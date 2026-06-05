@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,13 +19,14 @@ import (
 
 // ServiceUpdate describes the update status of one service image.
 type ServiceUpdate struct {
-	Service      string `json:"service"`
-	Image        string `json:"image"`
-	Tag          string `json:"tag"`
-	HasUpdate    bool   `json:"has_update"`
-	NewerTag     string `json:"newer_tag,omitempty"`    // for pinned tags: newest available
-	Indeterminate bool  `json:"indeterminate,omitempty"` // true when local digest unavailable
-	Error        string `json:"error,omitempty"`
+	Service       string `json:"service"`
+	Image         string `json:"image"`
+	Tag           string `json:"tag"`
+	HasUpdate     bool   `json:"has_update"`               // actionable: registry has a newer digest for the SAME tag (a one-click Update clears it)
+	NewerTag      string `json:"newer_tag,omitempty"`      // describes the digest drift (e.g. "11 (new digest)")
+	NewerStable   string `json:"newer_stable,omitempty"`   // informational: a higher STABLE version tag exists (drives the version-available alert, NOT the badge)
+	Indeterminate bool   `json:"indeterminate,omitempty"`  // true when local digest unavailable (e.g. locally-built image)
+	Error         string `json:"error,omitempty"`
 }
 
 // CacheEntry holds check results and when they were fetched.
@@ -96,7 +96,15 @@ func remoteDigest(image, tag string) string {
 	url := fmt.Sprintf("https://registry-1.docker.io/v2/%s/manifests/%s", repo, tag)
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json")
+	// Accept manifest-list / OCI-index types first so multi-arch images return the
+	// SAME top-level digest that `docker` records locally in RepoDigests; otherwise
+	// a strict registry could hand back a single-arch digest that never matches.
+	req.Header.Set("Accept", strings.Join([]string{
+		"application/vnd.docker.distribution.manifest.list.v2+json",
+		"application/vnd.oci.image.index.v1+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+		"application/vnd.oci.image.manifest.v1+json",
+	}, ", "))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != 200 {
 		return ""
@@ -119,9 +127,21 @@ func localDigest(imageRef string) string {
 	return s
 }
 
-// newerSemverTag queries Docker Hub tags list and returns the latest semver
-// tag that sorts after currentTag, or "" if none.
-func newerSemverTag(image, currentTag string) string {
+// newerStableTag queries the registry's tag list and returns the highest STABLE
+// version tag that is genuinely newer than currentTag, or "" if none.
+//
+// "Stable" means a pure numeric dotted version (optionally v-prefixed) with no
+// suffix — so pre-releases and OS/vendor variants (-rc, -beta, -ubi, -alpine,
+// -noble, …) are all excluded. "Newer" is judged at currentTag's precision: a
+// tag that merely adds more components to the same line (11 → 11.4.3) is NOT
+// newer, because a rolling tag like `11` already tracks the latest 11.x; only a
+// higher value at the current precision counts (11 → 12.x, 11.4 → 11.5/12.x).
+func newerStableTag(image, currentTag string) string {
+	cur := parseVersion(currentTag)
+	if cur == nil {
+		return "" // current tag isn't a pure version (e.g. has a -variant suffix) — skip
+	}
+
 	repo := normaliseRepo(image)
 	token := hubToken(repo)
 	if token == "" {
@@ -141,28 +161,57 @@ func newerSemverTag(image, currentTag string) string {
 	var result struct{ Tags []string }
 	json.Unmarshal(body, &result) //nolint:errcheck
 
-	// Filter to semver-looking tags (digits or v-prefix, with at least one dot)
-	var semverTags []string
+	var best []int
+	var bestStr string
 	for _, t := range result.Tags {
-		norm := strings.TrimPrefix(t, "v")
-		if len(norm) > 0 && norm[0] >= '0' && norm[0] <= '9' && strings.Contains(norm, ".") {
-			semverTags = append(semverTags, t)
+		cand := parseVersion(t)
+		if cand == nil { // not a pure stable version — skip
+			continue
+		}
+		if !versionNewerAtPrecision(cur, cand) {
+			continue
+		}
+		if bestStr == "" || versionLess(best, cand) {
+			best, bestStr = cand, t
 		}
 	}
+	return bestStr
+}
 
-	// Sort numerically by each dot-separated component so "10.0" > "9.0"
-	sort.Slice(semverTags, func(i, j int) bool {
-		return semverLess(semverTags[i], semverTags[j])
-	})
+// parseVersion parses a pure numeric dotted tag ("11", "11.4.3", optional "v"
+// prefix) into its integer components, or returns nil if any part is non-numeric
+// (which also rejects pre-release/variant suffixes like "13.0.1-ubi10-rc").
+func parseVersion(tag string) []int {
+	s := strings.TrimPrefix(tag, "v")
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ".")
+	out := make([]int, len(parts))
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil
+		}
+		out[i] = n
+	}
+	return out
+}
 
-	// Find the highest tag that is greater than currentTag
-	var newer string
-	for _, t := range semverTags {
-		if semverLess(currentTag, t) {
-			newer = t // keep updating — we want the highest
+// versionNewerAtPrecision reports whether cand is a higher version than cur,
+// comparing only up to cur's number of components. So with cur="11": "12.0.2" is
+// newer but "11.4.3" is not (same major, already tracked by the rolling tag).
+func versionNewerAtPrecision(cur, cand []int) bool {
+	for i := 0; i < len(cur); i++ {
+		c := 0
+		if i < len(cand) {
+			c = cand[i]
+		}
+		if c != cur[i] {
+			return c > cur[i]
 		}
 	}
-	return newer
+	return false
 }
 
 // ── Main check function ────────────────────────────────────────────────────────
@@ -196,26 +245,32 @@ func Check(workspacesDir, wsName, env string) []ServiceUpdate {
 		fullRef := img.Image + ":" + tag
 		upd := ServiceUpdate{Service: img.Name, Image: img.Image, Tag: tag}
 
-		if tag == "latest" {
-			local := localDigest(fullRef)
-			remote := remoteDigest(img.Image, tag)
-			switch {
-			case remote == "":
-				upd.Error = "could not reach registry"
-			case local == "":
-				// RepoDigest unavailable — image may not have been pulled from a registry,
-				// or was built locally. Cannot compare digests: report as indeterminate,
-				// not as "has update".
-				upd.Indeterminate = true
-			case local != remote:
-				upd.HasUpdate = true
-				upd.NewerTag = "latest (new digest)"
-			}
-		} else {
-			newer := newerSemverTag(img.Image, tag)
-			if newer != "" {
-				upd.HasUpdate = true
-				upd.NewerTag = newer
+		// Actionable signal: does the registry have a newer digest for the SAME
+		// configured tag? This is the only thing a one-click Update (pull the same
+		// tag + recreate) can act on, and it self-clears once pulled. Works for
+		// "latest" and pinned rolling tags (e.g. mariadb:11) alike.
+		local := localDigest(fullRef)
+		remote := remoteDigest(img.Image, tag)
+		switch {
+		case remote == "":
+			upd.Error = "could not reach registry"
+		case local == "":
+			// RepoDigest unavailable — image may not have been pulled from a registry,
+			// or was built locally. Cannot compare digests: report as indeterminate,
+			// not as "has update".
+			upd.Indeterminate = true
+		case local != remote:
+			upd.HasUpdate = true
+			upd.NewerTag = tag + " (new digest)"
+		}
+
+		// Informational signal: is a higher STABLE version pinned-able? This does
+		// NOT set HasUpdate (the Update button can't bump the pin) — it drives the
+		// "newer stable version available" alert so the user is notified without a
+		// badge that never clears. Skipped for "latest" (no version to compare).
+		if tag != "latest" {
+			if s := newerStableTag(img.Image, tag); s != "" {
+				upd.NewerStable = s
 			}
 		}
 
@@ -237,22 +292,20 @@ func RunBackground(cache *Cache, workspacesDir string) {
 	}()
 }
 
-// semverLess compares two version strings (e.g. "1.10.2" vs "1.9.0") numerically
-// per segment so "10" > "9". Strips a leading "v" before comparing.
-func semverLess(a, b string) bool {
-	pa := strings.Split(strings.TrimPrefix(a, "v"), ".")
-	pb := strings.Split(strings.TrimPrefix(b, "v"), ".")
-	n := len(pa)
-	if len(pb) > n {
-		n = len(pb)
+// versionLess compares two parsed versions numerically per component so
+// [1,10,2] > [1,9,0]. Missing trailing components are treated as zero.
+func versionLess(a, b []int) bool {
+	n := len(a)
+	if len(b) > n {
+		n = len(b)
 	}
 	for i := 0; i < n; i++ {
 		var na, nb int
-		if i < len(pa) {
-			na, _ = strconv.Atoi(pa[i])
+		if i < len(a) {
+			na = a[i]
 		}
-		if i < len(pb) {
-			nb, _ = strconv.Atoi(pb[i])
+		if i < len(b) {
+			nb = b[i]
 		}
 		if na != nb {
 			return na < nb

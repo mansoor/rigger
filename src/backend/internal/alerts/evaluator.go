@@ -204,6 +204,23 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		}
 		return true, float64(len(names)), fmt.Sprintf("%s/%s: %d image update(s) available (%s)",
 			t.ws, t.env, len(names), joinUpTo(names, 4))
+
+	case CondImageVersionAvailable:
+		entry, ok := e.imgCache.Get(t.ws, t.env)
+		if !ok {
+			return false, 0, ""
+		}
+		var notes []string
+		for _, u := range entry.Results {
+			if u.NewerStable != "" {
+				notes = append(notes, fmt.Sprintf("%s → %s", u.Service, u.NewerStable))
+			}
+		}
+		if len(notes) == 0 {
+			return false, 0, ""
+		}
+		return true, float64(len(notes)), fmt.Sprintf("%s/%s: newer stable version available (%s)",
+			t.ws, t.env, joinUpTo(notes, 4))
 	}
 
 	return false, 0, ""
