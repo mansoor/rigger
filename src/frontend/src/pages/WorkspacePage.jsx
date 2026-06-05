@@ -148,6 +148,16 @@ function UrlBadge({ href, reachable, mono, children }) {
   )
 }
 
+// CtlBtn — a compact per-container action button used in the Services list.
+function CtlBtn({ title, onClick, children }) {
+  return (
+    <button type="button" title={title} onClick={onClick}
+      className="text-gray-600 hover:text-gray-200 hover:bg-gray-800 rounded px-1 py-0.5 text-xs leading-none transition-colors">
+      {children}
+    </button>
+  )
+}
+
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onActionDone }) {
   const qc         = useQueryClient()
   // Use server-resolved domain (${VAR} already substituted) for display
@@ -225,7 +235,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const updateServices    = (imgUpdates?.updates || []).filter(u => u.has_update).map(u => `${u.service}: ${u.newer_tag}`)
   const indetermServices  = (imgUpdates?.updates || []).filter(u => u.indeterminate).map(u => u.service)
 
-  function handleAction(cmd) {
+  function handleAction(cmd, extra = []) {
     onAction(cmd, envName, () => {
       // Refresh env status, container details, image-update and metric state
       // after any action (deploy/refresh/etc.) so the card reflects reality.
@@ -242,7 +252,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           qc.invalidateQueries({ queryKey: ['imageupdates', name, envName] })
         }, 8000)
       }
-    })
+    }, extra)
   }
 
   const [stopOpen, setStopOpen]           = useState(false)
@@ -525,6 +535,15 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       <span className={`text-xs ${isNeutral ? 'text-gray-600' : txtCls}`}>
                         {c.State === 'running' && c.Health ? `${c.State} · ${label}` : label}
                       </span>
+                      {/* Per-container actions */}
+                      <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
+                        <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
+                        {c.State === 'running'
+                          ? <CtlBtn title="Stop" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
+                          : <CtlBtn title="Start" onClick={() => handleAction('start', [c.Service])}>▶</CtlBtn>}
+                        <CtlBtn title="Restart" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
+                        {isImage && <CtlBtn title="Update image" onClick={() => handleAction('update', [c.Service])}>↑</CtlBtn>}
+                      </div>
                     </div>
                   </div>
                 )
@@ -1444,11 +1463,12 @@ export default function WorkspacePage() {
     queryFn: () => fetchWorkspace(name),
   })
 
-  function runAction(cmd, env, onComplete) {
-    const socket = openActionSocket(name, cmd, env)
+  function runAction(cmd, env, onComplete, extra = []) {
+    const socket = openActionSocket(name, cmd, env, extra)
     if (onComplete) socket.addEventListener('close', onComplete)
     setActionWs(socket)
-    setActionTitle(`${cmd} ${env}`)
+    const tail = extra && extra.length ? ` · ${extra.join(', ')}` : ''
+    setActionTitle(`${cmd} ${env}${tail}`)
   }
 
   if (isLoading) return <Layout><div className="p-8 text-gray-500 text-sm">Loading…</div></Layout>
