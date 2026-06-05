@@ -386,6 +386,19 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const [downConfirm, setDownConfirm]     = useState(false) // confirm before Inactivate (down)
   const [containersOpen, setContainersOpen] = useState(true)
 
+  // Card collapse — hides the metrics + services detail to keep cards compact.
+  // Defaults to collapsed; the choice is persisted per workspace+env so it
+  // survives navigating away and back (the card remounts on route change).
+  const collapseKey = `rigger:envcard:${name}:${envName}`
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(collapseKey) === '1' } catch { return false }
+  })
+  const toggleExpanded = () => setExpanded(v => {
+    const next = !v
+    try { localStorage.setItem(collapseKey, next ? '1' : '0') } catch {}
+    return next
+  })
+
   // Build a merged service list: all expected services + actual runtime state.
   // For image stacks: start from config.images so we show services not yet started.
   // For custom stacks: use whatever docker compose ps returned.
@@ -401,6 +414,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const updateByService = Object.fromEntries(
     (imgUpdates?.updates || []).map(u => [u.service, u])
   )
+
+  // The metrics strip shows whenever the env is up (or has history); the services
+  // panel shows whenever there are services. The collapse toggle only appears when
+  // at least one of those sections has something to reveal.
+  const showMetrics     = metrics.length > 0 || containerStatus === 'running' || containerStatus === 'partial'
+  const hasCollapsible  = showMetrics || serviceRows.length > 0
+
   return (
     <div className="w-full bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col gap-4">
       {/* Card header: identity (name + host) on the left, state (status + access
@@ -477,11 +497,19 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         </div>
       </div>
 
-      {/* Resource history sparklines (Phase 6d). Shown whenever the env is up so a
-          freshly-deployed env looks consistent (— placeholders) instead of missing
-          the strip until the collector's first snapshot arrives. */}
-      {(metrics.length > 0 || containerStatus === 'running' || containerStatus === 'partial') && (
-        <div className="border-t border-gray-800/60 pt-3">
+      {/* Collapsible detail — metrics strip + services panel. Always mounted so a
+          grid-template-rows transition can animate the height open/closed; the
+          inner div is clipped to 0 height while collapsed. The animated region and
+          its handle are one flex child so a collapsed card doesn't reserve the
+          card's gap twice. */}
+      {hasCollapsible && (
+        <div className="-mt-1">
+          <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+            <div className="overflow-hidden">
+              <div className="flex flex-col gap-4 pb-1">
+                {/* Resource history sparklines (Phase 6d). */}
+                {showMetrics && (
+                <div className="border-t border-gray-800/60 pt-3">
           {/* Time-range selector — muted links, brighter on hover, active highlighted. */}
           <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 mb-2 text-[11px]">
             {METRIC_RANGES.map(r => (
@@ -500,9 +528,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         </div>
       )}
 
-      {/* Container health panel — collapsible */}
-      {serviceRows.length > 0 && (
-        <div className="border-t border-gray-800/60 pt-3">
+                {/* Container health panel — has its own inner toggle for the list. */}
+                {serviceRows.length > 0 && (
+                <div className="border-t border-gray-800/60 pt-3">
           {/* Panel header / toggle */}
           <button
             type="button"
@@ -600,6 +628,27 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
               })}
             </div>
           )}
+                </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Sleek expand/collapse handle — a full-width strip flush with the card's
+              bottom edge, chevron tucked close to the border. Points down when
+              collapsed, rotates up when expanded. */}
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            title={expanded ? 'Collapse details' : 'Expand details'}
+            aria-expanded={expanded}
+            className="-mx-5 -mb-5 mt-1 flex w-[calc(100%+2.5rem)] items-center justify-center rounded-b-xl border-t border-gray-800/60 py-1 text-gray-600 hover:bg-gray-800/40 hover:text-gray-300 transition-colors"
+          >
+            <svg viewBox="0 0 16 16" className={`w-3.5 h-3.5 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 6l4 4 4-4" />
+            </svg>
+          </button>
         </div>
       )}
 
