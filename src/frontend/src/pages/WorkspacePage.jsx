@@ -519,19 +519,6 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       <span className="text-xs text-gray-400 font-mono truncate">{c.short}</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {/* Per-service update badge */}
-                      {upd?.has_update && (
-                        <span title={`Update available: ${upd.newer_tag}`}
-                          className="text-xs px-1.5 py-0 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 animate-pulse leading-5">
-                          ↑
-                        </span>
-                      )}
-                      {upd?.indeterminate && !upd?.has_update && (
-                        <span title="Cannot compare digest — run Update to pull latest"
-                          className="text-xs px-1.5 py-0 rounded bg-gray-700/40 text-gray-500 border border-gray-600/30 leading-5">
-                          ?
-                        </span>
-                      )}
                       <span className={`text-xs ${isNeutral ? 'text-gray-600' : txtCls}`}>
                         {c.State === 'running' && c.Health ? `${c.State} · ${label}` : label}
                       </span>
@@ -542,7 +529,21 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                           ? <CtlBtn title="Stop" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
                           : <CtlBtn title="Start" onClick={() => handleAction('start', [c.Service])}>▶</CtlBtn>}
                         <CtlBtn title="Restart" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
-                        {isImage && <CtlBtn title="Update image" onClick={() => handleAction('update', [c.Service])}>↑</CtlBtn>}
+                        {/* Update icon doubles as the indicator: pulses amber when an
+                            update is available, muted when the digest can't be compared. */}
+                        {isImage && (
+                          <button type="button"
+                            title={upd?.has_update ? `Update available: ${upd.newer_tag} — pull & recreate`
+                              : upd?.indeterminate ? 'Cannot compare digest — pull latest & recreate'
+                              : 'Update image (pull & recreate)'}
+                            onClick={() => handleAction('update', [c.Service])}
+                            className={`rounded px-1 py-0.5 text-xs leading-none transition-colors hover:bg-gray-800 ${
+                              upd?.has_update ? 'text-amber-300 hover:text-amber-200 animate-pulse'
+                                : upd?.indeterminate ? 'text-gray-500 hover:text-gray-300'
+                                : 'text-gray-600 hover:text-gray-200'}`}>
+                            ↑
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
