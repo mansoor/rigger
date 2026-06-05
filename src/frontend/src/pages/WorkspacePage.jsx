@@ -673,64 +673,131 @@ function ReleasePipeline({ ws }) {
 
 // ── Inline action log — streams output from Deploy/Stop/Restart/Backup etc. ──
 
-function ActionLog({ actionWs, actionTitle, onClear }) {
-  const [lines, setLines] = useState([])
-  const [running, setRunning] = useState(false)
-  const scrollRef = useRef(null)
-  const wsRef = useRef(null)
+// ActionLog — a per-workspace, persisted history of action runs. Each run is
+// recorded as a header (action · env · user · timestamp), its streamed output,
+// and a result footer (✓/✗). History is kept in localStorage per workspace; a
+// dropdown limits how many trailing lines are shown.
+const ACTIONLOG_CAP  = 3000                       // max stored entries per workspace
+const TAIL_OPTIONS   = [100, 250, 500, 1000, 2000, 0] // 0 = All
+const actionLogKey   = (wsName) => `rigger:actionlog:${wsName}`
 
+function fmtTs(ts) {
+  const d = new Date(ts)
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+// NOTE: mounted with key={wsName} by the parent, so it remounts per workspace —
+// the lazy initializer below always reads the right workspace's history.
+function ActionLog({ wsName, actionWs, actionMeta }) {
+  const [entries, setEntries] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(actionLogKey(wsName))) || [] } catch { return [] }
+  })
+  const [running, setRunning] = useState(false)
+  const [tail, setTail] = useState(() => {
+    const v = Number(localStorage.getItem('rigger:actionlog:tail'))
+    return TAIL_OPTIONS.includes(v) ? v : 500
+  })
+  const scrollRef = useRef(null)
+  const wiredRef  = useRef(null) // last socket we attached listeners to (de-dupe)
+
+  // Persist (best-effort, capped to bound storage).
   useEffect(() => {
-    if (!actionWs) {
-      setLines([])      // Clear when parent sets actionWs → null (Clear button)
-      setRunning(false)
-      return
-    }
-    wsRef.current = actionWs
-    setLines([])
+    try { localStorage.setItem(actionLogKey(wsName), JSON.stringify(entries.slice(-ACTIONLOG_CAP))) } catch {}
+  }, [entries, wsName])
+
+  // Wire a freshly-started action: append a header, stream output, then a result.
+  useEffect(() => {
+    if (!actionWs || wiredRef.current === actionWs) return
+    wiredRef.current = actionWs
+    const meta  = actionMeta || {}
+    const extra = meta.extra && meta.extra.length ? ` ${meta.extra.join(' ')}` : ''
+    const cap   = arr => arr.length > ACTIONLOG_CAP ? arr.slice(-ACTIONLOG_CAP) : arr
+    setEntries(prev => cap([...prev, {
+      type: 'header', action: (meta.cmd || 'action') + extra, env: meta.env || '',
+      user: meta.user || 'unknown', ts: meta.ts || Date.now(),
+    }]))
     setRunning(true)
 
-    actionWs.addEventListener('message', e => {
-      const text = String(e.data || '')
-      setLines(prev => {
-        const newLines = text.split(/\r?\n/).filter(l => l !== '')
-        const next = [...prev, ...newLines]
-        return next.length > 2000 ? next.slice(-2000) : next
-      })
-    })
-    actionWs.addEventListener('close', () => setRunning(false))
-    actionWs.addEventListener('error', () => setRunning(false))
-  }, [actionWs])
+    const acc = []
+    const onMsg = e => {
+      const newLines = String(e.data || '').split(/\r?\n/).filter(l => l !== '')
+      if (!newLines.length) return
+      acc.push(...newLines)
+      setEntries(prev => cap([...prev, ...newLines.map(text => ({ type: 'out', text }))]))
+    }
+    const onEnd = () => {
+      // The backend ends with a green ✓ or red ✗ marker line; treat ✗ as failure.
+      const ok = !acc.some(l => l.includes('✗'))
+      setEntries(prev => cap([...prev, { type: 'result', ok, ts: Date.now() }]))
+      setRunning(false)
+      actionWs.removeEventListener('message', onMsg)
+    }
+    actionWs.addEventListener('message', onMsg)
+    actionWs.addEventListener('close', onEnd, { once: true })
+    actionWs.addEventListener('error', () => setRunning(false), { once: true })
+  }, [actionWs, actionMeta])
 
-  // Scroll the output container only — not the page (scrollIntoView would).
+  // Keep the output container (not the page) scrolled to the newest line.
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [lines])
+  }, [entries])
+
+  function clearLog() {
+    setEntries([])
+    try { localStorage.removeItem(actionLogKey(wsName)) } catch {}
+  }
+
+  const shown = tail > 0 ? entries.slice(-tail) : entries
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-gray-300">Action output</span>
-          {actionTitle && (
-            <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded font-mono">{actionTitle}</span>
-          )}
           {running && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
         </div>
-        {lines.length > 0 && (
-          <button onClick={onClear} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">Clear</button>
-        )}
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1 text-xs text-gray-500">
+            Lines
+            <select
+              value={tail}
+              onChange={e => { const v = Number(e.target.value); setTail(v); try { localStorage.setItem('rigger:actionlog:tail', String(v)) } catch {} }}
+              className="bg-gray-800 border border-gray-700 text-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-500"
+            >
+              {TAIL_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'All' : n}</option>)}
+            </select>
+          </label>
+          {entries.length > 0 && (
+            <button onClick={clearLog} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">Clear</button>
+          )}
+        </div>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed bg-gray-950/60 min-h-0">
-        {lines.length === 0 ? (
+        {entries.length === 0 ? (
           <p className="text-gray-700 pt-2">
-            Run Deploy, Stop, Restart, Backup, Update or other actions — output will stream here.
+            Run Deploy, Stop, Restart, Backup, Update or other actions — output is recorded here per workspace.
           </p>
         ) : (
-          lines.map((line, i) => (
-            <div key={i} dangerouslySetInnerHTML={{ __html: ansiToHtml(line) }} />
-          ))
+          shown.map((it, i) =>
+            it.type === 'header' ? (
+              <div key={i} className="mt-3 first:mt-0 flex flex-wrap items-center gap-x-2 border-t border-gray-800 pt-2">
+                <span className="text-brand-300 font-semibold">▶ {it.action}{it.env ? ` · ${it.env}` : ''}</span>
+                <span className="text-gray-600">·</span>
+                <span className="text-gray-500">{it.user}</span>
+                <span className="text-gray-600">·</span>
+                <span className="text-gray-500">{fmtTs(it.ts)}</span>
+              </div>
+            ) : it.type === 'result' ? (
+              <div key={i} className={`mb-1 ${it.ok ? 'text-green-400' : 'text-red-400'}`}>
+                {it.ok ? '✓ Completed' : '✗ Failed'} <span className="text-gray-600">· {fmtTs(it.ts)}</span>
+              </div>
+            ) : (
+              <div key={i} dangerouslySetInnerHTML={{ __html: ansiToHtml(it.text) }} />
+            )
+          )
         )}
       </div>
     </div>
@@ -1473,7 +1540,8 @@ export default function WorkspacePage() {
   const { name } = useParams()
   const navigate = useNavigate()
   const [actionWs, setActionWs]           = useState(null)   // current action WebSocket → ActionLog
-  const [actionTitle, setActionTitle]     = useState('')
+  const [actionMeta, setActionMeta]       = useState(null)   // {cmd, env, extra, user, ts} for the run's header
+  const username = useAuthStore(s => s.user?.sub) || 'unknown'
   const [configModal, setConfigModal]     = useState(null)
   const [composeModal, setComposeModal]   = useState(null)
   const [exportModal, setExportModal]     = useState(false)
@@ -1487,9 +1555,8 @@ export default function WorkspacePage() {
   function runAction(cmd, env, onComplete, extra = []) {
     const socket = openActionSocket(name, cmd, env, extra)
     if (onComplete) socket.addEventListener('close', onComplete)
+    setActionMeta({ cmd, env, extra, user: username, ts: Date.now() })
     setActionWs(socket)
-    const tail = extra && extra.length ? ` · ${extra.join(', ')}` : ''
-    setActionTitle(`${cmd} ${env}${tail}`)
   }
 
   if (isLoading) return <Layout><div className="p-8 text-gray-500 text-sm">Loading…</div></Layout>
@@ -1572,9 +1639,10 @@ export default function WorkspacePage() {
         {/* Bottom split: Action output + Logs — both fixed-height, scroll internally */}
         <div className="grid grid-cols-2 gap-5 items-start">
           <ActionLog
+            key={name}
+            wsName={name}
             actionWs={actionWs}
-            actionTitle={actionTitle}
-            onClear={() => { setActionWs(null); setActionTitle('') }}
+            actionMeta={actionMeta}
           />
           <LogViewer wsName={name} envs={envs} />
         </div>
