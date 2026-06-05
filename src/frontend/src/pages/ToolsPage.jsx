@@ -324,7 +324,22 @@ function ComposeToTemplate() {
   const [copied, setCopied]         = useState(false)
   const [saveState, setSaveState]   = useState(null)   // null | 'saving' | 'saved' | { error }
   const [forceOverwrite, setForce]  = useState(false)
+  // Optional presentation metadata — written into the saved template so it shows
+  // up properly in the New Workspace picker. `label` overrides the auto-derived
+  // one (empty = use the derived label); tags are entered comma-separated.
+  const [label, setLabel]           = useState('')
+  const [desc, setDesc]             = useState('')
+  const [tagsInput, setTagsInput]   = useState('')
   const fileInputRef                = useRef(null)
+
+  // Overlay the optional metadata onto the converted result so the JSON preview,
+  // copy, download and save all reflect what the user typed.
+  const finalResult = output?.result ? {
+    ...output.result,
+    label:       label.trim() || output.result.label,
+    description: desc.trim(),
+    tags:        tagsInput.split(',').map(t => t.trim()).filter(Boolean),
+  } : null
 
   function convert() {
     if (!input.trim()) return
@@ -363,28 +378,28 @@ function ComposeToTemplate() {
   }
 
   function copyResult() {
-    if (!output?.result) return
-    navigator.clipboard.writeText(JSON.stringify(output.result, null, 2)).then(() => {
+    if (!finalResult) return
+    navigator.clipboard.writeText(JSON.stringify(finalResult, null, 2)).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
   }
 
   function downloadResult() {
-    if (!output?.result) return
-    const blob = new Blob([JSON.stringify(output.result, null, 2)], { type: 'application/json' })
+    if (!finalResult) return
+    const blob = new Blob([JSON.stringify(finalResult, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `${output.result.name}.json`
+    a.download = `${finalResult.name}.json`
     a.click()
     URL.revokeObjectURL(a.href)
   }
 
   async function saveAsTemplate() {
-    if (!output?.result) return
+    if (!finalResult) return
     setSaveState('saving')
     try {
-      await saveToolTemplate(output.result.name, output.result, forceOverwrite)
+      await saveToolTemplate(finalResult.name, finalResult, forceOverwrite)
       setSaveState('saved')
     } catch (err) {
       const msg = err?.response?.data?.error || err.message
@@ -544,10 +559,40 @@ function ComposeToTemplate() {
                 ))}
               </div>
 
+              {/* Optional presentation metadata — written into the saved template
+                  and used by the New Workspace picker (card title, blurb, tag chips
+                  and search). Leave blank to use sensible defaults. */}
+              <div className="space-y-2 rounded-xl border border-gray-800 bg-gray-900/40 p-3">
+                <p className="text-xs font-semibold text-gray-400">
+                  Template details <span className="font-normal text-gray-600">— optional, shown in the New Workspace picker</span>
+                </p>
+                <input
+                  type="text"
+                  value={label}
+                  onChange={e => setLabel(e.target.value)}
+                  placeholder={`Label (default: ${output.result.label})`}
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+                />
+                <textarea
+                  value={desc}
+                  onChange={e => setDesc(e.target.value)}
+                  rows={2}
+                  placeholder="Description — a short blurb about what this stack is for"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-y"
+                />
+                <input
+                  type="text"
+                  value={tagsInput}
+                  onChange={e => setTagsInput(e.target.value)}
+                  placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
               {/* JSON — same min-height as compose textarea */}
               <pre className="overflow-auto rounded-xl bg-gray-950 border border-gray-700 p-4 text-xs text-gray-200 font-mono leading-relaxed"
                 style={{ minHeight: '28rem' }}>
-                {JSON.stringify(output.result, null, 2)}
+                {JSON.stringify(finalResult, null, 2)}
               </pre>
 
               {/* Save hint */}
