@@ -6,7 +6,7 @@ import { fetchContainers } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import '@xterm/xterm/css/xterm.css'
 
-export default function TerminalModal({ wsName, envName, onClose }) {
+export default function TerminalModal({ wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
   const termRef       = useRef(null)   // xterm instance
   const fitRef        = useRef(null)   // FitAddon instance
@@ -14,6 +14,7 @@ export default function TerminalModal({ wsName, envName, onClose }) {
   const wsRef         = useRef(null)   // WebSocket
   const resizeRef     = useRef(null)   // ResizeObserver
   const firstMsgRef   = useRef(false)  // tracks first WS message (avoids stale closure)
+  const autoConnRef   = useRef(false)  // ensures we auto-connect at most once
 
   const [service, setService]     = useState('')
   const [connected, setConnected] = useState(false)
@@ -30,12 +31,13 @@ export default function TerminalModal({ wsName, envName, onClose }) {
     c.State === 'running' || c.State === 'Up' || String(c.State).toLowerCase().startsWith('up')
   )
 
-  // Pre-select first running container
+  // Pre-select the container: the one the Terminal button was clicked on
+  // (initialService), else the first running container.
   useEffect(() => {
-    if (!service && runningContainers.length > 0) {
-      setService(runningContainers[0].Service)
-    }
-  }, [runningContainers])
+    if (service) return
+    if (initialService) { setService(initialService); return }
+    if (runningContainers.length > 0) setService(runningContainers[0].Service)
+  }, [runningContainers, initialService])
 
   // Initialise xterm once on mount
   useEffect(() => {
@@ -150,6 +152,15 @@ export default function TerminalModal({ wsName, envName, onClose }) {
       setConnecting(false)
     })
   }, [service, token, wsName, envName, disconnect])
+
+  // When opened from a per-container Terminal button, connect straight away
+  // (once) instead of waiting for the user to click Connect.
+  useEffect(() => {
+    if (initialService && service === initialService && termRef.current && !autoConnRef.current) {
+      autoConnRef.current = true
+      connect()
+    }
+  }, [service, connect, initialService])
 
   // Clean up on unmount
   useEffect(() => () => disconnect(), [disconnect])

@@ -596,6 +596,34 @@ func (b *Bridge) ExecForEnv(workspaceName, env string) (executor.Executor, error
 	return executor.Local{}, nil
 }
 
+// TermSession is an interactive PTY into a container — local (Docker socket) or
+// remote (`docker exec -it` over SSH). Read/Write stream the PTY bytes, Resize
+// tracks the browser terminal's window size, and Close ends the session. Both
+// the local *DockerExec and the remote *remotehost.ContainerPTY satisfy it, so
+// the terminal handler treats local and remote sessions identically.
+type TermSession interface {
+	io.ReadWriteCloser
+	Resize(rows, cols int)
+}
+
+// OpenTerminal opens an interactive shell into a container for one environment,
+// on whichever daemon it runs on: the local Docker socket for a local env, or
+// `docker exec -it` over an SSH-allocated PTY for a remote host (Wave C —
+// cross-host terminal). service is the container name (in Rigger the compose
+// service name is the prefixed container name); the caller validates it.
+func (b *Bridge) OpenTerminal(workspaceName, env, service string, cols, rows int) (TermSession, error) {
+	rt, err := b.resolveRemote(workspaceName, env)
+	if err != nil {
+		return nil, err
+	}
+	if rt == nil {
+		// Local: the Docker daemon allocates a PTY in the container via the socket.
+		return NewDockerExec(service, cols, rows, "")
+	}
+	// Remote: SSH allocates the PTY, `docker exec -it` runs on the host's daemon.
+	return rt.client.NewContainerPTY(service, cols, rows)
+}
+
 // remoteDotEnv reads the host-authoritative .env for a remote workspace env and
 // parses it into a map (DB credentials for backup/restore). Best-effort: a read
 // failure yields an empty map.

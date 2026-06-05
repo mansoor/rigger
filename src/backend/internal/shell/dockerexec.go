@@ -28,14 +28,14 @@ type DockerExec struct {
 // NewDockerExec creates and starts an interactive exec session in containerID.
 // cols/rows set the initial PTY size.
 func NewDockerExec(containerID string, cols, rows int, _ string) (*DockerExec, error) {
-	// ── Step 1: Create the exec instance (bash → sh fallback) ────────────────
+	// ── Step 1: Create the exec instance ─────────────────────────────────────
+	// We can't request "bash" directly and fall back on create error: Docker's
+	// exec-create succeeds even when the binary is absent (the "not found" error
+	// only surfaces at start). So we always launch sh — present in every image
+	// (ash on Alpine) — and exec bash from within it only when it exists.
 	execID, err := createExec(containerID)
 	if err != nil {
-		// bash not available — retry with sh
-		execID, err = createExecSh(containerID)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// ── Step 2: Start exec — response body IS the raw PTY stream ────────────
@@ -52,10 +52,14 @@ func NewDockerExec(containerID string, cols, rows int, _ string) (*DockerExec, e
 	return de, nil
 }
 
-// createExec calls POST /containers/{id}/exec with bash.
+// createExec calls POST /containers/{id}/exec with a shell that prefers bash but
+// falls back to sh — so it works in Alpine images (ash, no bash) as well as
+// Debian-based ones. sh is launched first (it exists virtually everywhere) and
+// re-execs bash only when present, avoiding a request for a missing binary.
 func createExec(containerID string) (string, error) {
 	body := `{"AttachStdin":true,"AttachStdout":true,"AttachStderr":true,"Tty":true,` +
-		`"Cmd":["bash"],"Env":["TERM=xterm-256color"]}`
+		`"Cmd":["sh","-c","if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi"],` +
+		`"Env":["TERM=xterm-256color"]}`
 	return doCreateExec(containerID, body)
 }
 
@@ -90,13 +94,6 @@ func doCreateExec(containerID, body string) (string, error) {
 		return "", fmt.Errorf("exec create: empty exec ID")
 	}
 	return result.ID, nil
-}
-
-// createExecSh is the fallback for containers that don't have bash.
-func createExecSh(containerID string) (string, error) {
-	body := `{"AttachStdin":true,"AttachStdout":true,"AttachStderr":true,"Tty":true,` +
-		`"Cmd":["sh"],"Env":["TERM=xterm-256color"]}`
-	return doCreateExec(containerID, body)
 }
 
 // startExec calls POST /exec/{id}/start and returns the hijacked connection.

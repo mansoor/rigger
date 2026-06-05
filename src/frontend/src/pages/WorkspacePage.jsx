@@ -329,7 +329,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         <div className="flex items-center gap-2 shrink-0">
           {/* > bash terminal button */}
           <button
-            onClick={onTerminal}
+            onClick={() => onTerminal()}
             title="Open terminal"
             className="font-mono text-xs px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-green-400 border border-gray-700 hover:border-green-700 transition-colors"
           >
@@ -515,6 +515,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                 const txtCls    = c.State ? containerTxtClass(c) : 'text-gray-600'
                 const label     = c.State ? containerStatusLabel(c) : 'Not started'
                 const isNeutral = !c.State || (c.State === 'running' && (c.Health === 'healthy' || c.Health === ''))
+                const isRunning = c.State === 'running'
                 const upd       = updateByService[c.short]
                 return (
                   <div key={c.short} className="flex items-center justify-between gap-2">
@@ -528,20 +529,35 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       </span>
                       {/* Per-container actions */}
                       <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
-                        <CtlBtn title="Info" onClick={() => setInfoFor({ service: c.Service, short: c.short })}>
-                          <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="currentColor" aria-hidden="true">
-                            <path fillRule="evenodd" clipRule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" />
-                          </svg>
-                        </CtlBtn>
+                        {/* Info, Terminal and Restart need a live container — only
+                            shown while running. Logs stays (useful post-crash), and
+                            Start/Stop toggles by state. */}
+                        {isRunning && (
+                          <CtlBtn title="Info" onClick={() => setInfoFor({ service: c.Service, short: c.short })}>
+                            <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="currentColor" aria-hidden="true">
+                              <path fillRule="evenodd" clipRule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" />
+                            </svg>
+                          </CtlBtn>
+                        )}
+                        {isRunning && (
+                          <CtlBtn title="Terminal" onClick={() => onTerminal(c.Service)}>
+                            <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M5 6l4 4-4 4" />
+                              <path d="M11 14h5" />
+                            </svg>
+                          </CtlBtn>
+                        )}
                         <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
-                        {c.State === 'running'
+                        {isRunning
                           ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
                           : <CtlBtn title="Start" className="text-gray-600 hover:text-blue-400" onClick={() => handleAction('start', [c.Service])}>
                               <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 inline-block align-middle" fill="currentColor" aria-hidden="true">
                                 <path d="M2 1.5L8.5 5L2 8.5Z" />
                               </svg>
                             </CtlBtn>}
-                        <CtlBtn title="Restart" className="text-gray-600 hover:text-green-400" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
+                        {isRunning && (
+                          <CtlBtn title="Restart" className="text-gray-600 hover:text-green-400" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
+                        )}
                         {/* Update icon doubles as the indicator: pulses amber when an
                             update is available, muted when the digest can't be compared. */}
                         {isImage && (
@@ -1558,7 +1574,7 @@ export default function WorkspacePage() {
                 onAction={runAction}
                 onConfig={() => setConfigModal({ env })}
                 onCompose={() => setComposeModal({ env })}
-                onTerminal={() => setTermModal({ env })}
+                onTerminal={(service) => setTermModal({ env, service: typeof service === 'string' ? service : undefined })}
               />
             </div>
           ))}
@@ -1594,7 +1610,8 @@ export default function WorkspacePage() {
         <ExportTemplateModal name={name} envs={envs} onClose={() => setExportModal(false)} />
       )}
       {termModal && (
-        <TerminalModal wsName={name} envName={termModal.env} onClose={() => setTermModal(null)} />
+        <TerminalModal wsName={name} envName={termModal.env} initialService={termModal.service}
+          onClose={() => setTermModal(null)} />
       )}
     </Layout>
   )

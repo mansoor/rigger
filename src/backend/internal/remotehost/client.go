@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -155,6 +156,82 @@ func (c *Client) WriteFile(path string, data []byte, mode int) error {
 		return fmt.Errorf("write %s: %w: %s", path, err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// ContainerPTY is an interactive shell into a container on the remote host: an
+// SSH session with an allocated PTY running `docker exec -it`. It exposes the
+// same Read/Write/Resize/Close shape as the local socket-based exec
+// (shell.DockerExec), so the terminal handler drives local and remote sessions
+// identically. SSH provides the PTY and window-resize for free — `docker exec
+// -it` sees a real TTY because the SSH PTY supplies one.
+type ContainerPTY struct {
+	sess   *ssh.Session
+	stdin  io.WriteCloser
+	stdout io.Reader
+}
+
+// NewContainerPTY opens an interactive shell into container on the remote host
+// via `docker exec -it`, preferring bash and falling back to sh. cols/rows set
+// the initial window size. container is single-quoted into the remote command;
+// callers must still validate it (the terminal handler enforces a strict name
+// pattern before this is reached).
+func (c *Client) NewContainerPTY(container string, cols, rows int) (*ContainerPTY, error) {
+	if rows <= 0 {
+		rows = 50
+	}
+	if cols <= 0 {
+		cols = 220
+	}
+	sess, err := c.ssh.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("open ssh session: %w", err)
+	}
+	modes := ssh.TerminalModes{ssh.ECHO: 1, ssh.TTY_OP_ISPEED: 14400, ssh.TTY_OP_OSPEED: 14400}
+	if err := sess.RequestPty("xterm-256color", rows, cols, modes); err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("request pty: %w", err)
+	}
+	stdin, err := sess.StdinPipe()
+	if err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	// With a PTY the container's stdout and stderr both land on the tty, which
+	// SSH delivers as this session's stdout — so StdoutPipe carries everything.
+	cmd := fmt.Sprintf("docker exec -it %s sh -c %s",
+		shQuote(container),
+		shQuote(`if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi`))
+	if err := sess.Start(cmd); err != nil {
+		sess.Close()
+		return nil, fmt.Errorf("start remote shell: %w", err)
+	}
+	return &ContainerPTY{sess: sess, stdin: stdin, stdout: stdout}, nil
+}
+
+// Read reads PTY output bytes from the remote shell.
+func (p *ContainerPTY) Read(b []byte) (int, error) { return p.stdout.Read(b) }
+
+// Write sends bytes to the remote shell's stdin.
+func (p *ContainerPTY) Write(b []byte) (int, error) { return p.stdin.Write(b) }
+
+// Resize sends a window-change so the container's PTY tracks the browser terminal.
+func (p *ContainerPTY) Resize(rows, cols int) {
+	if rows > 0 && cols > 0 {
+		p.sess.WindowChange(rows, cols) //nolint:errcheck
+	}
+}
+
+// Close ends the remote shell session.
+func (p *ContainerPTY) Close() error {
+	if p.stdin != nil {
+		p.stdin.Close() //nolint:errcheck
+	}
+	return p.sess.Close()
 }
 
 // shQuote single-quotes a string for safe interpolation into a remote shell

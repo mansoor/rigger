@@ -1530,8 +1530,10 @@ func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // WS /api/workspaces/{name}/envs/{env}/terminal — interactive shell into a container.
-// Uses Docker daemon API directly over the Unix socket so a real PTY is allocated
-// in the container — avoids the "input device is not a TTY" error from docker CLI.
+// The session is opened on whichever daemon the environment runs on: locally via
+// the Docker socket (the daemon allocates a PTY in the container, avoiding the
+// "input device is not a TTY" error), or — for an env bound to a remote host —
+// via `docker exec -it` over an SSH-allocated PTY (Wave C, cross-host terminal).
 func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	env  := r.PathValue("env")
@@ -1562,39 +1564,22 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: service name required\r\n")) //nolint:errcheck
 		return
 	}
+	// The service name is interpolated into a docker command (and, for remote
+	// hosts, a remote shell line) — enforce the strict container-name pattern.
+	if !safeContainerName.MatchString(init.Service) {
+		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: invalid container name\r\n")) //nolint:errcheck
+		return
+	}
 
 	cols, rows := init.Cols, init.Rows
 	if cols <= 0 { cols = 220 }
 	if rows <= 0 { rows = 50 }
 
-	// Resolve compose project + compose file to get the real container ID
-	cfgData, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
-	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: workspace not found\r\n")) //nolint:errcheck
-		return
-	}
-	var cfg struct{ Project struct{ Name string } `json:"project"` }
-	json.Unmarshal(cfgData, &cfg) //nolint:errcheck
-
-	prefix      := cfg.Project.Name + "_" + env
-	composePath := filepath.Join(h.workspacesDir, name, "envs", env, "docker-compose.yml")
-
-	qOut, _ := exec.Command("docker", "compose", "-p", prefix, "-f", composePath, "ps", "-q", init.Service).Output()
-	containerID := strings.TrimSpace(string(qOut))
-	if containerID == "" {
-		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-			[]byte(fmt.Sprintf("\r\nerror: service %q not found or not running\r\n", init.Service)))
-		return
-	}
-	// Use only the first line if multiple IDs are returned
-	if idx := strings.Index(containerID, "\n"); idx != -1 {
-		containerID = containerID[:idx]
-	}
-
-	// Open a PTY exec session via Docker daemon API (no docker CLI needed).
-	// This avoids "the input device is not a TTY" — the daemon allocates the
-	// PTY inside the container regardless of what the host stdin looks like.
-	de, err := shell.NewDockerExec(containerID, cols, rows, "")
+	// Open the PTY on the env's own daemon (local socket or remote SSH). In Rigger
+	// the compose service name is the prefixed container name, so it doubles as
+	// the docker exec target — no compose lookup needed, and the same call works
+	// for both local and remote.
+	de, err := h.bridge.OpenTerminal(name, env, init.Service, cols, rows)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
 			[]byte("\r\nerror: "+err.Error()+"\r\n"))
@@ -1603,7 +1588,7 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	defer de.Close()
 
 	conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-		[]byte(fmt.Sprintf("\r\n\x1b[32mConnected to %s/%s — type 'exit' to disconnect\x1b[0m\r\n", prefix, init.Service)))
+		[]byte(fmt.Sprintf("\r\n\x1b[32mConnected to %s/%s — type 'exit' to disconnect\x1b[0m\r\n", env, init.Service)))
 
 	done := make(chan struct{})
 
