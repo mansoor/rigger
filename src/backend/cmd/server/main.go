@@ -169,7 +169,24 @@ func main() {
 			case sub == "envs" && subsub == "image-updates":
 				handler.GetImageUpdates(w, r)
 			case sub == "envs" && subsub == "containers":
-				handler.GetContainers(w, r)
+				// .../containers            → list; .../containers/{service}/{action} → per-container
+				if svc := pathSegment(r.URL.Path, 6); svc != "" {
+					r.SetPathValue("service", svc)
+					switch pathSegment(r.URL.Path, 7) {
+					case "inspect":
+						handler.ContainerInspect(w, r)
+					case "stats":
+						handler.ContainerStats(w, r)
+					case "top":
+						handler.ContainerTop(w, r)
+					case "image-history":
+						handler.ContainerImageHistory(w, r)
+					default:
+						http.NotFound(w, r)
+					}
+				} else {
+					handler.GetContainers(w, r)
+				}
 			case sub == "envs" && subsub == "metrics":
 				handler.GetEnvMetrics(w, r)
 			default:
