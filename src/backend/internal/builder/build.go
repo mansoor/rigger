@@ -84,7 +84,10 @@ func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) err
 	imgTag := cfg.ImageTag(service, o.Env)
 	o.info("Building %s image: %s", service, imgTag)
 
-	if err := o.dockerRun(
+	// Run with the build context as the working dir and relative paths, so the
+	// remote executor can translate the dir to the host and build against the
+	// pushed context on the remote daemon (local behaviour is identical).
+	if err := o.dockerRunInDir(ctxDir,
 		"build",
 		"--build-arg", "BUILD_ENV="+o.Env,
 		"--build-arg", "VERSION="+ver,
@@ -93,8 +96,8 @@ func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) err
 		"--label", "version="+ver,
 		"--label", "service="+service,
 		"-t", imgTag,
-		"-f", filepath.Join(ctxDir, "Dockerfile"),
-		ctxDir,
+		"-f", "Dockerfile",
+		".",
 	); err != nil {
 		return err
 	}

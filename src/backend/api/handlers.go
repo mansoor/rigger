@@ -980,6 +980,21 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If this env runs on a remote host, push the updated .env to it — the local
+	// file is just a cache; the host's copy is what `docker compose` actually
+	// reads. This is the one explicit override of the host-authoritative .env.
+	pushed, hostName, err := h.bridge.PushEnvFile(name, env)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "saved locally but could not push to host " + hostName + ": " + err.Error(),
+		})
+		return
+	}
+	pushedTo := ""
+	if pushed {
+		pushedTo = hostName
+	}
+
 	// Audit log
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
@@ -988,7 +1003,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 			claims.UserID, claims.Username, name, "env-update", env,
 		)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "pushed_to_host": pushedTo})
 }
 
 // DELETE /api/workspaces/{name} — permanently removes a workspace directory

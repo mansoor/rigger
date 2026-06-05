@@ -139,6 +139,24 @@ func (c *Client) ReadFile(path string) ([]byte, error) {
 	return out, nil
 }
 
+// WriteFile writes data to a file on the remote host, creating any missing parent
+// directories and setting mode (an octal permission like 0o600). The bytes are
+// streamed over stdin so arbitrary content (quotes, newlines) is safe.
+func (c *Client) WriteFile(path string, data []byte, mode int) error {
+	sess, err := c.ssh.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	sess.Stdin = bytes.NewReader(data)
+	q := shQuote(path)
+	cmd := fmt.Sprintf(`mkdir -p "$(dirname %s)" && cat > %s && chmod %o %s`, q, q, mode, q)
+	if out, err := sess.CombinedOutput(cmd); err != nil {
+		return fmt.Errorf("write %s: %w: %s", path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // shQuote single-quotes a string for safe interpolation into a remote shell
 // command, escaping any embedded single quotes.
 func shQuote(s string) string {

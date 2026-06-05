@@ -32,16 +32,22 @@ func setup(t *testing.T) string {
 	return wsDir
 }
 
-// recorder is a fake executor.Executor that captures docker argv.
-type recorder struct{ calls [][]string }
+// recorder is a fake executor.Executor that captures docker argv and the working
+// dir of each call.
+type recorder struct {
+	calls [][]string
+	dirs  []string
+}
 
 func (r *recorder) Docker(s executor.Spec) error {
 	r.calls = append(r.calls, s.Args)
+	r.dirs = append(r.dirs, s.Dir)
 	return nil
 }
 
 func (r *recorder) DockerOutput(s executor.Spec) ([]byte, error) {
 	r.calls = append(r.calls, s.Args)
+	r.dirs = append(r.dirs, s.Dir)
 	return nil, nil
 }
 
@@ -86,6 +92,33 @@ func TestBuildBackendWithPushAndBump(t *testing.T) {
 	}
 	if push := joined(rec.calls[1]); push != "push "+wantTag {
 		t.Errorf("push call = %q, want push %s", push, wantTag)
+	}
+}
+
+// TestBuildRunsInContextDir locks in the contract the remote executor relies on:
+// the build runs with the working dir set to the context dir and uses relative
+// paths (`-f Dockerfile .`), so the remote executor can translate the dir to the
+// host and build against the pushed context.
+func TestBuildRunsInContextDir(t *testing.T) {
+	wsDir := setup(t)
+	rec := &recorder{}
+	o := Options{
+		WorkspacesDir: wsDir, Workspace: "app", Command: "build", Env: "prod",
+		Extra: []string{"backend"}, Stdout: &strings.Builder{}, Exec: rec,
+	}
+	if _, err := o.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected 1 build call, got %d: %v", len(rec.calls), rec.calls)
+	}
+	build := joined(rec.calls[0])
+	if !strings.Contains(build, "-f Dockerfile") || !strings.HasSuffix(build, " .") {
+		t.Errorf("build should use relative -f Dockerfile and context '.': %s", build)
+	}
+	wantDir := filepath.Join(wsDir, "app", "envs", "prod", "backend")
+	if rec.dirs[0] != wantDir {
+		t.Errorf("build Dir = %q, want %q", rec.dirs[0], wantDir)
 	}
 }
 

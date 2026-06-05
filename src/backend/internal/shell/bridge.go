@@ -118,6 +118,30 @@ func (b *Bridge) hostBase(host *settings.Host) string {
 	return b.remoteWorkspacesDir
 }
 
+// PushEnvFile pushes an environment's local .env to its remote host. The .env is
+// normally host-authoritative (deploys never overwrite it); this is the one
+// sanctioned override, run only on an explicit user edit so the change actually
+// reaches the host. It returns (pushed, hostName, error): pushed is false for a
+// local env, where the local .env is already authoritative and nothing is shipped.
+func (b *Bridge) PushEnvFile(workspaceName, env string) (bool, string, error) {
+	rt, err := b.resolveRemote(workspaceName, env)
+	if err != nil {
+		return false, "", err
+	}
+	if rt == nil {
+		return false, "", nil // local env — .env is already authoritative
+	}
+	localEnv := filepath.Join(b.workspacesDir, workspaceName, "envs", env, ".env")
+	data, err := os.ReadFile(localEnv)
+	if err != nil {
+		return false, rt.hostName, fmt.Errorf("read local .env: %w", err)
+	}
+	if err := rt.client.WriteFile(rt.exec.RemoteDir(localEnv), data, 0o600); err != nil {
+		return false, rt.hostName, fmt.Errorf("push .env to %s: %w", rt.hostName, err)
+	}
+	return true, rt.hostName, nil
+}
+
 // Migrate moves a whole workspace to targetHostID (0 = local control plane). It
 // is only permitted when every environment currently shares one host; mixed
 // setups must be moved per environment. It simply migrates each env in turn.
@@ -753,13 +777,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// Phase 6.5 finish: build/promote (image build/push, retag-and-redeploy) run
 	// natively in Go. Env/Extra carry the run.sh argument layout.
 	if builder.Handles(opts.Command) {
-		if rt != nil {
-			// Remote build/promote needs the full build context on the host and a
-			// remote registry login; not yet wired (Phase 7 follow-up). Fail loud
-			// rather than silently building on the control plane.
-			return fmt.Errorf("%q is not yet supported for workspaces on remote host %q", opts.Command, rt.hostName)
-		}
-		_, err := builder.Run(builder.Options{
+		bopts := builder.Options{
 			WorkspacesDir: b.workspacesDir,
 			Workspace:     opts.Workspace,
 			Command:       opts.Command,
@@ -768,7 +786,27 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
-		})
+		}
+		if rt != nil {
+			// Remote build/promote runs docker on the host's own daemon (so the
+			// image lands where the remote deploy needs it — no registry required
+			// for a plain build). For build, ship the build context (env dir incl
+			// service subdirs, .env stays host-authoritative) first. Route the
+			// post-promote deploy back through the bridge so it lands on the
+			// destination env's host.
+			bopts.Exec = rt.exec
+			bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
+			bopts.SetDeploy(func(env string) error {
+				return b.Run(RunOptions{Workspace: opts.Workspace, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
+			})
+			if opts.Command == "build" {
+				localDir := b.localEnvDir(opts.Workspace, opts.Env)
+				if err := rt.client.PushDir(localDir, rt.exec.RemoteDir(localDir), ".env"); err != nil {
+					return fmt.Errorf("push build context to %s: %w", rt.hostName, err)
+				}
+			}
+		}
+		_, err := builder.Run(bopts)
 		return err
 	}
 

@@ -213,6 +213,16 @@ func (r *runner) success(format string, a ...any) {
 }
 
 func (r *runner) up() error {
+	// A service name in Extra targets a single container (per-container Start
+	// button); empty deploys/starts the whole stack.
+	if svc := r.firstExtra(); svc != "" {
+		r.info("Starting %s in '%s'", svc, r.stack)
+		if err := r.compose("up", "-d", r.resolveSvc(svc)); err != nil {
+			return err
+		}
+		r.success("Started %s", svc)
+		return nil
+	}
 	r.info("Deploying '%s' (compose)", r.stack)
 	if err := r.compose("up", "-d", "--remove-orphans"); err != nil {
 		return err
@@ -222,6 +232,14 @@ func (r *runner) up() error {
 }
 
 func (r *runner) stop() error {
+	if svc := r.firstExtra(); svc != "" {
+		r.info("Stopping %s in '%s'", svc, r.stack)
+		if err := r.compose("stop", r.resolveSvc(svc)); err != nil {
+			return err
+		}
+		r.success("Stopped %s", svc)
+		return nil
+	}
 	r.info("Stopping stack '%s' (containers kept)", r.stack)
 	if err := r.compose("stop"); err != nil {
 		return err
@@ -260,24 +278,37 @@ func (r *runner) restart() error {
 }
 
 func (r *runner) update() error {
-	r.info("Updating images for '%s'", r.stack)
-	// Preserve running state: a stopped stack stays stopped after update.
+	// A service name in Extra updates a single container; empty updates the stack.
+	svc := r.firstExtra()
+	var target []string
+	label := "'" + r.stack + "'"
+	if svc != "" {
+		target = []string{r.resolveSvc(svc)}
+		label = svc + " in '" + r.stack + "'"
+	}
+	r.info("Updating images for %s", label)
+	// Preserve running state: a stopped target stays stopped after update.
 	runningBefore := false
-	if out, err := r.composeOutput("ps", "--status", "running", "--quiet"); err == nil {
+	if out, err := r.composeOutput(append([]string{"ps", "--status", "running", "--quiet"}, target...)...); err == nil {
 		runningBefore = len(bytes.TrimSpace(out)) > 0
 	}
 	r.info("Pulling latest images...")
-	if err := r.compose("pull"); err != nil {
+	if err := r.compose(append([]string{"pull"}, target...)...); err != nil {
 		return err
 	}
 	if runningBefore {
 		r.info("Recreating containers with new images...")
-		if err := r.compose("up", "-d", "--remove-orphans"); err != nil {
+		up := []string{"up", "-d"}
+		if svc == "" {
+			up = append(up, "--remove-orphans")
+		}
+		up = append(up, target...)
+		if err := r.compose(up...); err != nil {
 			return err
 		}
-		r.success("Stack '%s' updated and restarted", r.stack)
+		r.success("Updated %s and restarted", label)
 	} else {
-		r.success("Stack '%s' updated (images pulled, stack stays stopped)", r.stack)
+		r.success("Updated %s (images pulled, stays stopped)", label)
 	}
 	return nil
 }

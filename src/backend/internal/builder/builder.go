@@ -73,6 +73,21 @@ func (o Options) dockerRun(args ...string) error {
 	})
 }
 
+// dockerRunInDir runs a docker command with the working directory set to dir, so
+// relative paths (e.g. a build context) resolve there. For a remote executor the
+// dir is translated to the host's path, so the build runs against the pushed
+// context on the remote daemon.
+func (o Options) dockerRunInDir(dir string, args ...string) error {
+	return executor.Default(o.Exec).Docker(executor.Spec{
+		Args: args, Dir: dir, Env: o.EnvVars, Stdout: o.Stdout, Stderr: o.Stderr,
+	})
+}
+
+// SetDeploy overrides the deploy step used by promote. The shell bridge sets it
+// to route the post-promote deploy through remote-aware execution; it is also a
+// test seam.
+func (o *Options) SetDeploy(fn func(env string) error) { o.deploy = fn }
+
 // runDeploy brings up the stack for env (used by promote).
 func (o Options) runDeploy(env string) error {
 	if o.deploy != nil {
