@@ -263,7 +263,7 @@ function AccessUrls({ urls, reachable }) {
   )
 }
 
-function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onActionDone }) {
+function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   // Use server-resolved domain (${VAR} already substituted) for display
   const domain     = ws?.env_access?.[envName]?.domain || cfg?.domain || '—'
@@ -541,9 +541,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       </span>
                       {/* Per-container actions */}
                       <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
-                        {/* Info, Terminal and Restart need a live container — only
-                            shown while running. Logs stays (useful post-crash), and
-                            Start/Stop toggles by state. */}
+                        {/* Info, Terminal, Files, Logs and Restart need a live
+                            container — only shown while running. Start/Stop
+                            toggles by state. */}
                         {isRunning && (
                           <CtlBtn title="Info" onClick={() => setInfoFor({ service: c.Service, short: c.short })}>
                             <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="currentColor" aria-hidden="true">
@@ -566,7 +566,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                             </svg>
                           </CtlBtn>
                         )}
-                        <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
+                        {isRunning && (
+                          <CtlBtn title="Logs" onClick={() => onLogs(c.short)}>▤</CtlBtn>
+                        )}
                         {isRunning
                           ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
                           : <CtlBtn title="Start" className="text-gray-600 hover:text-blue-400" onClick={() => handleAction('start', [c.Service])}>
@@ -1612,6 +1614,7 @@ export default function WorkspacePage() {
   const [composeModal, setComposeModal]   = useState(null)
   const [exportModal, setExportModal]     = useState(false)
   const [termModal, setTermModal]         = useState(null) // {env}
+  const [logModal, setLogModal]           = useState(null) // {env, service}
 
   const { data: ws, isLoading, error } = useQuery({
     queryKey: ['workspace', name],
@@ -1694,6 +1697,7 @@ export default function WorkspacePage() {
                 onConfig={() => setConfigModal({ env })}
                 onCompose={() => setComposeModal({ env })}
                 onTerminal={(service) => setTermModal({ env, service: typeof service === 'string' ? service : undefined })}
+                onLogs={(service) => setLogModal({ env, service })}
               />
             </div>
           ))}
@@ -1732,6 +1736,15 @@ export default function WorkspacePage() {
       {termModal && (
         <TerminalModal wsName={name} envName={termModal.env} initialService={termModal.service}
           onClose={() => setTermModal(null)} />
+      )}
+      {logModal && (
+        <LogModal
+          wsName={name}
+          envs={envs}
+          initialEnv={logModal.env}
+          initialContainers={logModal.service ? [logModal.service] : []}
+          onClose={() => setLogModal(null)}
+        />
       )}
     </Layout>
   )
