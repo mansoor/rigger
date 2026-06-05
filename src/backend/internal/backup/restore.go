@@ -125,11 +125,30 @@ func (c *ctx) restoreDB(snapshot, backupDir string) int {
 	return fails
 }
 
+// waitReady polls a `compose exec -T <full> <probe...>` until it exits zero (the
+// service accepts connections) or the time budget is exhausted. It replaces a
+// fixed sleep that raced DB startup on cold/loaded daemons and intermittently
+// failed restores. Probe output is discarded.
+func (c *ctx) waitReady(full string, probe ...string) bool {
+	args := append([]string{"exec", "-T", full}, probe...)
+	for i := 0; i < 30; i++ { // ~60s budget (30 × 2s)
+		if c.compose(executor.Spec{}, args...) == nil {
+			return true
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return false
+}
+
 func (c *ctx) restorePostgres(svc, user, db, dumpFile string) error {
 	full := c.resolveSvc(svc)
 	c.info("Starting service: %s", svc)
 	_ = c.compose(executor.Spec{}, "up", "-d", full)
-	time.Sleep(4 * time.Second)
+
+	c.info("Waiting for %s to accept connections...", svc)
+	if !c.waitReady(full, "sh", "-c", `pg_isready -U "$1" -q 2>/dev/null || psql -U "$1" -c 'SELECT 1' >/dev/null 2>&1`, "_", user) {
+		c.warn("%s did not accept connections in time — attempting restore anyway", svc)
+	}
 
 	c.info("Dropping and recreating schema in %s...", db)
 	_ = c.compose(executor.Spec{}, "exec", "-T", full, "psql", "-U", user, "-d", db,
@@ -148,7 +167,15 @@ func (c *ctx) restoreMySQL(svc, rootPass, db, dumpFile string) error {
 	full := c.resolveSvc(svc)
 	c.info("Starting service: %s", svc)
 	_ = c.compose(executor.Spec{}, "up", "-d", full)
-	time.Sleep(4 * time.Second)
+
+	c.info("Waiting for %s to accept connections...", svc)
+	probe := `mariadb-admin ping -uroot -p"$1" --silent 2>/dev/null || ` +
+		`mysqladmin ping -uroot -p"$1" --silent 2>/dev/null || ` +
+		`mariadb -uroot -p"$1" -e 'SELECT 1' >/dev/null 2>&1 || ` +
+		`mysql -uroot -p"$1" -e 'SELECT 1' >/dev/null 2>&1`
+	if !c.waitReady(full, "sh", "-c", probe, "_", rootPass) {
+		c.warn("%s did not accept connections in time — attempting restore anyway", svc)
+	}
 
 	c.info("Restoring dump: %s", filepath.Base(dumpFile))
 	// Newer mariadb images ship the `mariadb` client and dropped the legacy
