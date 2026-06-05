@@ -1159,7 +1159,7 @@ export default function EditWorkspacePage() {
 
 // MigrateWarning is the confirmation shown before any host move. It spells out the
 // downtime and the data/secrets left behind on the source host.
-function MigrateWarning({ what, from, to, onConfirm, onCancel }) {
+function MigrateWarning({ what, from, to, warnings, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onCancel}>
       <div className="bg-gray-900 border border-amber-900/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
@@ -1183,6 +1183,7 @@ function MigrateWarning({ what, from, to, onConfirm, onCancel }) {
             <a href="/housekeeping" className="text-brand-400 underline">Housekeeping → Migration leftovers</a>.
           </li>
         </ul>
+        <PortWarnings warnings={warnings} />
         <div className="flex gap-3 pt-1">
           <button onClick={onConfirm} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Move</button>
           <button onClick={onCancel} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">Cancel</button>
@@ -1265,6 +1266,19 @@ function EnvHostsSection({ name }) {
     qc.invalidateQueries({ queryKey: ['workspaces'] })
   }
 
+  // Check the pending move's resolved host ports against the destination host
+  // (uses env_access so ${VAR} ports resolve to real numbers).
+  const destChecks = []
+  if (pending) {
+    const access = ws?.env_access?.[pending.env]
+    for (const img of (access?.images || [])) {
+      for (const p of [img.host_port, ...(img.link_ports || [])]) {
+        if (/^\d+$/.test(String(p))) destChecks.push({ host_id: pending.targetId, port: Number(p), service: img.name })
+      }
+    }
+  }
+  const destWarnings = usePortConflicts(destChecks)
+
   if (envs.length === 0) return null
 
   return (
@@ -1319,6 +1333,7 @@ function EnvHostsSection({ name }) {
           what={`${name} / ${pending.env}`}
           from={hostName(envHosts[pending.env]?.host_id || 0)}
           to={hostName(pending.targetId)}
+          warnings={destWarnings}
           onConfirm={confirmChange}
           onCancel={() => setPending(null)}
         />
