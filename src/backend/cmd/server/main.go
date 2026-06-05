@@ -137,6 +137,8 @@ func main() {
 			handler.GetLiveStats(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/activity":
 			handler.GetAllActivity(w, r)
+		case r.Method == "POST" && r.URL.Path == "/api/port-check":
+			handler.PortCheck(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/backups":
 			handler.ListBackups(w, r)
 		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/backups/"):
@@ -293,6 +295,9 @@ func main() {
 
 	// Global activity feed
 	mux.Handle("/api/activity", protected)
+
+	// Host-aware port-conflict check (New/Edit workspace)
+	mux.Handle("/api/port-check", protected)
 
 	// Backups (cross-workspace listing)
 	mux.Handle("/api/backups", protected)

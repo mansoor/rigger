@@ -8,6 +8,7 @@ import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fet
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
+import { usePortConflicts } from '../hooks/usePortConflicts'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -1100,6 +1101,18 @@ function Step4({ data, onChange }) {
   const showServices = data.stackType === 'image' || data.stackType === 'prebuilt'
   const serviceImages = data.images.filter(i => i.name && i.image)
 
+  // Within-workspace duplicate host ports (cheap, local).
+  const dupWarnings = portConflicts(serviceImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) })))
+  // Host-aware conflicts (C+D): each env's target host × each image's host ports.
+  const hostChecks = []
+  for (const env of data.environments || []) {
+    const hostId = env.host_id ?? data.default_host_id ?? 0
+    for (const img of serviceImages) {
+      for (const p of hostPortsFromMappings(img)) hostChecks.push({ host_id: hostId, port: Number(p), service: img.name })
+    }
+  }
+  const hostWarnings = usePortConflicts(hostChecks)
+
   return (
     <div className="space-y-6">
       <StepHeader step={4} title="Services" subtitle="Configure ports, volumes, restart policy and healthchecks per service." />
@@ -1119,9 +1132,7 @@ function Step4({ data, onChange }) {
                 onChange={updateImage} />
             ) : null
           )}
-          <PortWarnings warnings={portConflicts(
-            serviceImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) }))
-          )} />
+          <PortWarnings warnings={[...dupWarnings, ...hostWarnings]} />
         </div>
       )}
 
@@ -1295,6 +1306,20 @@ function Step6({ data }) {
     ? `Image stack: ${data.images.filter(i => i.name).map(i => `${i.name} (${i.image}:${i.tag || 'latest'})`).join(', ') || '(no services)'}`
     : `Custom: ${[data.backend, data.frontend !== 'none' && data.frontend, data.database !== 'none' && data.database].filter(Boolean).join(' · ')}`
 
+  const reviewImages = data.images.filter(i => i.name && i.image)
+  const dupWarnings = data.stackType === 'custom' ? [] :
+    portConflicts(reviewImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) })))
+  const hostChecks = []
+  if (data.stackType !== 'custom') {
+    for (const env of data.environments || []) {
+      const hostId = env.host_id ?? data.default_host_id ?? 0
+      for (const img of reviewImages) {
+        for (const p of hostPortsFromMappings(img)) hostChecks.push({ host_id: hostId, port: Number(p), service: img.name })
+      }
+    }
+  }
+  const hostWarnings = usePortConflicts(hostChecks)
+
   return (
     <div className="space-y-5">
       <StepHeader step={6} title="Review" subtitle="Confirm your configuration before creating the workspace." />
@@ -1321,11 +1346,7 @@ function Step6({ data }) {
         } />
       </div>
 
-      {data.stackType === 'image' && (
-        <PortWarnings warnings={portConflicts(
-          data.images.filter(i => i.name || i.image).map(img => ({ name: img.name, ports: hostPortsFromMappings(img) }))
-        )} />
-      )}
+      <PortWarnings warnings={[...dupWarnings, ...hostWarnings]} />
 
       <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl px-4 py-3">
         <p className="text-sm text-amber-300">

@@ -6,6 +6,7 @@ import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
+import { usePortConflicts } from '../hooks/usePortConflicts'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -877,6 +878,8 @@ export default function EditWorkspacePage() {
     queryKey: ['config', name],
     queryFn: () => fetchConfig(name),
   })
+  // Workspace (for env→host bindings) — used by the host-aware port check.
+  const { data: ws } = useQuery({ queryKey: ['workspace', name], queryFn: () => fetchWorkspace(name) })
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -1005,6 +1008,21 @@ export default function EditWorkspacePage() {
   function leave() { navigate(`/workspaces/${name}`) }
   function handleCancel() { if (dirty) setConfirmCancel(true); else leave() }
 
+  // Host-aware port conflicts (C+D): each env's target host × each image's host
+  // ports, excluding this workspace's own containers/config.
+  const envHostsMap = ws?.env_hosts || {}
+  const hostChecks = []
+  if (project?.type === 'image' && images && envs) {
+    for (const env of Object.keys(envs)) {
+      const hostId = envHostsMap[env]?.host_id || 0
+      for (const img of images) {
+        if (!img.name) continue
+        for (const p of hostPortsFromConfig(img)) hostChecks.push({ host_id: hostId, port: Number(p), service: img.name })
+      }
+    }
+  }
+  const hostWarnings = usePortConflicts(hostChecks, name)
+
   if (isLoading) return <Layout><div className="p-8 text-gray-500 text-sm">Loading…</div></Layout>
   if (error)     return <Layout><div className="p-8 text-red-400 text-sm">{error.message}</div></Layout>
 
@@ -1059,6 +1077,7 @@ export default function EditWorkspacePage() {
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-gray-300 mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages} />
+            <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-gray-500 mt-2">After saving, redeploy each environment to pick up image changes.</p>
           </section>
         )}

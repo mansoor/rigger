@@ -87,6 +87,9 @@ export const fetchEnvMetrics    = (name, env, minutes = 60) => api.get(`/workspa
 export const fetchActivity     = (name)      => api.get(`/workspaces/${name}/activity`).then(r => r.data)
 export const fetchActionRuns   = (name, limit = 100) => api.get(`/workspaces/${name}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (name)      => api.delete(`/workspaces/${name}/action-runs`).then(r => r.data)
+// Host-aware port-conflict check: host_ports = [{host_id, port, service}].
+export const checkPorts        = (hostPorts, excludeWorkspace = '') =>
+  api.post('/port-check', { host_ports: hostPorts, exclude_workspace: excludeWorkspace }).then(r => r.data)
 export const fetchAllActivity  = ()          => api.get('/activity').then(r => r.data)
 export const updateEnvVars     = (name, env, updates, deletes = []) =>
   api.patch(`/workspaces/${name}/envs/${env}/vars`, { updates, deletes }).then(r => r.data)

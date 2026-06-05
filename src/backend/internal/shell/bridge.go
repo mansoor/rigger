@@ -380,6 +380,13 @@ func (b *Bridge) DismissLeftover(id int64) error {
 	return err
 }
 
+// HostExecutor returns the docker executor for an arbitrary host id (0 = local
+// control plane). Used by read-only host queries like the port-in-use check.
+func (b *Bridge) HostExecutor(hostID int64) (executor.Executor, error) {
+	ex, _, err := b.hostExec(hostID)
+	return ex, err
+}
+
 // hostExec returns an executor and (for remote hosts) an SSH client for an
 // arbitrary host id (0 = local control plane; client is nil for local).
 func (b *Bridge) hostExec(hostID int64) (executor.Executor, *remotehost.Client, error) {
