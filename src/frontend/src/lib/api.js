@@ -42,6 +42,47 @@ export const fetchContainerInspect = (name, env, svc) => api.get(`/workspaces/${
 export const fetchContainerStats   = (name, env, svc) => api.get(`/workspaces/${name}/envs/${env}/containers/${svc}/stats`).then(r => r.data)
 export const fetchContainerTop     = (name, env, svc) => api.get(`/workspaces/${name}/envs/${env}/containers/${svc}/top`).then(r => r.data)
 export const fetchContainerHistory = (name, env, svc) => api.get(`/workspaces/${name}/envs/${env}/containers/${svc}/image-history`).then(r => r.data)
+
+// ── Container file browser (Wave D) ────────────────────────────────────────────
+const filesBase = (name, env, svc) => `/workspaces/${name}/envs/${env}/containers/${svc}`
+export const fetchContainerFiles = (name, env, svc, path = '/') =>
+  api.get(`${filesBase(name, env, svc)}/files`, { params: { path } }).then(r => r.data)
+export const fetchContainerFile  = (name, env, svc, path) =>
+  api.get(`${filesBase(name, env, svc)}/file`, { params: { path } }).then(r => r.data)
+export const saveContainerFile   = (name, env, svc, path, content) =>
+  api.put(`${filesBase(name, env, svc)}/file`, content, {
+    params: { path }, headers: { 'Content-Type': 'text/plain' },
+  }).then(r => r.data)
+export const deleteContainerFile = (name, env, svc, path) =>
+  api.delete(`${filesBase(name, env, svc)}/file`, { params: { path } }).then(r => r.data)
+export const renameContainerFile = (name, env, svc, path, to) =>
+  api.post(`${filesBase(name, env, svc)}/file-rename`, null, { params: { path, to } }).then(r => r.data)
+export const chmodContainerFile  = (name, env, svc, path, mode) =>
+  api.post(`${filesBase(name, env, svc)}/file-chmod`, null, { params: { path, mode } }).then(r => r.data)
+export const mkdirContainerDir   = (name, env, svc, path) =>
+  api.post(`${filesBase(name, env, svc)}/file-mkdir`, null, { params: { path } }).then(r => r.data)
+export const newContainerFile    = (name, env, svc, path) =>
+  api.post(`${filesBase(name, env, svc)}/file-new`, null, { params: { path } }).then(r => r.data)
+export const uploadContainerFile = (name, env, svc, dir, file) => {
+  const form = new FormData()
+  form.append('path', dir)
+  form.append('file', file)
+  return api.post(`${filesBase(name, env, svc)}/files-upload`, form).then(r => r.data)
+}
+// Fetch a file as a blob (carries the auth header) and trigger a browser download.
+export const downloadContainerFile = async (name, env, svc, path) => {
+  const res = await api.get(`${filesBase(name, env, svc)}/file-download`, {
+    params: { path }, responseType: 'blob',
+  })
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = path.split('/').pop() || 'download'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 export const fetchEnvMetrics    = (name, env, hours = 24) => api.get(`/workspaces/${name}/envs/${env}/metrics`, { params: { hours } }).then(r => r.data)
 export const fetchActivity     = (name)      => api.get(`/workspaces/${name}/activity`).then(r => r.data)
 export const fetchAllActivity  = ()          => api.get('/activity').then(r => r.data)

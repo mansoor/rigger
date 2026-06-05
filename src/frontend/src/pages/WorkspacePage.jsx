@@ -7,6 +7,7 @@ import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
 import TerminalModal from '../components/TerminalModal'
 import ContainerInfoModal from '../components/ContainerInfoModal'
+import FileBrowserModal from '../components/FileBrowserModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -261,6 +262,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const [stopOpen, setStopOpen]           = useState(false)
   const [deployOpen, setDeployOpen]       = useState(false)
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
+  const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
   const [noUpdateMsg, setNoUpdateMsg]     = useState(false)
   const [containersOpen, setContainersOpen] = useState(true)
 
@@ -547,6 +549,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                             </svg>
                           </CtlBtn>
                         )}
+                        {isRunning && (
+                          <CtlBtn title="Files" onClick={() => setFilesFor({ service: c.Service, short: c.short })}>
+                            <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="currentColor" aria-hidden="true">
+                              <path d="M2 5a2 2 0 012-2h3.2l1.6 1.6H16a2 2 0 012 2v6.8a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" />
+                            </svg>
+                          </CtlBtn>
+                        )}
                         <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
                         {isRunning
                           ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
@@ -586,6 +595,12 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {infoFor && (
         <ContainerInfoModal wsName={name} env={envName} service={infoFor.service} short={infoFor.short}
           onClose={() => setInfoFor(null)} />
+      )}
+
+      {/* Per-container file browser */}
+      {filesFor && (
+        <FileBrowserModal wsName={name} env={envName} service={filesFor.service} short={filesFor.short}
+          onClose={() => setFilesFor(null)} />
       )}
 
       {/* File editors + Backup */}

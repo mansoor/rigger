@@ -181,6 +181,12 @@ func main() {
 						handler.ContainerTop(w, r)
 					case "image-history":
 						handler.ContainerImageHistory(w, r)
+					case "files":
+						handler.FileList(w, r)
+					case "file":
+						handler.FileView(w, r)
+					case "file-download":
+						handler.FileDownload(w, r)
 					default:
 						http.NotFound(w, r)
 					}
@@ -198,6 +204,25 @@ func main() {
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
 			handler.ActionHTTP(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 5) == "containers":
+			// /api/workspaces/{name}/envs/{env}/containers/{service}/{action}
+			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("service", pathSegment(r.URL.Path, 6))
+			switch pathSegment(r.URL.Path, 7) {
+			case "files-upload":
+				handler.FileUpload(w, r)
+			case "file-rename":
+				handler.FileRename(w, r)
+			case "file-chmod":
+				handler.FileChmod(w, r)
+			case "file-mkdir":
+				handler.FileMkdir(w, r)
+			case "file-new":
+				handler.FileNew(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/export-template"):
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			handler.ExportTemplate(w, r)
@@ -219,12 +244,23 @@ func main() {
 				handler.PutCompose(w, r)
 			case sub == "envs" && subsub == "host":
 				handler.SetEnvHost(w, r)
+			case sub == "envs" && subsub == "containers" && pathSegment(r.URL.Path, 7) == "file":
+				r.SetPathValue("service", pathSegment(r.URL.Path, 6))
+				handler.FileSave(w, r)
 			default:
 				http.NotFound(w, r)
 			}
 		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/workspaces/"):
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			handler.DeleteWorkspace(w, r)
+			if pathSegment(r.URL.Path, 5) == "containers" && pathSegment(r.URL.Path, 7) == "file" {
+				// /api/workspaces/{name}/envs/{env}/containers/{service}/file?path=…
+				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+				r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+				r.SetPathValue("service", pathSegment(r.URL.Path, 6))
+				handler.FileDelete(w, r)
+			} else {
+				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+				handler.DeleteWorkspace(w, r)
+			}
 		case r.Method == "PATCH" && matchPrefix(r.URL.Path, "/api/workspaces/"):
 			name := pathSegment(r.URL.Path, 2)
 			env := pathSegment(r.URL.Path, 4)
