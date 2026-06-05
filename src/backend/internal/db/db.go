@@ -46,6 +46,22 @@ func (d *DB) migrate() error {
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
+		-- Recorded action runs (Action output history): one row per run with the
+		-- captured output and result, kept per workspace (pruned in actionruns.Record).
+		CREATE TABLE IF NOT EXISTS action_runs (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace   TEXT    NOT NULL,
+			env         TEXT,
+			command     TEXT    NOT NULL,
+			extra       TEXT,
+			username    TEXT,
+			status      TEXT    NOT NULL,  -- ok | fail
+			output      TEXT,
+			started_at  INTEGER,           -- epoch ms
+			finished_at INTEGER            -- epoch ms
+		);
+		CREATE INDEX IF NOT EXISTS idx_action_runs_ws ON action_runs(workspace, id);
+
 		CREATE TABLE IF NOT EXISTS backup_targets (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			name       TEXT    NOT NULL UNIQUE,

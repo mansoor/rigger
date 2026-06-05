@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/mansoor/rigger/ui/internal/actionruns"
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/composegen"
@@ -1081,15 +1083,24 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	// Pipe stdout+stderr → WebSocket text frames
-	// Both go through the same writer so output appears in order in the terminal.
+	// Pipe stdout+stderr → WebSocket text frames, capturing a bounded copy for the
+	// recorded Action-output history. Both streams share one writer so output
+	// appears in order.
+	startedAt := time.Now()
+	var outBuf bytes.Buffer
+	const outCap = 128 * 1024
 	pr, pw := io.Pipe()
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := pr.Read(buf)
 			if n > 0 {
 				conn.WriteMessage(websocket.TextMessage, buf[:n]) //nolint:errcheck
+				if outBuf.Len() < outCap {
+					outBuf.Write(buf[:n])
+				}
 			}
 			if readErr != nil {
 				break
@@ -1106,13 +1117,13 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		Stderr:    pw, // merged: errors appear inline with output, not silently dropped
 	})
 	pw.Close()
+	<-done // ensure all streamed output is captured before recording
 
+	var marker string
 	if runErr != nil {
-		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-			[]byte("\n\033[31m✗ "+req.Command+" failed: "+runErr.Error()+"\033[0m\n"))
+		marker = "\n\033[31m✗ " + req.Command + " failed: " + runErr.Error() + "\033[0m\n"
 	} else {
-		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-			[]byte("\n\033[32m✓ "+req.Command+" "+req.Env+" completed successfully.\033[0m\n"))
+		marker = "\n\033[32m✓ " + req.Command + " " + req.Env + " completed successfully.\033[0m\n"
 		// After a successful update, invalidate the image-check cache so the next
 		// frontend poll triggers a fresh check against the newly pulled image digests.
 		if req.Command == "update" && req.Env != "" {
@@ -1125,6 +1136,23 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 	}
+	conn.WriteMessage(websocket.TextMessage, []byte(marker)) //nolint:errcheck
+	outBuf.WriteString(marker)
+
+	// Record the run in the per-workspace Action-output history (skip read-only
+	// streaming commands, matching the audit-log policy).
+	if req.Command != "logs" && req.Command != "ps" {
+		status := "ok"
+		if runErr != nil {
+			status = "fail"
+		}
+		actionruns.Record(h.db, actionruns.Run{ //nolint:errcheck
+			Workspace: name, Env: req.Env, Command: req.Command,
+			Extra:     strings.Join(req.Extra, " "), Username: claims.Username,
+			Status:    status, Output: outBuf.String(),
+			StartedAt: startedAt.UnixMilli(), FinishedAt: time.Now().UnixMilli(),
+		})
+	}
 
 	// Record backup outcomes so the backup_failed alert condition has a source
 	// (audit_log only records that a backup ran, not whether it succeeded).
@@ -1135,6 +1163,34 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		}
 		alerts.LogBackup(h.db, name, req.Env, status, msg, 0) //nolint:errcheck
 	}
+}
+
+// GET /api/workspaces/{name}/action-runs?limit=N — recorded Action-output
+// history for a workspace (newest first).
+func (h *Handler) GetActionRuns(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	runs, err := actionruns.List(h.db, name, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, runs)
+}
+
+// DELETE /api/workspaces/{name}/action-runs — clear recorded history for a workspace.
+func (h *Handler) ClearActionRuns(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := actionruns.Clear(h.db, name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
 }
 
 // GET /api/stats — dashboard stats (docker info + host metrics + workspace summary)

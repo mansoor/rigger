@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, updateEnvVars, openActionSocket, exportTemplate } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, updateEnvVars, openActionSocket, exportTemplate, fetchActionRuns, clearActionRuns } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
@@ -673,13 +673,14 @@ function ReleasePipeline({ ws }) {
 
 // ── Inline action log — streams output from Deploy/Stop/Restart/Backup etc. ──
 
-// ActionLog — a per-workspace, persisted history of action runs. Each run is
-// recorded as a header (action · env · user · timestamp), its streamed output,
-// and a result footer (✓/✗). History is kept in localStorage per workspace; a
-// dropdown limits how many trailing lines are shown.
-const ACTIONLOG_CAP  = 3000                       // max stored entries per workspace
-const TAIL_OPTIONS   = [100, 250, 500, 1000, 2000, 0] // 0 = All
-const actionLogKey   = (wsName) => `rigger:actionlog:${wsName}`
+// ActionLog — a per-workspace history of action runs, loaded from the server
+// (the action_runs table). Each run is rendered as a header (action · env ·
+// user · timestamp), its captured output, and a result footer (✓/✗). A live run
+// streams in over the action WebSocket and is also recorded server-side, so it
+// reappears from the DB on the next load. A dropdown limits how many trailing
+// lines are shown.
+const MEM_CAP      = 8000                          // in-memory display cap
+const TAIL_OPTIONS = [100, 250, 500, 1000, 2000, 0] // 0 = All
 
 function fmtTs(ts) {
   const d = new Date(ts)
@@ -687,13 +688,24 @@ function fmtTs(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-// NOTE: mounted with key={wsName} by the parent, so it remounts per workspace —
-// the lazy initializer below always reads the right workspace's history.
+// Flatten server run records (newest-first) into chronological display entries.
+function runsToEntries(runs) {
+  const out = []
+  for (const run of [...(runs || [])].reverse()) {
+    const extra = run.extra ? ` ${run.extra}` : ''
+    out.push({ type: 'header', action: (run.command || 'action') + extra, env: run.env || '',
+      user: run.username || 'unknown', ts: run.started_at })
+    String(run.output || '').split(/\r?\n/).filter(l => l !== '').forEach(text => out.push({ type: 'out', text }))
+    out.push({ type: 'result', ok: run.status === 'ok', ts: run.finished_at })
+  }
+  return out
+}
+
+// NOTE: mounted with key={wsName} by the parent, so it remounts per workspace.
 function ActionLog({ wsName, actionWs, actionMeta }) {
-  const [entries, setEntries] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(actionLogKey(wsName))) || [] } catch { return [] }
-  })
+  const [entries, setEntries] = useState([])
   const [running, setRunning] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [tail, setTail] = useState(() => {
     const v = Number(localStorage.getItem('rigger:actionlog:tail'))
     return TAIL_OPTIONS.includes(v) ? v : 500
@@ -701,18 +713,22 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
   const scrollRef = useRef(null)
   const wiredRef  = useRef(null) // last socket we attached listeners to (de-dupe)
 
-  // Persist (best-effort, capped to bound storage).
-  useEffect(() => {
-    try { localStorage.setItem(actionLogKey(wsName), JSON.stringify(entries.slice(-ACTIONLOG_CAP))) } catch {}
-  }, [entries, wsName])
+  // Load recorded history from the server. Also wired to the header Refresh
+  // button, since there's no auto-refresh (another window or the CLI may have
+  // recorded runs since this view loaded).
+  const loadHistory = () => {
+    fetchActionRuns(wsName, 100).then(runs => setEntries(runsToEntries(runs))).catch(() => {})
+  }
+  useEffect(() => { loadHistory() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Wire a freshly-started action: append a header, stream output, then a result.
+  // The server records the same run, so it persists across reloads.
   useEffect(() => {
     if (!actionWs || wiredRef.current === actionWs) return
     wiredRef.current = actionWs
     const meta  = actionMeta || {}
     const extra = meta.extra && meta.extra.length ? ` ${meta.extra.join(' ')}` : ''
-    const cap   = arr => arr.length > ACTIONLOG_CAP ? arr.slice(-ACTIONLOG_CAP) : arr
+    const cap   = arr => arr.length > MEM_CAP ? arr.slice(-MEM_CAP) : arr
     setEntries(prev => cap([...prev, {
       type: 'header', action: (meta.cmd || 'action') + extra, env: meta.env || '',
       user: meta.user || 'unknown', ts: meta.ts || Date.now(),
@@ -746,13 +762,13 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
 
   function clearLog() {
     setEntries([])
-    try { localStorage.removeItem(actionLogKey(wsName)) } catch {}
+    clearActionRuns(wsName).catch(() => {})
   }
 
   const shown = tail > 0 ? entries.slice(-tail) : entries
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
+    <div className="relative bg-gray-900 border border-gray-800 rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-gray-300">Action output</span>
@@ -769,8 +785,19 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
               {TAIL_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'All' : n}</option>)}
             </select>
           </label>
+          <button onClick={loadHistory} title="Refresh history from the server"
+            className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" />
+            </svg>
+          </button>
           {entries.length > 0 && (
-            <button onClick={clearLog} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">Clear</button>
+            <button onClick={() => setConfirmClear(true)} title="Delete recorded history"
+              className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors">
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 6h16M9 6V4h6v2M7 6l1 14h8l1-14" /><path d="M10 10v6M14 10v6" />
+              </svg>
+            </button>
           )}
         </div>
       </div>
@@ -800,6 +827,21 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
           )
         )}
       </div>
+
+      {confirmClear && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60" onClick={() => setConfirmClear(false)}>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 max-w-xs" onClick={e => e.stopPropagation()}>
+            <p className="text-sm text-gray-200 mb-1">Delete action history?</p>
+            <p className="text-xs text-gray-500 mb-4">Permanently removes the recorded runs for this workspace from the server. This can’t be undone.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmClear(false)}
+                className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">Cancel</button>
+              <button onClick={() => { setConfirmClear(false); clearLog() }}
+                className="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 transition-colors">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

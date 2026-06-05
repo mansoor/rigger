@@ -1,15 +1,33 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/mansoor/rigger/ui/internal/actionruns"
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
+
+// cappedWriter copies into buf until it reaches cap bytes, then drops the rest
+// (it always reports a full write so it never breaks an io.MultiWriter).
+type cappedWriter struct {
+	buf *bytes.Buffer
+	cap int
+}
+
+func (c *cappedWriter) Write(p []byte) (int, error) {
+	if c.buf.Len() < c.cap {
+		c.buf.Write(p)
+	}
+	return len(p), nil
+}
 
 // flushWriter flushes the HTTP response after every write so a client (the rigger
 // CLI via `curl -N`) sees command output stream in real time.
@@ -58,19 +76,25 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
 	fw := &flushWriter{w: w, f: flusher}
 
+	// Tee a bounded copy of the streamed output for the recorded history.
+	startedAt := time.Now()
+	var outBuf bytes.Buffer
+	out := io.MultiWriter(fw, &cappedWriter{buf: &outBuf, cap: 128 * 1024})
+
 	runErr := h.bridge.Run(shell.RunOptions{
 		Workspace: name,
 		Command:   body.Command,
 		Env:       env,
 		Extra:     body.Extra,
-		Stdout:    fw,
-		Stderr:    fw,
+		Stdout:    out,
+		Stderr:    out,
 	})
 
+	var marker string
 	if runErr != nil {
-		fmt.Fprintf(fw, "\n\033[31m✗ %s failed: %s\033[0m\n", body.Command, runErr.Error())
+		marker = fmt.Sprintf("\n\033[31m✗ %s failed: %s\033[0m\n", body.Command, runErr.Error())
 	} else {
-		fmt.Fprintf(fw, "\n\033[32m✓ %s %s completed successfully.\033[0m\n", body.Command, env)
+		marker = fmt.Sprintf("\n\033[32m✓ %s %s completed successfully.\033[0m\n", body.Command, env)
 		if body.Command == "update" && env != "" {
 			h.imgCache.Invalidate(name, env)
 			go func() {
@@ -79,6 +103,26 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}()
 		}
+	}
+	fmt.Fprint(fw, marker)
+	outBuf.WriteString(marker)
+
+	// Record in the per-workspace Action-output history (skip read-only streaming).
+	if body.Command != "logs" && body.Command != "ps" {
+		status := "ok"
+		if runErr != nil {
+			status = "fail"
+		}
+		uname := ""
+		if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+			uname = claims.Username
+		}
+		actionruns.Record(h.db, actionruns.Run{ //nolint:errcheck
+			Workspace: name, Env: env, Command: body.Command,
+			Extra:     strings.Join(body.Extra, " "), Username: uname,
+			Status:    status, Output: outBuf.String(),
+			StartedAt: startedAt.UnixMilli(), FinishedAt: time.Now().UnixMilli(),
+		})
 	}
 
 	// Record backup outcomes (same as the WS handler) so backup_failed alerts work.

@@ -158,6 +158,8 @@ func main() {
 			switch {
 			case sub == "activity":
 				handler.GetActivity(w, r)
+			case sub == "action-runs":
+				handler.GetActionRuns(w, r)
 			case sub == "config":
 				handler.GetConfig(w, r)
 			case sub == "envs" && subsub == "status":
@@ -257,6 +259,9 @@ func main() {
 				r.SetPathValue("env", pathSegment(r.URL.Path, 4))
 				r.SetPathValue("service", pathSegment(r.URL.Path, 6))
 				handler.FileDelete(w, r)
+			} else if pathSegment(r.URL.Path, 3) == "action-runs" {
+				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+				handler.ClearActionRuns(w, r)
 			} else {
 				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 				handler.DeleteWorkspace(w, r)
