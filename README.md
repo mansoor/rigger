@@ -1,6 +1,6 @@
 # Rigger — Rig once. Deploy anywhere
 
-> **Yes, it's called Rigger.** And like a good dad, it does all the heavy lifting without complaining, remembers exactly how everything was set up, and gets quietly upset if you don't follow the instructions. Unlike your actual dad, it won't ask why you're still using `docker run` manually in 2026.
+> **Yes, it's called Rigger.** It's the deckhand who lashes your containers to the crane, double-checks every knot, and hoists them into prod without dropping one in the harbor. It remembers exactly which line went where, never fat-fingers a `docker run` at 2 a.m., and quietly judges you for deploying on a Friday. You bring the cargo — Rigger handles the heavy lifting, the rigging, and the part where everything stays afloat.
 
 A Go-powered toolkit for scaffolding, building, and operating multi-environment Docker application stacks — with a full-featured web UI for teams that prefer the browser. Create a self-contained workspace from the wizard, then build, deploy, promote, back up, and manage everything across dev, stage, and prod. The entire runtime is a single ~15 MB Go binary (no Bash scripts) plus a thin host CLI wrapper.
 
