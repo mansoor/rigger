@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Local env files (never commit secrets)
+src/.env
+
+# Node / frontend deps (frontend builds inside Docker via npm install)
+node_modules/
+src/frontend/package-lock.json
+
+# Claude Code local config / preview scaffolding
+.claude/settings.local.json
+.claude/launch.json
+
+# Go checksum file (regenerated at image build via `go mod tidy`)
+src/backend/go.sum
+
+# Embedded SPA build output (frontend is built into the binary at image build)
+src/backend/cmd/server/dist/
+
+# Windows crash dumps
+*.stackdump

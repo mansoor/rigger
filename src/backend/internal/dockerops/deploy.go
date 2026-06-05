@@ -1,0 +1,351 @@
+// Package dockerops implements stack deployment operations natively in Go,
+// wrapping `docker compose` directly (Phase 6.5b). It replaces the runtime path
+// through scripts/deploy.sh and run.sh for the compose lifecycle commands. The
+// compose project name and service-prefix rule ({project}_{env}) live here, in
+// one place, instead of being duplicated across bash scripts.
+package dockerops
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/composegen"
+	"github.com/mansoor/rigger/ui/internal/executor"
+)
+
+// deployCommands are the lifecycle commands dockerops owns (compose and swarm).
+// Other commands are handled by their own Go packages in the shell bridge.
+var deployCommands = map[string]bool{
+	"start":   true,
+	"stop":    true,
+	"down":    true,
+	"restart": true,
+	"update":  true,
+	"ps":      true,
+	"logs":    true,
+	"refresh": true,
+}
+
+// Handles reports whether dockerops owns a command (for compose deployments).
+func Handles(cmd string) bool { return deployCommands[cmd] }
+
+// Options configures a deployment operation.
+type Options struct {
+	WorkspacesDir string
+	Workspace     string
+	Command       string
+	Env           string
+	Extra         []string
+	EnvVars       []string // child-process environment (built by the shell bridge)
+	Stdout        io.Writer
+	Stderr        io.Writer
+
+	// Exec runs the docker commands. nil → local daemon (executor.Local). Set to
+	// a remotehost executor for cross-host operations (Phase 7).
+	Exec executor.Executor
+	// RemoteWorkspacesDir is the env dir base on the remote host (Phase 7); the
+	// local Exec ignores it.
+	RemoteWorkspacesDir string
+	// Remote marks a cross-host run (Phase 7). When set, the compose file is
+	// regenerated locally from config.json (deterministic, no secrets) and the
+	// local env-dir checks are skipped — the authoritative .env lives on the host.
+	Remote bool
+	// Sync pushes the local env dir to the remote host before the first compose
+	// call (set by the bridge for Remote runs; nil otherwise).
+	Sync func() error
+}
+
+type config struct {
+	Project struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	} `json:"project"`
+	Environments map[string]struct {
+		Deployment string `json:"deployment"`
+	} `json:"environments"`
+}
+
+// Run executes a compose-lifecycle command. The bool return reports whether
+// dockerops handled it; false means the caller should fall back to bash
+// (non-deploy commands, swarm deployments, or a missing/unreadable config).
+func Run(opts Options) (bool, error) {
+	if !deployCommands[opts.Command] {
+		return false, nil
+	}
+
+	cfgBytes, err := os.ReadFile(filepath.Join(opts.WorkspacesDir, opts.Workspace, "config.json"))
+	if err != nil {
+		return false, nil // can't read config — let bash try
+	}
+	var cfg config
+	if err := json.Unmarshal(cfgBytes, &cfg); err != nil {
+		return false, nil
+	}
+	envCfg, ok := cfg.Environments[opts.Env]
+	if !ok {
+		return true, fmt.Errorf("unknown environment %q", opts.Env)
+	}
+
+	envDir := filepath.Join(opts.WorkspacesDir, opts.Workspace, "envs", opts.Env)
+	composePath := filepath.Join(envDir, "docker-compose.yml")
+
+	if opts.Remote {
+		// Cross-host: regenerate the compose file locally (deterministic, no
+		// secrets) so it exists to push. The remote .env is authoritative and is
+		// never generated/pushed here — so the local .env check is skipped too.
+		content, err := composegen.Generate(cfgBytes, opts.Env)
+		if err != nil {
+			return true, fmt.Errorf("generate compose: %w", err)
+		}
+		if err := writeFile(composePath, content); err != nil {
+			return true, err
+		}
+	} else {
+		// refresh regenerates the compose file first, so the file may not exist yet.
+		if opts.Command != "refresh" {
+			if _, err := os.Stat(composePath); err != nil {
+				return true, fmt.Errorf("docker-compose.yml not found for %q — run init first", opts.Env)
+			}
+		}
+		if err := ensureEnvFile(envDir); err != nil {
+			return true, err
+		}
+	}
+
+	// Swarm deployments are now handled natively in Go too (Phase 6.5 finish).
+	if envCfg.Deployment == "swarm" {
+		s := &swarmRunner{
+			opts:        opts,
+			cfgBytes:    cfgBytes,
+			projectType: cfg.Project.Type,
+			stack:       cfg.Project.Name + "_" + opts.Env,
+			envDir:      envDir,
+			composePath: composePath,
+		}
+		return s.run()
+	}
+
+	r := &runner{
+		opts:        opts,
+		cfgBytes:    cfgBytes,
+		projectType: cfg.Project.Type,
+		stack:       cfg.Project.Name + "_" + opts.Env,
+		envDir:      envDir,
+		composePath: composePath,
+	}
+
+	switch opts.Command {
+	case "start":
+		return true, r.up()
+	case "stop":
+		return true, r.stop()
+	case "down":
+		return true, r.down()
+	case "restart":
+		return true, r.restart()
+	case "update":
+		return true, r.update()
+	case "ps":
+		return true, r.ps()
+	case "logs":
+		return true, r.logs()
+	case "refresh":
+		return true, r.refresh()
+	}
+	return false, nil
+}
+
+type runner struct {
+	opts        Options
+	cfgBytes    []byte
+	projectType string
+	stack       string
+	envDir      string
+	composePath string
+	synced      bool // Remote: env dir pushed to host (once per run)
+}
+
+// ensureSynced pushes the local env dir to the remote host before the first
+// compose call. No-op for local runs (Sync nil) and after the first push.
+func (r *runner) ensureSynced() error {
+	if r.opts.Sync == nil || r.synced {
+		return nil
+	}
+	r.synced = true
+	return r.opts.Sync()
+}
+
+// compose runs `docker compose -p <stack> -f docker-compose.yml <args>`,
+// streaming to the configured writers. CWD is the env dir so the .env file is
+// picked up.
+func (r *runner) compose(args ...string) error {
+	if err := r.ensureSynced(); err != nil {
+		return err
+	}
+	full := append([]string{"compose", "-p", r.stack, "-f", "docker-compose.yml"}, args...)
+	return executor.Default(r.opts.Exec).Docker(executor.Spec{
+		Args: full, Dir: r.envDir, Env: r.opts.EnvVars,
+		Stdout: r.opts.Stdout, Stderr: r.opts.Stderr,
+	})
+}
+
+// composeOutput runs a compose command and captures stdout (no streaming).
+func (r *runner) composeOutput(args ...string) ([]byte, error) {
+	if err := r.ensureSynced(); err != nil {
+		return nil, err
+	}
+	full := append([]string{"compose", "-p", r.stack, "-f", "docker-compose.yml"}, args...)
+	return executor.Default(r.opts.Exec).DockerOutput(executor.Spec{
+		Args: full, Dir: r.envDir, Env: r.opts.EnvVars,
+	})
+}
+
+func (r *runner) info(format string, a ...any) {
+	fmt.Fprintf(r.opts.Stdout, "⚑ "+format+"\n", a...)
+}
+func (r *runner) success(format string, a ...any) {
+	fmt.Fprintf(r.opts.Stdout, "✓ "+format+"\n", a...)
+}
+
+func (r *runner) up() error {
+	r.info("Deploying '%s' (compose)", r.stack)
+	if err := r.compose("up", "-d", "--remove-orphans"); err != nil {
+		return err
+	}
+	r.success("Stack '%s' is up", r.stack)
+	return nil
+}
+
+func (r *runner) stop() error {
+	r.info("Stopping stack '%s' (containers kept)", r.stack)
+	if err := r.compose("stop"); err != nil {
+		return err
+	}
+	r.success("Stack '%s' stopped", r.stack)
+	return nil
+}
+
+func (r *runner) down() error {
+	r.info("Bringing down stack '%s' (containers removed)", r.stack)
+	if err := r.compose("down"); err != nil {
+		return err
+	}
+	r.success("Stack '%s' is down", r.stack)
+	return nil
+}
+
+func (r *runner) restart() error {
+	svc := r.firstExtra()
+	if svc == "" {
+		r.info("Restarting all services in '%s'", r.stack)
+	} else {
+		r.info("Restarting %s in '%s'", svc, r.stack)
+	}
+	// up -d --remove-orphans (not `restart`) so it works whether containers are
+	// running or were previously removed with `down`.
+	args := []string{"up", "-d", "--remove-orphans"}
+	if svc != "" {
+		args = append(args, r.resolveSvc(svc))
+	}
+	if err := r.compose(args...); err != nil {
+		return err
+	}
+	r.success("Restart complete")
+	return nil
+}
+
+func (r *runner) update() error {
+	r.info("Updating images for '%s'", r.stack)
+	// Preserve running state: a stopped stack stays stopped after update.
+	runningBefore := false
+	if out, err := r.composeOutput("ps", "--status", "running", "--quiet"); err == nil {
+		runningBefore = len(bytes.TrimSpace(out)) > 0
+	}
+	r.info("Pulling latest images...")
+	if err := r.compose("pull"); err != nil {
+		return err
+	}
+	if runningBefore {
+		r.info("Recreating containers with new images...")
+		if err := r.compose("up", "-d", "--remove-orphans"); err != nil {
+			return err
+		}
+		r.success("Stack '%s' updated and restarted", r.stack)
+	} else {
+		r.success("Stack '%s' updated (images pulled, stack stays stopped)", r.stack)
+	}
+	return nil
+}
+
+func (r *runner) ps() error {
+	if err := r.compose("ps"); err != nil {
+		return err
+	}
+	if r.projectType == "image" {
+		printImageUpdates(r.opts.Stdout, r.opts.WorkspacesDir, r.opts.Workspace, r.opts.Env)
+	}
+	return nil
+}
+
+func (r *runner) logs() error {
+	svc := r.firstExtra()
+	if svc == "" {
+		return r.compose("logs", "-f")
+	}
+	return r.compose("logs", "-f", r.resolveSvc(svc))
+}
+
+func (r *runner) refresh() error {
+	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
+	content, err := composegen.Generate(r.cfgBytes, r.opts.Env)
+	if err != nil {
+		return fmt.Errorf("generate compose: %w", err)
+	}
+	if err := writeFile(r.composePath, content); err != nil {
+		return err
+	}
+	return r.up()
+}
+
+// writeFile writes compose content, creating the parent dir if needed.
+func writeFile(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o644)
+}
+
+// resolveSvc accepts either a short service name ("app") or the full prefixed
+// name ("myapp_prod_app") and returns the compose service name.
+func (r *runner) resolveSvc(svc string) string {
+	if strings.HasPrefix(svc, r.stack+"_") {
+		return svc
+	}
+	return r.stack + "_" + svc
+}
+
+func (r *runner) firstExtra() string {
+	if len(r.opts.Extra) > 0 {
+		return r.opts.Extra[0]
+	}
+	return ""
+}
+
+// ensureEnvFile makes sure the env's .env exists, copying from .env.example when
+// present (mirrors lib.sh ensure_env_file). docker compose needs it in CWD.
+func ensureEnvFile(envDir string) error {
+	envPath := filepath.Join(envDir, ".env")
+	if _, err := os.Stat(envPath); err == nil {
+		return nil
+	}
+	example := filepath.Join(envDir, ".env.example")
+	if data, err := os.ReadFile(example); err == nil {
+		return os.WriteFile(envPath, data, 0o644)
+	}
+	return fmt.Errorf(".env missing for environment (and no .env.example to seed it)")
+}

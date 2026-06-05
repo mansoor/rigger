@@ -1,0 +1,105 @@
+{
+  "project": {
+    "name": "myapp",
+    "type": "custom",
+    "registry": "registry.example.com",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "build": 0
+    }
+  },
+  "images": [],
+  "versions": {
+    "postgres":     "15-alpine",
+    "mysql":        "8.0",
+    "redis":        "7-alpine",
+    "garage":       "v1.0.1",
+    "garage_webui": "latest",
+    "nginx":        "1.25-alpine",
+    "node":         "20-alpine",
+    "php":          "8.3-fpm-alpine",
+    "composer":     "2.7"
+  },
+  "environments": {
+    "dev": {
+      "domain":           "dev.myapp.com",
+      "http_port":        8080,
+      "https_port":       8443,
+      "backend":          "laravel",
+      "frontend_enabled": false,
+      "frontend":         "nextjs",
+      "database":         "postgres",
+      "redis_enabled":    true,
+      "garage_enabled":   false,
+      "deployment":       "compose",
+      "traefik_enabled":  false,
+      "traefik_network":  "traefik_net",
+      "git": {
+        "enabled":        false,
+        "repo":           "git@github.com:org/repo.git",
+        "branch":         "develop",
+        "backend_path":   "./src/backend",
+        "frontend_path":  "./src/frontend"
+      },
+      "replicas": {
+        "backend":  1,
+        "frontend": 1
+      },
+      "env_vars": {}
+    },
+    "stage": {
+      "domain":           "stage.myapp.com",
+      "http_port":        8180,
+      "https_port":       8543,
+      "backend":          "laravel",
+      "frontend_enabled": false,
+      "frontend":         "nextjs",
+      "database":         "postgres",
+      "redis_enabled":    true,
+      "garage_enabled":   false,
+      "deployment":       "compose",
+      "traefik_enabled":  true,
+      "traefik_network":  "traefik_net",
+      "git": {
+        "enabled":        false,
+        "repo":           "git@github.com:org/repo.git",
+        "branch":         "develop",
+        "backend_path":   "./src/backend",
+        "frontend_path":  "./src/frontend"
+      },
+      "replicas": {
+        "backend":  1,
+        "frontend": 1
+      },
+      "env_vars": {}
+    },
+    "prod": {
+      "domain":           "prod.myapp.com",
+      "http_port":        80,
+      "https_port":       443,
+      "backend":          "laravel",
+      "frontend_enabled": false,
+      "frontend":         "nextjs",
+      "database":         "postgres",
+      "redis_enabled":    true,
+      "garage_enabled":   false,
+      "deployment":       "compose",
+      "traefik_enabled":  true,
+      "traefik_network":  "traefik_net",
+      "git": {
+        "enabled":        false,
+        "repo":           "git@github.com:org/repo.git",
+        "branch":         "develop",
+        "backend_path":   "./src/backend",
+        "frontend_path":  "./src/frontend"
+      },
+      "replicas": {
+        "backend":  2,
+        "frontend": 2
+      },
+      "env_vars": {}
+    }
+  }
+}

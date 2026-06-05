@@ -1,0 +1,46 @@
+# =============================================================================
+# .dockerignore.dev — Next.js  (dev environment)
+# Dockerfile.dev only COPY-s package lock files to run npm/yarn/pnpm install.
+# Source is bind-mounted; keep build context minimal.
+# =============================================================================
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# ── Reinstalled in container ──────────────────────────────────────────────────
+node_modules
+
+# ── Compiled output ───────────────────────────────────────────────────────────
+.next
+out
+dist
+.turbo
+coverage
+
+# ── Source (bind-mounted at runtime) ─────────────────────────────────────────
+app
+pages
+components
+lib
+src
+public
+styles
+tests
+__tests__
+docs
+
+# ── Version control & CI ──────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*

@@ -1,0 +1,77 @@
+{
+  "name": "ghost",
+  "label": "Ghost CMS + MySQL",
+  "description": "Ghost publishing platform with MySQL database",
+  "tags": [
+    "cms",
+    "blog",
+    "publishing"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "mysql",
+      "tag": "8.0",
+      "port": 3306,
+      "host_port": "",
+      "command": "--default-authentication-plugin=mysql_native_password",
+      "healthcheck": "mysqladmin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD} --silent",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/mysql"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "${MYSQL_ROOT_PASSWORD}",
+        "MYSQL_DATABASE": "${MYSQL_DATABASE}",
+        "MYSQL_USER": "${MYSQL_USER}",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "ghost",
+      "tag": "5-alpine",
+      "port": 2368,
+      "host_port": "${GHOST_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost:2368/ghost/ -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "60s"
+      },
+      "volumes": [
+        "./volumes/ghost_data:/var/lib/ghost/content"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "database__client": "mysql",
+        "database__connection__host": "db",
+        "database__connection__port": "3306",
+        "database__connection__database": "${MYSQL_DATABASE}",
+        "database__connection__user": "${MYSQL_USER}",
+        "database__connection__password": "${MYSQL_PASSWORD}",
+        "url": "${GHOST_URL}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "MYSQL_ROOT_PASSWORD": "CHANGE_ME_ROOT",
+    "MYSQL_DATABASE": "ghost",
+    "MYSQL_USER": "ghost_user",
+    "MYSQL_PASSWORD": "CHANGE_ME",
+    "GHOST_PORT": "2368",
+    "GHOST_URL": "http://localhost:2368"
+  }
+}

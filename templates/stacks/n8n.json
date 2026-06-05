@@ -1,0 +1,80 @@
+{
+  "name": "n8n",
+  "label": "n8n Workflow Automation + PostgreSQL",
+  "description": "n8n low-code automation platform with PostgreSQL persistence",
+  "tags": [
+    "automation",
+    "workflow",
+    "nocode"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "15-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "n8nio/n8n",
+      "tag": "latest",
+      "port": 5678,
+      "host_port": "${N8N_PORT}",
+      "command": "",
+      "healthcheck": "wget -qO- http://localhost:5678/healthz -o /dev/null 2>&1 || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "60s"
+      },
+      "volumes": [
+        "./volumes/n8n_data:/home/node/.n8n"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "DB_TYPE": "postgresdb",
+        "DB_POSTGRESDB_HOST": "db",
+        "DB_POSTGRESDB_PORT": "5432",
+        "DB_POSTGRESDB_DATABASE": "${POSTGRES_DB}",
+        "DB_POSTGRESDB_USER": "${POSTGRES_USER}",
+        "DB_POSTGRESDB_PASSWORD": "${POSTGRES_PASSWORD}",
+        "N8N_ENCRYPTION_KEY": "${N8N_ENCRYPTION_KEY}",
+        "N8N_HOST": "${N8N_HOST}",
+        "N8N_PORT": "5678",
+        "N8N_PROTOCOL": "http",
+        "WEBHOOK_URL": "http://${N8N_HOST}:${N8N_PORT}/"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "n8n",
+    "POSTGRES_USER": "n8n_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "N8N_PORT": "5678",
+    "N8N_HOST": "localhost",
+    "N8N_ENCRYPTION_KEY": "CHANGE_ME_32CHAR_KEY"
+  }
+}

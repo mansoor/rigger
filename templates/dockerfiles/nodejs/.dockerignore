@@ -1,0 +1,71 @@
+# =============================================================================
+# .dockerignore — Node.js  (prod / stage)
+# =============================================================================
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Reinstalled / compiled inside container ───────────────────────────────────
+node_modules
+dist
+build
+.cache
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+tests
+__tests__
+__mocks__
+coverage
+.nyc_output
+*.test.js
+*.test.ts
+*.test.mjs
+*.spec.js
+*.spec.ts
+*.spec.mjs
+jest.config.*
+vitest.config.*
+mocha*
+
+# ── Dev & CI config ───────────────────────────────────────────────────────────
+.editorconfig
+.eslintrc*
+.eslintignore
+.prettierrc*
+.prettierignore
+.stylelintrc*
+.huskyrc*
+.commitlintrc*
+.lintstagedrc*
+Makefile
+Dockerfile*
+docker-compose*.yml
+docker
+.travis.yml
+.circleci
+.github/workflows
+tsconfig.test.*
+nodemon*
+
+# ── Docs ──────────────────────────────────────────────────────────────────────
+docs
+*.md
+CHANGELOG*
+CONTRIBUTING*
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -1,0 +1,4 @@
+# Ignore all workspace contents — workspaces are generated locally by init_workspace.sh
+# and contain secrets (.env files). Only this .gitignore is tracked.
+*
+!.gitignore

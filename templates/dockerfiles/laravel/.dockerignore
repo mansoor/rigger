@@ -1,0 +1,64 @@
+# =============================================================================
+# .dockerignore — Laravel  (prod / stage)
+# Goal: smallest possible build context; no secrets, dev tools, or test debris.
+# =============================================================================
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Dependency directories (reinstalled inside container) ─────────────────────
+vendor
+node_modules
+
+# ── Laravel runtime cache (generated at startup) ──────────────────────────────
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*.php
+
+# ── Frontend build output (compiled inside container) ────────────────────────
+public/hot
+public/build
+public/mix-manifest.json
+
+# ── Test suite ────────────────────────────────────────────────────────────────
+tests
+coverage
+.phpunit*
+phpunit.xml
+phpunit.xml.dist
+
+# ── Development & CI config ───────────────────────────────────────────────────
+.editorconfig
+.styleci.yml
+.php-cs-fixer*
+Makefile
+Dockerfile*
+docker-compose*.yml
+docker
+.travis.yml
+.circleci
+.github/workflows
+
+# ── Docs & changelogs ─────────────────────────────────────────────────────────
+docs
+*.md
+CHANGELOG*
+UPGRADE*
+CONTRIBUTING*
+
+# ── Tooling ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo

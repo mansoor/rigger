@@ -1,0 +1,97 @@
+{
+  "name": "plausible",
+  "label": "Plausible Analytics",
+  "description": "Privacy-friendly Google Analytics alternative with PostgreSQL and ClickHouse",
+  "tags": [
+    "analytics",
+    "privacy",
+    "metrics"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "15-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "events_db",
+      "image": "clickhouse/clickhouse-server",
+      "tag": "23.3-alpine",
+      "port": 8123,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost:8123/ping -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/ch_data:/var/lib/clickhouse",
+        "./volumes/ch_logs:/var/log/clickhouse-server"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    },
+    {
+      "name": "app",
+      "image": "ghcr.io/plausible/community-edition",
+      "tag": "v2.1",
+      "port": 8000,
+      "host_port": "${PLAUSIBLE_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost:8000/ -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "60s"
+      },
+      "volumes": [],
+      "depends_on": [
+        "db",
+        "events_db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "DATABASE_URL": "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}",
+        "CLICKHOUSE_DATABASE_URL": "http://events_db:8123/${CLICKHOUSE_DB}",
+        "SECRET_KEY_BASE": "${SECRET_KEY_BASE}",
+        "TOTP_VAULT_KEY": "${TOTP_VAULT_KEY}",
+        "BASE_URL": "${BASE_URL}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "plausible",
+    "POSTGRES_USER": "plausible_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "CLICKHOUSE_DB": "plausible_events_db",
+    "PLAUSIBLE_PORT": "8000",
+    "SECRET_KEY_BASE": "CHANGE_ME_64CHAR_SECRET",
+    "TOTP_VAULT_KEY": "CHANGE_ME_BASE64_KEY",
+    "BASE_URL": "http://localhost:8000"
+  }
+}

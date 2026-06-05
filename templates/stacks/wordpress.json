@@ -1,0 +1,90 @@
+{
+  "name": "wordpress",
+  "label": "WordPress + MariaDB + Adminer",
+  "description": "WordPress CMS with MariaDB database and Adminer database UI",
+  "tags": [
+    "cms",
+    "php",
+    "blog"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "mariadb",
+      "tag": "11",
+      "port": 3306,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "mariadb-admin ping -h localhost -u root -p$$MARIADB_ROOT_PASSWORD --silent",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/mysql"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "${MYSQL_ROOT_PASSWORD}",
+        "MYSQL_DATABASE": "${MYSQL_DATABASE}",
+        "MYSQL_USER": "${MYSQL_USER}",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "wordpress",
+      "tag": "latest",
+      "port": 80,
+      "host_port": "${WP_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost/ -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "60s"
+      },
+      "volumes": [
+        "./volumes/wp_data:/var/www/html"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "WORDPRESS_DB_HOST": "db",
+        "WORDPRESS_DB_USER": "${MYSQL_USER}",
+        "WORDPRESS_DB_PASSWORD": "${MYSQL_PASSWORD}",
+        "WORDPRESS_DB_NAME": "${MYSQL_DATABASE}"
+      }
+    },
+    {
+      "name": "adminer",
+      "image": "adminer",
+      "tag": "latest",
+      "port": 8080,
+      "host_port": "${ADMINER_PORT}",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "volumes": [],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {
+    "MYSQL_ROOT_PASSWORD": "CHANGE_ME_ROOT",
+    "MYSQL_DATABASE": "wordpress",
+    "MYSQL_USER": "wp_user",
+    "MYSQL_PASSWORD": "CHANGE_ME",
+    "WP_PORT": "8080",
+    "ADMINER_PORT": "8181"
+  }
+}

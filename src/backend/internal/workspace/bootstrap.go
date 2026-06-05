@@ -1,0 +1,261 @@
+package workspace
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/composegen"
+	"github.com/mansoor/rigger/ui/internal/envgen"
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
+)
+
+// Bootstrap scaffolds (or re-scaffolds) a single environment inside a workspace,
+// porting scripts/bootstrap.sh natively to Go. It generates, under
+// workspacesDir/<name>/envs/<env>/:
+//
+//	.env / .env.example  — via envgen (existing secrets preserved unless regenEnv)
+//	docker-compose.yml   — via composegen
+//	backend/Dockerfile + .dockerignore, frontend/… , nginx.conf, garage.toml
+//	                     — custom stacks only, from templatesDir
+//
+// Progress is written to out. templatesDir is the toolkit's templates/ directory.
+func Bootstrap(workspacesDir, templatesDir, name, env string, regenEnv bool, out io.Writer) error {
+	if out == nil {
+		out = io.Discard
+	}
+	wsRoot := filepath.Join(workspacesDir, name)
+	cfgPath := filepath.Join(wsRoot, "config.json")
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+	cfg, err := wsconfig.Parse(data)
+	if err != nil {
+		return fmt.Errorf("parse config: %w", err)
+	}
+	if err := cfg.ValidateEnv(env); err != nil {
+		return err
+	}
+	e := cfg.Environments[env]
+
+	outDir := filepath.Join(wsRoot, "envs", env)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "Bootstrapping '%s'...\n", env)
+
+	// ── 1. .env / .env.example ──────────────────────────────────────────────────
+	envFile := filepath.Join(outDir, ".env")
+	if _, statErr := os.Stat(envFile); statErr != nil || regenEnv {
+		if err := writeEnv(cfg, env, outDir, envFile); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  .env generated\n")
+	} else {
+		fmt.Fprintf(out, "  .env exists — skipping (regen not requested)\n")
+	}
+
+	writeCompose := func() error {
+		content, err := composegen.Generate(data, env)
+		if err != nil {
+			return fmt.Errorf("generate compose: %w", err)
+		}
+		if err := os.WriteFile(filepath.Join(outDir, "docker-compose.yml"), content, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  docker-compose.yml generated\n")
+		return nil
+	}
+
+	// ── Image stack: only .env + compose ─────────────────────────────────────────
+	if cfg.ProjectType() == "image" {
+		if err := writeCompose(); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Environment '%s' bootstrapped (image stack)\n", env)
+		return nil
+	}
+
+	// ── Custom stack ──────────────────────────────────────────────────────────────
+	project := cfg.Project.Name
+	prefix := project + "_" + env
+
+	// 2. Backend Dockerfile + .dockerignore
+	beTmpl := filepath.Join(templatesDir, "dockerfiles", e.Backend)
+	if !isDir(beTmpl) {
+		return fmt.Errorf("no Dockerfile template for backend %q: %s", e.Backend, beTmpl)
+	}
+	beOut := filepath.Join(outDir, "backend")
+	if err := installDockerfile(beTmpl, beOut, env); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  backend Dockerfile (%s) installed\n", e.Backend)
+
+	// 3. Frontend Dockerfile (if enabled)
+	if e.FrontendEnabled {
+		feTmpl := filepath.Join(templatesDir, "dockerfiles", e.Frontend)
+		if !isDir(feTmpl) {
+			return fmt.Errorf("no Dockerfile template for frontend %q: %s", e.Frontend, feTmpl)
+		}
+		feOut := filepath.Join(outDir, "frontend")
+		if err := installDockerfile(feTmpl, feOut, env); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  frontend Dockerfile (%s) installed\n", e.Frontend)
+	}
+
+	// 4. Nginx config
+	if err := renderNginx(templatesDir, outDir, e.Backend, e.Domain, prefix, project, env); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "  nginx.conf rendered\n")
+
+	// 5. docker-compose.yml
+	if err := writeCompose(); err != nil {
+		return err
+	}
+
+	// 6. garage.toml (if enabled)
+	if e.GarageEnabled {
+		if err := os.WriteFile(filepath.Join(outDir, "garage.toml"), []byte(garageTOML(e.Domain)), 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  garage.toml generated\n")
+	}
+
+	fmt.Fprintf(out, "Environment '%s' bootstrapped\n", env)
+	return nil
+}
+
+// writeEnv generates .env and .env.example for env, preserving existing secrets.
+func writeEnv(cfg *wsconfig.Config, env, outDir, envFile string) error {
+	var existing map[string]string
+	if cur, err := os.ReadFile(envFile); err == nil {
+		existing = envgen.ParseEnv(cur)
+	}
+	envOut, exampleOut, err := envgen.Generate(cfg, env, existing, envgen.CryptoRand)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(envFile, []byte(envOut), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(outDir, ".env.example"), []byte(exampleOut), 0o644)
+}
+
+// installDockerfile copies the Dockerfile (preferring Dockerfile.dev for dev) and
+// the matching .dockerignore from a template dir into dest.
+func installDockerfile(tmplDir, dest, env string) error {
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	dfSrc := filepath.Join(tmplDir, "Dockerfile")
+	if env == "dev" {
+		if dev := filepath.Join(tmplDir, "Dockerfile.dev"); fileExists(dev) {
+			dfSrc = dev
+		}
+	}
+	if err := copyFile(dfSrc, filepath.Join(dest, "Dockerfile"), 0o644); err != nil {
+		return fmt.Errorf("copy Dockerfile: %w", err)
+	}
+	copyDockerignore(tmplDir, dest, env)
+	return nil
+}
+
+// copyDockerignore copies the env-appropriate .dockerignore (dev uses the loose
+// .dockerignore.dev), falling back to the other variant. Missing files are
+// non-fatal (mirrors bootstrap.sh).
+func copyDockerignore(tmplDir, dest, env string) {
+	var preferred, fallback string
+	if env == "dev" {
+		preferred = filepath.Join(tmplDir, ".dockerignore.dev")
+		fallback = filepath.Join(tmplDir, ".dockerignore")
+	} else {
+		preferred = filepath.Join(tmplDir, ".dockerignore")
+		fallback = filepath.Join(tmplDir, ".dockerignore.dev")
+	}
+	src := preferred
+	if !fileExists(src) {
+		src = fallback
+	}
+	if fileExists(src) {
+		_ = copyFile(src, filepath.Join(dest, ".dockerignore"), 0o644)
+	}
+}
+
+// renderNginx renders templates/nginx/<backend>.conf, substituting the workspace
+// placeholders, into outDir/nginx.conf.
+func renderNginx(templatesDir, outDir, backend, domain, prefix, project, env string) error {
+	tmpl := filepath.Join(templatesDir, "nginx", backend+".conf")
+	src, err := os.ReadFile(tmpl)
+	if err != nil {
+		return fmt.Errorf("nginx template not found: %s", tmpl)
+	}
+	r := strings.NewReplacer(
+		"{{DOMAIN}}", domain,
+		"{{PREFIX}}", prefix,
+		"{{PROJECT}}", project,
+		"{{ENV}}", env,
+	)
+	return os.WriteFile(filepath.Join(outDir, "nginx.conf"), []byte(r.Replace(string(src))), 0o644)
+}
+
+// garageTOML renders the garage.toml content (bootstrap.sh heredoc).
+func garageTOML(domain string) string {
+	return fmt.Sprintf(`metadata_dir = "/meta"
+data_dir     = "/data"
+db_engine    = "lmdb"
+replication_factor = 1
+
+[rpc_bind_addr]
+addr = "0.0.0.0:3901"
+
+[s3_api]
+s3_region     = "garage"
+api_bind_addr = "0.0.0.0:3900"
+root_domain   = ".s3.%s"
+
+[s3_web]
+bind_addr     = "0.0.0.0:3902"
+root_domain   = ".web.%s"
+index         = "index.html"
+error_document = "404.html"
+
+[admin]
+api_bind_addr = "0.0.0.0:3903"
+`, domain, domain)
+}
+
+// ── small fs helpers ────────────────────────────────────────────────────────────
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
+
+func isDir(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && info.IsDir()
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}

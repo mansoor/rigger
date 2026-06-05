@@ -1,0 +1,76 @@
+# =============================================================================
+# .dockerignore — Next.js  (prod / stage)
+# Multi-stage build compiles to .next/standalone — exclude everything
+# that isn't needed by the deps or builder stages.
+# =============================================================================
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── Reinstalled / compiled inside container ───────────────────────────────────
+node_modules
+.next
+out
+dist
+.turbo
+.vercel
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.spec.ts
+**/*.spec.tsx
+**/*.spec.js
+coverage
+.nyc_output
+playwright-report
+cypress
+
+# ── Dev & CI config ───────────────────────────────────────────────────────────
+.editorconfig
+.eslintrc*
+.eslintignore
+.prettierrc*
+.stylelintrc*
+.huskyrc*
+Makefile
+Dockerfile*
+docker-compose*.yml
+docker
+.travis.yml
+.circleci
+.github/workflows
+jest.config.*
+vitest.config.*
+playwright.config.*
+
+# ── Storybook ─────────────────────────────────────────────────────────────────
+.storybook
+storybook-static
+
+# ── Docs ──────────────────────────────────────────────────────────────────────
+docs
+*.md
+CHANGELOG*
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

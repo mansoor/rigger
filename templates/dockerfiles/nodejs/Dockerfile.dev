@@ -1,0 +1,31 @@
+# =============================================================================
+# Node.js — Development Dockerfile
+# Uses nodemon for hot-reload; source bind-mounted from host
+# =============================================================================
+
+FROM node:20-alpine
+
+ENV NODE_ENV=development \
+    PORT=3000
+
+RUN apk add --no-cache git curl
+
+WORKDIR /app
+
+# Install nodemon globally for hot-reload
+RUN npm install -g nodemon
+
+# Copy manifests and install all deps (including devDependencies)
+# In dev, the source is bind-mounted so node_modules in the image
+# is the canonical one — avoids platform mismatch on macOS/Linux
+COPY package.json package-lock.json* ./
+RUN npm install
+
+EXPOSE 3000 9229
+
+# 9229 = Node.js inspector port for debugger attachment
+
+HEALTHCHECK --interval=15s --timeout=3s \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["nodemon", "--inspect=0.0.0.0:9229", "src/index.js"]

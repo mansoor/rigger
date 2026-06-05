@@ -1,0 +1,40 @@
+# =============================================================================
+# .dockerignore.dev — React / Vite  (dev environment)
+# Dockerfile.dev only COPY-s package lock files to run npm/yarn/pnpm install.
+# Source is bind-mounted; keep build context minimal.
+# =============================================================================
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# ── Reinstalled in container ──────────────────────────────────────────────────
+node_modules
+
+# ── Compiled output ───────────────────────────────────────────────────────────
+dist
+.vite
+.cache
+coverage
+
+# ── Source (bind-mounted at runtime) ─────────────────────────────────────────
+src
+public
+tests
+__tests__
+docs
+
+# ── Version control & CI ──────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*

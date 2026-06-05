@@ -1,0 +1,44 @@
+{
+  "project": {
+    "name": "obs",
+    "type": "image",
+    "registry": "",
+    "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }
+  },
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "16",
+      "port": 5432,
+      "healthcheck": "pg_isready -U $obs",
+      "volumes": ["pgdata:/var/lib/postgresql/data", "./init.sql:/docker-entrypoint-initdb.d/init.sql:ro"],
+      "env_vars": { "POSTGRES_USER": "obs", "POSTGRES_PASSWORD": "secret", "POSTGRES_DB": "obs" }
+    },
+    {
+      "name": "app",
+      "image": "grafana/grafana",
+      "tag": "latest",
+      "port": 3000,
+      "host_port": "3000",
+      "command": "./run.sh --verbose",
+      "depends_on": ["db"],
+      "env_vars": { "GF_SECURITY_ADMIN_PASSWORD": "admin" },
+      "extra_ports": ["9090:9090"],
+      "healthcheck_config": { "interval": "15s", "retries": 5 }
+    }
+  ],
+  "named_volumes": [{ "name": "extra" }],
+  "environments": {
+    "prod": {
+      "domain": "obs.example.com",
+      "traefik_enabled": true,
+      "traefik_network": "traefik_net",
+      "ssl_enabled": false,
+      "deployment": "compose",
+      "service_overrides": {
+        "app": { "extra_compose": "deploy:\n  resources:\n    limits:\n      memory: 512M" }
+      }
+    }
+  }
+}

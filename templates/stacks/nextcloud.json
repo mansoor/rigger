@@ -1,0 +1,100 @@
+{
+  "name": "nextcloud",
+  "label": "Nextcloud + PostgreSQL + Redis",
+  "description": "Nextcloud self-hosted file sharing and collaboration with PostgreSQL and Redis cache",
+  "tags": [
+    "storage",
+    "productivity",
+    "files"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "15-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "redis",
+      "image": "redis",
+      "tag": "7-alpine",
+      "port": 6379,
+      "host_port": "",
+      "command": "redis-server --appendonly yes",
+      "healthcheck": "redis-cli ping | grep -q PONG || exit 1",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "3s",
+        "retries": "3",
+        "start_period": "10s"
+      },
+      "volumes": [
+        "./volumes/redis_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    },
+    {
+      "name": "app",
+      "image": "nextcloud",
+      "tag": "28-apache",
+      "port": 80,
+      "host_port": "${NC_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost/status.php -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "90s"
+      },
+      "volumes": [
+        "./volumes/nc_data:/var/www/html"
+      ],
+      "depends_on": [
+        "db",
+        "redis"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_HOST": "db",
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "REDIS_HOST": "redis",
+        "NEXTCLOUD_ADMIN_USER": "${NC_ADMIN_USER}",
+        "NEXTCLOUD_ADMIN_PASSWORD": "${NC_ADMIN_PASSWORD}",
+        "NEXTCLOUD_TRUSTED_DOMAINS": "${NC_DOMAIN}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "nextcloud",
+    "POSTGRES_USER": "nc_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "NC_PORT": "8080",
+    "NC_ADMIN_USER": "admin",
+    "NC_ADMIN_PASSWORD": "CHANGE_ME",
+    "NC_DOMAIN": "localhost"
+  }
+}

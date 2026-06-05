@@ -1,0 +1,44 @@
+{
+  "name": "minio",
+  "label": "MinIO Object Storage",
+  "description": "High-performance S3-compatible object storage with web console",
+  "tags": [
+    "storage",
+    "s3",
+    "object-storage"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "minio/minio",
+      "tag": "latest",
+      "port": 9000,
+      "host_port": "${MINIO_API_PORT}",
+      "command": "server /data --console-address \":9001\"",
+      "healthcheck": "curl -sf http://localhost:9000/minio/health/live -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/minio_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [
+        "${MINIO_CONSOLE_PORT}:9001"
+      ],
+      "env_vars": {
+        "MINIO_ROOT_USER": "${MINIO_ROOT_USER}",
+        "MINIO_ROOT_PASSWORD": "${MINIO_ROOT_PASSWORD}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "MINIO_ROOT_USER": "minioadmin",
+    "MINIO_ROOT_PASSWORD": "CHANGE_ME",
+    "MINIO_API_PORT": "9000",
+    "MINIO_CONSOLE_PORT": "9001"
+  }
+}

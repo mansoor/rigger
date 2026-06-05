@@ -1,0 +1,73 @@
+# =============================================================================
+# .dockerignore — React / Vite  (prod / stage)
+# Builder stage compiles to dist/ and copies into nginx — exclude everything
+# that isn't source code or a lock file.
+# =============================================================================
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+
+# ── Reinstalled / compiled inside container ───────────────────────────────────
+node_modules
+dist
+.vite
+.cache
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+**/__tests__
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.spec.ts
+**/*.spec.tsx
+**/*.spec.js
+coverage
+.nyc_output
+playwright-report
+cypress
+vitest.config.*
+jest.config.*
+playwright.config.*
+
+# ── Dev & CI config ───────────────────────────────────────────────────────────
+.editorconfig
+.eslintrc*
+.eslintignore
+.prettierrc*
+.stylelintrc*
+.huskyrc*
+.commitlintrc*
+Makefile
+Dockerfile*
+docker-compose*.yml
+docker
+.travis.yml
+.circleci
+.github/workflows
+
+# ── Storybook ─────────────────────────────────────────────────────────────────
+.storybook
+storybook-static
+
+# ── Docs ──────────────────────────────────────────────────────────────────────
+docs
+*.md
+CHANGELOG*
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

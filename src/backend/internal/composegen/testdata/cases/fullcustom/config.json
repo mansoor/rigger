@@ -1,0 +1,32 @@
+{
+  "project": {
+    "name": "shop",
+    "type": "custom",
+    "registry": "reg.example.com",
+    "version": { "major": 2, "minor": 3, "patch": 1, "build": 7 }
+  },
+  "images": [],
+  "versions": {
+    "mysql": "8.4",
+    "garage": "v1.0.1",
+    "garage_webui": "latest",
+    "nginx": "1.27-alpine"
+  },
+  "environments": {
+    "prod": {
+      "domain": "shop.example.com",
+      "http_port": 8080,
+      "backend": "nodejs",
+      "frontend_enabled": true,
+      "frontend": "nextjs",
+      "database": "mysql",
+      "redis_enabled": false,
+      "garage_enabled": true,
+      "deployment": "swarm",
+      "traefik_enabled": true,
+      "traefik_network": "traefik_net",
+      "ssl_enabled": true,
+      "replicas": { "backend": 3, "frontend": 2 }
+    }
+  }
+}

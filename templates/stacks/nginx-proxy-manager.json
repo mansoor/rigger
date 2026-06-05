@@ -1,0 +1,81 @@
+{
+  "name": "nginx-proxy-manager",
+  "label": "Nginx Proxy Manager + MariaDB",
+  "description": "Beautiful UI for managing Nginx reverse proxies, SSL certificates, and access lists",
+  "tags": [
+    "proxy",
+    "nginx",
+    "ssl",
+    "reverse-proxy"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "mariadb",
+      "tag": "10.6",
+      "port": 3306,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "mariadb-admin ping -h localhost -u root -p$$MARIADB_ROOT_PASSWORD --silent",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/mysql"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "${MYSQL_ROOT_PASSWORD}",
+        "MYSQL_DATABASE": "${MYSQL_DATABASE}",
+        "MYSQL_USER": "${MYSQL_USER}",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "jc21/nginx-proxy-manager",
+      "tag": "latest",
+      "port": 80,
+      "host_port": "${NPM_HTTP_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost:81/ -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "60s"
+      },
+      "volumes": [
+        "./volumes/npm_data:/data",
+        "./volumes/npm_letsencrypt:/etc/letsencrypt"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [
+        "${NPM_HTTPS_PORT}:443",
+        "${NPM_ADMIN_PORT}:81"
+      ],
+      "env_vars": {
+        "DB_MYSQL_HOST": "db",
+        "DB_MYSQL_PORT": "3306",
+        "DB_MYSQL_USER": "${MYSQL_USER}",
+        "DB_MYSQL_PASSWORD": "${MYSQL_PASSWORD}",
+        "DB_MYSQL_NAME": "${MYSQL_DATABASE}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "MYSQL_ROOT_PASSWORD": "CHANGE_ME_ROOT",
+    "MYSQL_DATABASE": "npm",
+    "MYSQL_USER": "npm_user",
+    "MYSQL_PASSWORD": "CHANGE_ME",
+    "NPM_HTTP_PORT": "80",
+    "NPM_HTTPS_PORT": "443",
+    "NPM_ADMIN_PORT": "81"
+  }
+}

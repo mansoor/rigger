@@ -1,0 +1,48 @@
+# Rigger line-ending policy
+#
+# The bash CLI toolkit and all generated scripts run INSIDE Linux (Alpine)
+# containers via bind mounts. CRLF line endings break bash ("#!/bin/bash\r"
+# is not a valid interpreter and \r corrupts every variable), so every text
+# file that can end up in the container — or be executed by sh/bash — MUST be
+# checked out with LF regardless of the developer's OS or core.autocrlf setting.
+
+# Default: treat as text, normalize to LF in the repo, check out LF everywhere.
+* text=auto eol=lf
+
+# Shell scripts and the run.sh template — always LF, no exceptions.
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.template  text eol=lf
+init_workspace.sh text eol=lf
+install.sh        text eol=lf
+
+# Container & compose files run on Linux — LF.
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Config/templates consumed by the Linux backend — LF.
+*.json      text eol=lf
+*.env       text eol=lf
+
+# Windows-only scripts (if ever added) keep CRLF.
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# Binary assets — never apply EOL filtering.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.eot   binary
+*.gz    binary
+*.tar   binary
+*.zip   binary
+*.pdf   binary

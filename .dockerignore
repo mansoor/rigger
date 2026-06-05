@@ -1,0 +1,24 @@
+# Build context is the repo root (see src/docker-compose.yml).
+# Keep: scripts/, templates/, init_workspace.sh, src/frontend, src/backend.
+
+.git
+.gitattributes
+.gitignore
+**/.DS_Store
+
+# Frontend build artifacts / deps (rebuilt inside the image)
+src/frontend/node_modules
+src/frontend/.vite-cache
+src/backend/cmd/server/dist
+
+# Runtime data — bind-mounted at runtime, not baked into the image
+workspaces
+
+# Local env / secrets
+src/.env
+.env
+
+# Docs and scratch
+*.md
+RIGGER_*.md
+_wsverify

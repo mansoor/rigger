@@ -1,0 +1,43 @@
+# =============================================================================
+# .dockerignore.dev — Laravel  (dev environment)
+# Source is bind-mounted at runtime — Dockerfile.dev only needs:
+#   composer.json / composer.lock  (for composer install)
+#   package.json / package-lock.json  (for npm install, if applicable)
+#   docker/  (php.ini, xdebug.ini, www.conf, entrypoint)
+# Everything else is excluded to keep the build context lean.
+# =============================================================================
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Reinstalled in container ──────────────────────────────────────────────────
+vendor
+node_modules
+
+# ── Source code (bind-mounted at runtime, not baked into dev image) ───────────
+app
+bootstrap/cache
+config
+database
+lang
+public
+resources
+routes
+storage
+tests
+
+# ── Version control & CI ──────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+public/build
+public/hot
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log

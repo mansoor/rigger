@@ -1,0 +1,39 @@
+# =============================================================================
+# .dockerignore.dev — Node.js  (dev environment)
+# Dockerfile.dev only COPY-s package*.json to run npm install.
+# Source is bind-mounted; keep context minimal.
+# =============================================================================
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Reinstalled in container ──────────────────────────────────────────────────
+node_modules
+
+# ── Compiled output (not needed for dev container startup) ────────────────────
+dist
+build
+.cache
+coverage
+.nyc_output
+
+# ── Source (bind-mounted at runtime) ─────────────────────────────────────────
+src
+test
+tests
+__tests__
+docs
+public
+
+# ── Version control & CI ──────────────────────────────────────────────────────
+.git
+.gitignore
+.github
+
+# ── OS noise ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*

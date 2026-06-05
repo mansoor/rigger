@@ -1,0 +1,195 @@
+# ============================================================
+# docker-compose.yml — prod environment
+# Project : shop  (type: custom)
+# Version : 2.3.1-build.7
+# Generated: 2026-06-04 08:24:31 UTC
+# Regenerate: ./run.sh refresh prod
+# ============================================================
+
+networks:
+  shop_prod_net:
+    driver: bridge
+  traefik_net:
+    external: true
+
+volumes:
+  shop_prod_mysql_data:
+  shop_prod_garage_data:
+  shop_prod_garage_meta:
+  shop_prod_uploads:
+
+services:
+
+  # ── Backend (nodejs) ──────────────────────────────────────────────────────
+  shop_prod_backend:
+    image: ${BACKEND_IMAGE:-reg.example.com/shop-backend:2.3.1-build.7-prod}
+    container_name: shop_prod_backend
+    env_file: .env
+    volumes:
+      - shop_prod_uploads:/app/storage/uploads
+    networks:
+      - shop_prod_net
+    depends_on:
+      shop_prod_mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  # ── Nginx ──────────────────────────────────────────────────────────────────
+  shop_prod_nginx:
+    image: nginx:1.27-alpine
+    container_name: shop_prod_nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - shop_prod_uploads:/var/www/uploads:ro
+    depends_on:
+      - shop_prod_backend
+    networks:
+      - shop_prod_net
+      - traefik_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shop_prod_nginx.rule=Host(`shop.example.com`)"
+      - "traefik.http.routers.shop_prod_nginx.entrypoints=websecure"
+      - "traefik.http.routers.shop_prod_nginx.tls=true"
+      - "traefik.http.routers.shop_prod_nginx.tls.certresolver=letsencrypt"
+      - "traefik.http.services.shop_prod_nginx.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost/ -o /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  # ── MySQL 8.4 ──────────────────────────────────────────────────────
+  shop_prod_mysql:
+    image: mysql:8.4
+    container_name: shop_prod_mysql
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    command: --default-authentication-plugin=mysql_native_password
+    volumes:
+      - shop_prod_mysql_data:/var/lib/mysql
+    networks:
+      - shop_prod_net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  # ── Garage v1.0.1 (S3-compatible) ──────────────────────────────────────
+  shop_prod_garage:
+    image: dxflrs/garage:v1.0.1
+    container_name: shop_prod_garage
+    volumes:
+      - shop_prod_garage_data:/data
+      - shop_prod_garage_meta:/meta
+      - ./garage.toml:/etc/garage.toml:ro
+    environment:
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN}
+    networks:
+      - shop_prod_net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3903/health -o /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  # ── Garage WebUI ─────────────────────────────────────────────────────────────
+  shop_prod_garage_webui:
+    image: khofesh/garage-webui:latest
+    container_name: shop_prod_garage_webui
+    environment:
+      GARAGE_API_URL: http://shop_prod_garage:3900
+      GARAGE_API_TOKEN: ${GARAGE_ADMIN_TOKEN}
+    depends_on:
+      - shop_prod_garage
+    networks:
+      - shop_prod_net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+
+  # ── Frontend (nextjs) ────────────────────────────────────────────────────
+  shop_prod_frontend:
+    image: ${FRONTEND_IMAGE:-reg.example.com/shop-frontend:2.3.1-build.7-prod}
+    container_name: shop_prod_frontend
+    env_file: .env
+    networks:
+      - shop_prod_net
+      - traefik_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.shop_prod_frontend.rule=Host(`app.shop.example.com`)"
+      - "traefik.http.routers.shop_prod_frontend.entrypoints=websecure"
+      - "traefik.http.routers.shop_prod_frontend.tls=true"
+      - "traefik.http.routers.shop_prod_frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.shop_prod_frontend.loadbalancer.server.port=3000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+

@@ -1,0 +1,137 @@
+# Project name is pinned so the compose project / image / volume stay "rigger"
+# even though the compose file now lives in src/ (the dir basename is "src").
+name: rigger
+
+services:
+
+  # ── Rigger ──────────────────────────────────────────────────────────────────────
+  rigger:
+    build:
+      # Build context is the repo root so the image can bake in templates/
+      # (single-image distribution; toolkit logic lives in the Go binary).
+      context: ..
+      dockerfile: src/Dockerfile
+    container_name: rigger
+    restart: unless-stopped
+    ports:
+      - "${RIGGER_PORT:-8080}:8080"
+    volumes:
+      # NOTE: toolkit logic lives in the Go binary (no scripts) — the old
+      # `../:/toolkit:ro` code mount has been removed. Only rw DATA is mounted.
+      # Workspaces (read-write): config.json, envs/, backups/ live here
+      - ../workspaces:/toolkit/workspaces
+      # Templates (read-write): allows saving new templates from the Tools page
+      - ../templates:/toolkit/templates
+      # Docker socket: needed for shell bridge to run docker commands
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Host root (read-only): lets dashboard disk stats and the disk_above_pct
+      # alert measure the REAL host filesystem instead of the container overlay.
+      - /:/host:ro
+      # Persistent data: SQLite DB
+      - rigger-data:/data
+    environment:
+      - LISTEN_ADDR=:8080
+      - TOOLKIT_ROOT=/toolkit
+      - WORKSPACES_DIR=/toolkit/workspaces
+      - DATA_DIR=/data
+      # Host filesystem mount point for disk metrics (see volumes: /:/host:ro)
+      - HOST_FS_PATH=/host
+      # Notifications use the in-process apprise-go library by default (no extra
+      # container). To use the Apprise API sidecar instead, uncomment the
+      # `apprise` service below and set APPRISE_URL to point at it:
+      # - APPRISE_URL=http://apprise:8000
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+    networks:
+      - traefik_net
+    # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.
+    # Uncomment labels block and set RIGGER_DOMAIN in .env to enable.
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.rigger.rule=Host(`${RIGGER_DOMAIN}`)"
+    #   - "traefik.http.routers.rigger.entrypoints=websecure"
+    #   - "traefik.http.routers.rigger.tls=true"
+    #   - "traefik.http.routers.rigger.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.rigger.loadbalancer.server.port=8080"
+
+  # ── Apprise API sidecar (OPTIONAL) ────────────────────────────────────────────
+  # Rigger delivers non-email notifications via the embedded apprise-go library by
+  # default, so this container is NOT needed. Uncomment it (and set APPRISE_URL
+  # on the rigger service above) only if you prefer the upstream Python Apprise
+  # — e.g. for its broadest service coverage or to update notifications
+  # independently of Rigger by bumping this image. Internal-only on traefik_net.
+  # apprise:
+  #   image: caronc/apprise:latest
+  #   container_name: rigger-apprise
+  #   restart: unless-stopped
+  #   networks:
+  #     - traefik_net
+
+  # ── Traefik reverse proxy ─────────────────────────────────────────────────────
+  # Routes HTTP/HTTPS traffic to workspace containers based on Docker labels.
+  # Issues and renews Let's Encrypt certificates automatically.
+  #
+  # Requirements for SSL:
+  #   • ACME_EMAIL must be set in .env
+  #   • Port 80 must be publicly reachable for the HTTP-01 ACME challenge
+  #   • Each workspace domain must resolve to this server in DNS
+  #
+  # If another proxy (Nginx, Cloudflare, HAProxy) sits in front, configure it
+  # to forward ports 80 and 443 to this server. Set Cloudflare to "Full" SSL
+  # mode if used, so the HTTP-01 challenge on port 80 can reach Traefik.
+  traefik:
+    image: traefik:v3.1
+    container_name: rigger-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command:
+      # ── Entrypoints ──
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # ── Docker provider ──
+      # Watches all containers on traefik_net for label changes.
+      - --providers.docker=true
+      - --providers.docker.network=traefik_net
+      - --providers.docker.exposedbydefault=false
+      # ── Let's Encrypt ACME (HTTP-01 challenge) ──
+      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
+      - --certificatesresolvers.letsencrypt.acme.storage=/certs/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # ── Global HTTP → HTTPS redirect ──
+      # Applied only to routers that opt in via their entrypoint labels.
+      # Workspaces without SSL keep their HTTP router on the 'web' entrypoint.
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      # ── Logging ──
+      - --log.level=INFO
+      - --accesslog=false
+      # ── Dashboard (disabled by default) ──
+      # To enable: change to --api.dashboard=true and add labels to this service.
+      - --api.dashboard=false
+    volumes:
+      # Docker socket — read-only; Traefik only watches, never modifies
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Certificate storage — mount a named volume so certs survive restarts
+      - traefik-certs:/certs
+    networks:
+      - traefik_net
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  # Shared Docker network for Traefik routing.
+  # Declared external so no single compose project owns it — both this file
+  # and all workspace compose files attach to it without label conflicts.
+  #
+  # Create it once before first deploy:
+  #   docker network create traefik_net
+  traefik_net:
+    external: true
+    name: traefik_net
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  rigger-data:
+  # Let's Encrypt certificate store — back this volume up regularly
+  traefik-certs:
