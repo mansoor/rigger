@@ -213,13 +213,14 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		var notes []string
 		for _, u := range entry.Results {
 			if u.NewerStable != "" {
-				notes = append(notes, fmt.Sprintf("%s → %s", u.Service, u.NewerStable))
+				notes = append(notes, fmt.Sprintf("%s (service name: %s) (CURRENT: %s → NEW: %s)",
+					u.Image, u.Service, u.Tag, u.NewerStable))
 			}
 		}
 		if len(notes) == 0 {
 			return false, 0, ""
 		}
-		return true, float64(len(notes)), fmt.Sprintf("%s/%s: newer stable version available (%s)",
+		return true, float64(len(notes)), fmt.Sprintf("%s/%s: newer stable image version available for %s",
 			t.ws, t.env, joinUpTo(notes, 4))
 	}
 
