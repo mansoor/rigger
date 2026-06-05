@@ -24,6 +24,17 @@ function fmtRate(bps) {
   return `${fmtBytes(bps)}/s`
 }
 
+// Selectable metric time windows (minutes). Default is 60m.
+const METRIC_RANGES = [
+  { label: '30m', v: 30 },
+  { label: '60m', v: 60 },
+  { label: '3h',  v: 180 },
+  { label: '6h',  v: 360 },
+  { label: '12h', v: 720 },
+  { label: '1d',  v: 1440 },
+  { label: '3d',  v: 4320 },
+]
+
 function MetricTile({ label, value, series, stroke }) {
   return (
     <div className="bg-gray-900/40 border border-gray-800/60 rounded-lg px-3 py-2 min-w-0">
@@ -279,11 +290,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   })
 
   // Metrics history (Phase 6d) — per-env CPU/memory/disk/network for sparklines.
+  // rangeMin is the selected time window (minutes); default 60.
+  const [rangeMin, setRangeMin] = useState(60)
   // Poll faster until the first snapshot exists (e.g. a just-deployed env) so the
   // strip fills in on its own; settle to 60s once populated.
   const { data: metrics = [] } = useQuery({
-    queryKey: ['metrics', name, envName],
-    queryFn: () => fetchEnvMetrics(name, envName, 24),
+    queryKey: ['metrics', name, envName, rangeMin],
+    queryFn: () => fetchEnvMetrics(name, envName, rangeMin),
     refetchInterval: (q) => ((q.state.data?.length ?? 0) === 0 ? 20_000 : 60_000),
     retry: false,
   })
@@ -450,7 +463,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         <div className="flex items-center gap-0.5 p-1 bg-gray-800/40 border border-gray-800 rounded-lg">
           <ToolBtn icon="refresh" title="Refresh — regenerate compose from config & deploy"
             onClick={() => handleAction('refresh')} className="text-gray-500 hover:text-sky-400" />
-          <ToolBtn icon="restart" title="Restart containers in place" disabled={!isRunning}
+          <ToolBtn icon="restart" title="Restart the existing containers in place" disabled={!hasContainers}
             onClick={() => handleAction('restart')} className="text-gray-500 hover:text-green-400" />
           <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
             onClick={() => setDownConfirm(true)} className="text-red-400/50 hover:text-red-400" />
@@ -468,11 +481,22 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           freshly-deployed env looks consistent (— placeholders) instead of missing
           the strip until the collector's first snapshot arrives. */}
       {(metrics.length > 0 || containerStatus === 'running' || containerStatus === 'partial') && (
-        <div className="border-t border-gray-800/60 pt-3 grid grid-cols-2 2xl:grid-cols-4 gap-3">
-          <MetricTile label="CPU"     value={lastMetric ? `${lastMetric.cpu_pct.toFixed(1)}%` : '—'} series={cpuSeries}     stroke="#22d3ee" />
-          <MetricTile label="Memory"  value={lastMetric ? fmtBytes(lastMetric.memory_bytes) : '—'}   series={memSeries}     stroke="#a78bfa" />
-          <MetricTile label="Disk"    value={lastMetric ? fmtBytes(lastMetric.disk_bytes) : '—'}     series={diskSeries}    stroke="#34d399" />
-          <MetricTile label="Network" value={lastMetric ? fmtRate(lastNetRate) : '—'}                series={netRateSeries} stroke="#fbbf24" />
+        <div className="border-t border-gray-800/60 pt-3">
+          {/* Time-range selector — muted links, brighter on hover, active highlighted. */}
+          <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 mb-2 text-[11px]">
+            {METRIC_RANGES.map(r => (
+              <button key={r.v} type="button" onClick={() => setRangeMin(r.v)}
+                className={`transition-colors ${rangeMin === r.v ? 'text-gray-200 font-medium' : 'text-gray-600 hover:text-gray-400'}`}>
+                {r.label}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 2xl:grid-cols-4 gap-3">
+            <MetricTile label="CPU"     value={lastMetric ? `${lastMetric.cpu_pct.toFixed(1)}%` : '—'} series={cpuSeries}     stroke="#22d3ee" />
+            <MetricTile label="Memory"  value={lastMetric ? fmtBytes(lastMetric.memory_bytes) : '—'}   series={memSeries}     stroke="#a78bfa" />
+            <MetricTile label="Disk"    value={lastMetric ? fmtBytes(lastMetric.disk_bytes) : '—'}     series={diskSeries}    stroke="#34d399" />
+            <MetricTile label="Network" value={lastMetric ? fmtRate(lastNetRate) : '—'}                series={netRateSeries} stroke="#fbbf24" />
+          </div>
         </div>
       )}
 

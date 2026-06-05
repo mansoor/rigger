@@ -6,6 +6,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchWorkspaces, fetchHosts } from '../lib/api'
 import TrashIcon from '../components/TrashIcon'
+import PortWarnings from '../components/PortWarnings'
+import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -611,7 +613,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label required>Name</Label>
-          <Input value={env.name} onChange={v => upd('name', v)} placeholder="prod" />
+          <Input value={env.name} onChange={v => upd('name', v)} placeholder="dev" />
         </div>
         <div>
           <Label>Domain</Label>
@@ -1117,6 +1119,9 @@ function Step4({ data, onChange }) {
                 onChange={updateImage} />
             ) : null
           )}
+          <PortWarnings warnings={portConflicts(
+            serviceImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) }))
+          )} />
         </div>
       )}
 
@@ -1316,6 +1321,12 @@ function Step6({ data }) {
         } />
       </div>
 
+      {data.stackType === 'image' && (
+        <PortWarnings warnings={portConflicts(
+          data.images.filter(i => i.name || i.image).map(img => ({ name: img.name, ports: hostPortsFromMappings(img) }))
+        )} />
+      )}
+
       <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl px-4 py-3">
         <p className="text-sm text-amber-300">
           After creation, edit <code className="font-mono text-xs bg-amber-900/40 px-1 py-0.5 rounded">envs/&#123;env&#125;/.env</code> to fill in secrets before starting the stack.
@@ -1478,7 +1489,7 @@ const DEFAULT_DATA = {
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
   backend: 'laravel', frontend: 'none', database: 'postgres', redis: false, garage: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
-  environments: [{ ...DEFAULT_ENV, name: 'prod', http_port: 80 }],
+  environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
   templateVolumes: [], // read-only display list populated from selected prebuilt template
   backup: { enabled: true, targetId: null, targetName: 'local', schedule: 'daily', retention: 7 },

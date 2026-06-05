@@ -6,8 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
+
+// envOrder ranks environment names by their conventional deployment-pipeline
+// position so cards render in a stable, intuitive order (dev → stage → prod)
+// rather than the random order of a Go map. Unknown names sort last,
+// alphabetically.
+func envRank(name string) int {
+	switch strings.ToLower(name) {
+	case "dev", "develop", "development":
+		return 0
+	case "test", "testing":
+		return 1
+	case "qa":
+		return 2
+	case "stage", "staging":
+		return 3
+	case "uat":
+		return 4
+	case "preprod", "pre-prod", "preproduction":
+		return 5
+	case "prod", "production", "live":
+		return 6
+	default:
+		return 100
+	}
+}
 
 type Version struct {
 	Major int `json:"major"`
@@ -159,6 +185,15 @@ func load(workspacesDir, name string) (Workspace, error) {
 	for k := range envSet {
 		envs = append(envs, k)
 	}
+	// Stable, pipeline-style order (dev → stage → prod → others) so cards don't
+	// shuffle between loads.
+	sort.Slice(envs, func(i, j int) bool {
+		ri, rj := envRank(envs[i]), envRank(envs[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return envs[i] < envs[j]
+	})
 
 	// Build per-environment resolved access info.
 	// Best-effort: missing .env files result in empty/raw values, never an error.

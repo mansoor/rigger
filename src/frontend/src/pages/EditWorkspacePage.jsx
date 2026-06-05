@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob } from '../lib/api'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
+import PortWarnings from '../components/PortWarnings'
+import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -420,6 +422,9 @@ function ImagesEditor({ images, onChange }) {
           onRemove={idx => onChange(images.filter((_, j) => j !== idx))}
         />
       ))}
+      <PortWarnings warnings={portConflicts(
+        images.filter(i => i.name || i.image).map(img => ({ name: img.name, ports: hostPortsFromConfig(img) }))
+      )} />
       <button
         type="button"
         onClick={() => onChange([...images, {
