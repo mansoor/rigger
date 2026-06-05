@@ -6,6 +6,7 @@ import { useAuthStore } from '../store/auth'
 import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
 import TerminalModal from '../components/TerminalModal'
+import ContainerInfoModal from '../components/ContainerInfoModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -259,6 +260,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   const [stopOpen, setStopOpen]           = useState(false)
   const [deployOpen, setDeployOpen]       = useState(false)
+  const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [noUpdateMsg, setNoUpdateMsg]     = useState(false)
   const [containersOpen, setContainersOpen] = useState(true)
 
@@ -526,6 +528,11 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       </span>
                       {/* Per-container actions */}
                       <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
+                        <CtlBtn title="Info" onClick={() => setInfoFor({ service: c.Service, short: c.short })}>
+                          <svg viewBox="0 0 20 20" className="w-3 h-3 inline-block align-middle" fill="currentColor" aria-hidden="true">
+                            <path fillRule="evenodd" clipRule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" />
+                          </svg>
+                        </CtlBtn>
                         <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
                         {c.State === 'running'
                           ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
@@ -557,6 +564,12 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             </div>
           )}
         </div>
+      )}
+
+      {/* Per-container Info inspector */}
+      {infoFor && (
+        <ContainerInfoModal wsName={name} env={envName} service={infoFor.service} short={infoFor.short}
+          onClose={() => setInfoFor(null)} />
       )}
 
       {/* File editors + Backup */}
