@@ -162,6 +162,96 @@ function CtlBtn({ title, onClick, children, className = '' }) {
   )
 }
 
+// ── EnvCard action UI (state-aware buttons + toolbar) ─────────────────────────
+// Shared 24-viewBox icons. deploy/stop render filled; the rest are stroked.
+const EI = {
+  deploy:  <polygon points="7 4 20 12 7 20" />,
+  update:  <><path d="M12 20V7" /><path d="M6 12l6-6 6 6" /><path d="M5 21h14" /></>,
+  stop:    <rect x="6" y="6" width="12" height="12" rx="2" />,
+  refresh: <><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" /></>,
+  restart: <><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></>,
+  down:    <><path d="M12 3v9" /><path d="M7 6a8 8 0 1 0 10 0" /></>,
+  vars:    <><path d="M4 8h16M4 16h16" /><circle cx="9" cy="8" r="2.4" fill="currentColor" stroke="none" /><circle cx="15" cy="16" r="2.4" fill="currentColor" stroke="none" /></>,
+  compose: <><path d="M9 8l-4 4 4 4" /><path d="M15 8l4 4-4 4" /></>,
+  terminal:<><path d="M6 7l5 5-5 5" /><path d="M13 17h6" /></>,
+  backup:  <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" /></>,
+}
+function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} fill={fill ? 'currentColor' : 'none'}
+      stroke={fill ? 'none' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {EI[name]}
+    </svg>
+  )
+}
+
+// PrimaryBtn — a prominent labelled lifecycle button (Deploy / Update / Stop).
+function PrimaryBtn({ variant, icon, fill, disabled, pulse, onClick, title, children }) {
+  const styles = {
+    deploy: 'bg-brand-600 hover:bg-brand-700 text-white',
+    update: 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/25',
+    stop:   'bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200',
+  }
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      className={`flex-1 flex items-center justify-center gap-1.5 text-[13px] font-semibold px-2 py-2 rounded-lg transition-colors disabled:opacity-30 disabled:pointer-events-none ${styles[variant]}`}>
+      <EnvIcon name={icon} fill={fill} className="w-3.5 h-3.5" />
+      {children}
+      {pulse && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+    </button>
+  )
+}
+
+// ToolBtn — a compact muted icon button in the EnvCard action toolbar; gains its
+// accent color on hover (className), greys out when disabled.
+function ToolBtn({ icon, title, onClick, disabled, className = 'text-gray-500 hover:text-gray-200' }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-colors hover:bg-gray-900 disabled:opacity-25 disabled:pointer-events-none ${className}`}>
+      <EnvIcon name={icon} className="w-[15px] h-[15px]" />
+    </button>
+  )
+}
+
+// AccessUrls — env access links below the status badge. A single URL shows inline;
+// two or more collapse into a dropdown so a domain + ports don't eat vertical space.
+function AccessUrls({ urls, reachable }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+  if (urls.length === 0) return null
+  if (urls.length === 1) return <UrlBadge href={urls[0].href} reachable={reachable} mono>{urls[0].label} ↗</UrlBadge>
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 max-w-[150px] transition-colors">
+        <span className="truncate">🌐 {urls[0].label}</span>
+        <span className="opacity-60 shrink-0">+{urls.length - 1} ▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]">
+          {urls.map((u, i) => reachable ? (
+            <a key={i} href={u.href} target="_blank" rel="noreferrer"
+              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-gray-300 hover:bg-gray-700 hover:text-brand-300 transition-colors">
+              <span className="truncate">{u.label}</span><span className="opacity-60">↗</span>
+            </a>
+          ) : (
+            <span key={i} title="Not reachable — the environment is not running or is unhealthy"
+              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-gray-600 cursor-not-allowed">
+              <span className="truncate">{u.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onActionDone }) {
   const qc         = useQueryClient()
   // Use server-resolved domain (${VAR} already substituted) for display
@@ -238,6 +328,25 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const hasIndeterminate  = !hasImageUpdate && imgUpdates?.updates?.some(u => u.indeterminate) || false
   const updateServices    = (imgUpdates?.updates || []).filter(u => u.has_update).map(u => `${u.service}: ${u.newer_tag}`)
   const indetermServices  = (imgUpdates?.updates || []).filter(u => u.indeterminate).map(u => u.service)
+  // Update is shown permanently for image stacks; disabled once we've confirmed
+  // everything is current (so its position never shifts).
+  const updateChecked     = imgUpdates && !imgUpdates.pending
+  const updateUpToDate    = updateChecked && !hasImageUpdate
+
+  // Action availability by env state.
+  const isRunning     = containerStatus === 'running' || containerStatus === 'partial'
+  const hasContainers = containerStatus !== 'unknown'
+  const hostName      = ws?.env_hosts?.[envName]?.host_name // unset ⇒ local
+
+  // Access URLs collapsed into one list (domain and/or port links). Rendered
+  // inline when there's one, as a dropdown when there are several.
+  const accessUrls = []
+  if (viaTraefik && url) accessUrls.push({ label: domain, href: url })
+  if (!viaTraefik) {
+    if (domainUrl) accessUrls.push({ label: domain, href: domainUrl })
+    if (links && links.length) links.forEach(l => accessUrls.push({ label: l.label, href: l.url }))
+    else if (port && url) accessUrls.push({ label: `:${port}`, href: url })
+  }
 
   function handleAction(cmd, extra = []) {
     onAction(cmd, envName, () => {
@@ -259,11 +368,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     }, extra)
   }
 
-  const [stopOpen, setStopOpen]           = useState(false)
-  const [deployOpen, setDeployOpen]       = useState(false)
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
-  const [noUpdateMsg, setNoUpdateMsg]     = useState(false)
+  const [downConfirm, setDownConfirm]     = useState(false) // confirm before Inactivate (down)
   const [containersOpen, setContainersOpen] = useState(true)
 
   // Build a merged service list: all expected services + actual runtime state.
@@ -281,71 +388,23 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const updateByService = Object.fromEntries(
     (imgUpdates?.updates || []).map(u => [u.service, u])
   )
-  const stopRef   = useRef(null)
-  const deployRef = useRef(null)
-
-  // Close dropdowns when clicking outside
-  useEffect(() => {
-    if (!stopOpen) return
-    function handler(e) { if (stopRef.current && !stopRef.current.contains(e.target)) setStopOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [stopOpen])
-
-  useEffect(() => {
-    if (!deployOpen) return
-    function handler(e) { if (deployRef.current && !deployRef.current.contains(e.target)) setDeployOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [deployOpen])
-
   return (
     <div className="w-full bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col gap-4">
-      {/* Card header */}
+      {/* Card header: identity (name + host) on the left, state (status + access
+          URLs) on the right. */}
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <h3 className="font-semibold text-white text-base shrink-0">{envName}</h3>
-
-          {/* Domain badge — Traefik ON: primary access URL */}
-          {viaTraefik && url && (
-            <UrlBadge href={url} reachable={reachable}>{domain} ↗</UrlBadge>
-          )}
-
-          {/* Domain badge — Traefik OFF but domain is set (informational, alongside port links) */}
-          {!viaTraefik && domainUrl && (
-            <UrlBadge href={domainUrl} reachable={reachable}>{domain} ↗</UrlBadge>
-          )}
-
-          {/* Port link badges — image stack (Traefik off): one badge per linked port */}
-          {!viaTraefik && links && links.map((lnk, li) => (
-            <UrlBadge key={li} href={lnk.url} reachable={reachable} mono>{lnk.label} ↗</UrlBadge>
-          ))}
-
-          {/* Port badge — custom stack (Traefik off) via http_port */}
-          {!viaTraefik && (!links || links.length === 0) && port && url && (
-            <UrlBadge href={url} reachable={reachable} mono>:{port} ↗</UrlBadge>
-          )}
-
-          {/* Update badges moved to container panel rows */}
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* > bash terminal button */}
-          <button
-            onClick={() => onTerminal()}
-            title="Open terminal"
-            className="font-mono text-xs px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-green-400 border border-gray-700 hover:border-green-700 transition-colors"
+        <div className="flex flex-col min-w-0">
+          <h3 className="font-semibold text-white text-base truncate">{envName}</h3>
+          <span
+            title={hostName ? `Runs on remote host ${hostName}` : 'Runs on the local control plane'}
+            className={`inline-flex items-center gap-1 text-[11px] mt-0.5 ${hostName ? 'text-indigo-300' : 'text-gray-500'}`}
           >
-            &gt; bash
-          </button>
-          {ws?.env_hosts?.[envName]?.host_name && (
-            <span
-              title={`Runs on remote host ${ws.env_hosts[envName].host_name}`}
-              className="text-xs px-2 py-0.5 rounded bg-indigo-950/60 text-indigo-300 border border-indigo-800/50"
-            >
-              🖥 {ws.env_hosts[envName].host_name}
-            </span>
-          )}
+            🖥 {hostName || 'local'}
+          </span>
+        </div>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
           <StatusBadge label={containerStatus} color={containerStatus} />
+          <AccessUrls urls={accessUrls} reachable={reachable} />
         </div>
       </div>
 
@@ -356,127 +415,54 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         {gitBranch && <DetailRow icon="○" value={gitBranch} />}
       </div>
 
-      {/* Actions — 2×2 grid: [Deploy][Update] / [Restart][Stop▾] */}
-      <div className="grid grid-cols-2 gap-2 mt-auto">
-
-        {/* Row 1 col 1: Deploy ▾ split button */}
-        <div ref={deployRef} className="relative flex">
-          <button
-            onClick={() => handleAction('start')}
-            className="flex-1 text-sm font-medium px-3 py-1.5 rounded-l-lg transition-colors flex items-center justify-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white"
-          >
-            <span className="text-xs opacity-60">○</span> Deploy
-          </button>
-          <button
-            onClick={() => setDeployOpen(o => !o)}
-            className="px-1.5 py-1.5 rounded-r-lg border-l border-brand-700 bg-brand-600 hover:bg-brand-700 text-white transition-colors"
-            title="More deploy options"
-          >
-            ▾
-          </button>
-          {deployOpen && (
-            <div className="absolute left-0 top-full mt-1 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[200px] py-1">
-              <button
-                onClick={() => { setDeployOpen(false); handleAction('start') }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition-colors"
-              >
-                Deploy
-                <p className="text-xs text-gray-500 mt-0.5">Start containers (uses current compose)</p>
-              </button>
-              <div className="border-t border-gray-700 my-1" />
-              <button
-                onClick={() => { setDeployOpen(false); handleAction('refresh') }}
-                className="w-full text-left px-3 py-2 text-sm text-brand-300 hover:bg-gray-700 transition-colors"
-              >
-                Refresh
-                <p className="text-xs text-gray-500 mt-0.5">Regenerate compose from config + deploy</p>
-              </button>
+      {/* Actions — state-aware: primary lifecycle buttons + a compact toolbar.
+          Down (Inactivate) is destructive, so it asks to confirm first. */}
+      <div className="mt-auto relative flex flex-col gap-2">
+        {downConfirm && (
+          <div className="absolute inset-x-0 bottom-full mb-2 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-3">
+            <p className="text-sm text-gray-200">Inactivate {envName}?</p>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">Removes the containers (volumes are kept). Deploy brings it back.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setDownConfirm(false)}
+                className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors">Cancel</button>
+              <button onClick={() => { setDownConfirm(false); handleAction('down') }}
+                className="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 transition-colors">Inactivate</button>
             </div>
+          </div>
+        )}
+
+        {/* Primary lifecycle: Deploy / Update (image stacks) / Stop */}
+        <div className="flex gap-2">
+          <PrimaryBtn variant="deploy" icon="deploy" fill onClick={() => handleAction('start')}
+            title="Deploy — bring the stack up (applies the current compose)">Deploy</PrimaryBtn>
+          {isImage && (
+            <PrimaryBtn variant="update" icon="update" pulse={hasImageUpdate} disabled={updateUpToDate}
+              onClick={() => handleAction('update')}
+              title={updateUpToDate ? 'Up to date — no update available'
+                : hasImageUpdate ? `Update available${updateServices.length ? ': ' + updateServices.join(', ') : ''} — pull & recreate`
+                : 'Pull latest images & recreate'}>Update</PrimaryBtn>
           )}
+          <PrimaryBtn variant="stop" icon="stop" fill disabled={!isRunning} onClick={() => handleAction('stop')}
+            title="Stop containers (keep state)">Stop</PrimaryBtn>
         </div>
 
-        {/* Row 1 col 2: Update (image stacks) or empty slot (custom) */}
-        {isImage ? (() => {
-          const checked  = imgUpdates && !imgUpdates.pending
-          const upToDate = checked && !hasImageUpdate
-
-          function handleUpdate() {
-            if (upToDate) {
-              setNoUpdateMsg(true)
-              setTimeout(() => setNoUpdateMsg(false), 3000)
-              return
-            }
-            handleAction('update')
-          }
-
-          return (
-            <div className="relative">
-              <button
-                onClick={handleUpdate}
-                className={`w-full text-sm font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 border ${
-                  upToDate
-                    ? 'bg-gray-800/60 text-gray-500 border-gray-700 cursor-default'
-                    : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border-amber-500/20'
-                }`}
-                title={upToDate ? 'All images are up to date' : 'Pull latest images and recreate containers'}
-              >
-                <span className="text-xs">{upToDate ? '✓' : '↑'}</span>
-                {upToDate ? 'Up to date' : 'Update'}
-                {hasImageUpdate && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
-              </button>
-              {noUpdateMsg && (
-                <div className="absolute left-0 right-0 -bottom-7 text-center text-xs text-gray-400 bg-gray-800 border border-gray-700 rounded px-2 py-1 z-10 pointer-events-none">
-                  Already up to date
-                </div>
-              )}
-            </div>
-          )
-        })() : <div />}
-
-        {/* Row 2 col 1: Restart */}
-        <button
-          onClick={() => handleAction('restart')}
-          className="text-sm font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white"
-        >
-          <span className="text-xs opacity-60">○</span> Restart
-        </button>
-
-        {/* Row 2 col 2: Stop / Down split button */}
-        <div ref={stopRef} className="relative flex">
-          <button
-            onClick={() => handleAction('stop')}
-            className="flex-1 text-sm font-medium px-3 py-1.5 rounded-l-lg transition-colors flex items-center justify-center gap-1.5 bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200"
-          >
-            <span className="text-xs opacity-60">○</span> Stop
-          </button>
-          <button
-            onClick={() => setStopOpen(o => !o)}
-            className="px-1.5 py-1.5 rounded-r-lg border-l border-red-900 bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200 transition-colors"
-            title="More stop options"
-          >
-            ▾
-          </button>
-          {stopOpen && (
-            <div className="absolute right-0 top-full mt-1 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[160px] py-1">
-              <button
-                onClick={() => { setStopOpen(false); handleAction('stop') }}
-                className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 transition-colors"
-              >
-                Stop
-                <p className="text-xs text-gray-500 mt-0.5">Pause containers (keep state)</p>
-              </button>
-              <button
-                onClick={() => { setStopOpen(false); handleAction('down') }}
-                className="w-full text-left px-3 py-2 text-sm text-red-300 hover:bg-gray-700 transition-colors"
-              >
-                Inactivate
-                <p className="text-xs text-gray-500 mt-0.5">Remove containers (keep volumes)</p>
-              </button>
-            </div>
-          )}
+        {/* Toolbar: secondary lifecycle + files + terminal */}
+        <div className="flex items-center gap-0.5 p-1 bg-gray-800/40 border border-gray-800 rounded-lg">
+          <ToolBtn icon="refresh" title="Refresh — regenerate compose from config & deploy"
+            onClick={() => handleAction('refresh')} className="text-gray-500 hover:text-sky-400" />
+          <ToolBtn icon="restart" title="Restart containers in place" disabled={!isRunning}
+            onClick={() => handleAction('restart')} className="text-gray-500 hover:text-green-400" />
+          <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
+            onClick={() => setDownConfirm(true)} className="text-red-400/50 hover:text-red-400" />
+          <span className="w-px self-stretch bg-gray-800 mx-1" />
+          <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-gray-500 hover:text-violet-400" />
+          <ToolBtn icon="compose" title="Edit compose" onClick={onCompose} className="text-gray-500 hover:text-teal-400" />
+          <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
+            onClick={() => onTerminal()} className="text-gray-500 hover:text-emerald-400" />
+          <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
+            onClick={() => handleAction('backup')} className="text-gray-500 hover:text-indigo-400" />
         </div>
-
-      </div>{/* end grid */}
+      </div>
 
       {/* Resource history sparklines (Phase 6d). Shown whenever the env is up so a
           freshly-deployed env looks consistent (— placeholders) instead of missing
@@ -603,21 +589,6 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           onClose={() => setFilesFor(null)} />
       )}
 
-      {/* File editors + Backup */}
-      <div className="flex gap-2 pt-3 border-t border-gray-800">
-        <button onClick={onConfig}
-          className="flex-1 text-xs text-gray-400 hover:text-gray-200 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">
-          Env Vars
-        </button>
-        <button onClick={onCompose}
-          className="flex-1 text-xs text-gray-400 hover:text-gray-200 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">
-          Compose
-        </button>
-        <button onClick={() => handleAction('backup')}
-          className="flex-1 text-xs text-gray-400 hover:text-gray-200 py-1.5 rounded-lg hover:bg-gray-800 transition-colors">
-          Backup
-        </button>
-      </div>
     </div>
   )
 }
