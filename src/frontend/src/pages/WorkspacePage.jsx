@@ -149,10 +149,12 @@ function UrlBadge({ href, reachable, mono, children }) {
 }
 
 // CtlBtn — a compact per-container action button used in the Services list.
-function CtlBtn({ title, onClick, children }) {
+// className overrides the text/hover colors (defaults to muted gray); all
+// buttons share the same size, shape, and hover background.
+function CtlBtn({ title, onClick, children, className = '' }) {
   return (
     <button type="button" title={title} onClick={onClick}
-      className="text-gray-600 hover:text-gray-200 hover:bg-gray-800 rounded px-1 py-0.5 text-xs leading-none transition-colors">
+      className={`rounded px-1 py-0.5 text-xs leading-none transition-colors hover:bg-gray-800 ${className || 'text-gray-600 hover:text-gray-200'}`}>
       {children}
     </button>
   )
@@ -526,23 +528,26 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                       <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
                         <CtlBtn title="Logs" onClick={() => handleAction('logs', [c.Service])}>▤</CtlBtn>
                         {c.State === 'running'
-                          ? <CtlBtn title="Stop" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
-                          : <CtlBtn title="Start" onClick={() => handleAction('start', [c.Service])}>▶</CtlBtn>}
-                        <CtlBtn title="Restart" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
+                          ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
+                          : <CtlBtn title="Start" className="text-gray-600 hover:text-blue-400" onClick={() => handleAction('start', [c.Service])}>
+                              <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 inline-block align-middle" fill="currentColor" aria-hidden="true">
+                                <path d="M2 1.5L8.5 5L2 8.5Z" />
+                              </svg>
+                            </CtlBtn>}
+                        <CtlBtn title="Restart" className="text-gray-600 hover:text-green-400" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
                         {/* Update icon doubles as the indicator: pulses amber when an
                             update is available, muted when the digest can't be compared. */}
                         {isImage && (
-                          <button type="button"
+                          <CtlBtn
                             title={upd?.has_update ? `Update available: ${upd.newer_tag} — pull & recreate`
                               : upd?.indeterminate ? 'Cannot compare digest — pull latest & recreate'
                               : 'Update image (pull & recreate)'}
-                            onClick={() => handleAction('update', [c.Service])}
-                            className={`rounded px-1 py-0.5 text-xs leading-none transition-colors hover:bg-gray-800 ${
-                              upd?.has_update ? 'text-amber-300 hover:text-amber-200 animate-pulse'
-                                : upd?.indeterminate ? 'text-gray-500 hover:text-gray-300'
-                                : 'text-gray-600 hover:text-gray-200'}`}>
+                            className={upd?.has_update ? 'text-amber-300 hover:text-amber-200 animate-pulse'
+                              : upd?.indeterminate ? 'text-gray-500 hover:text-gray-300'
+                              : 'text-gray-600 hover:text-gray-200'}
+                            onClick={() => handleAction('update', [c.Service])}>
                             ↑
-                          </button>
+                          </CtlBtn>
                         )}
                       </div>
                     </div>
