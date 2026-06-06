@@ -122,6 +122,8 @@ func main() {
 		// Configuration snapshots (.rws) — config-only, separate from full backups.
 		case r.Method == "POST" && r.URL.Path == "/api/tools/workspace-snapshots":
 			handler.CreateWorkspaceSnapshot(w, r)
+		case r.Method == "POST" && r.URL.Path == "/api/tools/workspace-snapshots/upload":
+			handler.UploadWorkspaceSnapshot(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/tools/workspace-snapshots":
 			handler.ListWorkspaceSnapshots(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/tools/workspace-snapshots/") && hasSuffix(r.URL.Path, "/rollback"):

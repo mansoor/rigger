@@ -6,7 +6,7 @@ import {
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive,
   restoreWorkspace, fetchWorkspaces,
-  createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot,
+  createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot, uploadWorkspaceSnapshot,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
@@ -746,6 +746,8 @@ function WorkspaceBackup() {
   const [snapMsg, setSnapMsg]           = useState(null) // { ok, text }
   const [snapDeleting, setSnapDeleting] = useState({})
   const [rollingBack, setRollingBack]   = useState({})
+  const [snapUploading, setSnapUploading] = useState(false)
+  const snapUploadRef = useRef(null)
 
   // Workspace list
   const { data: workspaces = [] } = useQuery({
@@ -920,6 +922,24 @@ function WorkspaceBackup() {
     } catch (e) { setSnapMsg({ ok: false, text: e.message }) }
   }
 
+  async function uploadSnapshot(e) {
+    const f = e.target.files?.[0]
+    e.target.value = '' // allow re-uploading the same file
+    if (!f) return
+    setSnapUploading(true); setSnapMsg(null)
+    try {
+      const fd = new FormData()
+      fd.append('snapshot', f)
+      const snap = await uploadWorkspaceSnapshot(fd)
+      setSnapMsg({ ok: true, text: `Uploaded ${snap.filename}${snap.workspace ? ` (workspace: ${snap.workspace})` : ''}.` })
+      refetchSnapshots()
+    } catch (err) {
+      setSnapMsg({ ok: false, text: err?.response?.data?.error || err.message })
+    } finally {
+      setSnapUploading(false)
+    }
+  }
+
   const isRunning = activeJob?.status === 'running' || (activeJobId && !activeJob)
 
   return (
@@ -973,9 +993,17 @@ function WorkspaceBackup() {
 
         {/* Saved snapshots */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-300 border-b border-gray-800 pb-2 mb-3">
-            Saved snapshots <span className="ml-2 text-xs font-normal text-gray-600">({snapshots.length})</span>
-          </h4>
+          <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+            <h4 className="text-sm font-semibold text-gray-300">
+              Saved snapshots <span className="ml-2 text-xs font-normal text-gray-600">({snapshots.length})</span>
+            </h4>
+            <button
+              onClick={() => snapUploadRef.current?.click()}
+              disabled={snapUploading}
+              className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-50"
+            >{snapUploading ? 'Uploading…' : '↑ Upload .rws'}</button>
+            <input ref={snapUploadRef} type="file" accept=".rws" onChange={uploadSnapshot} className="hidden" />
+          </div>
           {snapshots.length === 0
             ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
             : (

@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
@@ -199,6 +200,116 @@ func readSnapshotMeta(path string) (snapshotMeta, error) {
 		}
 	}
 	return m, nil
+}
+
+// POST /api/tools/workspace-snapshots/upload  (multipart: field "snapshot")
+// Accepts a .rws file (e.g. downloaded from another server) and stores it so it
+// can be rolled back like any locally-created snapshot.
+func (h *Handler) UploadWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil { // 64 MB — config snapshots are tiny
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse upload: " + err.Error()})
+		return
+	}
+	file, hdr, err := r.FormFile("snapshot")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "snapshot field required"})
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, 64<<20))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Validate it's a real .rws: gzip+tar containing at least config.json.
+	meta, err := validateSnapshotBytes(data)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid .rws snapshot: " + err.Error()})
+		return
+	}
+
+	// Prefer the uploaded filename; otherwise derive one. Ensure uniqueness.
+	name := sanitizeSnapshotName(hdr.Filename)
+	if name == "" {
+		base := meta.Workspace
+		if base == "" {
+			base = "snapshot"
+		}
+		name = fmt.Sprintf("%s_%s%s", base, time.Now().Format("20060102-150405"), snapshotExt)
+	}
+	name = uniqueSnapshotName(h.dataDir, name)
+
+	if err := os.MkdirAll(snapshotsDir(h.dataDir), 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	destPath := filepath.Join(snapshotsDir(h.dataDir), name)
+	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	createdAt := meta.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	writeJSON(w, http.StatusOK, SnapshotInfo{
+		Filename:  name,
+		Workspace: meta.Workspace,
+		CreatedAt: createdAt,
+		SizeBytes: int64(len(data)),
+	})
+}
+
+// validateSnapshotBytes confirms data is a gzip+tar with at least config.json,
+// returning the embedded meta.json (zero value if absent).
+func validateSnapshotBytes(data []byte) (snapshotMeta, error) {
+	var meta snapshotMeta
+	gr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return meta, fmt.Errorf("not a gzip archive")
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	hasConfig := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return meta, fmt.Errorf("not a valid tar archive")
+		}
+		switch filepath.ToSlash(hdr.Name) {
+		case "meta.json":
+			json.NewDecoder(tr).Decode(&meta) //nolint:errcheck
+		case "config.json":
+			hasConfig = true
+		}
+	}
+	if !hasConfig {
+		return meta, fmt.Errorf("missing config.json")
+	}
+	return meta, nil
+}
+
+// uniqueSnapshotName returns name, or name with a -2/-3/… suffix before .rws if
+// a file with that name already exists.
+func uniqueSnapshotName(dataDir, name string) string {
+	dir := snapshotsDir(dataDir)
+	if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
+		return name
+	}
+	stem := strings.TrimSuffix(name, snapshotExt)
+	for i := 2; i < 1000; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", stem, i, snapshotExt)
+		if _, err := os.Stat(filepath.Join(dir, candidate)); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+	return fmt.Sprintf("%s-%d%s", stem, time.Now().UnixNano(), snapshotExt)
 }
 
 // GET /api/tools/workspace-snapshots

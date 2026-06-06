@@ -130,6 +130,10 @@ export const deleteWorkspaceSnapshot = (filename) =>
   api.delete(`/tools/workspace-snapshots/${encodeURIComponent(filename)}`).then(r => r.data)
 export const rollbackWorkspaceSnapshot = (filename) =>
   api.post(`/tools/workspace-snapshots/${encodeURIComponent(filename)}/rollback`).then(r => r.data)
+export const uploadWorkspaceSnapshot = (formData) =>
+  api.post('/tools/workspace-snapshots/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data)
 export const deleteWorkspace   = (name)      => api.delete(`/workspaces/${name}`).then(r => r.data)
 export const putConfig         = (name, content) =>
   api.put(`/workspaces/${name}/config`, { content }).then(r => r.data)
