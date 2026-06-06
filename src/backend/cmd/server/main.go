@@ -190,6 +190,8 @@ func main() {
 				handler.GetEnvStatus(w, r)
 			case sub == "envs" && subsub == "vars":
 				handler.GetEnvVars(w, r)
+			case sub == "envs" && subsub == "secret-events":
+				handler.GetSecretEvents(w, r)
 			case sub == "envs" && subsub == "compose":
 				handler.GetCompose(w, r)
 			case sub == "envs" && subsub == "image-updates":
@@ -253,6 +255,11 @@ func main() {
 			// /api/workspaces/{name}/migrate — move a workspace to another host (Phase 7)
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			handler.MigrateWorkspace(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/rotate"):
+			// /api/workspaces/{name}/envs/{env}/rotate — rotate a secret value (Phase 8c)
+			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			handler.RotateSecret(w, r)
 		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/"):
 			name := pathSegment(r.URL.Path, 2)
 			sub := pathSegment(r.URL.Path, 3)

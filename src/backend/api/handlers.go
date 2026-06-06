@@ -393,7 +393,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			send("\033[32m✓ " + env.Name + " bootstrapped\033[0m\n")
 			// Write per-environment initial env vars if provided
 			if len(env.Vars) > 0 {
-				if err2 := workspace.UpdateEnvVars(h.workspacesDir, msg.Workspace.Name, env.Name, env.Vars, nil); err2 != nil {
+				if err2 := workspace.UpdateEnvVars(h.workspacesDir, msg.Workspace.Name, env.Name, env.Vars, nil, nil); err2 != nil {
 					send("\033[33m⚠ env vars for " + env.Name + ": " + err2.Error() + "\033[0m\n")
 				} else {
 					send("\033[32m✓ " + env.Name + " env vars written\033[0m\n")
@@ -1016,7 +1016,8 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// GET /api/workspaces/{name}/envs/{env}/vars  — returns env vars (masked by default, ?reveal=true for plaintext)
+// GET /api/workspaces/{name}/envs/{env}/vars  — returns env vars with secret
+// flags (secret values masked by default, ?reveal=true for plaintext)
 func (h *Handler) GetEnvVars(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	env := r.PathValue("env")
@@ -1026,24 +1027,148 @@ func (h *Handler) GetEnvVars(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Revealing a secret-flagged value is an auditable read (Phase 8d).
+	if reveal {
+		claims := auth.ClaimsFromContext(r.Context())
+		ip := clientIP(r)
+		for k, v := range vars {
+			if v.Secret {
+				h.recordSecretEvent(name, env, k, "read", claims, ip)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, vars)
 }
 
-// PATCH /api/workspaces/{name}/envs/{env}/vars  — updates and/or deletes env vars
+// PATCH /api/workspaces/{name}/envs/{env}/vars  — updates and/or deletes env vars.
+// Body: { updates, deletes, secret_keys }. secret_keys is the full desired set of
+// secret-flagged keys for this env. For swarm deployments, flagged values are
+// stored as Docker Swarm secrets (encrypted at rest) and kept out of .env; for
+// compose they stay in .env and are only masked in the UI.
 func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 	var body struct {
-		Updates map[string]string `json:"updates"`
-		Deletes []string          `json:"deletes"`
+		Updates    map[string]string `json:"updates"`
+		Deletes    []string          `json:"deletes"`
+		SecretKeys []string          `json:"secret_keys"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if err := workspace.UpdateEnvVars(h.workspacesDir, name, env, body.Updates, body.Deletes); err != nil {
+	if body.Updates == nil {
+		body.Updates = map[string]string{}
+	}
+
+	ws, err := workspace.Get(h.workspacesDir, name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	envCfg := ws.Config.Environments[env]
+	swarm := envCfg.Deployment == "swarm"
+	versions := map[string]int{}
+	for k, v := range envCfg.SecretVersions {
+		versions[k] = v
+	}
+	prevSecret := map[string]bool{}
+	for _, k := range envCfg.SecretKeys {
+		prevSecret[k] = true
+	}
+	newSecret := map[string]bool{}
+	for _, k := range body.SecretKeys {
+		newSecret[k] = true
+	}
+
+	claims := auth.ClaimsFromContext(r.Context())
+	ip := clientIP(r)
+	var warn string
+
+	// Keys whose values must not be written to .env — only those actually secured
+	// as Docker secrets, so a creation failure never silently drops the value.
+	skipEnvFile := map[string]bool{}
+
+	if swarm {
+		// Current plaintext values, so flagging an existing var as secret can move
+		// its value into a Docker secret without the user re-typing it.
+		current, _ := workspace.EnvVars(h.workspacesDir, name, env, true)
+
+		for k := range newSecret {
+			val, provided := body.Updates[k]
+			if !provided {
+				if cur, ok := current[k]; ok && !cur.Secret {
+					val, provided = cur.Value, true // reuse the existing plaintext
+				}
+			}
+			if !provided {
+				// Already a secret with no new value → its Docker secret already
+				// exists; keep it out of .env.
+				if prevSecret[k] {
+					skipEnvFile[k] = true
+				}
+				continue
+			}
+			ver := versions[k]
+			if ver < 1 {
+				ver = 1
+			}
+			if _, serr := h.bridge.EnsureSwarmSecret(name, env, k, val, ver); serr != nil {
+				warn = serr.Error() // leave the value in .env as a fallback
+			} else {
+				versions[k] = ver
+				skipEnvFile[k] = true
+			}
+		}
+		// Keys unflagged this save: drop their Docker secret (best-effort). A new
+		// plaintext value, if provided, falls through to .env below.
+		for k := range prevSecret {
+			if !newSecret[k] {
+				if v := versions[k]; v > 0 {
+					h.bridge.RemoveSwarmSecret(name, env, k, v) //nolint:errcheck
+				}
+				delete(versions, k)
+			}
+		}
+		// Deleted keys that were secrets: remove the Docker secret too.
+		for _, k := range body.Deletes {
+			if prevSecret[k] {
+				if v := versions[k]; v > 0 {
+					h.bridge.RemoveSwarmSecret(name, env, k, v) //nolint:errcheck
+				}
+				delete(versions, k)
+			}
+		}
+	}
+
+	if err := workspace.UpdateEnvVars(h.workspacesDir, name, env, body.Updates, body.Deletes, skipEnvFile); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if err := workspace.SetSecretMeta(h.workspacesDir, name, env, body.SecretKeys, versions); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved .env but failed to persist secret flags: " + err.Error()})
+		return
+	}
+	// Regenerate this env's compose so the secrets wiring (or its removal) is
+	// reflected immediately, without waiting for a Refresh.
+	if cfgData, rerr := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json")); rerr == nil {
+		if content, gerr := composegen.Generate(cfgData, env); gerr == nil {
+			outPath := filepath.Join(h.workspacesDir, name, "envs", env, "docker-compose.yml")
+			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
+		}
+	}
+
+	// Audit secret writes (newly-flagged or value-changed) and deletes — for both
+	// compose and swarm. Key names only, never values.
+	for k := range newSecret {
+		if _, provided := body.Updates[k]; provided || !prevSecret[k] {
+			h.recordSecretEvent(name, env, k, "write", claims, ip)
+		}
+	}
+	for _, k := range body.Deletes {
+		if prevSecret[k] {
+			h.recordSecretEvent(name, env, k, "delete", claims, ip)
+		}
 	}
 
 	// If this env runs on a remote host, push the updated .env to it — the local
@@ -1062,14 +1187,17 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log
-	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "env-update", env,
 		)
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "pushed_to_host": pushedTo})
+	resp := map[string]string{"status": "ok", "pushed_to_host": pushedTo}
+	if warn != "" {
+		resp["warning"] = warn
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // DELETE /api/workspaces/{name} — permanently removes a workspace directory
@@ -1404,10 +1532,10 @@ func (h *Handler) GenerateTemplateDraft(w http.ResponseWriter, r *http.Request) 
 	if env != "" {
 		if vars, err := workspace.EnvVars(h.workspacesDir, name, env, true); err == nil {
 			for k, v := range vars {
-				if isSecretEnvKey(k) {
+				if v.Secret || isSecretEnvKey(k) {
 					defaultEnvVars[k] = "CHANGE_ME"
 				} else {
-					defaultEnvVars[k] = v
+					defaultEnvVars[k] = v.Value
 				}
 			}
 		}

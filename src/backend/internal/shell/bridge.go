@@ -663,6 +663,41 @@ func (b *Bridge) ExecForEnv(workspaceName, env string) (executor.Executor, error
 	return executor.Local{}, nil
 }
 
+// EnsureSwarmSecret creates the Docker Swarm secret for one secret key/version
+// on whichever daemon the environment runs (local or remote), returning the
+// secret name. The value is never persisted by Rigger — Swarm holds it
+// encrypted at rest in its Raft store. Idempotent (a no-op if it already
+// exists, since Swarm secrets are immutable).
+func (b *Bridge) EnsureSwarmSecret(workspaceName, env, key, value string, version int) (string, error) {
+	ws, err := workspace.Get(b.workspacesDir, workspaceName)
+	if err != nil {
+		return "", err
+	}
+	ex, err := b.ExecForEnv(workspaceName, env)
+	if err != nil {
+		return "", err
+	}
+	name := dockerops.SecretName(ws.Config.Project.Name, env, key, version)
+	if err := dockerops.EnsureSecret(ex, name, value); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
+// fails if the secret is still referenced by a running service).
+func (b *Bridge) RemoveSwarmSecret(workspaceName, env, key string, version int) error {
+	ws, err := workspace.Get(b.workspacesDir, workspaceName)
+	if err != nil {
+		return err
+	}
+	ex, err := b.ExecForEnv(workspaceName, env)
+	if err != nil {
+		return err
+	}
+	return dockerops.RemoveSecret(ex, dockerops.SecretName(ws.Config.Project.Name, env, key, version))
+}
+
 // TermSession is an interactive PTY into a container — local (Docker socket) or
 // remote (`docker exec -it` over SSH). Read/Write stream the PTY bytes, Resize
 // tracks the browser terminal's window size, and Close ends the session. Both

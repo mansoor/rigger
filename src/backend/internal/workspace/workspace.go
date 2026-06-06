@@ -71,6 +71,13 @@ type EnvConfig struct {
 	Frontend        string                      `json:"frontend"`
 	Database        string                      `json:"database"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides,omitempty"`
+	// SecretKeys are env-var names flagged as secrets (Phase 8). For swarm
+	// deployments their values live in Docker Swarm secrets (encrypted at rest),
+	// not in .env; for compose they stay in .env and are only masked in the UI.
+	SecretKeys []string `json:"secret_keys,omitempty"`
+	// SecretVersions tracks the current Docker-secret version per secret key
+	// (swarm secrets are immutable, so rotation bumps the version). Absent ⇒ v1.
+	SecretVersions map[string]int `json:"secret_versions,omitempty"`
 }
 
 type Config struct {
@@ -275,16 +282,29 @@ func resolveEnvRefs(s string, vars map[string]string) string {
 	})
 }
 
-// EnvVars reads .env file for a workspace+environment.
-// When reveal is false, secret-looking values are masked as "••••••••".
-func EnvVars(workspacesDir, name, env string, reveal bool) (map[string]string, error) {
+// EnvVar is one environment variable as returned to the UI: its (possibly
+// masked) value plus whether it is flagged as a secret (Phase 8).
+type EnvVar struct {
+	Value  string `json:"value"`
+	Secret bool   `json:"secret"`
+}
+
+const secretMask = "••••••••"
+
+// EnvVars reads the .env file for a workspace+environment and returns each var
+// with its secret flag. Non-secret values are always returned in clear; secret
+// values are masked unless reveal is true. Keys flagged as secret but absent
+// from .env (swarm secrets live in the Docker secret store, write-only) are
+// still listed, always masked. Deployment mode comes from config.json.
+func EnvVars(workspacesDir, name, env string, reveal bool) (map[string]EnvVar, error) {
 	envFile := filepath.Join(workspacesDir, name, "envs", env, ".env")
 	data, err := os.ReadFile(envFile)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read .env: %w", err)
 	}
 
-	result := make(map[string]string)
+	secret := secretKeySet(workspacesDir, name, env)
+	result := make(map[string]EnvVar)
 	for _, line := range splitLines(string(data)) {
 		if len(line) == 0 || line[0] == '#' {
 			continue
@@ -293,18 +313,103 @@ func EnvVars(workspacesDir, name, env string, reveal bool) (map[string]string, e
 		if !ok {
 			continue
 		}
-		if reveal {
-			result[k] = v
-		} else {
-			result[k] = "••••••••"
+		isSecret := secret[k]
+		if isSecret && !reveal {
+			v = secretMask
+		}
+		result[k] = EnvVar{Value: v, Secret: isSecret}
+	}
+	// Surface swarm secrets that are not present in .env (their values live in the
+	// Docker secret store and can never be read back).
+	for k := range secret {
+		if _, ok := result[k]; !ok {
+			result[k] = EnvVar{Value: secretMask, Secret: true}
 		}
 	}
 	return result, nil
 }
 
+// secretKeySet returns the set of secret-flagged keys for one environment.
+func secretKeySet(workspacesDir, name, env string) map[string]bool {
+	set := map[string]bool{}
+	cfg, err := loadConfig(workspacesDir, name)
+	if err != nil {
+		return set
+	}
+	for _, k := range cfg.Environments[env].SecretKeys {
+		set[k] = true
+	}
+	return set
+}
+
+// loadConfig reads and parses a workspace's config.json.
+func loadConfig(workspacesDir, name string) (*Config, error) {
+	data, err := os.ReadFile(filepath.Join(workspacesDir, name, "config.json"))
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// SetSecretMeta persists the secret-key list and versions for one environment
+// into config.json, preserving every other field of the file (it operates on
+// generic JSON so unknown env fields like replicas/redis_enabled are never
+// dropped). Used by the env-vars and rotation handlers.
+func SetSecretMeta(workspacesDir, name, env string, secretKeys []string, versions map[string]int) error {
+	path := filepath.Join(workspacesDir, name, "config.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	var envs map[string]map[string]json.RawMessage
+	if raw, ok := root["environments"]; ok {
+		if err := json.Unmarshal(raw, &envs); err != nil {
+			return err
+		}
+	}
+	if envs == nil {
+		envs = map[string]map[string]json.RawMessage{}
+	}
+	ec := envs[env]
+	if ec == nil {
+		ec = map[string]json.RawMessage{}
+	}
+	if len(secretKeys) == 0 {
+		delete(ec, "secret_keys")
+	} else if b, e := json.Marshal(secretKeys); e == nil {
+		ec["secret_keys"] = b
+	}
+	if len(versions) == 0 {
+		delete(ec, "secret_versions")
+	} else if b, e := json.Marshal(versions); e == nil {
+		ec["secret_versions"] = b
+	}
+	envs[env] = ec
+	encEnvs, err := json.Marshal(envs)
+	if err != nil {
+		return err
+	}
+	root["environments"] = encEnvs
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
+}
+
 // UpdateEnvVars writes changed key=value pairs into the .env file and removes
-// any keys listed in deletes. Other lines are preserved unchanged.
-func UpdateEnvVars(workspacesDir, name, env string, updates map[string]string, deletes []string) error {
+// any keys listed in deletes. Other lines are preserved unchanged. Keys in
+// skipEnvFile are not written to .env (their values live elsewhere — e.g. a
+// Docker Swarm secret) and any existing line for them is dropped.
+func UpdateEnvVars(workspacesDir, name, env string, updates map[string]string, deletes []string, skipEnvFile map[string]bool) error {
 	envFile := filepath.Join(workspacesDir, name, "envs", env, ".env")
 	data, err := os.ReadFile(envFile)
 	if err != nil {
@@ -322,6 +427,12 @@ func UpdateEnvVars(workspacesDir, name, env string, updates map[string]string, d
 	deleteSet := make(map[string]bool, len(deletes))
 	for _, k := range deletes {
 		deleteSet[k] = true
+	}
+	// Keys whose values must not land in .env are treated like deletes for the
+	// file, but their values are still applied to the secret store by the caller.
+	for k := range skipEnvFile {
+		deleteSet[k] = true
+		delete(updates, k)
 	}
 
 	lines := splitLines(string(data))

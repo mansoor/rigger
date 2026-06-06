@@ -92,8 +92,12 @@ export const clearActionRuns   = (name)      => api.delete(`/workspaces/${name}/
 export const checkPorts        = (hostPorts, excludeWorkspace = '') =>
   api.post('/port-check', { host_ports: hostPorts, exclude_workspace: excludeWorkspace }).then(r => r.data)
 export const fetchAllActivity  = ()          => api.get('/activity').then(r => r.data)
-export const updateEnvVars     = (name, env, updates, deletes = []) =>
-  api.patch(`/workspaces/${name}/envs/${env}/vars`, { updates, deletes }).then(r => r.data)
+export const updateEnvVars     = (name, env, updates, deletes = [], secretKeys = []) =>
+  api.patch(`/workspaces/${name}/envs/${env}/vars`, { updates, deletes, secret_keys: secretKeys }).then(r => r.data)
+export const rotateSecret      = (name, env, key, newValue) =>
+  api.post(`/workspaces/${name}/envs/${env}/rotate`, { key, new_value: newValue }).then(r => r.data)
+export const fetchSecretEvents = (name, env) =>
+  api.get(`/workspaces/${name}/envs/${env}/secret-events`).then(r => r.data)
 export const fetchCompose      = (name, env) => api.get(`/workspaces/${name}/envs/${env}/compose`).then(r => r.data)
 export const putCompose        = (name, env, content) =>
   api.put(`/workspaces/${name}/envs/${env}/compose`, { content }).then(r => r.data)

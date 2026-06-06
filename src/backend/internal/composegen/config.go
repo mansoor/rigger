@@ -56,6 +56,10 @@ type Env struct {
 	Deployment       string                     `json:"deployment"`
 	Replicas         Replicas                   `json:"replicas"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides"`
+	// SecretKeys / SecretVersions drive Docker Swarm secret wiring (Phase 8).
+	// Only consulted for swarm deployments; ignored for compose.
+	SecretKeys     []string       `json:"secret_keys"`
+	SecretVersions map[string]int `json:"secret_versions"`
 }
 
 type Replicas struct {

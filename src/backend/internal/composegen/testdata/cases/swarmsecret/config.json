@@ -1,0 +1,30 @@
+{
+  "project": {
+    "name": "myapp",
+    "type": "custom",
+    "registry": "reg.example.com",
+    "version": { "major": 1, "minor": 0, "patch": 0, "build": 1 }
+  },
+  "images": [],
+  "versions": {
+    "postgres": "16-alpine",
+    "nginx": "1.27-alpine"
+  },
+  "environments": {
+    "prod": {
+      "domain": "myapp.example.com",
+      "http_port": 8080,
+      "backend": "nodejs",
+      "frontend_enabled": false,
+      "database": "postgres",
+      "redis_enabled": false,
+      "garage_enabled": false,
+      "deployment": "swarm",
+      "traefik_enabled": false,
+      "ssl_enabled": false,
+      "replicas": { "backend": 1 },
+      "secret_keys": ["POSTGRES_PASSWORD"],
+      "secret_versions": { "POSTGRES_PASSWORD": 2 }
+    }
+  }
+}

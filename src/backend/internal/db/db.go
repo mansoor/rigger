@@ -161,6 +161,21 @@ func (d *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_backup_log_target
 			ON backup_log(workspace, env, created_at);
 
+		-- 8d: Secret audit trail. Every read (reveal), write, rotate or delete of a
+		-- secret-flagged env var is recorded here — key name only, never the value.
+		CREATE TABLE IF NOT EXISTS secret_events (
+			id         INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace  TEXT    NOT NULL,
+			env        TEXT    NOT NULL,
+			key        TEXT    NOT NULL,
+			action     TEXT    NOT NULL,            -- read | write | rotate | delete
+			username   TEXT    NOT NULL DEFAULT '',
+			ip         TEXT    NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE INDEX IF NOT EXISTS idx_secret_events_target
+			ON secret_events(workspace, env, key, created_at);
+
 		-- 6b: Notification channels. type 'email' is delivered directly via SMTP;
 		-- all other types ('apprise') are delivered through the Apprise API
 		-- sidecar, so Slack/Discord/Telegram/webhook/etc. need no bespoke code.

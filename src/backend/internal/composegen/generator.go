@@ -74,6 +74,9 @@ func (g *gen) build() {
 	}
 	g.line("")
 
+	// ── Secrets (swarm only) ──
+	g.emitTopLevelSecrets()
+
 	if ptype == "image" {
 		g.buildImageStack(prefix, isSwarm)
 	} else {
@@ -104,6 +107,8 @@ func (g *gen) deployBlock(isSwarm bool, replicas, restart string) {
 	} else {
 		g.line("    restart: " + restart)
 	}
+	// Attach any swarm secrets to every service (no-op for compose / no secrets).
+	g.emitServiceSecrets()
 }
 
 func (g *gen) traefikLabels(router, host, port string) {

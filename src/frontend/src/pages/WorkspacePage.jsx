@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, openActionSocket, fetchActionRuns, clearActionRuns } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -1446,95 +1446,139 @@ function ansiToHtml(text) {
 
 // ── Env vars editor (modal) ───────────────────────────────────────────────────
 
-function EnvVarsModal({ name, env, onClose }) {
+function EnvVarsModal({ name, env, deployment, onClose }) {
   const qc = useQueryClient()
+  const swarm = deployment === 'swarm'
   const [reveal, setReveal] = useState(false)
   const [edits, setEdits]   = useState({})
   const [deletes, setDeletes] = useState(new Set())
+  const [flags, setFlags]   = useState({}) // per-key secret-flag overrides
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
+  const [newSecret, setNewSecret] = useState(false)
+  const [rotateKey, setRotateKey] = useState(null)
+  const [rotateVal, setRotateVal] = useState('')
+  const [showAudit, setShowAudit] = useState(false)
 
   const { data: vars, isLoading } = useQuery({
     queryKey: ['envvars', name, env, reveal],
     queryFn: () => fetchEnvVars(name, env, reveal),
   })
 
+  // Effective secret flag for a key: a pending toggle wins, else the server value.
+  const isSecret = (k) => (k in flags ? flags[k] : !!vars?.[k]?.secret)
+
   const mutation = useMutation({
-    mutationFn: ({ updates, dels }) => updateEnvVars(name, env, updates, dels),
+    mutationFn: ({ updates, dels, secretKeys }) => updateEnvVars(name, env, updates, dels, secretKeys),
     onSuccess: () => {
-      setEdits({})
-      setDeletes(new Set())
-      setNewKey('')
-      setNewVal('')
+      setEdits({}); setDeletes(new Set()); setFlags({})
+      setNewKey(''); setNewVal(''); setNewSecret(false)
+      qc.invalidateQueries({ queryKey: ['envvars', name, env] })
+    },
+  })
+
+  const rotateMut = useMutation({
+    mutationFn: ({ key, value }) => rotateSecret(name, env, key, value),
+    onSuccess: () => {
+      setRotateKey(null); setRotateVal('')
       qc.invalidateQueries({ queryKey: ['envvars', name, env] })
     },
   })
 
   function toggleDelete(k) {
-    setDeletes(prev => {
-      const next = new Set(prev)
-      next.has(k) ? next.delete(k) : next.add(k)
-      return next
-    })
-    // Clear any pending edit for a key being deleted
+    setDeletes(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
     setEdits(prev => { const n = { ...prev }; delete n[k]; return n })
+  }
+
+  function toggleFlag(k) {
+    setFlags(prev => ({ ...prev, [k]: !isSecret(k) }))
+  }
+
+  function buildSecretKeys(includeNew) {
+    const keys = new Set()
+    for (const k of Object.keys(vars || {})) {
+      if (!deletes.has(k) && isSecret(k)) keys.add(k)
+    }
+    if (includeNew && newKey.trim() && newSecret) keys.add(newKey.trim())
+    return [...keys]
   }
 
   function handleSave() {
     const updates = { ...edits }
     if (newKey.trim()) updates[newKey.trim()] = newVal
-    mutation.mutate({ updates, dels: [...deletes] })
+    mutation.mutate({ updates, dels: [...deletes], secretKeys: buildSecretKeys(true) })
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-white">Env vars — {env}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowAudit(s => !s)} title="Secret audit trail"
+              className={`text-xs px-2 py-1 rounded transition-colors ${showAudit ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}>🕓 Audit</button>
+            <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+          </div>
         </div>
 
+        {/* Deployment-aware secret status */}
+        {swarm ? (
+          <div className="mb-3 text-xs rounded-lg border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-3 py-2">
+            🔒 Secrets are stored as <strong>Docker Swarm secrets</strong> — encrypted at rest and mounted in-memory at <code className="text-emerald-200">/run/secrets/&lt;KEY&gt;</code>. Their values can't be read back; use Rotate to change one.
+          </div>
+        ) : (
+          <div className="mb-3 text-xs rounded-lg border border-amber-800/60 bg-amber-950/40 text-amber-300/90 px-3 py-2">
+            ⚠ Compose stores values in <strong>plaintext</strong> in <code className="text-amber-200">.env</code> on disk. Deploy this environment with <strong>Swarm</strong> for encrypted-at-rest secrets.
+          </div>
+        )}
+
+        {showAudit && <SecretAuditPanel name={name} env={env} />}
+
         {/* Reveal toggle */}
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-xs text-gray-500">
-            {reveal ? 'Showing current values — edit to change.' : 'Values hidden. Edit inputs to change; leave blank to keep existing.'}
-          </p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-gray-500">Click the lock to flag a value as a secret.</p>
           <label className="flex items-center gap-2 cursor-pointer shrink-0 ml-3">
-            <input
-              type="checkbox"
-              checked={reveal}
-              onChange={e => { setReveal(e.target.checked); setEdits({}) }}
-              className="w-3.5 h-3.5 accent-brand-500"
-            />
+            <input type="checkbox" checked={reveal} onChange={e => { setReveal(e.target.checked); setEdits({}) }}
+              className="w-3.5 h-3.5 accent-brand-500" />
             <span className="text-xs text-gray-400 select-none">Show values</span>
           </label>
         </div>
 
         {isLoading ? <p className="text-gray-500 text-sm">Loading…</p> : (
           <div className="space-y-2 mb-4 max-h-72 overflow-y-auto pr-1">
-            {Object.entries(vars || {}).map(([k, currentVal]) => {
+            {Object.entries(vars || {}).map(([k, info]) => {
               const markedForDelete = deletes.has(k)
+              const secret = isSecret(k)
+              // Swarm secrets are write-only: their value can't be edited inline.
+              const lockedValue = secret && swarm && !!info.secret
               return (
-                <div key={k} className={`flex items-center gap-2 rounded transition-colors ${markedForDelete ? 'opacity-40' : ''}`}>
-                  <span className="font-mono text-xs text-gray-300 w-40 shrink-0 truncate" title={k}>{k}</span>
-                  <input
-                    type={reveal ? 'text' : 'password'}
-                    placeholder={reveal ? currentVal : '••••••••'}
-                    value={markedForDelete ? '' : (edits[k] ?? (reveal ? currentVal : ''))}
-                    disabled={markedForDelete}
-                    onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                    className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleDelete(k)}
+                <div key={k} className={`flex items-center gap-2 rounded pl-1.5 transition-colors ${markedForDelete ? 'opacity-40' : ''} ${secret ? 'border-l-2 border-amber-500/70' : 'border-l-2 border-transparent'}`}>
+                  <button type="button" onClick={() => toggleFlag(k)} disabled={markedForDelete}
+                    title={secret ? 'Flagged as secret — click to unflag' : 'Flag as secret'}
+                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-amber-400' : 'text-gray-600 hover:text-gray-300'}`}>
+                    {secret ? '🔒' : '🔓'}
+                  </button>
+                  <span className="font-mono text-xs text-gray-300 w-36 shrink-0 truncate" title={k}>{k}</span>
+                  {lockedValue ? (
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="flex-1 px-2 py-1 text-sm text-gray-500 italic select-none">stored in Docker secret</span>
+                      <button type="button" onClick={() => { setRotateKey(k); setRotateVal('') }}
+                        className="shrink-0 px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-white">Rotate</button>
+                    </div>
+                  ) : (
+                    <input
+                      type={reveal && !secret ? 'text' : 'password'}
+                      placeholder={reveal ? (info.value || '') : '••••••••'}
+                      value={markedForDelete ? '' : (edits[k] ?? (reveal && !secret ? info.value : ''))}
+                      disabled={markedForDelete}
+                      onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
+                      className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  )}
+                  <button type="button" onClick={() => toggleDelete(k)}
                     title={markedForDelete ? 'Undo delete' : 'Delete this variable'}
                     className={`shrink-0 w-6 h-6 flex items-center justify-center rounded transition-colors text-xs ${
-                      markedForDelete
-                        ? 'bg-red-800 text-red-200 hover:bg-red-700'
-                        : 'text-gray-600 hover:text-red-400 hover:bg-gray-700'
-                    }`}
-                  >
+                      markedForDelete ? 'bg-red-800 text-red-200 hover:bg-red-700' : 'text-gray-600 hover:text-red-400 hover:bg-gray-700'}`}>
                     {markedForDelete ? '↩' : '×'}
                   </button>
                 </div>
@@ -1543,24 +1587,43 @@ function EnvVarsModal({ name, env, onClose }) {
           </div>
         )}
 
+        {/* Rotate sub-form */}
+        {rotateKey && (
+          <div className="mb-3 rounded-lg border border-gray-700 bg-gray-800/60 p-3">
+            <p className="text-xs text-gray-300 mb-2">Rotate secret <span className="font-mono text-amber-300">{rotateKey}</span> — enter a new value:</p>
+            <div className="flex gap-2">
+              <input type="password" autoFocus value={rotateVal} onChange={e => setRotateVal(e.target.value)}
+                placeholder="new value"
+                className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
+              <button type="button" disabled={!rotateVal || rotateMut.isPending}
+                onClick={() => rotateMut.mutate({ key: rotateKey, value: rotateVal })}
+                className="px-3 py-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm rounded">
+                {rotateMut.isPending ? 'Rotating…' : 'Rotate'}</button>
+              <button type="button" onClick={() => setRotateKey(null)}
+                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded">Cancel</button>
+            </div>
+            {rotateMut.isError && <p className="text-red-400 text-xs mt-2">{rotateMut.error?.response?.data?.error || 'Rotation failed'}</p>}
+          </div>
+        )}
+
         {/* Add new variable row */}
         <div className="flex gap-2 pt-3 border-t border-gray-800">
+          <button type="button" onClick={() => setNewSecret(s => !s)}
+            title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
+            className={`shrink-0 w-7 h-7 flex items-center justify-center rounded text-xs ${newSecret ? 'text-amber-400 bg-gray-800' : 'text-gray-600 hover:text-gray-300'}`}>
+            {newSecret ? '🔒' : '🔓'}
+          </button>
           <input type="text" placeholder="NEW_KEY" value={newKey}
             onChange={e => setNewKey(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
-            className="w-44 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
-          <input type={reveal ? 'text' : 'password'} placeholder="value" value={newVal}
+            className="w-40 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
+          <input type={newSecret ? 'password' : 'text'} placeholder="value" value={newVal}
             onChange={e => setNewVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
             className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
-          <button
-            type="button"
-            onClick={() => { if (newKey.trim()) handleSave() }}
+          <button type="button" onClick={() => { if (newKey.trim()) handleSave() }}
             disabled={!newKey.trim() || mutation.isPending}
-            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded transition-colors shrink-0"
-          >
-            Add
-          </button>
+            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded transition-colors shrink-0">Add</button>
         </div>
 
         {/* Refresh hint */}
@@ -1574,9 +1637,40 @@ function EnvVarsModal({ name, env, onClose }) {
             {mutation.isPending ? 'Saving…' : 'Save changes'}
           </button>
           {mutation.isSuccess && <span className="text-green-400 text-sm">Saved ✓</span>}
-          {mutation.isError && <span className="text-red-400 text-sm">Failed</span>}
+          {mutation.isError && <span className="text-red-400 text-sm">{mutation.error?.response?.data?.error || 'Failed'}</span>}
+          {mutation.data?.warning && <span className="text-amber-400 text-sm">⚠ {mutation.data.warning}</span>}
         </div>
       </div>
+    </div>
+  )
+}
+
+// SecretAuditPanel renders the recent secret read/write/rotate/delete events for
+// one environment (Phase 8d).
+function SecretAuditPanel({ name, env }) {
+  const { data: events, isLoading } = useQuery({
+    queryKey: ['secret-events', name, env],
+    queryFn: () => fetchSecretEvents(name, env),
+  })
+  const color = { read: 'text-sky-400', write: 'text-emerald-400', rotate: 'text-amber-400', delete: 'text-red-400' }
+  return (
+    <div className="mb-3 rounded-lg border border-gray-700 bg-gray-950/60 p-3 max-h-40 overflow-y-auto">
+      <p className="text-xs text-gray-400 mb-2 font-medium">Secret audit trail</p>
+      {isLoading ? <p className="text-xs text-gray-500">Loading…</p> :
+        (events || []).length === 0 ? <p className="text-xs text-gray-600">No secret events yet.</p> : (
+          <table className="w-full text-xs">
+            <tbody>
+              {events.map((e, i) => (
+                <tr key={i} className="text-gray-400">
+                  <td className={`pr-2 font-medium ${color[e.action] || 'text-gray-300'}`}>{e.action}</td>
+                  <td className="pr-2 font-mono text-gray-300 truncate max-w-[8rem]" title={e.key}>{e.key}</td>
+                  <td className="pr-2 truncate">{e.username || '—'}</td>
+                  <td className="text-gray-600 whitespace-nowrap">{e.created_at}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
     </div>
   )
 }
@@ -1693,7 +1787,7 @@ export default function WorkspacePage() {
 
       {/* Modals / drawers */}
       {configModal && (
-        <EnvVarsModal name={name} env={configModal.env} onClose={() => setConfigModal(null)} />
+        <EnvVarsModal name={name} env={configModal.env} deployment={cfg?.environments?.[configModal.env]?.deployment || 'compose'} onClose={() => setConfigModal(null)} />
       )}
       {composeModal && (
         <ComposeEditor
