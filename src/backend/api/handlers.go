@@ -1377,6 +1377,7 @@ func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Name        string   `json:"name"`  // template id / filename slug (required)
 		Label       string   `json:"label"`
 		Description string   `json:"description"`
 		Tags        []string `json:"tags"`
@@ -1386,8 +1387,22 @@ func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
+
+	// Template name (slug) is now an explicit, required field — no longer derived
+	// from the workspace name.
+	slug := strings.TrimSpace(body.Name)
+	if slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template name is required"})
+		return
+	}
+	for _, c := range slug {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template name must contain only lowercase letters, digits and hyphens"})
+			return
+		}
+	}
 	if body.Label == "" {
-		body.Label = name
+		body.Label = slug
 	}
 	if body.Env == "" {
 		// pick first env
@@ -1422,7 +1437,7 @@ func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
 
 	// Build template JSON
 	tmpl := map[string]any{
-		"name":             name,
+		"name":             slug,
 		"label":            body.Label,
 		"description":      body.Description,
 		"tags":             body.Tags,
@@ -1436,19 +1451,24 @@ func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Write to templates/stacks/{name}.json
+	// Write to templates/stacks/{slug}.json — reject if the name is taken so an
+	// existing template is never silently overwritten.
 	templatesDir := filepath.Join(h.templatesDir, "stacks")
 	if err := os.MkdirAll(templatesDir, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create templates dir"})
 		return
 	}
-	destPath := filepath.Join(templatesDir, name+".json")
+	destPath := filepath.Join(templatesDir, slug+".json")
+	if _, err := os.Stat(destPath); err == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("a template named %q already exists — choose a different name", slug)})
+		return
+	}
 	if err := os.WriteFile(destPath, out, 0644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write template file"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "template": name, "path": destPath})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "template": slug, "path": destPath})
 }
 
 // POST /api/tools/save-template — save a converter-generated template JSON to templates/stacks/

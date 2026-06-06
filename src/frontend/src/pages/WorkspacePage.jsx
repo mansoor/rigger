@@ -1447,21 +1447,26 @@ function ansiToHtml(text) {
 // ── Export as template modal ──────────────────────────────────────────────────
 
 function ExportTemplateModal({ name, envs, onClose }) {
+  const [tplName, setTplName]   = useState('')      // template id / filename slug (required)
   const [label, setLabel]       = useState(name)
   const [desc, setDesc]         = useState('')
   const [tags, setTags]         = useState('')
   const [env, setEnv]           = useState(envs[0] || '')
-  const [done, setDone]         = useState(false)
+  const [done, setDone]         = useState(null)    // saved template name on success
   const [error, setError]       = useState('')
+
+  const slug      = tplName.trim()
+  const nameValid = /^[a-z0-9-]+$/.test(slug)
 
   const mutation = useMutation({
     mutationFn: () => exportTemplate(name, {
+      name: slug,
       label,
       description: desc,
       tags: tags.split(',').map(t => t.trim()).filter(Boolean),
       env,
     }),
-    onSuccess: () => setDone(true),
+    onSuccess: (data) => setDone(data?.template || slug),
     onError: (e) => setError(e.response?.data?.error || 'Export failed'),
   })
 
@@ -1475,7 +1480,7 @@ function ExportTemplateModal({ name, envs, onClose }) {
 
         {done ? (
           <div className="space-y-3">
-            <p className="text-sm text-green-400">✓ Template saved as <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">{name}.json</code> in <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">templates/stacks/</code>.</p>
+            <p className="text-sm text-green-400">✓ Template saved as <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">{done}.json</code> in <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">templates/stacks/</code>.</p>
             <p className="text-xs text-gray-500">It will appear in the "Pre-built template" picker when creating a new workspace.</p>
             <button onClick={onClose} className="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Close</button>
           </div>
@@ -1483,6 +1488,16 @@ function ExportTemplateModal({ name, envs, onClose }) {
           <>
             {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
 
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Template name <span className="text-red-400">*</span></label>
+              <input value={tplName} onChange={e => setTplName(e.target.value)} placeholder="e.g. my-wordpress-stack" autoFocus
+                className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm focus:outline-none ${
+                  tplName && !nameValid ? 'border-amber-600 focus:border-amber-500' : 'border-gray-700 focus:border-brand-500'
+                }`} />
+              {tplName && !nameValid
+                ? <p className="text-xs text-amber-400 mt-1">Use lowercase letters, digits and hyphens only.</p>
+                : <p className="text-xs text-gray-500 mt-1">The template's id and filename — <code className="font-mono">templates/stacks/&lt;name&gt;.json</code>.</p>}
+            </div>
             <div>
               <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Template label</label>
               <input value={label} onChange={e => setLabel(e.target.value)}
@@ -1510,8 +1525,9 @@ function ExportTemplateModal({ name, envs, onClose }) {
             <p className="text-xs text-gray-500">Secret values will be replaced with <code className="font-mono">CHANGE_ME</code> placeholders in the template.</p>
             <button
               onClick={() => mutation.mutate()}
-              disabled={mutation.isPending || !label}
-              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+              disabled={mutation.isPending || !nameValid || !label}
+              title={!nameValid ? 'Enter a valid template name first' : undefined}
+              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors"
             >
               {mutation.isPending ? 'Exporting…' : 'Export template'}
             </button>
