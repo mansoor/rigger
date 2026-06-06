@@ -497,7 +497,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             }} className="text-red-400/50 hover:text-red-400" />
           <span className="w-px self-stretch bg-gray-800 mx-1" />
           <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-gray-500 hover:text-violet-400" />
-          <ToolBtn icon="compose" title="Edit compose" onClick={onCompose} className="text-gray-500 hover:text-teal-400" />
+          <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-gray-500 hover:text-teal-400" />
           <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
             onClick={() => onTerminal()} className="text-gray-500 hover:text-emerald-400" />
           <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}

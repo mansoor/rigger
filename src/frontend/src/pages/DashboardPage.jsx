@@ -258,28 +258,31 @@ export default function DashboardPage() {
     retry: false,
   })
 
-  // Network is cumulative; derive a per-workspace throughput rate from the delta
-  // between consecutive live samples.
+  // Network counters are cumulative; derive per-workspace in/out throughput rates
+  // from the delta between consecutive live samples (rx = incoming, tx = outgoing).
   const prevNet = useRef(null)
   const [netRates, setNetRates] = useState({})
   useEffect(() => {
     if (!live || Object.keys(live).length === 0) return
     const now = Date.now()
-    const totals = {}
+    const totals = {} // name → { rx, tx } cumulative bytes
     for (const w of workspaces) {
-      let net = 0
+      let rx = 0, tx = 0
       for (const env of (w.envs || [])) {
         const p = live[`${w.name}_${env}`]
-        if (p) net += (p.net_rx_bytes || 0) + (p.net_tx_bytes || 0)
+        if (p) { rx += p.net_rx_bytes || 0; tx += p.net_tx_bytes || 0 }
       }
-      totals[w.name] = net
+      totals[w.name] = { rx, tx }
     }
     if (prevNet.current) {
       const dt = (now - prevNet.current.t) / 1000
       const rates = {}
       for (const name in totals) {
-        const d = totals[name] - (prevNet.current.totals[name] || 0)
-        rates[name] = dt > 0 ? Math.max(0, d / dt) : 0
+        const prev = prevNet.current.totals[name] || { rx: 0, tx: 0 }
+        rates[name] = {
+          rx: dt > 0 ? Math.max(0, (totals[name].rx - prev.rx) / dt) : 0,
+          tx: dt > 0 ? Math.max(0, (totals[name].tx - prev.tx) / dt) : 0,
+        }
       }
       setNetRates(rates)
     }
@@ -372,7 +375,7 @@ export default function DashboardPage() {
                     <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">CPU</th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Memory</th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Disk</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Network</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Net I/O</th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
                   </tr>
                 </thead>
@@ -380,7 +383,7 @@ export default function DashboardPage() {
                   {workspaces.map(w => {
                     const as = wsAlertStyle(summary.by_workspace?.[w.name])
                     const lv = aggregateLive(w, live)
-                    const netRate = netRates[w.name] || 0
+                    const netRate = netRates[w.name] || { rx: 0, tx: 0 }
                     return (
                     <tr key={w.name} className={`hover:bg-gray-800/40 transition-colors group ${as.row}`}>
                       <td className={`px-5 py-3 ${as.cell}`}>
@@ -451,9 +454,16 @@ export default function DashboardPage() {
                             : <span className="text-gray-600">—</span>}
                         </span>
                       </td>
-                      {/* Network throughput (live, derived rate) */}
+                      {/* Net I/O throughput — incoming (rx) and outgoing (tx), live derived rate */}
                       <td className="px-4 py-3 text-right">
-                        <span className="text-xs text-gray-400 tabular-nums">{fmtRate(netRate)}</span>
+                        <div className="flex flex-col items-end leading-tight">
+                          <span className="text-xs text-gray-400 tabular-nums" title="incoming">
+                            <span className="text-gray-600">↓</span> {fmtRate(netRate.rx)}
+                          </span>
+                          <span className="text-xs text-gray-400 tabular-nums" title="outgoing">
+                            <span className="text-gray-600">↑</span> {fmtRate(netRate.tx)}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <Link to={`/workspaces/${w.name}`} className="text-xs text-gray-600 group-hover:text-gray-400 transition-colors">
