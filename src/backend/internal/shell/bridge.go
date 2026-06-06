@@ -55,6 +55,9 @@ type Bridge struct {
 	db        *db.DB
 	pool      *remotehost.Pool
 	cryptoKey []byte
+
+	// Per-workspace directory sizes, refreshed off the dashboard request path.
+	disk *diskUsageCache
 }
 
 // NewBridge builds a bridge. Pass a nil db/pool (and the local workspaces dir as
@@ -70,6 +73,7 @@ func NewBridge(workspacesDir, remoteWorkspacesDir, toolkitRoot string, database 
 		db:                  database,
 		pool:                pool,
 		cryptoKey:           cryptoKey,
+		disk:                newDiskUsageCache(5 * time.Minute),
 	}
 }
 
@@ -538,13 +542,69 @@ func (b *Bridge) ProjectStatsAllHosts() map[string]stats.ProjectStats {
 	return fanout(b.hostExecutors(), stats.ContainerStatsByProjectFor)
 }
 
-// Stats builds the full dashboard payload with per-project running/memory counts
-// aggregated across all hosts (Docker/Host sections stay control-plane local).
+// Stats builds the full dashboard payload. Per-project running counts are merged
+// across all hosts; the Docker/Host sections stay control-plane local. The
+// dashboard table shows per-workspace CPU/mem/network from the separate
+// /api/live-stats poll, so this skips the expensive per-container `docker stats`
+// sampling here. Per-workspace disk sizes come from an async cache so the request
+// never blocks on `du` (slow over bind mounts).
 func (b *Bridge) Stats() stats.Stats {
 	execs := b.hostExecutors()
 	running := fanout(execs, stats.RunningByProjectFor)
-	mem := fanout(execs, stats.MemByProjectFor)
-	return stats.CollectWith(b.workspacesDir, running, mem)
+	disk := b.disk.snapshot(b.workspacesDir)
+	return stats.CollectWith(b.workspacesDir, running, nil, disk)
+}
+
+// diskUsageCache holds per-workspace directory sizes (MB), refreshed off the
+// request path. `du` over a bind mount (Docker Desktop on Windows especially)
+// can take tens of seconds, so the dashboard must never block on it: snapshot()
+// returns the last-known sizes immediately and triggers a background refresh for
+// any entry that is missing or older than ttl.
+type diskUsageCache struct {
+	ttl   time.Duration
+	mu    sync.Mutex
+	sizes map[string]float64
+	at    map[string]time.Time
+	busy  map[string]bool
+}
+
+func newDiskUsageCache(ttl time.Duration) *diskUsageCache {
+	return &diskUsageCache{
+		ttl:   ttl,
+		sizes: map[string]float64{},
+		at:    map[string]time.Time{},
+		busy:  map[string]bool{},
+	}
+}
+
+// snapshot returns a copy of the cached sizes (MB) for every workspace under
+// workspacesDir, refreshing stale/missing entries asynchronously.
+func (c *diskUsageCache) snapshot(workspacesDir string) map[string]float64 {
+	entries, _ := os.ReadDir(workspacesDir)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]float64, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		out[name] = c.sizes[name] // 0 until first computed
+		if !c.busy[name] && time.Since(c.at[name]) > c.ttl {
+			c.busy[name] = true
+			go c.refresh(name, filepath.Join(workspacesDir, name))
+		}
+	}
+	return out
+}
+
+func (c *diskUsageCache) refresh(name, path string) {
+	mb := stats.WorkspaceDiskMB(path)
+	c.mu.Lock()
+	c.sizes[name] = mb
+	c.at[name] = time.Now()
+	c.busy[name] = false
+	c.mu.Unlock()
 }
 
 // latestSnapshot returns the most recent snapshot dir name under a workspace

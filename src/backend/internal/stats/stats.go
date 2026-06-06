@@ -67,17 +67,22 @@ type WorkspaceInfo struct {
 
 // Collect gathers all stats from the local daemon.
 func Collect(workspacesDir string) Stats {
-	return CollectWith(workspacesDir, getRunningContainersByProject(), containerMemByProject())
+	return CollectWith(workspacesDir, getRunningContainersByProject(), containerMemByProject(), nil)
 }
 
 // CollectWith builds the dashboard stats using caller-supplied per-project running
 // and memory maps (Phase 7: the bridge merges these across hosts). The Docker and
 // Host sections still describe the local control plane.
-func CollectWith(workspacesDir string, running map[string]int, mem map[string]float64) Stats {
+//
+// diskMB supplies per-workspace directory sizes (MB). It is passed in rather than
+// computed here because `du` over a bind mount can take tens of seconds — the
+// bridge serves cached sizes and refreshes them off the request path. A nil map
+// means "compute synchronously" (used by the standalone Collect()).
+func CollectWith(workspacesDir string, running map[string]int, mem map[string]float64, diskMB map[string]float64) Stats {
 	return Stats{
 		Docker:     collectDocker(),
 		Host:       collectHost(),
-		Workspaces: collectWorkspaces(workspacesDir, running, mem),
+		Workspaces: collectWorkspaces(workspacesDir, running, mem, diskMB),
 	}
 }
 
@@ -127,8 +132,11 @@ func countDockerObjects(kind string) int {
 	return len(strings.Split(s, "\n"))
 }
 
-// workspaceDiskMB returns the disk usage of a workspace directory in MB.
-func workspaceDiskMB(wsPath string) float64 {
+// WorkspaceDiskMB returns the disk usage of a workspace directory in MB via
+// `du -sk`. This can be slow on a bind mount (Docker Desktop especially), so the
+// dashboard never calls it on the request path — the bridge caches the result
+// and refreshes it in the background.
+func WorkspaceDiskMB(wsPath string) float64 {
 	out, err := exec.Command("du", "-sk", wsPath).Output()
 	if err != nil {
 		return 0
@@ -649,7 +657,7 @@ func runCmd(name string, args ...string) string {
 
 // ── Workspaces ─────────────────────────────────────────────────────────────────
 
-func collectWorkspaces(workspacesDir string, projectContainers map[string]int, projectMemory map[string]float64) WorkspaceSummary {
+func collectWorkspaces(workspacesDir string, projectContainers map[string]int, projectMemory map[string]float64, diskMB map[string]float64) WorkspaceSummary {
 	summary := WorkspaceSummary{
 		ByType:     make(map[string]int),
 		Workspaces: []WorkspaceInfo{},
@@ -699,7 +707,14 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 			memTotal     += projectMemory[project]
 		}
 
-		wsPath := filepath.Join(workspacesDir, wsName)
+		// Disk size: prefer the caller-supplied (cached) value; fall back to a
+		// synchronous du only when no map was provided (nil = standalone Collect).
+		var diskVal float64
+		if diskMB != nil {
+			diskVal = diskMB[wsName]
+		} else {
+			diskVal = WorkspaceDiskMB(filepath.Join(workspacesDir, wsName))
+		}
 
 		summary.Total++
 		summary.ByType[wsType]++
@@ -709,7 +724,7 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 			Envs:              envNames,
 			ImageCount:        len(cfg.Images),
 			RunningContainers: runningTotal,
-			DiskMB:            workspaceDiskMB(wsPath),
+			DiskMB:            diskVal,
 			MemMB:             memTotal,
 		})
 	}
