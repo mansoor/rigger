@@ -81,11 +81,6 @@ function StepHeader({ step, title, subtitle }) {
 const CUSTOM_REGISTRY = '__custom__'
 
 function Step1({ data, onChange, errors, onConflict }) {
-  const { data: registries = [], isLoading } = useQuery({
-    queryKey: ['registries'],
-    queryFn: fetchRegistries,
-  })
-
   // Registered remote hosts (Phase 7) — for the default-host selector.
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
 
@@ -102,30 +97,9 @@ function Step1({ data, onChange, errors, onConflict }) {
   // Propagate conflict to parent so validate() can block Continue
   useEffect(() => { onConflict(nameConflict) }, [nameConflict]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Once registries load, default to first one if registry not yet set
-  useEffect(() => {
-    if (!isLoading && registries.length > 0 && !data.registry) {
-      onChange('registry', registries[0].url)
-    }
-  }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Determine whether the current registry value matches a known registry URL
-  const isCustom = !isLoading && registries.length > 0 && !registries.some(r => r.url === data.registry)
-  const selectValue = isCustom ? CUSTOM_REGISTRY : (data.registry || '')
-
-  function handleSelectChange(val) {
-    if (val === CUSTOM_REGISTRY) {
-      onChange('registry', '')
-    } else {
-      onChange('registry', val)
-    }
-  }
-
-  const hasRegistries = !isLoading && registries.length > 0
-
   return (
     <div className="space-y-5">
-      <StepHeader step={1} title="Project" subtitle="Name your project and choose a container registry." />
+      <StepHeader step={1} title="Project" subtitle="Name your project and pick a default host." />
 
       <div>
         <Label required>Project name</Label>
@@ -135,69 +109,6 @@ function Step1({ data, onChange, errors, onConflict }) {
         />
         {!errors.name && !nameConflict && (
           <p className="text-xs text-gray-500 mt-1">Lowercase letters, numbers, hyphens. Becomes the Docker resource prefix.</p>
-        )}
-      </div>
-
-      <div>
-        <Label required>Container registry</Label>
-
-        {/* No registries configured — show hint + freetext fallback */}
-        {!isLoading && !hasRegistries && (
-          <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-amber-950/40 border border-amber-800/50 rounded-lg">
-            <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
-            <p className="text-xs text-amber-300">
-              No registries configured.{' '}
-              <a href="/settings" target="_blank" rel="noreferrer"
-                className="underline underline-offset-2 hover:text-amber-200 transition-colors">
-                Add one in Settings
-              </a>{' '}
-              to reuse credentials across workspaces.
-            </p>
-          </div>
-        )}
-
-        {/* Dropdown when registries exist */}
-        {hasRegistries && (
-          <select
-            value={selectValue}
-            onChange={e => handleSelectChange(e.target.value)}
-            className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 transition-colors ${
-              errors.registry ? 'border-red-500' : 'border-gray-700'
-            }`}
-          >
-            {registries.map(r => (
-              <option key={r.id} value={r.url}>
-                {r.name} — {r.url}
-              </option>
-            ))}
-            <option value={CUSTOM_REGISTRY}>Other (enter manually)…</option>
-          </select>
-        )}
-
-        {/* Freetext input: always shown when no registries, or when "Other" is selected */}
-        {(!hasRegistries || isCustom || selectValue === CUSTOM_REGISTRY) && (
-          <div className={hasRegistries ? 'mt-2' : ''}>
-            <Input
-              value={data.registry} onChange={v => onChange('registry', v)}
-              placeholder="registry.example.com"
-              error={errors.registry}
-            />
-            {hasRegistries && (
-              <p className="text-xs text-gray-500 mt-1">
-                To save this registry for reuse,{' '}
-                <a href="/settings" target="_blank" rel="noreferrer"
-                  className="text-brand-400 hover:text-brand-300 underline underline-offset-2 transition-colors">
-                  add it in Settings
-                </a>{' '}
-                first.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Show error for dropdown-only mode */}
-        {errors.registry && hasRegistries && !isCustom && selectValue !== CUSTOM_REGISTRY && (
-          <p className="text-red-400 text-xs mt-1">{errors.registry}</p>
         )}
       </div>
 
@@ -479,7 +390,90 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
   )
 }
 
-function Step2({ data, onChange }) {
+// RegistryField — saved-registries dropdown + manual entry. Shown only for
+// custom (build-type) stacks: those tag & push built images to the registry so
+// remote hosts can pull them without rebuilding. Image/prebuilt stacks pull
+// their images directly (registry embedded in each image ref), so it's hidden.
+function RegistryField({ data, onChange, errors }) {
+  const { data: registries = [], isLoading } = useQuery({
+    queryKey: ['registries'],
+    queryFn: fetchRegistries,
+  })
+
+  // Default to the first saved registry once loaded (if none chosen yet).
+  useEffect(() => {
+    if (!isLoading && registries.length > 0 && !data.registry) {
+      onChange('registry', registries[0].url)
+    }
+  }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const hasRegistries = !isLoading && registries.length > 0
+  const isCustom = !isLoading && registries.length > 0 && !registries.some(r => r.url === data.registry)
+  const selectValue = isCustom ? CUSTOM_REGISTRY : (data.registry || '')
+  const handleSelectChange = val => onChange('registry', val === CUSTOM_REGISTRY ? '' : val)
+
+  return (
+    <div>
+      <Label required>Container registry</Label>
+      <p className="text-xs text-gray-500 mb-2">Built images are tagged and pushed here so remote hosts can pull them without rebuilding.</p>
+
+      {!isLoading && !hasRegistries && (
+        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-amber-950/40 border border-amber-800/50 rounded-lg">
+          <span className="text-amber-400 mt-0.5 shrink-0">⚠</span>
+          <p className="text-xs text-amber-300">
+            No registries configured.{' '}
+            <a href="/settings" target="_blank" rel="noreferrer"
+              className="underline underline-offset-2 hover:text-amber-200 transition-colors">
+              Add one in Settings
+            </a>{' '}
+            to reuse credentials across workspaces.
+          </p>
+        </div>
+      )}
+
+      {hasRegistries && (
+        <select
+          value={selectValue}
+          onChange={e => handleSelectChange(e.target.value)}
+          className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 transition-colors ${
+            errors.registry ? 'border-red-500' : 'border-gray-700'
+          }`}
+        >
+          {registries.map(r => (
+            <option key={r.id} value={r.url}>{r.name} — {r.url}</option>
+          ))}
+          <option value={CUSTOM_REGISTRY}>Other (enter manually)…</option>
+        </select>
+      )}
+
+      {(!hasRegistries || isCustom || selectValue === CUSTOM_REGISTRY) && (
+        <div className={hasRegistries ? 'mt-2' : ''}>
+          <Input
+            value={data.registry} onChange={v => onChange('registry', v)}
+            placeholder="registry.example.com"
+            error={errors.registry}
+          />
+          {hasRegistries && (
+            <p className="text-xs text-gray-500 mt-1">
+              To save this registry for reuse,{' '}
+              <a href="/settings" target="_blank" rel="noreferrer"
+                className="text-brand-400 hover:text-brand-300 underline underline-offset-2 transition-colors">
+                add it in Settings
+              </a>{' '}
+              first.
+            </p>
+          )}
+        </div>
+      )}
+
+      {errors.registry && hasRegistries && !isCustom && selectValue !== CUSTOM_REGISTRY && (
+        <p className="text-red-400 text-xs mt-1">{errors.registry}</p>
+      )}
+    </div>
+  )
+}
+
+function Step2({ data, onChange, errors }) {
   const { data: templates } = useQuery({ queryKey: ['templates'], queryFn: fetchTemplates })
 
   return (
@@ -502,6 +496,11 @@ function Step2({ data, onChange }) {
           </button>
         ))}
       </div>
+
+      {/* Container registry — custom (build) stacks only; image/prebuilt pull directly */}
+      {data.stackType === 'custom' && (
+        <RegistryField data={data} onChange={onChange} errors={errors} />
+      )}
 
       {/* Image stack: custom image list + env vars */}
       {data.stackType === 'image' && (
@@ -593,7 +592,7 @@ function Step2({ data, onChange }) {
   )
 }
 
-// ── Step 3: Environments ──────────────────────────────────────────────────────
+// ── Environments (wizard step 4 — Step3 component) ────────────────────────────
 
 const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {} }
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
@@ -767,7 +766,7 @@ function Step3({ data, onChange }) {
 
   return (
     <div className="space-y-4">
-      <StepHeader step={3} title="Environments" subtitle="Configure the environments for this workspace." />
+      <StepHeader step={4} title="Environments" subtitle="Configure the environments for this workspace." />
       {data.environments.map((env, i) => (
         <EnvForm
           key={i} idx={i} env={env}
@@ -789,7 +788,7 @@ function Step3({ data, onChange }) {
   )
 }
 
-// ── Step 4: Env Vars & Volumes ────────────────────────────────────────────────
+// ── Services / volumes (wizard step 3 — Step4 component) ──────────────────────
 
 const DEFAULT_VOLUME = { name: '', mountPath: '' }
 
@@ -1115,7 +1114,7 @@ function Step4({ data, onChange }) {
 
   return (
     <div className="space-y-6">
-      <StepHeader step={4} title="Services" subtitle="Configure ports, volumes, restart policy and healthchecks per service." />
+      <StepHeader step={3} title="Services" subtitle="Configure ports, volumes, restart policy and healthchecks per service." />
 
       {/* Per-service config — image and prebuilt stacks */}
       {showServices && serviceImages.length > 0 && (
@@ -1465,7 +1464,7 @@ function Step7({ workspace, onDone, onResult, onGoBack }) {
 
 // ── Stepper nav ───────────────────────────────────────────────────────────────
 
-const STEPS = ['Project', 'Stack', 'Environments', 'Services', 'Backup', 'Review', 'Result']
+const STEPS = ['Project', 'Stack', 'Services', 'Environments', 'Backup', 'Review', 'Result']
 
 function Stepper({ current, maxVisited, onStepClick }) {
   return (
@@ -1544,14 +1543,16 @@ export default function NewWorkspacePage() {
     if (!data.name.trim()) e.name = 'Required'
     else if (!/^[a-z0-9][a-z0-9\-]{0,62}$/.test(data.name)) e.name = 'Lowercase letters, numbers, hyphens only'
     else if (nameConflict) e.name = nameConflict // uniqueness check propagated from Step1
-    if (!data.registry.trim()) e.registry = 'Required'
+    // Registry only matters for custom (build) stacks — and lives on step 2 now.
+    if (step === 2 && data.stackType === 'custom' && !data.registry.trim()) e.registry = 'Required'
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'
     if (step === 2 && data.stackType === 'image' && data.images.every(img => !img.name || !img.image)) e.images = 'Add at least one service with a name and image'
-    if (step === 3 && data.environments.some(e => !e.name.trim())) e.envs = 'All environments need a name'
-    if (step === 4) {
+    // Steps 3/4 are Services then Environments (swapped to match Edit workspace).
+    if (step === 3) {
       const badVols = data.volumes.filter(v => v.name && !v.mountPath)
       if (badVols.length > 0) e.volumes = 'Each volume needs a mount path'
     }
+    if (step === 4 && data.environments.some(e => !e.name.trim())) e.envs = 'All environments need a name'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -1565,7 +1566,10 @@ export default function NewWorkspacePage() {
     const isImage = data.stackType === 'prebuilt' || data.stackType === 'image'
     return {
       name: data.name.trim(),
-      registry: data.registry.trim(),
+      // Registry is only used to tag/push built images (custom stacks). Image and
+      // prebuilt stacks pull images directly, so send empty to avoid storing a
+      // value that's never read.
+      registry: data.stackType === 'custom' ? data.registry.trim() : '',
       type: isImage ? 'image' : 'custom',
       template: data.stackType === 'prebuilt' ? data.template : '',
       images: data.stackType === 'image'
@@ -1637,9 +1641,11 @@ export default function NewWorkspacePage() {
 
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8">
             {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} />}
-            {step === 2 && <Step2 data={data} onChange={update} />}
-            {step === 3 && <Step3 data={data} onChange={update} />}
-            {step === 4 && <Step4 data={data} onChange={update} errors={errors} />}
+            {step === 2 && <Step2 data={data} onChange={update} errors={errors} />}
+            {/* Services (3) then Environments (4) — define the stack shape before
+                its environments. Step4=Services component, Step3=Environments. */}
+            {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
+            {step === 4 && <Step3 data={data} onChange={update} />}
             {step === 5 && <Step5 data={data} onChange={update} />}
             {step === 6 && <Step6 data={data} />}
             {step === 7 && (
