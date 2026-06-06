@@ -485,7 +485,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           onClick={async () => {
             if (await confirm({
               title: 'Remove environment?',
-              message: `Remove the "${envName}" environment from this workspace? It will be deleted when you save changes. (Its deployed containers are not touched until you redeploy.)`,
+              message: `Remove the "${envName}" environment from this workspace? When you save, its containers are stopped and removed and its files are deleted. This can't be undone.`,
               confirmLabel: 'Remove',
             })) onRemove()
           }}

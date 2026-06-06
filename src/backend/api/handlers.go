@@ -688,6 +688,19 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	w.Write(data) //nolint:errcheck
 }
 
+// configEnvNames extracts the set of environment names from config.json bytes.
+func configEnvNames(data []byte) map[string]bool {
+	var c struct {
+		Environments map[string]json.RawMessage `json:"environments"`
+	}
+	json.Unmarshal(data, &c) //nolint:errcheck
+	out := make(map[string]bool, len(c.Environments))
+	for k := range c.Environments {
+		out[k] = true
+	}
+	return out
+}
+
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -710,6 +723,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	// project, container, named-volume and network names) and the workspace folder
 	// is never renamed — so changing it would orphan the running stack and its
 	// volume data on the next deploy. The folder name is the stable identity.
+	oldEnvs := map[string]bool{}
 	if existing, rerr := os.ReadFile(path); rerr == nil {
 		var was, now struct {
 			Project struct {
@@ -724,10 +738,36 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		oldEnvs = configEnvNames(existing)
 	}
+
+	// Environments removed in this edit must be fully cleaned up — otherwise their
+	// containers stay running and their envs/<env> dir lingers, which keeps the env
+	// visible on the workspace page even though it's gone from config (and so can't
+	// be acted on). Tear each one down BEFORE overwriting config.json, while the
+	// deploy layer can still resolve it; then delete its directory.
+	newEnvs := configEnvNames([]byte(body.Content))
+	for env := range oldEnvs {
+		if newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
+			continue
+		}
+		var out bytes.Buffer
+		if derr := h.bridge.Run(shell.RunOptions{Workspace: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
+			fmt.Fprintf(os.Stderr, "PutConfig: tear down removed env %s/%s: %v\n%s", name, env, derr, out.String())
+		}
+	}
+
 	if err := os.WriteFile(path, []byte(body.Content), 0644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// Remove the now-orphaned env directories (config.json already updated).
+	for env := range oldEnvs {
+		if newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
+			continue
+		}
+		os.RemoveAll(filepath.Join(h.workspacesDir, name, "envs", env)) //nolint:errcheck
 	}
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
