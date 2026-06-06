@@ -698,6 +698,25 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(h.workspacesDir, name, "config.json")
+	// Reject changes to project.name: it's the Docker resource prefix (compose
+	// project, container, named-volume and network names) and the workspace folder
+	// is never renamed — so changing it would orphan the running stack and its
+	// volume data on the next deploy. The folder name is the stable identity.
+	if existing, rerr := os.ReadFile(path); rerr == nil {
+		var was, now struct {
+			Project struct {
+				Name string `json:"name"`
+			} `json:"project"`
+		}
+		json.Unmarshal(existing, &was)             //nolint:errcheck
+		json.Unmarshal([]byte(body.Content), &now) //nolint:errcheck
+		if was.Project.Name != "" && now.Project.Name != was.Project.Name {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "Project name can't be changed after creation — it's the Docker stack/container/volume prefix and the workspace folder isn't renamed.",
+			})
+			return
+		}
+	}
 	if err := os.WriteFile(path, []byte(body.Content), 0644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

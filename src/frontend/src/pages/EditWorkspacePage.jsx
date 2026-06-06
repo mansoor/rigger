@@ -1072,7 +1072,16 @@ export default function EditWorkspacePage() {
           }`}>
             <div>
               <Label>Project name</Label>
-              <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
+              {/* Read-only: project.name is the Docker resource prefix (stack /
+                  container / named-volume / network names) and the workspace folder
+                  is never renamed, so changing it would orphan the running stack. */}
+              <div
+                title="Fixed after creation — it's the Docker resource prefix"
+                className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm cursor-not-allowed select-none truncate"
+              >
+                {project?.name}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
             </div>
             {/* Registry only applies to custom (build) stacks — image stacks pull
                 images directly, so hide it (matches the New Workspace wizard). */}
