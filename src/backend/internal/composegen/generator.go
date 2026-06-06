@@ -65,9 +65,15 @@ func (g *gen) build() {
 	g.line("")
 
 	// ── Networks ──
+	// Swarm services require a swarm-scoped network; bridge is local-only and is
+	// rejected by `docker stack deploy`.
 	g.line("networks:")
 	g.line("  " + prefix + "_net:")
-	g.line("    driver: bridge")
+	if isSwarm {
+		g.line("    driver: overlay")
+	} else {
+		g.line("    driver: bridge")
+	}
 	if e.TraefikEnabled {
 		g.line("  " + e.TraefikNetwork + ":")
 		g.line("    external: true")

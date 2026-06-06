@@ -8,7 +8,7 @@
 
 networks:
   myapp_prod_net:
-    driver: bridge
+    driver: overlay
 
 secrets:
   myapp_prod_POSTGRES_PASSWORD_v2:
@@ -30,8 +30,7 @@ services:
     networks:
       - myapp_prod_net
     depends_on:
-      myapp_prod_postgres:
-        condition: service_healthy
+      - myapp_prod_postgres
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 30s

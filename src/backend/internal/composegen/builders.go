@@ -58,10 +58,15 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 	g.line("      - " + prefix + "_uploads:/app/storage/uploads")
 	g.line("    networks:")
 	g.line("      - " + prefix + "_net")
-	if e.Database == "postgres" {
-		g.raw("    depends_on:\n      " + prefix + "_postgres:\n        condition: service_healthy\n")
-	} else if e.Database == "mysql" {
-		g.raw("    depends_on:\n      " + prefix + "_mysql:\n        condition: service_healthy\n")
+	if e.Database == "postgres" || e.Database == "mysql" {
+		db := prefix + "_" + e.Database
+		if isSwarm {
+			// `docker stack deploy` only accepts the short list form and ignores
+			// startup-ordering conditions; the map+condition form fails validation.
+			g.raw("    depends_on:\n      - " + db + "\n")
+		} else {
+			g.raw("    depends_on:\n      " + db + ":\n        condition: service_healthy\n")
+		}
 	}
 	if e.Backend == "nodejs" {
 		g.healthcheck("wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1", "30s", "10s", "3", "40s", "")
@@ -289,6 +294,11 @@ func (g *gen) buildImageService(prefix string, img Image, images []Image, isSwar
 	if len(deps) > 0 {
 		g.line("    depends_on:")
 		for _, dep := range deps {
+			if isSwarm {
+				// Swarm: short list form only (conditions are unsupported/ignored).
+				g.line("      - " + prefix + "_" + dep)
+				continue
+			}
 			depHasHC := false
 			for _, di := range images {
 				if di.Name == dep {

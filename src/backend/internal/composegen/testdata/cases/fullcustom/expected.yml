@@ -2,13 +2,13 @@
 # docker-compose.yml — prod environment
 # Project : shop  (type: custom)
 # Version : 2.3.1-build.7
-# Generated: 2026-06-04 08:24:31 UTC
+# Generated: 2026-01-01 00:00:00 UTC
 # Regenerate: ./run.sh refresh prod
 # ============================================================
 
 networks:
   shop_prod_net:
-    driver: bridge
+    driver: overlay
   traefik_net:
     external: true
 
@@ -30,8 +30,7 @@ services:
     networks:
       - shop_prod_net
     depends_on:
-      shop_prod_mysql:
-        condition: service_healthy
+      - shop_prod_mysql
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1"]
       interval: 30s
