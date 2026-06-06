@@ -320,10 +320,11 @@ const PLACEHOLDER = `services:
       - db_data:/var/lib/mysql`
 
 // ── Color-coded JSON editor ─────────────────────────────────────────────────────
-// A transparent <textarea> layered over a syntax-highlighted <pre>. Both share the
-// exact font/padding/wrapping, so the (invisible) caret and selection line up with
-// the colored text. The <pre> sits in normal flow and dictates height (grows with
-// content); the textarea is absolutely positioned over it. No external deps.
+// A transparent <textarea> layered over a syntax-highlighted <pre>, plus a line-
+// number gutter. All three share the exact font/padding/line-height, so the
+// (invisible) caret, the colored text and the line numbers stay aligned. The
+// editor has a fixed height and scrolls internally; the textarea is the scroller
+// and its onScroll syncs the highlight <pre> and the gutter. No external deps.
 
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -355,21 +356,48 @@ function highlightJson(code) {
   return out
 }
 
-function JsonEditor({ value, onChange, valid, minHeight }) {
-  const shared = 'm-0 px-4 py-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words'
+function JsonEditor({ value, onChange, valid, height = '20rem' }) {
+  const taRef = useRef(null)
+  const preRef = useRef(null)
+  const gutterRef = useRef(null)
+
+  const lineCount = value ? value.split('\n').length : 1
+  const gutter = Array.from({ length: lineCount }, (_, i) => i + 1).join('\n')
+
+  function sync() {
+    const ta = taRef.current
+    if (!ta) return
+    if (preRef.current)   { preRef.current.scrollTop = ta.scrollTop; preRef.current.scrollLeft = ta.scrollLeft }
+    if (gutterRef.current) gutterRef.current.scrollTop = ta.scrollTop
+  }
+
+  const shared = 'm-0 px-3 py-3 text-xs font-mono leading-relaxed whitespace-pre'
   return (
     <div
-      className={`relative w-full rounded-xl bg-gray-950 border ${valid ? 'border-gray-700 focus-within:border-brand-500' : 'border-red-700/60 focus-within:border-red-500'}`}
-      style={{ minHeight }}
+      className={`relative w-full flex rounded-xl bg-gray-950 border overflow-hidden ${valid ? 'border-gray-700 focus-within:border-brand-500' : 'border-red-700/60 focus-within:border-red-500'}`}
+      style={{ height }}
     >
-      <pre aria-hidden="true" className={`${shared} text-gray-200 pointer-events-none`}
-        dangerouslySetInnerHTML={{ __html: highlightJson(value) + '\n' }} />
-      <textarea
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        spellCheck={false}
-        className={`${shared} absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-white focus:outline-none`}
-      />
+      {/* Line-number gutter (scrolls in sync, no scrollbar of its own) */}
+      <pre ref={gutterRef} aria-hidden="true"
+        className="m-0 py-3 pl-3 pr-2 text-xs font-mono leading-relaxed text-right text-gray-600 select-none overflow-hidden whitespace-pre border-r border-gray-800/80 bg-gray-950"
+        style={{ minWidth: '2.75rem' }}
+      >{gutter}</pre>
+
+      {/* Code area: highlighted <pre> behind, transparent <textarea> on top */}
+      <div className="relative flex-1 overflow-hidden">
+        <pre ref={preRef} aria-hidden="true"
+          className={`${shared} absolute inset-0 overflow-hidden text-gray-200 pointer-events-none`}
+          dangerouslySetInnerHTML={{ __html: highlightJson(value) + '\n' }} />
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onScroll={sync}
+          spellCheck={false}
+          wrap="off"
+          className={`${shared} absolute inset-0 w-full h-full resize-none overflow-auto bg-transparent text-transparent caret-white focus:outline-none`}
+        />
+      </div>
     </div>
   )
 }
@@ -679,36 +707,18 @@ function ComposeToTemplate() {
             </button>
             <input ref={tplFileRef} type="file" accept=".json,application/json"
               onChange={uploadTemplateFile} className="hidden" />
-            {hasContent && (
-              <>
-                <button onClick={copyResult}
-                  className={`${btnBase} ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
-                  {copied ? '✓ Copied' : '⎘ Copy'}
-                </button>
-                <button onClick={downloadResult} disabled={!parsed}
-                  className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
-                  ⬇ Download
-                </button>
-              </>
-            )}
+            <button onClick={copyResult} disabled={!hasContent}
+              className={`${btnBase} disabled:opacity-40 disabled:cursor-not-allowed ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+              {copied ? '✓ Copied' : '⎘ Copy'}
+            </button>
+            <button onClick={downloadResult} disabled={!parsed}
+              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
+              ⬇ Download
+            </button>
           </div>
         </div>
 
-        {/* Empty state */}
-        {!hasContent && (
-          <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
-            style={{ minHeight: '20rem' }}>
-            <p className="text-gray-700 text-sm text-center px-6">
-              <span className="text-gray-500">Convert Docker Compose</span>,{' '}
-              <span className="text-gray-500">Upload template</span>, or{' '}
-              <span className="text-gray-500">Select image workspace</span> to load one for editing.
-            </p>
-          </div>
-        )}
-
-          {hasContent && (
-            <>
-              {/* Summary chips — only when the JSON parses */}
+        {/* Summary chips — only when the JSON parses */}
               {parsed && Array.isArray(parsed.images) && (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs px-2 py-0.5 rounded-full bg-green-950/40 text-green-400 border border-green-700/40">
@@ -767,9 +777,9 @@ function ComposeToTemplate() {
                 />
               </div>
 
-              {/* Editable template JSON — the source of truth (color-coded) */}
-              <JsonEditor value={tplJson} onChange={editJson} valid={!!parsed} minHeight="22rem" />
-              {!parsed && (
+              {/* Editable template JSON — color-coded, line-numbered, scrolls internally */}
+              <JsonEditor value={tplJson} onChange={editJson} valid={!hasContent || !!parsed} height="min(20rem, 40vh)" />
+              {hasContent && !parsed && (
                 <p className="text-xs text-red-400/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
               )}
 
@@ -831,8 +841,6 @@ function ComposeToTemplate() {
                   Saved to <code className="font-mono">{parsed.name}.json</code> — available immediately in the New Workspace wizard (no rebuild needed).
                 </p>
               )}
-            </>
-          )}
         </div>
 
       {composeModalOpen && (
