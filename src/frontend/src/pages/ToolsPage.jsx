@@ -6,6 +6,7 @@ import {
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive,
   restoreWorkspace, fetchWorkspaces,
+  createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
@@ -739,6 +740,12 @@ function WorkspaceBackup() {
   const [deleting, setDeleting]       = useState({})
   const [downloading, setDownloading] = useState({})
   const restoreRef = useRef(null)
+  // Config snapshot (.rws) state
+  const [snapName, setSnapName]         = useState('')
+  const [snapBusy, setSnapBusy]         = useState(false)
+  const [snapMsg, setSnapMsg]           = useState(null) // { ok, text }
+  const [snapDeleting, setSnapDeleting] = useState({})
+  const [rollingBack, setRollingBack]   = useState({})
 
   // Workspace list
   const { data: workspaces = [] } = useQuery({
@@ -762,6 +769,12 @@ function WorkspaceBackup() {
   const { data: archives = [], refetch: refetchArchives } = useQuery({
     queryKey: ['workspace-archives'],
     queryFn: listWorkspaceArchives,
+  })
+
+  // Config snapshots
+  const { data: snapshots = [], refetch: refetchSnapshots } = useQuery({
+    queryKey: ['workspace-snapshots'],
+    queryFn: fetchWorkspaceSnapshots,
   })
 
   // When job completes/fails, refresh archives
@@ -842,17 +855,167 @@ function WorkspaceBackup() {
     }
   }
 
+  // ── Config snapshot handlers ──
+  async function takeSnapshot() {
+    if (!selectedWs) return
+    setSnapBusy(true); setSnapMsg(null)
+    try {
+      const snap = await createWorkspaceSnapshot(selectedWs, snapName.trim())
+      setSnapMsg({ ok: true, text: `Saved ${snap.filename} (${fmtBytes(snap.size_bytes)}).` })
+      setSnapName('')
+      refetchSnapshots()
+    } catch (e) {
+      setSnapMsg({ ok: false, text: e?.response?.data?.error || e.message })
+    } finally {
+      setSnapBusy(false)
+    }
+  }
+
+  async function rollbackSnapshot(snap) {
+    const ok = await confirm({
+      title: `Roll back ${snap.workspace || 'workspace'} configuration?`,
+      message: `This OVERWRITES the current config.json and every .env file for "${snap.workspace}" with the snapshot "${snap.filename}". Any configuration changed since then is lost. If a DB password, API token or other key has changed since this snapshot was taken, you must update it to the new value afterwards and redeploy. Data volumes are NOT touched.`,
+      confirmLabel: 'Roll back',
+    })
+    if (!ok) return
+    setRollingBack(s => ({ ...s, [snap.filename]: true }))
+    try {
+      const res = await rollbackWorkspaceSnapshot(snap.filename)
+      setSnapMsg({ ok: true, text: `Rolled "${res.workspace}" back to ${snap.filename}. Review secrets in Edit Workspace, then redeploy.` })
+      qc.invalidateQueries({ queryKey: ['workspace', res.workspace] })
+    } catch (e) {
+      setSnapMsg({ ok: false, text: e?.response?.data?.error || e.message })
+    } finally {
+      setRollingBack(s => ({ ...s, [snap.filename]: false }))
+    }
+  }
+
+  async function removeSnapshot(filename) {
+    if (!(await confirm({
+      title: 'Delete snapshot?',
+      message: `Permanently delete the snapshot "${filename}"? This can't be undone.`,
+      confirmLabel: 'Delete',
+    }))) return
+    setSnapDeleting(s => ({ ...s, [filename]: true }))
+    try {
+      await deleteWorkspaceSnapshot(filename)
+      refetchSnapshots()
+    } catch (e) {
+      setSnapMsg({ ok: false, text: e?.response?.data?.error || e.message })
+    } finally {
+      setSnapDeleting(s => ({ ...s, [filename]: false }))
+    }
+  }
+
+  async function downloadSnapshot(filename) {
+    try {
+      const res = await fetch(`/api/tools/workspace-snapshots/${encodeURIComponent(filename)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('download failed')
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob); a.download = filename; a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) { setSnapMsg({ ok: false, text: e.message }) }
+  }
+
   const isRunning = activeJob?.status === 'running' || (activeJobId && !activeJob)
 
   return (
     <div className="space-y-8">
-      <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-        Create a full backup of any workspace — config, environment files, and all volume data
-        (per-env backup snapshots excluded). Archives are stored on the server; download to keep locally.
-        To restore, upload a previously downloaded archive.
-        <span className="block mt-1 text-gray-600">
-          Tip: stop the workspace's containers before restoring to avoid data conflicts.
-        </span>
+      {/* ── Configuration snapshots (.rws) ── */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-white">Configuration snapshots</h3>
+          <p className="text-sm text-gray-500 mt-1">
+            Save a lightweight snapshot of just the workspace <strong className="text-gray-400">configuration</strong> —{' '}
+            <code className="font-mono text-xs">config.json</code> and each environment's{' '}
+            <code className="font-mono text-xs">.env</code> (secrets included) — and roll back to it later.
+            No volume data is captured (use a full backup below for that).
+          </p>
+        </div>
+
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">Workspace</label>
+              <select
+                value={selectedWs}
+                onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBackupErr(null); setActiveJobId(null) }}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
+              >
+                <option value="">— select workspace —</option>
+                {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                Snapshot name <span className="text-gray-600 font-normal">(optional)</span>
+              </label>
+              <input
+                value={snapName}
+                onChange={e => setSnapName(e.target.value)}
+                placeholder={selectedWs ? `${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<timestamp>.rws'}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+              />
+            </div>
+          </div>
+          <button
+            onClick={takeSnapshot}
+            disabled={!selectedWs || snapBusy}
+            className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
+              !selectedWs || snapBusy ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700 text-white'
+            }`}
+          >{snapBusy ? 'Saving…' : 'Take configuration snapshot'}</button>
+          {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{snapMsg.text}</p>}
+        </div>
+
+        {/* Saved snapshots */}
+        <div>
+          <h4 className="text-sm font-semibold text-gray-300 border-b border-gray-800 pb-2 mb-3">
+            Saved snapshots <span className="ml-2 text-xs font-normal text-gray-600">({snapshots.length})</span>
+          </h4>
+          {snapshots.length === 0
+            ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
+            : (
+              <div className="space-y-2">
+                {snapshots.map(s => (
+                  <div key={s.filename} className="flex items-center gap-3 px-3 py-2.5 bg-gray-800/50 border border-gray-700/60 rounded-lg">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-mono text-gray-300 truncate" title={s.filename}>{s.filename}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        {s.workspace ? <span className="text-gray-500">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}
+                      </p>
+                    </div>
+                    <button onClick={() => rollbackSnapshot(s)} disabled={rollingBack[s.filename]}
+                      className="text-xs px-2.5 py-1 rounded border border-amber-700/60 text-amber-300 hover:bg-amber-900/30 transition-colors disabled:opacity-50">
+                      {rollingBack[s.filename] ? '…' : 'Roll back'}
+                    </button>
+                    <button onClick={() => downloadSnapshot(s.filename)}
+                      className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors">Download</button>
+                    <button onClick={() => removeSnapshot(s.filename)} disabled={snapDeleting[s.filename]}
+                      className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50">
+                      {snapDeleting[s.filename] ? '…' : 'Delete'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+        </div>
+      </div>
+
+      {/* ── Full backup & restore (config + all volume data) ── */}
+      <div className="border-t border-gray-800 pt-6">
+        <h3 className="text-base font-semibold text-white mb-1">Full backup &amp; restore</h3>
+        <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
+          Create a full backup of any workspace — config, environment files, and all volume data
+          (per-env backup snapshots excluded). Archives are stored on the server; download to keep locally.
+          To restore, upload a previously downloaded archive.
+          <span className="block mt-1 text-gray-600">
+            Tip: stop the workspace's containers before restoring to avoid data conflicts.
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-8 items-start">
@@ -1037,8 +1200,8 @@ const TOOLS = [
   },
   {
     id: 'workspace-backup',
-    label: 'Workspace Backup & Restore',
-    description: 'Create full workspace archives and restore from a downloaded backup.',
+    label: 'Workspace Manager',
+    description: 'Snapshot or roll back workspace configuration, and create/restore full workspace backups (config + data).',
     component: WorkspaceBackup,
   },
 ]

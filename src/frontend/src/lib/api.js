@@ -121,6 +121,15 @@ export const restoreWorkspace = (formData) =>
   api.post('/tools/workspace-restore', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data)
+// ── Workspace configuration snapshots (.rws — config only, no data) ──
+export const createWorkspaceSnapshot = (workspace, name) =>
+  api.post('/tools/workspace-snapshots', { workspace, name }).then(r => r.data)
+export const fetchWorkspaceSnapshots = () =>
+  api.get('/tools/workspace-snapshots').then(r => r.data)
+export const deleteWorkspaceSnapshot = (filename) =>
+  api.delete(`/tools/workspace-snapshots/${encodeURIComponent(filename)}`).then(r => r.data)
+export const rollbackWorkspaceSnapshot = (filename) =>
+  api.post(`/tools/workspace-snapshots/${encodeURIComponent(filename)}/rollback`).then(r => r.data)
 export const deleteWorkspace   = (name)      => api.delete(`/workspaces/${name}`).then(r => r.data)
 export const putConfig         = (name, content) =>
   api.put(`/workspaces/${name}/config`, { content }).then(r => r.data)

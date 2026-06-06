@@ -119,6 +119,20 @@ func main() {
 			handler.DeleteWorkspaceArchive(w, r)
 		case r.Method == "POST" && r.URL.Path == "/api/tools/workspace-restore":
 			handler.RestoreWorkspace(w, r)
+		// Configuration snapshots (.rws) — config-only, separate from full backups.
+		case r.Method == "POST" && r.URL.Path == "/api/tools/workspace-snapshots":
+			handler.CreateWorkspaceSnapshot(w, r)
+		case r.Method == "GET" && r.URL.Path == "/api/tools/workspace-snapshots":
+			handler.ListWorkspaceSnapshots(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/tools/workspace-snapshots/") && hasSuffix(r.URL.Path, "/rollback"):
+			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
+			handler.RollbackWorkspaceSnapshot(w, r)
+		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/tools/workspace-snapshots/"):
+			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
+			handler.DownloadWorkspaceSnapshot(w, r)
+		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/tools/workspace-snapshots/"):
+			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
+			handler.DeleteWorkspaceSnapshot(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/templates/") && hasSuffix(r.URL.Path, "/use"):
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			handler.RecordTemplateUse(w, r)
