@@ -350,6 +350,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Capture the host-side folder path once, now, so the UI can show where the
+	// workspace lives without a runtime docker inspect (persisted in config as
+	// project.workspace_root_dir).
+	if hwd := h.hostBindSourceDir(); hwd != "" {
+		msg.Workspace.WorkspaceRootDir = strings.TrimRight(hwd, "/\\") + "/" + msg.Workspace.Name
+	}
+
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
 	if err := workspace.Create(h.workspacesDir, msg.Workspace); err != nil {
 		send("\033[31mError: " + err.Error() + "\033[0m\n")
@@ -959,6 +966,34 @@ func parseComposeStatus(output string, runErr error) string {
 }
 
 // GET /api/workspaces/{name}
+var (
+	hostWsDirOnce  sync.Once
+	hostWsDirValue string
+)
+
+// hostBindSourceDir returns the workspaces directory path ON THE HOST (the
+// bind-mount source), as opposed to h.workspacesDir which is the path inside
+// this container (e.g. /toolkit/workspaces). Prefers the HOST_WORKSPACES_DIR
+// override; otherwise inspects this container's own mounts for the workspaces
+// destination. Cached for the process; returns "" if it can't be determined.
+func (h *Handler) hostBindSourceDir() string {
+	hostWsDirOnce.Do(func() {
+		if v := strings.TrimSpace(os.Getenv("HOST_WORKSPACES_DIR")); v != "" {
+			hostWsDirValue = v
+			return
+		}
+		host, _ := os.Hostname() // inside a container this is the container ID
+		if host == "" {
+			return
+		}
+		format := fmt.Sprintf(`{{range .Mounts}}{{if eq .Destination "%s"}}{{.Source}}{{end}}{{end}}`, h.workspacesDir)
+		if out, err := dockerRun("inspect", host, "--format", format); err == nil {
+			hostWsDirValue = strings.TrimSpace(out)
+		}
+	})
+	return hostWsDirValue
+}
+
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	ws, err := workspace.Get(h.workspacesDir, name)
@@ -968,7 +1003,17 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)
-	writeJSON(w, http.StatusOK, wss[0])
+	out := wss[0]
+	// Surface the host-side folder path so the UI can show where the workspace
+	// actually lives (not the container's /toolkit path). Prefer the value stamped
+	// into config at creation; fall back to resolving the bind-mount source for
+	// workspaces created before workspace_root_dir existed.
+	if rd := strings.TrimSpace(out.Config.Project.WorkspaceRootDir); rd != "" {
+		out.HostPath = rd
+	} else if hwd := h.hostBindSourceDir(); hwd != "" {
+		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + name
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // GET /api/workspaces/{name}/envs/{env}/vars  — returns env vars (masked by default, ?reveal=true for plaintext)

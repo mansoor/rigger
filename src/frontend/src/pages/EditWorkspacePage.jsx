@@ -1067,30 +1067,47 @@ export default function EditWorkspacePage() {
         {/* Project settings */}
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Project</h2>
-          <div className={`bg-gray-900 border border-gray-800 rounded-xl p-5 grid gap-4 ${
-            project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'
-          }`}>
-            <div>
-              <Label>Project name</Label>
-              {/* Read-only: project.name is the Docker resource prefix (stack /
-                  container / named-volume / network names) and the workspace folder
-                  is never renamed, so changing it would orphan the running stack. */}
-              <div
-                title="Fixed after creation — it's the Docker resource prefix"
-                className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm cursor-not-allowed select-none truncate"
-              >
-                {project?.name}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
-            </div>
-            {/* Registry only applies to custom (build) stacks — image stacks pull
-                images directly, so hide it (matches the New Workspace wizard). */}
-            {project?.type !== 'image' && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+            <div className={`grid gap-4 ${project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <div>
-                <Label>Registry</Label>
-                <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+                <Label>Project name</Label>
+                {/* Read-only: project.name is the Docker resource prefix (stack /
+                    container / named-volume / network names) and the workspace
+                    folder is never renamed, so changing it would orphan the stack. */}
+                <div
+                  title="Fixed after creation — it's the Docker resource prefix"
+                  className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm cursor-not-allowed select-none truncate"
+                >
+                  {project?.name}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
               </div>
-            )}
+              {/* Registry only applies to custom (build) stacks — image stacks pull
+                  images directly, so hide it (matches the New Workspace wizard). */}
+              {project?.type !== 'image' && (
+                <div>
+                  <Label>Registry</Label>
+                  <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+                </div>
+              )}
+            </div>
+
+            {/* Workspace folder — read-only. Prefer the host-side path (the bind-
+                mount source); fall back to the in-container path if unresolved. */}
+            <div>
+              <Label>Workspace folder</Label>
+              <div
+                title={ws?.host_path || ws?.path || ''}
+                className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm font-mono cursor-not-allowed select-all truncate"
+              >
+                {ws?.host_path || ws?.path || '—'}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {ws?.host_path
+                  ? 'Location on the host — holds config, compose files and bind-mounted volumes.'
+                  : 'Path inside the Rigger container. Set HOST_WORKSPACES_DIR to show the host path.'}
+              </p>
+            </div>
           </div>
         </section>
 

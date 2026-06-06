@@ -47,6 +47,10 @@ type Project struct {
 	Type     string  `json:"type"`
 	Registry string  `json:"registry"`
 	Version  Version `json:"version"`
+	// WorkspaceRootDir is the host-side path of this workspace's folder, captured
+	// once at creation so the UI can show where it lives without a runtime docker
+	// inspect. May be empty for workspaces created before this was added.
+	WorkspaceRootDir string `json:"workspace_root_dir,omitempty"`
 }
 
 // ServiceOverride holds environment-specific YAML appended to a service definition.
@@ -104,7 +108,8 @@ type ImageAccessInfo struct {
 
 type Workspace struct {
 	Name      string                    `json:"name"`
-	Path      string                    `json:"path"`
+	Path      string                    `json:"path"`      // path inside the control-plane container
+	HostPath  string                    `json:"host_path,omitempty"` // bind-mount source on the host (filled by the API layer)
 	Config    Config                    `json:"config"`
 	Envs      []string                  `json:"envs"`
 	EnvAccess map[string]EnvAccessInfo  `json:"env_access"` // keyed by env name

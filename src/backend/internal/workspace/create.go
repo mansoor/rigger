@@ -29,6 +29,7 @@ type CreateRequest struct {
 	NamedVolumes   []NamedVolume     `json:"named_volumes"`    // additional named volumes (Step 4)
 	Backup         *BackupCfg        `json:"backup"`           // backup configuration (Step 5)
 	TemplateEnvs   map[string]string `json:"-"`                // resolved env vars (post-smart-defaults); set server-side
+	WorkspaceRootDir string          `json:"-"`                // host-side folder path; set server-side at creation
 }
 
 // NamedVolume is an additional named Docker volume to declare in compose.
@@ -240,15 +241,20 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		environments[envName] = envBlock
 	}
 
-	cfg := map[string]any{
-		"project": map[string]any{
-			"name":     req.Name,
-			"type":     req.Type,
-			"registry": req.Registry,
-			"version": map[string]any{
-				"major": 1, "minor": 0, "patch": 0, "build": 0,
-			},
+	project := map[string]any{
+		"name":     req.Name,
+		"type":     req.Type,
+		"registry": req.Registry,
+		"version": map[string]any{
+			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},
+	}
+	// Host-side folder path, resolved once by the API layer at creation.
+	if req.WorkspaceRootDir != "" {
+		project["workspace_root_dir"] = req.WorkspaceRootDir
+	}
+	cfg := map[string]any{
+		"project":      project,
 		"versions":     versions,
 		"environments": environments,
 	}
