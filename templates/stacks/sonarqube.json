@@ -1,0 +1,63 @@
+{
+  "default_env_vars": {
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "POSTGRES_USER": "sonar",
+    "SONAR_JDBC_PASSWORD": "CHANGE_ME",
+    "SONAR_JDBC_URL": "jdbc:postgresql://postgres:5432/sonar",
+    "SONAR_JDBC_USERNAME": "sonar"
+  },
+  "description": "SonarQube is purpose-built for DevOps, embedding automated code analysis directly into your pipeline and supporting the programming languages your team already use",
+  "images": [
+    {
+      "command": "",
+      "depends_on": [
+        "postgres"
+      ],
+      "env_vars": {
+        "SONAR_JDBC_PASSWORD": "${SONAR_JDBC_PASSWORD}",
+        "SONAR_JDBC_URL": "${SONAR_JDBC_URL}",
+        "SONAR_JDBC_USERNAME": "${SONAR_JDBC_USERNAME}"
+      },
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "9000",
+      "image": "sonarqube",
+      "name": "sonarqube",
+      "port": 9000,
+      "restart": "always",
+      "tag": "26.5.0.122743-community",
+      "volumes": []
+    },
+    {
+      "command": "",
+      "depends_on": [],
+      "env_vars": {
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "POSTGRES_USER": "${POSTGRES_USER}"
+      },
+      "extra_ports": [],
+      "healthcheck": "pg_isready -q || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "retries": "3",
+        "start_period": "30s",
+        "timeout": "10s"
+      },
+      "host_port": "",
+      "image": "postgres",
+      "name": "postgres",
+      "port": 0,
+      "restart": "always",
+      "tag": "17.5-alpine3.20",
+      "volumes": []
+    }
+  ],
+  "label": "SonarQube",
+  "name": "sonarqube",
+  "tags": [
+    "code-review",
+    "devops",
+    "ci/cd"
+  ]
+}

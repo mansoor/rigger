@@ -1,0 +1,31 @@
+{
+  "default_env_vars": {},
+  "description": "A powerful, intuitive Docker platform. Free for homelabs, ready for enterprises",
+  "images": [
+    {
+      "command": "",
+      "depends_on": [],
+      "env_vars": {},
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "3000",
+      "image": "fnsys/dockhand",
+      "name": "dockhand_prod_app",
+      "port": 3000,
+      "restart": "unless-stopped",
+      "tag": "latest",
+      "volumes": [
+        "/var/run/docker.sock:/var/run/docker.sock",
+        "./volumes/data:/app/data"
+      ]
+    }
+  ],
+  "label": "Dockhand",
+  "name": "dockhand",
+  "tags": [
+    "docker",
+    "homelab",
+    "devools"
+  ]
+}
