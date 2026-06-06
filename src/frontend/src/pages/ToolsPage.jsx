@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import Layout from '../components/Layout'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  saveToolTemplate, fetchTemplates,
+  saveToolTemplate, fetchTemplates, fetchTemplateDraft,
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive,
   restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchWorkspaces,
@@ -331,6 +331,16 @@ function ComposeToTemplate() {
   const fileInputRef                = useRef(null)       // compose import
   const tplFileRef                  = useRef(null)       // template upload
 
+  // "From a workspace" source — pull an existing image stack into the editor.
+  const [wsPick, setWsPick]   = useState('')
+  const [wsEnv, setWsEnv]     = useState('')
+  const [wsBusy, setWsBusy]   = useState(false)
+  const [wsError, setWsError] = useState('')
+  const { data: allWorkspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces, staleTime: 30_000 })
+  // Only image stacks can become templates (project.type lives in the nested config).
+  const imageWorkspaces = allWorkspaces.filter(w => w.config?.project?.type === 'image')
+  const pickedEnvs = imageWorkspaces.find(w => w.name === wsPick)?.envs || []
+
   // Parse the editable JSON for the summary chips, metadata helpers and download.
   let parsed = null
   try { parsed = tplJson.trim() ? JSON.parse(tplJson) : null } catch { parsed = null }
@@ -345,10 +355,27 @@ function ComposeToTemplate() {
     setCopied(false)
   }
 
-  // Load a template object into the editor (from Convert or Upload).
+  // Load a template object into the editor (from Convert, Upload or Workspace).
   function loadTemplate(tpl) {
     editJson(JSON.stringify(tpl, null, 2))
     setTagsText(Array.isArray(tpl?.tags) ? tpl.tags.join(', ') : '')
+  }
+
+  // Pull an image workspace's stack (images + masked env-var defaults) into the
+  // editor as a draft. Name/label are seeded from the workspace as an editable
+  // starting point; the user reviews, names and validates before saving.
+  async function loadFromWorkspace() {
+    if (!wsPick) return
+    setWsBusy(true); setWsError('')
+    try {
+      const draft = await fetchTemplateDraft(wsPick, wsEnv || pickedEnvs[0])
+      const slug = wsPick.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+      loadTemplate({ ...draft, name: draft.name || slug, label: draft.label || wsPick })
+    } catch (e) {
+      setWsError(e?.response?.data?.error || e.message)
+    } finally {
+      setWsBusy(false)
+    }
   }
 
   // Patch one top-level key on the parsed template and write it back to the editor.
@@ -475,10 +502,44 @@ function ComposeToTemplate() {
     <div className="space-y-6">
       {/* Description */}
       <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-        Paste or import a <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left and
-        convert it — or <strong className="text-gray-300">Upload template</strong> on the right to load an existing
-        one. Edit the template JSON, fill in label / description / tags, then <strong className="text-gray-300">Validate</strong>{' '}
-        (which also checks the name is unique) to unlock <strong className="text-gray-300">Save as template</strong>.
+        Create a reusable prebuilt template from one of three sources: convert a{' '}
+        <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left,{' '}
+        <strong className="text-gray-300">Upload template</strong> on the right, or pull in an existing{' '}
+        <strong className="text-gray-300">image workspace</strong> below. Then edit the JSON, fill in name / label /
+        description / tags, and <strong className="text-gray-300">Validate</strong> (which also checks the name is
+        unique) to unlock <strong className="text-gray-300">Save as template</strong>.
+      </div>
+
+      {/* Source: from an existing workspace */}
+      <div className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-gray-300">Start from a workspace:</span>
+        <select
+          value={wsPick}
+          onChange={e => { setWsPick(e.target.value); setWsEnv(''); setWsError('') }}
+          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
+        >
+          <option value="">— select image workspace —</option>
+          {imageWorkspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
+        </select>
+        {pickedEnvs.length > 1 && (
+          <select
+            value={wsEnv || pickedEnvs[0]}
+            onChange={e => setWsEnv(e.target.value)}
+            title="Environment to read env-var defaults from"
+            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
+          >
+            {pickedEnvs.map(en => <option key={en} value={en}>{en}</option>)}
+          </select>
+        )}
+        <button
+          onClick={loadFromWorkspace}
+          disabled={!wsPick || wsBusy}
+          className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${
+            wsPick && !wsBusy ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
+          }`}
+        >{wsBusy ? 'Loading…' : 'Load into editor →'}</button>
+        <span className="text-xs text-gray-600">Pulls images + env-var defaults (secrets masked) into the editor.</span>
+        {wsError && <span className="text-xs text-red-400 w-full">{wsError}</span>}
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
@@ -608,6 +669,14 @@ function ComposeToTemplate() {
                 <p className="text-xs font-semibold text-gray-400">
                   Template details <span className="font-normal text-gray-600">— shown in the New Workspace picker</span>
                 </p>
+                <input
+                  type="text"
+                  value={parsed?.name ?? ''}
+                  disabled={!parsed}
+                  onChange={e => patchField('name', e.target.value)}
+                  placeholder="Name (id / filename — lowercase, digits, hyphens)"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50 font-mono"
+                />
                 <input
                   type="text"
                   value={parsed?.label ?? ''}

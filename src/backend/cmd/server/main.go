@@ -183,6 +183,9 @@ func main() {
 				handler.GetActionRuns(w, r)
 			case sub == "config":
 				handler.GetConfig(w, r)
+			case sub == "template-draft":
+				// Generate a prebuilt-template JSON draft for the Template Manager.
+				handler.GenerateTemplateDraft(w, r)
 			case sub == "envs" && subsub == "status":
 				handler.GetEnvStatus(w, r)
 			case sub == "envs" && subsub == "vars":
@@ -246,9 +249,6 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
-		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/export-template"):
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			handler.ExportTemplate(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/migrate"):
 			// /api/workspaces/{name}/migrate — move a workspace to another host (Phase 7)
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))

@@ -104,7 +104,10 @@ export const fetchBackups      = ()          => api.get('/backups').then(r => r.
 export const deleteBackup      = (workspace, env, date) => api.delete(`/backups/${workspace}/${env}/${date}`).then(r => r.data)
 export const fetchStats        = ()          => api.get('/stats').then(r => r.data)
 export const fetchLiveStats    = ()          => api.get('/live-stats').then(r => r.data)
-export const exportTemplate    = (name, body) => api.post(`/workspaces/${name}/export-template`, body).then(r => r.data)
+// Generate a prebuilt-template JSON draft from an image workspace (no file
+// written) — loaded into the Template Manager editor for review and save.
+export const fetchTemplateDraft = (name, env) =>
+  api.get(`/workspaces/${name}/template-draft${env ? `?env=${encodeURIComponent(env)}` : ''}`).then(r => r.data)
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 

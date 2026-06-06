@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, openActionSocket, exportTemplate, fetchActionRuns, clearActionRuns } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, openActionSocket, fetchActionRuns, clearActionRuns } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -1444,100 +1444,6 @@ function ansiToHtml(text) {
     .replace(/\x1b\[[0-9;]*m/g, '') // strip remaining codes
 }
 
-// ── Export as template modal ──────────────────────────────────────────────────
-
-function ExportTemplateModal({ name, envs, onClose }) {
-  const [tplName, setTplName]   = useState('')      // template id / filename slug (required)
-  const [label, setLabel]       = useState(name)
-  const [desc, setDesc]         = useState('')
-  const [tags, setTags]         = useState('')
-  const [env, setEnv]           = useState(envs[0] || '')
-  const [done, setDone]         = useState(null)    // saved template name on success
-  const [error, setError]       = useState('')
-
-  const slug      = tplName.trim()
-  const nameValid = /^[a-z0-9-]+$/.test(slug)
-
-  const mutation = useMutation({
-    mutationFn: () => exportTemplate(name, {
-      name: slug,
-      label,
-      description: desc,
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
-      env,
-    }),
-    onSuccess: (data) => setDone(data?.template || slug),
-    onError: (e) => setError(e.response?.data?.error || 'Export failed'),
-  })
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Export as prebuilt template</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
-        </div>
-
-        {done ? (
-          <div className="space-y-3">
-            <p className="text-sm text-green-400">✓ Template saved as <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">{done}.json</code> in <code className="font-mono text-xs bg-gray-800 px-1 py-0.5 rounded">templates/stacks/</code>.</p>
-            <p className="text-xs text-gray-500">It will appear in the "Pre-built template" picker when creating a new workspace.</p>
-            <button onClick={onClose} className="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Close</button>
-          </div>
-        ) : (
-          <>
-            {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Template name <span className="text-red-400">*</span></label>
-              <input value={tplName} onChange={e => setTplName(e.target.value)} placeholder="e.g. my-wordpress-stack" autoFocus
-                className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-white text-sm focus:outline-none ${
-                  tplName && !nameValid ? 'border-amber-600 focus:border-amber-500' : 'border-gray-700 focus:border-brand-500'
-                }`} />
-              {tplName && !nameValid
-                ? <p className="text-xs text-amber-400 mt-1">Use lowercase letters, digits and hyphens only.</p>
-                : <p className="text-xs text-gray-500 mt-1">The template's id and filename — <code className="font-mono">templates/stacks/&lt;name&gt;.json</code>.</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Template label</label>
-              <input value={label} onChange={e => setLabel(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Description</label>
-              <textarea value={desc} onChange={e => setDesc(e.target.value)} rows={2}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 resize-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Tags <span className="normal-case font-normal text-gray-500">(comma-separated)</span></label>
-              <input value={tags} onChange={e => setTags(e.target.value)} placeholder="nginx, proxy, ssl"
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500" />
-            </div>
-            {envs.length > 1 && (
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Read env vars from</label>
-                <select value={env} onChange={e => setEnv(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
-                  {envs.map(e => <option key={e} value={e}>{e}</option>)}
-                </select>
-              </div>
-            )}
-            <p className="text-xs text-gray-500">Secret values will be replaced with <code className="font-mono">CHANGE_ME</code> placeholders in the template.</p>
-            <button
-              onClick={() => mutation.mutate()}
-              disabled={mutation.isPending || !nameValid || !label}
-              title={!nameValid ? 'Enter a valid template name first' : undefined}
-              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors"
-            >
-              {mutation.isPending ? 'Exporting…' : 'Export template'}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ── Env vars editor (modal) ───────────────────────────────────────────────────
 
 function EnvVarsModal({ name, env, onClose }) {
@@ -1685,7 +1591,6 @@ export default function WorkspacePage() {
   const username = useAuthStore(s => s.user?.sub) || 'unknown'
   const [configModal, setConfigModal]     = useState(null)
   const [composeModal, setComposeModal]   = useState(null)
-  const [exportModal, setExportModal]     = useState(false)
   const [termModal, setTermModal]         = useState(null) // {env}
   const [logModal, setLogModal]           = useState(null) // {env, service}
 
@@ -1742,7 +1647,6 @@ export default function WorkspacePage() {
 
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {type === 'image' && <HeaderBtn label="Export as template" onClick={() => setExportModal(true)} />}
             <HeaderBtn label="Edit workspace" onClick={() => navigate(`/workspaces/${name}/edit`)} />
             {type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
           </div>
@@ -1798,9 +1702,6 @@ export default function WorkspacePage() {
           onClose={() => setComposeModal(null)}
           onRefresh={() => runAction('refresh', composeModal.env)}
         />
-      )}
-      {exportModal && (
-        <ExportTemplateModal name={name} envs={envs} onClose={() => setExportModal(false)} />
       )}
       {termModal && (
         <TerminalModal wsName={name} envName={termModal.env} initialService={termModal.service}

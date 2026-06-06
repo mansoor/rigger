@@ -1353,11 +1353,22 @@ func (h *Handler) GetImageUpdates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response{Updates: entry.Results, CheckedAt: &entry.CheckedAt})
 }
 
-// POST /api/workspaces/{name}/export-template — export an image stack as a reusable prebuilt template
-func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
+// isSecretEnvKey reports whether an env-var name looks like a secret, so its
+// value is masked (→ CHANGE_ME) when generating a template draft.
+func isSecretEnvKey(k string) bool {
+	ku := strings.ToUpper(k)
+	return strings.Contains(ku, "PASSWORD") || strings.Contains(ku, "SECRET") ||
+		strings.Contains(ku, "TOKEN") || strings.Contains(ku, "KEY") || strings.Contains(ku, "SALT")
+}
+
+// GET /api/workspaces/{name}/template-draft?env=<env>
+// Generates a prebuilt-template JSON draft from an image workspace and RETURNS
+// it (no file is written) so the Template Manager can load it into its editor
+// for review, validation and save. Secret env-var values are masked here so
+// they never reach the browser.
+func (h *Handler) GenerateTemplateDraft(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	// Read config.json
 	cfgPath := filepath.Join(h.workspacesDir, name, "config.json")
 	cfgData, err := os.ReadFile(cfgPath)
 	if err != nil {
@@ -1372,103 +1383,47 @@ func (h *Handler) ExportTemplate(w http.ResponseWriter, r *http.Request) {
 
 	projectType, _ := cfg["project"].(map[string]any)["type"].(string)
 	if projectType != "image" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only image stacks can be exported as templates"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only image stacks can be turned into templates"})
 		return
 	}
 
-	var body struct {
-		Name        string   `json:"name"`  // template id / filename slug (required)
-		Label       string   `json:"label"`
-		Description string   `json:"description"`
-		Tags        []string `json:"tags"`
-		Env         string   `json:"env"` // which env to read default_env_vars from
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-
-	// Template name (slug) is now an explicit, required field — no longer derived
-	// from the workspace name.
-	slug := strings.TrimSpace(body.Name)
-	if slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template name is required"})
-		return
-	}
-	for _, c := range slug {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "template name must contain only lowercase letters, digits and hyphens"})
-			return
-		}
-	}
-	if body.Label == "" {
-		body.Label = slug
-	}
-	if body.Env == "" {
-		// pick first env
+	// Choose the env to read default values from (query param, else first env).
+	env := r.URL.Query().Get("env")
+	if env == "" {
 		if envs, ok := cfg["environments"].(map[string]any); ok {
 			for k := range envs {
-				body.Env = k
+				env = k
 				break
 			}
 		}
 	}
 
-	// Collect default_env_vars from the specified environment's env_vars (masking secrets)
+	// Default env-var values come from the env's decrypted .env file (the config's
+	// image env_vars are only ${VAR} references). Secrets are masked to CHANGE_ME.
 	defaultEnvVars := map[string]string{}
-	if envs, ok := cfg["environments"].(map[string]any); ok {
-		if envCfg, ok := envs[body.Env].(map[string]any); ok {
-			if ev, ok := envCfg["env_vars"].(map[string]any); ok {
-				for k, v := range ev {
-					vs, _ := v.(string)
-					// Replace generated secrets with CHANGE_ME placeholders
-					ku := strings.ToUpper(k)
-					isSecret := strings.Contains(ku, "PASSWORD") || strings.Contains(ku, "SECRET") ||
-						strings.Contains(ku, "TOKEN") || strings.Contains(ku, "KEY") || strings.Contains(ku, "SALT")
-					if isSecret {
-						defaultEnvVars[k] = "CHANGE_ME"
-					} else {
-						defaultEnvVars[k] = vs
-					}
+	if env != "" {
+		if vars, err := workspace.EnvVars(h.workspacesDir, name, env, true); err == nil {
+			for k, v := range vars {
+				if isSecretEnvKey(k) {
+					defaultEnvVars[k] = "CHANGE_ME"
+				} else {
+					defaultEnvVars[k] = v
 				}
 			}
 		}
 	}
 
-	// Build template JSON
-	tmpl := map[string]any{
-		"name":             slug,
-		"label":            body.Label,
-		"description":      body.Description,
-		"tags":             body.Tags,
+	// Draft template: name/label/description/tags are left for the user to fill in
+	// (validated & saved via the Template Manager). images carry over as-is.
+	draft := map[string]any{
+		"name":             "",
+		"label":            "",
+		"description":      "",
+		"tags":             []string{},
 		"images":           cfg["images"],
 		"default_env_vars": defaultEnvVars,
 	}
-
-	out, err := json.MarshalIndent(tmpl, "", "  ")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to marshal template"})
-		return
-	}
-
-	// Write to templates/stacks/{slug}.json — reject if the name is taken so an
-	// existing template is never silently overwritten.
-	templatesDir := filepath.Join(h.templatesDir, "stacks")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create templates dir"})
-		return
-	}
-	destPath := filepath.Join(templatesDir, slug+".json")
-	if _, err := os.Stat(destPath); err == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("a template named %q already exists — choose a different name", slug)})
-		return
-	}
-	if err := os.WriteFile(destPath, out, 0644); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write template file"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "template": slug, "path": destPath})
+	writeJSON(w, http.StatusOK, draft)
 }
 
 // POST /api/tools/save-template — save a converter-generated template JSON to templates/stacks/
