@@ -84,6 +84,7 @@ export const downloadContainerFile = async (name, env, svc, path) => {
   URL.revokeObjectURL(url)
 }
 export const fetchEnvMetrics    = (name, env, minutes = 60) => api.get(`/workspaces/${name}/envs/${env}/metrics`, { params: { minutes } }).then(r => r.data)
+export const fetchMetricsConfig = ()         => api.get('/metrics/config').then(r => r.data)
 export const fetchActivity     = (name)      => api.get(`/workspaces/${name}/activity`).then(r => r.data)
 export const fetchActionRuns   = (name, limit = 100) => api.get(`/workspaces/${name}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (name)      => api.delete(`/workspaces/${name}/action-runs`).then(r => r.data)

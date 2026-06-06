@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, updateEnvVars, openActionSocket, exportTemplate, fetchActionRuns, clearActionRuns } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, openActionSocket, exportTemplate, fetchActionRuns, clearActionRuns } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
@@ -263,6 +263,19 @@ function AccessUrls({ urls, reachable }) {
   )
 }
 
+// useMetricsInterval returns the server's metrics collection cadence in seconds
+// (METRICS_INTERVAL_SECONDS, default 30). One shared query key means every
+// EnvCard dedupes onto a single request, cached for the session.
+function useMetricsInterval() {
+  const { data } = useQuery({
+    queryKey: ['metrics-config'],
+    queryFn: fetchMetricsConfig,
+    staleTime: Infinity,
+    retry: false,
+  })
+  return data?.collect_interval_seconds || 30
+}
+
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   // Use server-resolved domain (${VAR} already substituted) for display
@@ -292,12 +305,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   // Metrics history (Phase 6d) — per-env CPU/memory/disk/network for sparklines.
   // rangeMin is the selected time window (minutes); default 60.
   const [rangeMin, setRangeMin] = useState(60)
-  // Poll faster until the first snapshot exists (e.g. a just-deployed env) so the
-  // strip fills in on its own; settle to 60s once populated.
+  // Refresh the sparklines at the server's collection cadence so the UI and the
+  // collector move together (driven by METRICS_INTERVAL_SECONDS, default 30s).
+  const metricsIntervalMs = useMetricsInterval() * 1000
   const { data: metrics = [] } = useQuery({
     queryKey: ['metrics', name, envName, rangeMin],
     queryFn: () => fetchEnvMetrics(name, envName, rangeMin),
-    refetchInterval: (q) => ((q.state.data?.length ?? 0) === 0 ? 20_000 : 60_000),
+    refetchInterval: metricsIntervalMs,
     retry: false,
   })
   const lastMetric = metrics[metrics.length - 1]

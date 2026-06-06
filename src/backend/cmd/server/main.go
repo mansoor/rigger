@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/mansoor/rigger/ui/api"
@@ -76,13 +75,10 @@ func main() {
 	alerts.NewEvaluator(database, cfg.WorkspacesDir, imgCache, alertBroker, notifier).Run()
 
 	// Metrics history (Phase 6d): background collector samples per-env CPU/memory/
-	// disk every METRICS_INTERVAL_SECONDS (default 1 min), pruning to 90 days.
-	metricsInterval := 1 * time.Minute
-	if v := os.Getenv("METRICS_INTERVAL_SECONDS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			metricsInterval = time.Duration(n) * time.Second
-		}
-	}
+	// disk every METRICS_INTERVAL_SECONDS (default 30s). A separate tiered job
+	// thins old rows (full-res ≤24h, 1-min 24–120h, 5-min beyond) and prunes to
+	// 90 days. The same interval is reported to the UI via /api/metrics/config.
+	metricsInterval := time.Duration(metrics.IntervalSeconds()) * time.Second
 	metrics.NewCollector(database, cfg.WorkspacesDir, metricsInterval, bridge).Run()
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
@@ -131,6 +127,8 @@ func main() {
 			handler.GetTemplate(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/debug/paths":
 			handler.DebugPaths(w, r)
+		case r.Method == "GET" && r.URL.Path == "/api/metrics/config":
+			handler.GetMetricsConfig(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/stats":
 			handler.GetStats(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/live-stats":
@@ -290,6 +288,7 @@ func main() {
 	mux.HandleFunc("/api/workspaces/create", handler.CreateWorkspace)
 
 	// Stats (dashboard)
+	mux.Handle("/api/metrics/config", protected)
 	mux.Handle("/api/stats", protected)
 	mux.Handle("/api/live-stats", protected)
 

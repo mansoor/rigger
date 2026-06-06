@@ -5,7 +5,18 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/mansoor/rigger/ui/internal/metrics"
 )
+
+// GET /api/metrics/config — exposes the collection cadence (seconds) so the UI
+// can poll at the same rate instead of a hardcoded interval. Driven by the same
+// METRICS_INTERVAL_SECONDS the collector uses, so both stay in lock-step.
+func (h *Handler) GetMetricsConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]int{
+		"collect_interval_seconds": metrics.IntervalSeconds(),
+	})
+}
 
 // GET /api/workspaces/{name}/envs/{env}/metrics?minutes=60
 // Returns the recorded metric history for one env, oldest first, for sparklines.
