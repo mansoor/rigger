@@ -426,17 +426,97 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
   )
 }
 
+// ── Convert-Docker-Compose modal (Template Manager source) ──────────────────────
+// Paste/import a docker-compose.yml and convert it to a Rigger template, which is
+// loaded into the editor. Lives in a modal so the editor can use the full width.
+function ComposeModal({ onLoad, onClose }) {
+  const [input, setInput] = useState('')
+  const [name, setName]   = useState('')   // template-name slug derived from an imported filename
+  const [error, setError] = useState('')
+  const fileRef = useRef(null)
+  const btnBase = 'text-xs px-2.5 py-1 rounded border transition-colors'
+
+  async function paste() {
+    try { const t = await navigator.clipboard.readText(); if (t) { setInput(t); setError('') } }
+    catch { document.getElementById('compose-modal-input')?.focus() }
+  }
+  function importFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      setInput(ev.target.result || ''); setError('')
+      if (!name) setName(file.name.replace(/\.(ya?ml|txt)$/i, '').replace(/[^a-z0-9]/gi, '-').toLowerCase() || '')
+    }
+    reader.readAsText(file)
+    e.target.value = '' // reset so the same file can be re-imported
+  }
+  function convert() {
+    if (!input.trim()) return
+    const res = convertCompose(input, name || 'my-stack')
+    if (res.error) { setError(res.error); return }
+    onLoad(res.result) // parent loads it into the editor and closes the modal
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-3xl p-6 space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-white">Convert Docker Compose</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Paste or import a <code className="font-mono text-xs">docker-compose.yml</code>; converting turns its services
+          into a Rigger template and loads it into the editor for review.
+        </p>
+
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-semibold text-gray-300">docker-compose.yml</label>
+          <div className="flex items-center gap-2">
+            <button onClick={paste} className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>⎘ Paste</button>
+            <button onClick={() => fileRef.current?.click()} className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>↑ Import file</button>
+            <button onClick={() => { setInput(PLACEHOLDER); setError('') }} className="text-xs text-brand-400 hover:text-brand-300 transition-colors">Example</button>
+            <input ref={fileRef} type="file" accept=".yml,.yaml,.txt" onChange={importFile} className="hidden" />
+          </div>
+        </div>
+
+        <textarea
+          id="compose-modal-input"
+          value={input}
+          onChange={e => { setInput(e.target.value); setError('') }}
+          placeholder={PLACEHOLDER}
+          spellCheck={false}
+          className="w-full px-3 py-3 bg-gray-950 border border-gray-700 rounded-xl text-gray-200 text-xs font-mono placeholder-gray-700 focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
+          style={{ minHeight: '24rem' }}
+        />
+
+        {error && (
+          <div className="rounded-lg bg-red-950/40 border border-red-700/40 px-3 py-2">
+            <p className="text-red-400 text-xs font-medium">Conversion failed</p>
+            <p className="text-red-300/70 text-xs mt-0.5">{error}</p>
+          </div>
+        )}
+
+        <button
+          onClick={convert}
+          disabled={!input.trim()}
+          className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
+            input.trim() ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
+          }`}
+        >Convert &amp; load into editor →</button>
+      </div>
+    </div>
+  )
+}
+
 function ComposeToTemplate() {
-  const [input, setInput]           = useState('')      // compose YAML (left panel)
-  const [templateName, setName]     = useState('')      // name used by the compose converter
-  const [convertError, setConvertError] = useState('')  // compose → JSON parse error
   const [tplJson, setTplJson]       = useState('')      // editable template JSON — the source of truth
   const [tagsText, setTagsText]     = useState('')      // comma-separated tags helper (synced on load)
   const [validation, setValidation] = useState(null)    // null | {checking} | {ok:true,...} | {ok:false,errors:[]}
   const [copied, setCopied]         = useState(false)
   const [saveState, setSaveState]   = useState(null)    // null | 'saving' | 'saved' | { error }
-  const fileInputRef                = useRef(null)       // compose import
   const tplFileRef                  = useRef(null)       // template upload
+  const [composeModalOpen, setComposeModalOpen] = useState(false)  // docker-compose convert modal
 
   // "From a workspace" source — pick an image stack (in a modal) and pull it in.
   const [wsModalOpen, setWsModalOpen] = useState(false)
@@ -488,42 +568,6 @@ function ComposeToTemplate() {
   function patchField(key, value) {
     if (!parsed) return
     editJson(JSON.stringify({ ...parsed, [key]: value }, null, 2))
-  }
-
-  function convert() {
-    if (!input.trim()) return
-    const res = convertCompose(input, templateName || 'my-stack')
-    if (res.error) { setConvertError(res.error); return }
-    setConvertError('')
-    loadTemplate(res.result)
-  }
-
-  // Paste compose from clipboard
-  async function pasteFromClipboard() {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (text) setInput(text)
-    } catch {
-      // Browser denied clipboard access — focus the textarea so Ctrl+V works
-      document.getElementById('compose-input')?.focus()
-    }
-  }
-
-  // Import a docker-compose.yml into the left textarea
-  function importFile(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      setInput(ev.target.result || '')
-      // Auto-derive template name from filename
-      if (!templateName) {
-        const base = file.name.replace(/\.(ya?ml|txt)$/i, '').replace(/[^a-z0-9]/gi, '-').toLowerCase()
-        setName(base || '')
-      }
-    }
-    reader.readAsText(file)
-    e.target.value = ''  // reset so same file can be re-imported
   }
 
   // Upload an existing template .json straight into the editor
@@ -608,110 +652,59 @@ function ComposeToTemplate() {
     <div className="space-y-6">
       {/* Description */}
       <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-        Create a reusable prebuilt template from one of three sources: convert a{' '}
-        <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left, or — on the right —{' '}
-        <strong className="text-gray-300">Upload template</strong> or <strong className="text-gray-300">Select image
-        workspace</strong>. Then edit the JSON, fill in name / label / description / tags, and{' '}
-        <strong className="text-gray-300">Validate</strong> (which also checks the name is unique) to unlock{' '}
-        <strong className="text-gray-300">Save as template</strong>.
+        Create a reusable prebuilt template from one of three sources —{' '}
+        <strong className="text-gray-300">Convert Docker Compose</strong>, <strong className="text-gray-300">Upload
+        template</strong>, or <strong className="text-gray-300">Select image workspace</strong> — then edit the JSON,
+        fill in name / label / description / tags, and <strong className="text-gray-300">Validate</strong> (which also
+        checks the name is unique) to unlock <strong className="text-gray-300">Save as template</strong>.
       </div>
 
-      <div className="grid grid-cols-2 gap-6 items-start">
-        {/* ── Left: Input ── */}
-        <div className="space-y-2">
-          {/* Input toolbar */}
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-gray-300">docker-compose.yml</label>
-            <div className="flex items-center gap-2">
-              <button onClick={pasteFromClipboard}
-                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
-                ⎘ Paste
-              </button>
-              <button onClick={() => fileInputRef.current?.click()}
-                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
-                ↑ Import file
-              </button>
-              <button onClick={() => setInput(PLACEHOLDER)}
-                className="text-xs text-brand-400 hover:text-brand-300 transition-colors">
-                Example
-              </button>
-              <input ref={fileInputRef} type="file" accept=".yml,.yaml,.txt"
-                onChange={importFile} className="hidden" />
-            </div>
-          </div>
-
-          {/* Compose textarea — Ctrl+V and right-click paste work natively */}
-          <textarea
-            id="compose-input"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder={PLACEHOLDER}
-            spellCheck={false}
-            className="w-full px-3 py-3 bg-gray-950 border border-gray-700 rounded-xl text-gray-200 text-xs font-mono placeholder-gray-700 focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
-            style={{ minHeight: '35rem' }}
-          />
-
-          {/* Convert bar */}
-          <div className="pt-1">
-            <button
-              onClick={convert}
-              disabled={!input.trim()}
-              className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-                input.trim() ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
-              }`}
-            >Convert →</button>
+      {/* ── Template editor (full width) ── */}
+      <div className="space-y-2">
+        {/* Editor toolbar */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <label className="text-sm font-semibold text-gray-300">Rigger template JSON</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setComposeModalOpen(true)}
+              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              ⇄ Convert Docker Compose
+            </button>
+            <button onClick={() => { setWsError(''); setWsModalOpen(true) }}
+              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              ⊞ Select image workspace
+            </button>
+            <button onClick={() => tplFileRef.current?.click()}
+              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              ↑ Upload template
+            </button>
+            <input ref={tplFileRef} type="file" accept=".json,application/json"
+              onChange={uploadTemplateFile} className="hidden" />
+            {hasContent && (
+              <>
+                <button onClick={copyResult}
+                  className={`${btnBase} ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                  {copied ? '✓ Copied' : '⎘ Copy'}
+                </button>
+                <button onClick={downloadResult} disabled={!parsed}
+                  className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
+                  ⬇ Download
+                </button>
+              </>
+            )}
           </div>
         </div>
 
-        {/* ── Right: Template editor ── */}
-        <div className="space-y-2">
-          {/* Editor toolbar */}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <label className="text-sm font-semibold text-gray-300">Rigger template JSON</label>
-            <div className="flex items-center gap-2">
-              <button onClick={() => { setWsError(''); setWsModalOpen(true) }}
-                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
-                ⊞ Select image workspace
-              </button>
-              <button onClick={() => tplFileRef.current?.click()}
-                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
-                ↑ Upload template
-              </button>
-              <input ref={tplFileRef} type="file" accept=".json,application/json"
-                onChange={uploadTemplateFile} className="hidden" />
-              {hasContent && (
-                <>
-                  <button onClick={copyResult}
-                    className={`${btnBase} ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
-                    {copied ? '✓ Copied' : '⎘ Copy'}
-                  </button>
-                  <button onClick={downloadResult} disabled={!parsed}
-                    className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
-                    ⬇ Download
-                  </button>
-                </>
-              )}
-            </div>
+        {/* Empty state */}
+        {!hasContent && (
+          <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
+            style={{ minHeight: '20rem' }}>
+            <p className="text-gray-700 text-sm text-center px-6">
+              <span className="text-gray-500">Convert Docker Compose</span>,{' '}
+              <span className="text-gray-500">Upload template</span>, or{' '}
+              <span className="text-gray-500">Select image workspace</span> to load one for editing.
+            </p>
           </div>
-
-          {/* Conversion error (compose → JSON) */}
-          {convertError && (
-            <div className="rounded-xl bg-red-950/40 border border-red-700/40 p-4">
-              <p className="text-red-400 text-sm font-medium">Conversion failed</p>
-              <p className="text-red-300/70 text-xs mt-1">{convertError}</p>
-            </div>
-          )}
-
-          {/* Empty state */}
-          {!hasContent && !convertError && (
-            <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
-              style={{ minHeight: '35rem' }}>
-              <p className="text-gray-700 text-sm text-center px-6">
-                Convert a compose file, <span className="text-gray-500">Upload template</span>, or{' '}
-                <span className="text-gray-500">Select image workspace</span> to load one for editing.
-              </p>
-            </div>
-          )}
+        )}
 
           {hasContent && (
             <>
@@ -841,8 +834,13 @@ function ComposeToTemplate() {
             </>
           )}
         </div>
-      </div>
 
+      {composeModalOpen && (
+        <ComposeModal
+          onLoad={(tpl) => { loadTemplate(tpl); setComposeModalOpen(false) }}
+          onClose={() => setComposeModalOpen(false)}
+        />
+      )}
       {wsModalOpen && (
         <SelectWorkspaceModal
           workspaces={imageWorkspaces}
