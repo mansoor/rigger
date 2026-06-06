@@ -171,6 +171,7 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Workspace string `json:"workspace"`
+		Name      string `json:"name"` // optional custom backup filename
 	}
 	if err := readJSON(r, &body); err != nil || body.Workspace == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace required"})
@@ -185,11 +186,24 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 
 	job := h.jobs.create(body.Workspace)
 
+	// Resolve the archive filename: a custom name (sanitised, .rwb-suffixed,
+	// collision-safe) or the default "<workspace>-<timestamp>.rwb".
+	dir := archivesDir(h.dataDir)
+	archiveName := strings.TrimSpace(body.Name)
+	if archiveName != "" {
+		archiveName = sanitizeArchiveName(filepath.Base(archiveName))
+		if !hasArchiveSuffix(archiveName) {
+			archiveName += archiveExt
+		}
+		archiveName = uniqueArchiveName(dir, archiveName)
+	} else {
+		ts := job.StartedAt.UTC().Format("20060102-150405")
+		archiveName = fmt.Sprintf("%s-%s%s", body.Workspace, ts, archiveExt)
+	}
+
 	// Run backup asynchronously
 	go func() {
-		ts := job.StartedAt.UTC().Format("20060102-150405")
-		archiveName := fmt.Sprintf("%s-%s%s", body.Workspace, ts, archiveExt)
-		destPath := filepath.Join(archivesDir(h.dataDir), archiveName)
+		destPath := filepath.Join(dir, archiveName)
 
 		size, err := createArchive(wsDir, body.Workspace, destPath)
 		now := time.Now()

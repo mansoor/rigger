@@ -109,8 +109,8 @@ export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 
 // ── Workspace backup / restore ────────────────────────────────────────────────
-export const startWorkspaceBackup    = (workspace) =>
-  api.post('/tools/workspace-backup', { workspace }).then(r => r.data)
+export const startWorkspaceBackup    = (workspace, name) =>
+  api.post('/tools/workspace-backup', { workspace, name }).then(r => r.data)
 export const getBackupJob            = (id) =>
   api.get(`/tools/backup-jobs/${id}`).then(r => r.data)
 export const listWorkspaceArchives   = () =>

@@ -730,7 +730,6 @@ const ROW_BTN         = 'text-xs px-2.5 py-1 rounded border transition-colors di
 const ROW_BTN_PRIMARY = `${ROW_BTN} border-amber-700/60 text-amber-300 hover:bg-amber-900/30`            // Roll back / Restore
 const ROW_BTN_NEUTRAL = `${ROW_BTN} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500` // Download
 const ROW_BTN_DELETE  = `${ROW_BTN} border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-700/60` // Delete
-const UPLOAD_BTN      = 'text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-50'
 const createBtnClass  = (enabled) =>
   `w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
     enabled ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
@@ -749,20 +748,40 @@ function FileRow({ title, meta, children }) {
   )
 }
 
-// A list header with a count and a consistent "Upload" button + hidden input.
-function SavedList({ label, count, uploadRef, uploading, onUpload, ext, accept, children }) {
+// A saved-files list header with a count.
+function SavedList({ label, count, children }) {
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+      <div className="border-b border-gray-800 pb-2 mb-3">
         <h4 className="text-sm font-semibold text-gray-300">
           {label} <span className="ml-1 text-xs font-normal text-gray-600">({count})</span>
         </h4>
-        <button onClick={() => uploadRef.current?.click()} disabled={uploading} className={UPLOAD_BTN}>
-          {uploading ? 'Uploading…' : `↑ Upload ${ext}`}
-        </button>
-        <input ref={uploadRef} type="file" accept={accept} onChange={onUpload} className="hidden" />
       </div>
       {children}
+    </div>
+  )
+}
+
+// A small drag-and-drop zone that also opens a file dialog on click. Used to
+// bring a snapshot/backup in from elsewhere (upload, then roll back / restore).
+function DropZone({ onFile, accept, hint, busy, busyLabel }) {
+  const ref = useRef(null)
+  const [over, setOver] = useState(false)
+  return (
+    <div
+      onClick={() => !busy && ref.current?.click()}
+      onDragOver={e => { e.preventDefault(); if (!busy) setOver(true) }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { e.preventDefault(); setOver(false); if (busy) return; const f = e.dataTransfer.files?.[0]; if (f) onFile(f) }}
+      className={`border-2 border-dashed rounded-xl px-4 py-3 text-center transition-colors ${
+        busy ? 'opacity-60 cursor-wait border-gray-700'
+        : over ? 'border-brand-500 bg-brand-950/20 cursor-pointer'
+        : 'border-gray-700 hover:border-brand-600 cursor-pointer'
+      }`}
+    >
+      <p className="text-xs text-gray-400">{busy ? busyLabel : hint}</p>
+      <input ref={ref} type="file" accept={accept} className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} />
     </div>
   )
 }
@@ -782,9 +801,9 @@ function WorkspaceBackup() {
   const [snapDeleting, setSnapDeleting] = useState({})
   const [rollingBack, setRollingBack]   = useState({})
   const [snapUploading, setSnapUploading] = useState(false)
-  const snapUploadRef = useRef(null)
 
   // Full backup (.rwb) state
+  const [bkpName, setBkpName]               = useState('')    // optional custom backup filename
   const [activeJobId, setActiveJobId]       = useState(null)  // job ID string while running
   const [backupErr, setBackupErr]           = useState(null)
   const [bkpMsg, setBkpMsg]                 = useState(null)  // { ok, text } — restore/upload/delete
@@ -792,7 +811,6 @@ function WorkspaceBackup() {
   const [downloading, setDownloading]       = useState({})
   const [restoringArchive, setRestoringArchive] = useState({})
   const [archiveUploading, setArchiveUploading] = useState(false)
-  const archiveUploadRef = useRef(null)
 
   // Workspace list
   const { data: workspaces = [] } = useQuery({
@@ -834,8 +852,9 @@ function WorkspaceBackup() {
     setBackupErr(null)
     setActiveJobId(null)
     try {
-      const job = await startWorkspaceBackup(selectedWs)
+      const job = await startWorkspaceBackup(selectedWs, bkpName.trim())
       setActiveJobId(job.id)
+      setBkpName('')
     } catch (e) {
       setBackupErr(e?.response?.data?.error || e.message)
     }
@@ -904,16 +923,14 @@ function WorkspaceBackup() {
   }
 
   // Upload a .rwb to the server — it joins the list, then restore it like any other.
-  async function uploadArchive(e) {
-    const f = e.target.files?.[0]
-    e.target.value = '' // allow re-uploading the same file
+  async function uploadArchive(f) {
     if (!f) return
     setArchiveUploading(true); setBkpMsg(null)
     try {
       const fd = new FormData()
       fd.append('archive', f)
       const a = await uploadWorkspaceArchive(fd)
-      setBkpMsg({ ok: true, text: `Uploaded ${a.filename}${a.workspace ? ` (workspace: ${a.workspace})` : ''}. Restore it from the list below.` })
+      setBkpMsg({ ok: true, text: `Uploaded ${a.filename}${a.workspace ? ` (workspace: ${a.workspace})` : ''}. Restore it from the list above.` })
       refetchArchives()
     } catch (err) {
       setBkpMsg({ ok: false, text: err?.response?.data?.error || err.message })
@@ -987,16 +1004,14 @@ function WorkspaceBackup() {
     } catch (e) { setSnapMsg({ ok: false, text: e.message }) }
   }
 
-  async function uploadSnapshot(e) {
-    const f = e.target.files?.[0]
-    e.target.value = '' // allow re-uploading the same file
+  async function uploadSnapshot(f) {
     if (!f) return
     setSnapUploading(true); setSnapMsg(null)
     try {
       const fd = new FormData()
       fd.append('snapshot', f)
       const snap = await uploadWorkspaceSnapshot(fd)
-      setSnapMsg({ ok: true, text: `Uploaded ${snap.filename}${snap.workspace ? ` (workspace: ${snap.workspace})` : ''}.` })
+      setSnapMsg({ ok: true, text: `Uploaded ${snap.filename}${snap.workspace ? ` (workspace: ${snap.workspace})` : ''}. Roll back to it from the list above.` })
       refetchSnapshots()
     } catch (err) {
       setSnapMsg({ ok: false, text: err?.response?.data?.error || err.message })
@@ -1062,8 +1077,7 @@ function WorkspaceBackup() {
             {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{snapMsg.text}</p>}
           </div>
 
-          <SavedList label="Saved snapshots" count={snapshots.length}
-            uploadRef={snapUploadRef} uploading={snapUploading} onUpload={uploadSnapshot} ext=".rws" accept=".rws">
+          <SavedList label="Saved snapshots" count={snapshots.length}>
             {snapshots.length === 0
               ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
               : (
@@ -1083,6 +1097,22 @@ function WorkspaceBackup() {
                 </div>
               )}
           </SavedList>
+
+          {/* Bring a snapshot in from elsewhere */}
+          <DropZone onFile={uploadSnapshot} accept=".rws" busy={snapUploading}
+            busyLabel="Uploading snapshot…"
+            hint="↑ Drop a .rws snapshot here, or click to browse" />
+
+          {/* Snapshot-specific guidance */}
+          <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rolling back configuration</p>
+            <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
+              <li>Click <strong className="text-gray-400">Roll back</strong> on a snapshot to overwrite the workspace's <code className="font-mono text-gray-400">config.json</code> and every <code className="font-mono text-gray-400">.env</code></li>
+              <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-gray-400">.rws</code> above — it joins the list, then roll back to it</li>
+              <li>If a secret (DB password, API key…) changed since the snapshot, update it afterward and redeploy</li>
+              <li>Volume data is never touched — use a full backup for that</li>
+            </ol>
+          </div>
         </section>
 
         {/* ── Full backup (.rwb) ── */}
@@ -1096,6 +1126,17 @@ function WorkspaceBackup() {
           </div>
 
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                Backup name <span className="text-gray-600 font-normal">(optional)</span>
+              </label>
+              <input
+                value={bkpName}
+                onChange={e => setBkpName(e.target.value)}
+                placeholder={selectedWs ? `${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>-<timestamp>.rwb'}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+              />
+            </div>
             <button onClick={startBackup} disabled={!selectedWs || isRunning} className={createBtnClass(!!selectedWs && !isRunning)}>
               {isRunning ? '⏳ Backing up…' : 'Start full backup'}
             </button>
@@ -1135,8 +1176,7 @@ function WorkspaceBackup() {
             )}
           </div>
 
-          <SavedList label="Backups on server" count={archives.length}
-            uploadRef={archiveUploadRef} uploading={archiveUploading} onUpload={uploadArchive} ext=".rwb" accept=".rwb,.tar.gz,.gz">
+          <SavedList label="Backups on server" count={archives.length}>
             {bkpMsg && <p className={`text-xs px-1 mb-2 ${bkpMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{bkpMsg.text}</p>}
             {archives.length === 0
               ? <p className="text-xs text-gray-600 py-4 text-center">No backups yet.</p>
@@ -1159,19 +1199,24 @@ function WorkspaceBackup() {
                 </div>
               )}
           </SavedList>
-        </section>
-      </div>
 
-      {/* Restore guidance (applies to full backups) */}
-      <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Restoring a full backup</p>
-        <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
-          <li>Stop the workspace's containers if it already exists</li>
-          <li>If the <code className="font-mono text-gray-400">.rwb</code> lives elsewhere, Upload it first — it joins the list</li>
-          <li>Click <strong className="text-gray-400">Restore</strong> on the backup row (an existing workspace is replaced)</li>
-          <li>The workspace appears in the sidebar immediately</li>
-          <li>Run <code className="font-mono text-gray-400">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
-        </ol>
+          {/* Bring a backup in from elsewhere */}
+          <DropZone onFile={uploadArchive} accept=".rwb,.tar.gz,.gz" busy={archiveUploading}
+            busyLabel="Uploading backup…"
+            hint="↑ Drop a .rwb backup here, or click to browse" />
+
+          {/* Backup-specific guidance */}
+          <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Restoring a full backup</p>
+            <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
+              <li>Stop the workspace's containers if it already exists</li>
+              <li>To use a backup from elsewhere, drop the <code className="font-mono text-gray-400">.rwb</code> above — it joins the list</li>
+              <li>Click <strong className="text-gray-400">Restore</strong> on a backup row (an existing workspace is replaced)</li>
+              <li>The workspace appears in the sidebar immediately</li>
+              <li>Run <code className="font-mono text-gray-400">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
+            </ol>
+          </div>
+        </section>
       </div>
     </div>
   )
