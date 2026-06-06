@@ -222,41 +222,64 @@ function ImageEditor({ images, onChange }) {
   )
 }
 
-function EnvVarEditor({ envVars, onChange }) {
+function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange, deployment }) {
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
+  const [newSecret, setNewSecret] = useState(false)
   const entries = Object.entries(envVars)
+  const secretSet = new Set(secretKeys)
+  const swarm = deployment === 'swarm'
 
   function update(k, v) { onChange({ ...envVars, [k]: v }) }
-  function remove(k) { const next = { ...envVars }; delete next[k]; onChange(next) }
+  function remove(k) {
+    const next = { ...envVars }; delete next[k]; onChange(next)
+    if (secretSet.has(k)) onSecretKeysChange(secretKeys.filter(x => x !== k))
+  }
+  function toggleSecret(k) {
+    onSecretKeysChange(secretSet.has(k) ? secretKeys.filter(x => x !== k) : [...secretKeys, k])
+  }
   function add() {
     const k = newKey.trim()
     if (!k) return
     onChange({ ...envVars, [k]: newVal })
-    setNewKey('')
-    setNewVal('')
+    if (newSecret && !secretSet.has(k)) onSecretKeysChange([...secretKeys, k])
+    setNewKey(''); setNewVal(''); setNewSecret(false)
   }
 
   return (
     <div className="space-y-2">
-      {entries.map(([k, v]) => (
-        <div key={k} className="flex items-center gap-2">
-          <span className="font-mono text-xs text-gray-300 w-44 shrink-0 truncate">{k}</span>
-          <input
-            type="text" value={v} onChange={e => update(k, e.target.value)}
-            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500"
-          />
-          <button type="button" onClick={() => remove(k)} className="text-gray-500 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-red-950/30"><TrashIcon /></button>
-        </div>
-      ))}
+      {swarm
+        ? <p className="text-xs text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) when this environment is created.</p>
+        : <p className="text-xs text-amber-400/70">⚠ Compose keeps values plaintext in .env — flag secrets and deploy with Swarm for encryption at rest.</p>}
+      {entries.map(([k, v]) => {
+        const secret = secretSet.has(k)
+        return (
+          <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-amber-500/70' : 'border-transparent'}`}>
+            <button type="button" onClick={() => toggleSecret(k)} title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
+              className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-amber-400' : 'text-gray-600 hover:text-gray-300'}`}>
+              {secret ? '🔒' : '🔓'}
+            </button>
+            <span className="font-mono text-xs text-gray-300 w-40 shrink-0 truncate">{k}</span>
+            <input
+              type={secret ? 'password' : 'text'} value={v} onChange={e => update(k, e.target.value)}
+              className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500"
+            />
+            <button type="button" onClick={() => remove(k)} className="text-gray-500 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-red-950/30"><TrashIcon /></button>
+          </div>
+        )
+      })}
       <div className="flex gap-2 pt-1">
+        <button type="button" onClick={() => setNewSecret(s => !s)} title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
+          className={`shrink-0 w-7 h-7 flex items-center justify-center rounded text-xs ${newSecret ? 'text-amber-400 bg-gray-800' : 'text-gray-600 hover:text-gray-300'}`}>
+          {newSecret ? '🔒' : '🔓'}
+        </button>
         <input
           type="text" placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
-          className="w-44 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500"
+          className="w-40 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500"
         />
         <input
-          type="text" placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
+          type={newSecret ? 'password' : 'text'} placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
           className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500"
         />
@@ -594,7 +617,7 @@ function Step2({ data, onChange, errors }) {
 
 // ── Environments (wizard step 4 — Step3 component) ────────────────────────────
 
-const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {} }
+const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {}, secret_keys: [] }
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
 function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0 }) {
@@ -724,16 +747,18 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
 
       {/* Per-environment variables */}
       <div className="pt-3 border-t border-gray-700/60">
-        <EnvVarsSection vars={env.vars || {}} onChange={v => upd('vars', v)} />
+        <EnvVarsSection vars={env.vars || {}} secretKeys={env.secret_keys || []} deployment={env.deployment}
+          onChange={v => upd('vars', v)} onSecretKeysChange={s => upd('secret_keys', s)} />
       </div>
     </div>
   )
 }
 
 // Collapsible per-env vars section inside EnvForm
-function EnvVarsSection({ vars, onChange }) {
+function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, deployment }) {
   const [open, setOpen] = useState(false)
   const count = Object.keys(vars).length
+  const secretCount = secretKeys.length
   return (
     <div>
       <button type="button" onClick={() => setOpen(o => !o)}
@@ -741,9 +766,10 @@ function EnvVarsSection({ vars, onChange }) {
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
         {count > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{count} set</span>}
+        {secretCount > 0 && <span className="ml-1 text-amber-400 normal-case font-normal">· {secretCount} 🔒</span>}
         <span className="ml-auto text-gray-600 normal-case font-normal">per-environment .env</span>
       </button>
-      {open && <div className="mt-3"><EnvVarEditor envVars={vars} onChange={onChange} /></div>}
+      {open && <div className="mt-3"><EnvVarEditor envVars={vars} secretKeys={secretKeys} onChange={onChange} onSecretKeysChange={onSecretKeysChange} deployment={deployment} /></div>}
     </div>
   )
 }
@@ -756,9 +782,10 @@ function Step3({ data, onChange }) {
     onChange('environments', envs)
   }
   function addEnv() {
-    // Inherit vars from the first environment so all envs start with the same keys
+    // Inherit vars + secret flags from the first environment so all envs start aligned
     const inheritedVars = data.environments.length > 0 ? { ...(data.environments[0].vars || {}) } : {}
-    onChange('environments', [...data.environments, { ...DEFAULT_ENV, vars: inheritedVars }])
+    const inheritedSecrets = data.environments.length > 0 ? [...(data.environments[0].secret_keys || [])] : []
+    onChange('environments', [...data.environments, { ...DEFAULT_ENV, vars: inheritedVars, secret_keys: inheritedSecrets }])
   }
   function removeEnv(idx) {
     onChange('environments', data.environments.filter((_, i) => i !== idx))

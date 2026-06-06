@@ -79,6 +79,7 @@ type EnvRequest struct {
 	GitRepo    string            `json:"git_repo"`
 	GitBranch  string            `json:"git_branch"`
 	Vars       map[string]string `json:"vars"`               // per-environment initial env vars
+	SecretKeys []string          `json:"secret_keys,omitempty"` // env-var names flagged as secrets (Phase 8)
 	HostID     int64             `json:"host_id,omitempty"`  // per-env remote host (0 = local); bound after create
 }
 
@@ -236,6 +237,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		}
 		if len(mergedEnvVars) > 0 {
 			envBlock["env_vars"] = mergedEnvVars
+		}
+		if len(e.SecretKeys) > 0 {
+			envBlock["secret_keys"] = e.SecretKeys
 		}
 
 		environments[envName] = envBlock

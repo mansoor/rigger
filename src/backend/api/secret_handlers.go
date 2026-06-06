@@ -158,3 +158,43 @@ func (h *Handler) GetSecretEvents(w http.ResponseWriter, r *http.Request) {
 func shellRun(name, env, cmd string, out *bytes.Buffer) shell.RunOptions {
 	return shell.RunOptions{Workspace: name, Command: cmd, Env: env, Stdout: out, Stderr: out}
 }
+
+// seedEnvVars writes a new environment's initial vars during workspace creation,
+// applying Phase 8 secret handling: for swarm envs, flagged values become Docker
+// secrets (encrypted at rest) and are kept out of .env; for compose they stay
+// plaintext. The env's secret_keys are already persisted to config.json by
+// workspace.Create. A failed Docker-secret creation is returned as a soft warning
+// and the value is left in .env as a fallback (never silently dropped).
+func (h *Handler) seedEnvVars(name string, env workspace.EnvRequest, claims *auth.Claims, ip string) error {
+	skip := map[string]bool{}
+	versions := map[string]int{}
+	var warn error
+	if env.Deployment == "swarm" {
+		for _, k := range env.SecretKeys {
+			val, ok := env.Vars[k]
+			if !ok || val == "" {
+				continue
+			}
+			if _, err := h.bridge.EnsureSwarmSecret(name, env.Name, k, val, 1); err != nil {
+				warn = err // keep the value in .env as a fallback
+				continue
+			}
+			versions[k] = 1
+			skip[k] = true
+		}
+	}
+	if err := workspace.UpdateEnvVars(h.workspacesDir, name, env.Name, env.Vars, nil, skip); err != nil {
+		return err
+	}
+	if len(versions) > 0 {
+		if err := workspace.SetSecretMeta(h.workspacesDir, name, env.Name, env.SecretKeys, versions); err != nil {
+			return err
+		}
+	}
+	for _, k := range env.SecretKeys {
+		if _, ok := env.Vars[k]; ok {
+			h.recordSecretEvent(name, env.Name, k, "write", claims, ip)
+		}
+	}
+	return warn
+}

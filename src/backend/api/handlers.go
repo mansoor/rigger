@@ -391,9 +391,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			allOk = false
 		} else {
 			send("\033[32m✓ " + env.Name + " bootstrapped\033[0m\n")
-			// Write per-environment initial env vars if provided
-			if len(env.Vars) > 0 {
-				if err2 := workspace.UpdateEnvVars(h.workspacesDir, msg.Workspace.Name, env.Name, env.Vars, nil, nil); err2 != nil {
+			// Write per-environment initial env vars (Phase 8 secret-aware: swarm
+			// secrets become Docker secrets, kept out of .env).
+			if len(env.Vars) > 0 || len(env.SecretKeys) > 0 {
+				if err2 := h.seedEnvVars(msg.Workspace.Name, env, auth.ClaimsFromContext(r.Context()), clientIP(r)); err2 != nil {
 					send("\033[33m⚠ env vars for " + env.Name + ": " + err2.Error() + "\033[0m\n")
 				} else {
 					send("\033[32m✓ " + env.Name + " env vars written\033[0m\n")
