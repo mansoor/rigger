@@ -319,6 +319,113 @@ const PLACEHOLDER = `services:
     volumes:
       - db_data:/var/lib/mysql`
 
+// ── Color-coded JSON editor ─────────────────────────────────────────────────────
+// A transparent <textarea> layered over a syntax-highlighted <pre>. Both share the
+// exact font/padding/wrapping, so the (invisible) caret and selection line up with
+// the colored text. The <pre> sits in normal flow and dictates height (grows with
+// content); the textarea is absolutely positioned over it. No external deps.
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Token classes: keys (sky), string values (emerald), numbers (amber),
+// booleans/null (purple), punctuation (gray).
+const JSON_TOKEN_RE = /("(?:\\.|[^"\\])*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([{}[\],:])/g
+
+function highlightJson(code) {
+  let out = '', last = 0, m
+  JSON_TOKEN_RE.lastIndex = 0
+  while ((m = JSON_TOKEN_RE.exec(code))) {
+    out += escapeHtml(code.slice(last, m.index))
+    if (m[1] && m[2] !== undefined) {            // "key":
+      out += `<span class="text-sky-300">${escapeHtml(m[1])}</span><span class="text-gray-500">${escapeHtml(m[2])}</span>`
+    } else if (m[1]) {                           // "string value"
+      out += `<span class="text-emerald-300">${escapeHtml(m[1])}</span>`
+    } else if (m[3]) {                           // number
+      out += `<span class="text-amber-300">${escapeHtml(m[3])}</span>`
+    } else if (m[4]) {                           // true | false | null
+      out += `<span class="text-purple-300">${escapeHtml(m[4])}</span>`
+    } else if (m[5]) {                           // punctuation
+      out += `<span class="text-gray-500">${escapeHtml(m[5])}</span>`
+    }
+    last = m.index + m[0].length
+  }
+  out += escapeHtml(code.slice(last))
+  return out
+}
+
+function JsonEditor({ value, onChange, valid, minHeight }) {
+  const shared = 'm-0 px-4 py-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words'
+  return (
+    <div
+      className={`relative w-full rounded-xl bg-gray-950 border ${valid ? 'border-gray-700 focus-within:border-brand-500' : 'border-red-700/60 focus-within:border-red-500'}`}
+      style={{ minHeight }}
+    >
+      <pre aria-hidden="true" className={`${shared} text-gray-200 pointer-events-none`}
+        dangerouslySetInnerHTML={{ __html: highlightJson(value) + '\n' }} />
+      <textarea
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        spellCheck={false}
+        className={`${shared} absolute inset-0 w-full h-full resize-none bg-transparent text-transparent caret-white focus:outline-none`}
+      />
+    </div>
+  )
+}
+
+// ── Select-image-workspace modal (Template Manager source) ──────────────────────
+function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
+  const [ws, setWs]   = useState(workspaces[0]?.name || '')
+  const [env, setEnv] = useState('')
+  const envs = workspaces.find(w => w.name === ws)?.envs || []
+  const chosenEnv = env || envs[0] || ''
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-white">Select an image workspace</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+        </div>
+        <p className="text-sm text-gray-500">
+          Pulls the stack's images and environment-variable defaults (secrets masked) into the editor as a draft template.
+        </p>
+
+        {workspaces.length === 0 ? (
+          <p className="text-sm text-gray-400 bg-gray-800/50 border border-gray-700/60 rounded-lg px-3 py-3">
+            No image workspaces found. Only image stacks can become templates.
+          </p>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Workspace</label>
+              <select value={ws} onChange={e => { setWs(e.target.value); setEnv('') }}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
+                {workspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Environment <span className="normal-case font-normal text-gray-500">(for env-var defaults)</span>
+              </label>
+              <select value={chosenEnv} onChange={e => setEnv(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
+                {envs.map(en => <option key={en} value={en}>{en}</option>)}
+              </select>
+            </div>
+            {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+            <button onClick={() => onLoad(ws, chosenEnv)} disabled={!ws || busy}
+              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+              {busy ? 'Loading…' : 'Load into editor'}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ComposeToTemplate() {
   const [input, setInput]           = useState('')      // compose YAML (left panel)
   const [templateName, setName]     = useState('')      // name used by the compose converter
@@ -331,15 +438,13 @@ function ComposeToTemplate() {
   const fileInputRef                = useRef(null)       // compose import
   const tplFileRef                  = useRef(null)       // template upload
 
-  // "From a workspace" source — pull an existing image stack into the editor.
-  const [wsPick, setWsPick]   = useState('')
-  const [wsEnv, setWsEnv]     = useState('')
+  // "From a workspace" source — pick an image stack (in a modal) and pull it in.
+  const [wsModalOpen, setWsModalOpen] = useState(false)
   const [wsBusy, setWsBusy]   = useState(false)
   const [wsError, setWsError] = useState('')
   const { data: allWorkspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces, staleTime: 30_000 })
   // Only image stacks can become templates (project.type lives in the nested config).
   const imageWorkspaces = allWorkspaces.filter(w => w.config?.project?.type === 'image')
-  const pickedEnvs = imageWorkspaces.find(w => w.name === wsPick)?.envs || []
 
   // Parse the editable JSON for the summary chips, metadata helpers and download.
   let parsed = null
@@ -364,13 +469,14 @@ function ComposeToTemplate() {
   // Pull an image workspace's stack (images + masked env-var defaults) into the
   // editor as a draft. Name/label are seeded from the workspace as an editable
   // starting point; the user reviews, names and validates before saving.
-  async function loadFromWorkspace() {
-    if (!wsPick) return
+  async function loadFromWorkspace(wsName, env) {
+    if (!wsName) return
     setWsBusy(true); setWsError('')
     try {
-      const draft = await fetchTemplateDraft(wsPick, wsEnv || pickedEnvs[0])
-      const slug = wsPick.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
-      loadTemplate({ ...draft, name: draft.name || slug, label: draft.label || wsPick })
+      const draft = await fetchTemplateDraft(wsName, env)
+      const slug = wsName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+      loadTemplate({ ...draft, name: draft.name || slug, label: draft.label || wsName })
+      setWsModalOpen(false)
     } catch (e) {
       setWsError(e?.response?.data?.error || e.message)
     } finally {
@@ -503,43 +609,11 @@ function ComposeToTemplate() {
       {/* Description */}
       <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
         Create a reusable prebuilt template from one of three sources: convert a{' '}
-        <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left,{' '}
-        <strong className="text-gray-300">Upload template</strong> on the right, or pull in an existing{' '}
-        <strong className="text-gray-300">image workspace</strong> below. Then edit the JSON, fill in name / label /
-        description / tags, and <strong className="text-gray-300">Validate</strong> (which also checks the name is
-        unique) to unlock <strong className="text-gray-300">Save as template</strong>.
-      </div>
-
-      {/* Source: from an existing workspace */}
-      <div className="bg-gray-800/40 border border-gray-700/60 rounded-xl p-3 flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-gray-300">Start from a workspace:</span>
-        <select
-          value={wsPick}
-          onChange={e => { setWsPick(e.target.value); setWsEnv(''); setWsError('') }}
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
-        >
-          <option value="">— select image workspace —</option>
-          {imageWorkspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
-        </select>
-        {pickedEnvs.length > 1 && (
-          <select
-            value={wsEnv || pickedEnvs[0]}
-            onChange={e => setWsEnv(e.target.value)}
-            title="Environment to read env-var defaults from"
-            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
-          >
-            {pickedEnvs.map(en => <option key={en} value={en}>{en}</option>)}
-          </select>
-        )}
-        <button
-          onClick={loadFromWorkspace}
-          disabled={!wsPick || wsBusy}
-          className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${
-            wsPick && !wsBusy ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
-          }`}
-        >{wsBusy ? 'Loading…' : 'Load into editor →'}</button>
-        <span className="text-xs text-gray-600">Pulls images + env-var defaults (secrets masked) into the editor.</span>
-        {wsError && <span className="text-xs text-red-400 w-full">{wsError}</span>}
+        <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left, or — on the right —{' '}
+        <strong className="text-gray-300">Upload template</strong> or <strong className="text-gray-300">Select image
+        workspace</strong>. Then edit the JSON, fill in name / label / description / tags, and{' '}
+        <strong className="text-gray-300">Validate</strong> (which also checks the name is unique) to unlock{' '}
+        <strong className="text-gray-300">Save as template</strong>.
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
@@ -574,23 +648,15 @@ function ComposeToTemplate() {
             placeholder={PLACEHOLDER}
             spellCheck={false}
             className="w-full px-3 py-3 bg-gray-950 border border-gray-700 rounded-xl text-gray-200 text-xs font-mono placeholder-gray-700 focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
-            style={{ minHeight: '28rem' }}
+            style={{ minHeight: '35rem' }}
           />
 
           {/* Convert bar */}
-          <div className="flex items-center gap-3 pt-1">
-            <input
-              type="text"
-              value={templateName}
-              onChange={e => setName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && convert()}
-              placeholder="Template name (e.g. Ghost CMS)"
-              className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-brand-500"
-            />
+          <div className="pt-1">
             <button
               onClick={convert}
               disabled={!input.trim()}
-              className={`px-5 py-2 text-sm font-semibold rounded-lg transition-colors shrink-0 ${
+              className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
                 input.trim() ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
               }`}
             >Convert →</button>
@@ -603,6 +669,10 @@ function ComposeToTemplate() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <label className="text-sm font-semibold text-gray-300">Rigger template JSON</label>
             <div className="flex items-center gap-2">
+              <button onClick={() => { setWsError(''); setWsModalOpen(true) }}
+                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+                ⊞ Select image workspace
+              </button>
               <button onClick={() => tplFileRef.current?.click()}
                 className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
                 ↑ Upload template
@@ -635,9 +705,10 @@ function ComposeToTemplate() {
           {/* Empty state */}
           {!hasContent && !convertError && (
             <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
-              style={{ minHeight: '28rem' }}>
+              style={{ minHeight: '35rem' }}>
               <p className="text-gray-700 text-sm text-center px-6">
-                Convert a compose file, or <span className="text-gray-500">Upload template</span> to load an existing one for editing.
+                Convert a compose file, <span className="text-gray-500">Upload template</span>, or{' '}
+                <span className="text-gray-500">Select image workspace</span> to load one for editing.
               </p>
             </div>
           )}
@@ -703,14 +774,8 @@ function ComposeToTemplate() {
                 />
               </div>
 
-              {/* Editable template JSON — the source of truth */}
-              <textarea
-                value={tplJson}
-                onChange={e => editJson(e.target.value)}
-                spellCheck={false}
-                className={`w-full px-4 py-3 bg-gray-950 border rounded-xl text-gray-200 text-xs font-mono leading-relaxed focus:outline-none resize-y ${parsed ? 'border-gray-700 focus:border-brand-500' : 'border-red-700/60 focus:border-red-500'}`}
-                style={{ minHeight: '22rem' }}
-              />
+              {/* Editable template JSON — the source of truth (color-coded) */}
+              <JsonEditor value={tplJson} onChange={editJson} valid={!!parsed} minHeight="22rem" />
               {!parsed && (
                 <p className="text-xs text-red-400/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
               )}
@@ -777,6 +842,16 @@ function ComposeToTemplate() {
           )}
         </div>
       </div>
+
+      {wsModalOpen && (
+        <SelectWorkspaceModal
+          workspaces={imageWorkspaces}
+          busy={wsBusy}
+          error={wsError}
+          onLoad={loadFromWorkspace}
+          onClose={() => setWsModalOpen(false)}
+        />
+      )}
     </div>
   )
 }
