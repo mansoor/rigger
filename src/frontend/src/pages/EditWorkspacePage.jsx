@@ -1032,8 +1032,15 @@ export default function EditWorkspacePage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-xl font-bold text-white">Edit workspace</h1>
-            <p className="text-sm text-gray-400 mt-0.5">{name}</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Edit workspace</p>
+            <div className="flex items-center gap-2.5 mt-0.5">
+              <h1 className="text-2xl font-bold text-white">{name}</h1>
+              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                project?.type === 'image' ? 'bg-blue-950 text-blue-300' : 'bg-purple-950 text-purple-300'
+              }`}>
+                {project?.type === 'image' ? 'image' : 'custom'}
+              </span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -1060,15 +1067,21 @@ export default function EditWorkspacePage() {
         {/* Project settings */}
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Project</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 grid grid-cols-2 gap-4">
+          <div className={`bg-gray-900 border border-gray-800 rounded-xl p-5 grid gap-4 ${
+            project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'
+          }`}>
             <div>
               <Label>Project name</Label>
               <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
             </div>
-            <div>
-              <Label>Registry</Label>
-              <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
-            </div>
+            {/* Registry only applies to custom (build) stacks — image stacks pull
+                images directly, so hide it (matches the New Workspace wizard). */}
+            {project?.type !== 'image' && (
+              <div>
+                <Label>Registry</Label>
+                <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+              </div>
+            )}
           </div>
         </section>
 
