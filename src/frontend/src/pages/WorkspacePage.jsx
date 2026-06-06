@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, openActionSocket, exportTemplate, fetchActionRuns, clearActionRuns } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
 import TerminalModal from '../components/TerminalModal'
@@ -397,7 +398,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
-  const [downConfirm, setDownConfirm]     = useState(false) // confirm before Inactivate (down)
+  const confirm = useConfirm() // gated confirm dialog for destructive actions
   const [containersOpen, setContainersOpen] = useState(true)
 
   // Card collapse — hides the metrics + services detail to keep cards compact.
@@ -465,19 +466,6 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {/* Actions — state-aware: primary lifecycle buttons + a compact toolbar.
           Down (Inactivate) is destructive, so it asks to confirm first. */}
       <div className="mt-auto relative flex flex-col gap-2">
-        {downConfirm && (
-          <div className="absolute inset-x-0 bottom-full mb-2 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-3">
-            <p className="text-sm text-gray-200">Inactivate {envName}?</p>
-            <p className="text-xs text-gray-500 mt-0.5 mb-3">Removes the containers (volumes are kept). Deploy brings it back.</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setDownConfirm(false)}
-                className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors">Cancel</button>
-              <button onClick={() => { setDownConfirm(false); handleAction('down') }}
-                className="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 transition-colors">Inactivate</button>
-            </div>
-          </div>
-        )}
-
         {/* Primary lifecycle: Deploy / Update (image stacks) / Stop */}
         <div className="flex gap-2">
           <PrimaryBtn variant="deploy" icon="deploy" fill onClick={() => handleAction('start')}
@@ -500,7 +488,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           <ToolBtn icon="restart" title="Restart the existing containers in place" disabled={!hasContainers}
             onClick={() => handleAction('restart')} className="text-gray-500 hover:text-green-400" />
           <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
-            onClick={() => setDownConfirm(true)} className="text-red-400/50 hover:text-red-400" />
+            onClick={async () => {
+              if (await confirm({
+                title: `Inactivate ${envName}?`,
+                message: 'Removes the containers (volumes are kept). Deploy brings it back.',
+                confirmLabel: 'Inactivate',
+              })) handleAction('down')
+            }} className="text-red-400/50 hover:text-red-400" />
           <span className="w-px self-stretch bg-gray-800 mx-1" />
           <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-gray-500 hover:text-violet-400" />
           <ToolBtn icon="compose" title="Edit compose" onClick={onCompose} className="text-gray-500 hover:text-teal-400" />
@@ -792,9 +786,9 @@ function runsToEntries(runs) {
 
 // NOTE: mounted with key={wsName} by the parent, so it remounts per workspace.
 function ActionLog({ wsName, actionWs, actionMeta }) {
+  const confirm = useConfirm()
   const [entries, setEntries] = useState([])
   const [running, setRunning] = useState(false)
-  const [confirmClear, setConfirmClear] = useState(false)
   const [tail, setTail] = useState(() => {
     const v = Number(localStorage.getItem('rigger:actionlog:tail'))
     return TAIL_OPTIONS.includes(v) ? v : 500
@@ -881,7 +875,15 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
             </svg>
           </button>
           {entries.length > 0 && (
-            <button onClick={() => setConfirmClear(true)} title="Delete recorded history"
+            <button
+              onClick={async () => {
+                if (await confirm({
+                  title: 'Delete action history?',
+                  message: "Permanently removes the recorded runs for this workspace from the server. This can't be undone.",
+                  confirmLabel: 'Delete',
+                })) clearLog()
+              }}
+              title="Delete recorded history"
               className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors">
               <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M4 6h16M9 6V4h6v2M7 6l1 14h8l1-14" /><path d="M10 10v6M14 10v6" />
@@ -916,21 +918,6 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
           )
         )}
       </div>
-
-      {confirmClear && (
-        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60" onClick={() => setConfirmClear(false)}>
-          <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 max-w-xs" onClick={e => e.stopPropagation()}>
-            <p className="text-sm text-gray-200 mb-1">Delete action history?</p>
-            <p className="text-xs text-gray-500 mb-4">Permanently removes the recorded runs for this workspace from the server. This can’t be undone.</p>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setConfirmClear(false)}
-                className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">Cancel</button>
-              <button onClick={() => { setConfirmClear(false); clearLog() }}
-                className="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 transition-colors">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

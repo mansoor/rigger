@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
 import ErrorBoundary from './components/ErrorBoundary'
+import { ConfirmProvider } from './context/ConfirmContext'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
 import DashboardPage from './pages/DashboardPage'
@@ -64,7 +65,9 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AppRoutes />
+      <ConfirmProvider>
+        <AppRoutes />
+      </ConfirmProvider>
     </BrowserRouter>
   )
 }

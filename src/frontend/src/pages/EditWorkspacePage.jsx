@@ -7,6 +7,7 @@ import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
+import { useConfirm } from '../context/ConfirmContext'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -169,6 +170,7 @@ const RESTART_OPTIONS = [
 // until the user types into them. Without local state, portRowsToFields() would
 // immediately filter out the empty new row and Add would appear broken.
 function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
+  const confirm = useConfirm()
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
 
@@ -194,7 +196,15 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Service {idx + 1}</p>
         {allImages.length > 1 && (
-          <button type="button" onClick={() => onRemove(idx)} className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+          <button type="button"
+            onClick={async () => {
+              if (await confirm({
+                title: 'Remove service?',
+                message: `Remove "${img.name || `Service ${idx + 1}`}" from this workspace? It will be deleted when you save changes.`,
+                confirmLabel: 'Remove',
+              })) onRemove(idx)
+            }}
+            className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
         )}
       </div>
 
@@ -444,6 +454,7 @@ function ImagesEditor({ images, onChange }) {
 // ── Environment editor ────────────────────────────────────────────────────────
 
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames }) {
+  const confirm = useConfirm()
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
   const updGit = (k, v) => onChange({ ...cfg, git: { ...(cfg.git || {}), [k]: v } })
   const updReplicas = (k, v) => onChange({ ...cfg, replicas: { ...(cfg.replicas || {}), [k]: parseInt(v) || 1 } })
@@ -471,7 +482,13 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         </div>
         <button
           type="button"
-          onClick={onRemove}
+          onClick={async () => {
+            if (await confirm({
+              title: 'Remove environment?',
+              message: `Remove the "${envName}" environment from this workspace? It will be deleted when you save changes. (Its deployed containers are not touched until you redeploy.)`,
+              confirmLabel: 'Remove',
+            })) onRemove()
+          }}
           disabled={isOnlyEnv}
           title={isOnlyEnv ? 'Cannot remove the only environment' : undefined}
           className={`text-xs transition-colors ${isOnlyEnv ? 'text-gray-600 cursor-not-allowed' : 'text-red-400 hover:text-red-300'}`}

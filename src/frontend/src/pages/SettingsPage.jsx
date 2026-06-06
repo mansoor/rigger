@@ -941,15 +941,14 @@ function GeneralTab() {
   })
   const [acmeEmail, setAcmeEmail] = useState('')
   const [riggerDomain, setRiggerDomain] = useState('')
-
-  // Seed local state once loaded
-  useState(() => {
-    if (cfg.acme_email !== undefined) setAcmeEmail(cfg.acme_email || '')
-    if (cfg.rigger_domain !== undefined) setRiggerDomain(cfg.rigger_domain || '')
-  })
+  const [confirmDestructive, setConfirmDestructive] = useState(true)
 
   const saveMut = useMutation({
-    mutationFn: () => updateGeneralSettings({ acme_email: acmeEmail, rigger_domain: riggerDomain }),
+    mutationFn: () => updateGeneralSettings({
+      acme_email: acmeEmail,
+      rigger_domain: riggerDomain,
+      confirm_destructive: confirmDestructive ? 'true' : 'false',
+    }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
 
@@ -958,6 +957,8 @@ function GeneralTab() {
   if (!isLoading && !synced && cfg.acme_email !== undefined) {
     setAcmeEmail(cfg.acme_email || '')
     setRiggerDomain(cfg.rigger_domain || '')
+    // Default ON — only an explicit "false" disables confirmations.
+    setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setSynced(true)
   }
 
@@ -1019,6 +1020,26 @@ function GeneralTab() {
           <p className="text-xs text-gray-500 mt-1">
             Leave blank to access Rigger UI on port {' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
+          </p>
+        </div>
+      </div>
+
+      {/* Confirmations */}
+      <div>
+        <h2 className="text-base font-semibold text-white mb-1">Confirmations</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Show a confirmation dialog before destructive actions — removing a service or
+          environment, deleting backups/archives, clearing history, inactivating a stack, and the like.
+        </p>
+        <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+          <Toggle
+            checked={confirmDestructive}
+            onChange={setConfirmDestructive}
+            label="Confirm before destructive actions"
+          />
+          <p className="text-xs text-gray-500 mt-2">
+            Recommended (on by default). Turn off to skip these prompts. Stronger safeguards —
+            type-to-confirm workspace deletion and the Housekeeping prune flows — always stay on.
           </p>
         </div>
       </div>

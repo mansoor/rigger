@@ -8,6 +8,7 @@ import {
   restoreWorkspace, fetchWorkspaces,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useConfirm } from '../context/ConfirmContext'
 
 // ── docker-compose → Rigger template converter ──────────────────────────────────
 //
@@ -726,6 +727,7 @@ function fmtDate(s) {
 function WorkspaceBackup() {
   const qc    = useQueryClient()
   const token = useAuthStore(s => s.token)
+  const confirm = useConfirm()
 
   const [selectedWs, setSelectedWs]   = useState('')
   const [activeJobId, setActiveJobId] = useState(null)  // job ID string while running
@@ -802,6 +804,11 @@ function WorkspaceBackup() {
   }
 
   async function deleteArchive(filename) {
+    if (!(await confirm({
+      title: 'Delete archive?',
+      message: `Permanently delete the backup archive "${filename}"? This can't be undone.`,
+      confirmLabel: 'Delete',
+    }))) return
     setDeleting(d => ({ ...d, [filename]: true }))
     try {
       await deleteWorkspaceArchive(filename)
