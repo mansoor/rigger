@@ -2,7 +2,7 @@ import { useState, useRef } from 'react'
 import Layout from '../components/Layout'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  saveToolTemplate,
+  saveToolTemplate, fetchTemplates,
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive,
   restoreWorkspace, fetchWorkspaces,
@@ -318,38 +318,52 @@ const PLACEHOLDER = `services:
       - db_data:/var/lib/mysql`
 
 function ComposeToTemplate() {
-  const [input, setInput]           = useState('')
-  const [templateName, setName]     = useState('')
-  const [output, setOutput]         = useState(null)   // { result } | { error }
+  const [input, setInput]           = useState('')      // compose YAML (left panel)
+  const [templateName, setName]     = useState('')      // name used by the compose converter
+  const [convertError, setConvertError] = useState('')  // compose → JSON parse error
+  const [tplJson, setTplJson]       = useState('')      // editable template JSON — the source of truth
+  const [tagsText, setTagsText]     = useState('')      // comma-separated tags helper (synced on load)
+  const [validation, setValidation] = useState(null)    // null | {checking} | {ok:true,...} | {ok:false,errors:[]}
   const [copied, setCopied]         = useState(false)
-  const [saveState, setSaveState]   = useState(null)   // null | 'saving' | 'saved' | { error }
-  const [forceOverwrite, setForce]  = useState(false)
-  // Optional presentation metadata — written into the saved template so it shows
-  // up properly in the New Workspace picker. `label` overrides the auto-derived
-  // one (empty = use the derived label); tags are entered comma-separated.
-  const [label, setLabel]           = useState('')
-  const [desc, setDesc]             = useState('')
-  const [tagsInput, setTagsInput]   = useState('')
-  const fileInputRef                = useRef(null)
+  const [saveState, setSaveState]   = useState(null)    // null | 'saving' | 'saved' | { error }
+  const fileInputRef                = useRef(null)       // compose import
+  const tplFileRef                  = useRef(null)       // template upload
 
-  // Overlay the optional metadata onto the converted result so the JSON preview,
-  // copy, download and save all reflect what the user typed.
-  const finalResult = output?.result ? {
-    ...output.result,
-    label:       label.trim() || output.result.label,
-    description: desc.trim(),
-    tags:        tagsInput.split(',').map(t => t.trim()).filter(Boolean),
-  } : null
+  // Parse the editable JSON for the summary chips, metadata helpers and download.
+  let parsed = null
+  try { parsed = tplJson.trim() ? JSON.parse(tplJson) : null } catch { parsed = null }
+  const hasContent = tplJson.trim().length > 0
+
+  // Any edit to the template (textarea, a helper field, convert or upload) clears
+  // the last validation result, so Save stays disabled until the user re-validates.
+  function editJson(next) {
+    setTplJson(next)
+    setValidation(null)
+    setSaveState(null)
+    setCopied(false)
+  }
+
+  // Load a template object into the editor (from Convert or Upload).
+  function loadTemplate(tpl) {
+    editJson(JSON.stringify(tpl, null, 2))
+    setTagsText(Array.isArray(tpl?.tags) ? tpl.tags.join(', ') : '')
+  }
+
+  // Patch one top-level key on the parsed template and write it back to the editor.
+  function patchField(key, value) {
+    if (!parsed) return
+    editJson(JSON.stringify({ ...parsed, [key]: value }, null, 2))
+  }
 
   function convert() {
     if (!input.trim()) return
-    setOutput(convertCompose(input, templateName || 'my-stack'))
-    setCopied(false)
-    setSaveState(null)
-    setForce(false)
+    const res = convertCompose(input, templateName || 'my-stack')
+    if (res.error) { setConvertError(res.error); return }
+    setConvertError('')
+    loadTemplate(res.result)
   }
 
-  // Paste from clipboard
+  // Paste compose from clipboard
   async function pasteFromClipboard() {
     try {
       const text = await navigator.clipboard.readText()
@@ -360,7 +374,7 @@ function ComposeToTemplate() {
     }
   }
 
-  // Import from file
+  // Import a docker-compose.yml into the left textarea
   function importFile(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -377,37 +391,79 @@ function ComposeToTemplate() {
     e.target.value = ''  // reset so same file can be re-imported
   }
 
+  // Upload an existing template .json straight into the editor
+  function uploadTemplateFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const text = ev.target.result || ''
+      editJson(text)
+      try { const obj = JSON.parse(text); setTagsText(Array.isArray(obj?.tags) ? obj.tags.join(', ') : '') } catch { setTagsText('') }
+    }
+    reader.readAsText(file)
+    e.target.value = ''  // reset so the same file can be re-uploaded
+  }
+
   function copyResult() {
-    if (!finalResult) return
-    navigator.clipboard.writeText(JSON.stringify(finalResult, null, 2)).then(() => {
+    if (!hasContent) return
+    navigator.clipboard.writeText(tplJson).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     })
   }
 
   function downloadResult() {
-    if (!finalResult) return
-    const blob = new Blob([JSON.stringify(finalResult, null, 2)], { type: 'application/json' })
+    if (!parsed) return
+    const blob = new Blob([tplJson], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `${finalResult.name}.json`
+    a.download = `${parsed.name || 'template'}.json`
     a.click()
     URL.revokeObjectURL(a.href)
   }
 
+  // Validate the template structure and confirm the name is unique. Success is
+  // what unlocks Save.
+  async function runValidate() {
+    setValidation({ checking: true })
+    let tpl
+    try { tpl = JSON.parse(tplJson) } catch (e) {
+      setValidation({ ok: false, errors: ['Invalid JSON — ' + e.message] })
+      return
+    }
+    const errors = []
+    const nm = (tpl?.name || '').toString().trim()
+    if (!nm) errors.push('Missing "name".')
+    else if (!/^[a-z0-9-]+$/.test(nm)) errors.push('"name" must contain only lowercase letters, digits and hyphens.')
+    if (!(tpl?.label || '').toString().trim()) errors.push('Missing "label".')
+    if (!Array.isArray(tpl?.images) || tpl.images.length === 0) errors.push('"images" must be a non-empty array.')
+    else tpl.images.forEach((img, i) => {
+      if (!img?.name)  errors.push(`images[${i}] is missing "name".`)
+      if (!img?.image) errors.push(`images[${i}] is missing "image".`)
+    })
+    // Name uniqueness — only checked once the name itself is well-formed.
+    if (nm && /^[a-z0-9-]+$/.test(nm)) {
+      try {
+        const existing = await fetchTemplates()
+        if ((existing || []).some(t => t.name === nm)) {
+          errors.push(`A template named "${nm}" already exists — choose a different "name".`)
+        }
+      } catch {
+        errors.push('Could not verify name uniqueness (failed to load existing templates).')
+      }
+    }
+    setValidation(errors.length ? { ok: false, errors } : { ok: true, name: nm, services: tpl.images.length })
+  }
+
   async function saveAsTemplate() {
-    if (!finalResult) return
+    if (!validation?.ok || !parsed) return
     setSaveState('saving')
     try {
-      await saveToolTemplate(finalResult.name, finalResult, forceOverwrite)
+      await saveToolTemplate(parsed.name, parsed, false)
       setSaveState('saved')
     } catch (err) {
-      const msg = err?.response?.data?.error || err.message
-      if (err?.response?.status === 409) {
-        setSaveState({ conflict: true, msg })
-      } else {
-        setSaveState({ error: msg })
-      }
+      setSaveState({ error: err?.response?.data?.error || err.message })
     }
   }
 
@@ -417,10 +473,10 @@ function ComposeToTemplate() {
     <div className="space-y-6">
       {/* Description */}
       <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-        Paste or import a <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> below.
-        The converter extracts services, ports, volumes, environment variables, healthchecks and dependencies
-        into a Rigger template JSON. Named volumes become bind mounts. Environment values become{' '}
-        <code className="font-mono text-gray-300 text-xs">{'${VAR}'}</code> references with original values as defaults.
+        Paste or import a <code className="font-mono text-gray-300 text-xs">docker-compose.yml</code> on the left and
+        convert it — or <strong className="text-gray-300">Upload template</strong> on the right to load an existing
+        one. Edit the template JSON, fill in label / description / tags, then <strong className="text-gray-300">Validate</strong>{' '}
+        (which also checks the name is unique) to unlock <strong className="text-gray-300">Save as template</strong>.
       </div>
 
       <div className="grid grid-cols-2 gap-6 items-start">
@@ -478,134 +534,172 @@ function ComposeToTemplate() {
           </div>
         </div>
 
-        {/* ── Right: Output ── */}
+        {/* ── Right: Template editor ── */}
         <div className="space-y-2">
-          {/* Output toolbar */}
-          <div className="flex items-center justify-between">
+          {/* Editor toolbar */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <label className="text-sm font-semibold text-gray-300">Rigger template JSON</label>
-            {output?.result && (
-              <div className="flex items-center gap-2">
-                <button onClick={copyResult}
-                  className={`${btnBase} ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
-                  {copied ? '✓ Copied' : '⎘ Copy'}
-                </button>
-                <button onClick={downloadResult}
-                  className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200`}>
-                  ⬇ Download
+            <div className="flex items-center gap-2">
+              <button onClick={() => tplFileRef.current?.click()}
+                className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+                ↑ Upload template
+              </button>
+              <input ref={tplFileRef} type="file" accept=".json,application/json"
+                onChange={uploadTemplateFile} className="hidden" />
+              {hasContent && (
+                <>
+                  <button onClick={copyResult}
+                    className={`${btnBase} ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+                    {copied ? '✓ Copied' : '⎘ Copy'}
+                  </button>
+                  <button onClick={downloadResult} disabled={!parsed}
+                    className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
+                    ⬇ Download
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Conversion error (compose → JSON) */}
+          {convertError && (
+            <div className="rounded-xl bg-red-950/40 border border-red-700/40 p-4">
+              <p className="text-red-400 text-sm font-medium">Conversion failed</p>
+              <p className="text-red-300/70 text-xs mt-1">{convertError}</p>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!hasContent && !convertError && (
+            <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
+              style={{ minHeight: '28rem' }}>
+              <p className="text-gray-700 text-sm text-center px-6">
+                Convert a compose file, or <span className="text-gray-500">Upload template</span> to load an existing one for editing.
+              </p>
+            </div>
+          )}
+
+          {hasContent && (
+            <>
+              {/* Summary chips — only when the JSON parses */}
+              {parsed && Array.isArray(parsed.images) && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-950/40 text-green-400 border border-green-700/40">
+                    ✓ {parsed.images.length} service{parsed.images.length !== 1 ? 's' : ''}
+                  </span>
+                  {parsed.default_env_vars && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
+                      {Object.keys(parsed.default_env_vars).length} env vars
+                    </span>
+                  )}
+                  {parsed.images.map((img, i) => (
+                    <span key={img.name || i} className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 font-mono">
+                      {img.name}: {img.image}{img.tag ? ':' + img.tag : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Quick metadata editors — patch the JSON below. Shown in the New
+                  Workspace picker (card title, blurb, tag chips and search). */}
+              <div className="space-y-2 rounded-xl border border-gray-800 bg-gray-900/40 p-3">
+                <p className="text-xs font-semibold text-gray-400">
+                  Template details <span className="font-normal text-gray-600">— shown in the New Workspace picker</span>
+                </p>
+                <input
+                  type="text"
+                  value={parsed?.label ?? ''}
+                  disabled={!parsed}
+                  onChange={e => patchField('label', e.target.value)}
+                  placeholder="Label (e.g. Ghost CMS)"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                />
+                <textarea
+                  value={parsed?.description ?? ''}
+                  disabled={!parsed}
+                  onChange={e => patchField('description', e.target.value)}
+                  rows={2}
+                  placeholder="Description — a short blurb about what this stack is for"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-y disabled:opacity-50"
+                />
+                <input
+                  type="text"
+                  value={tagsText}
+                  disabled={!parsed}
+                  onChange={e => { setTagsText(e.target.value); patchField('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean)) }}
+                  placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
+                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                />
+              </div>
+
+              {/* Editable template JSON — the source of truth */}
+              <textarea
+                value={tplJson}
+                onChange={e => editJson(e.target.value)}
+                spellCheck={false}
+                className={`w-full px-4 py-3 bg-gray-950 border rounded-xl text-gray-200 text-xs font-mono leading-relaxed focus:outline-none resize-y ${parsed ? 'border-gray-700 focus:border-brand-500' : 'border-red-700/60 focus:border-red-500'}`}
+                style={{ minHeight: '22rem' }}
+              />
+              {!parsed && (
+                <p className="text-xs text-red-400/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
+              )}
+
+              {/* Validate → Save (Save unlocks only after a successful validation) */}
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <button
+                  onClick={runValidate}
+                  disabled={!parsed || validation?.checking}
+                  className={`${btnBase} disabled:opacity-40 disabled:cursor-not-allowed ${
+                    validation?.ok ? 'border-green-600 bg-green-950 text-green-400'
+                    : 'border-brand-600 bg-brand-950 text-brand-300 hover:bg-brand-900'
+                  }`}
+                >
+                  {validation?.checking ? 'Validating…' : validation?.ok ? '✓ Validated' : '✓ Validate'}
                 </button>
                 <button
                   onClick={saveAsTemplate}
-                  disabled={saveState === 'saving' || saveState === 'saved'}
+                  disabled={!validation?.ok || saveState === 'saving' || saveState === 'saved'}
+                  title={!validation?.ok ? 'Validate the template first' : undefined}
                   className={`${btnBase} ${
                     saveState === 'saved'   ? 'border-green-600 bg-green-950 text-green-400' :
                     saveState === 'saving'  ? 'border-gray-700 text-gray-500 cursor-wait' :
-                    saveState?.conflict     ? 'border-amber-600 bg-amber-950 text-amber-300' :
+                    !validation?.ok         ? 'border-gray-800 text-gray-600 cursor-not-allowed' :
                     'border-brand-600 bg-brand-950 text-brand-300 hover:bg-brand-900'
                   }`}
                 >
-                  {saveState === 'saved'    ? '✓ Saved'    :
-                   saveState === 'saving'   ? 'Saving…'    :
-                   saveState?.conflict      ? '⚠ Exists — overwrite?' :
-                   '💾 Save as template'}
+                  {saveState === 'saved' ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : '💾 Save as template'}
                 </button>
-                {saveState?.conflict && (
-                  <button onClick={() => { setForce(true); saveAsTemplate() }}
-                    className={`${btnBase} border-red-700 text-red-400 hover:text-red-300`}>
-                    Overwrite
-                  </button>
+                {validation && !validation.checking && (
+                  <span className="text-xs text-gray-600">
+                    {validation.ok ? '' : `${validation.errors.length} issue${validation.errors.length !== 1 ? 's' : ''} to fix`}
+                  </span>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* Empty state */}
-          {!output && (
-            <div className="rounded-xl bg-gray-950 border border-gray-800 flex items-center justify-center"
-              style={{ minHeight: '28rem' }}>
-              <p className="text-gray-700 text-sm">Output will appear here</p>
-            </div>
-          )}
-
-          {/* Error state */}
-          {output?.error && (
-            <div className="rounded-xl bg-red-950/40 border border-red-700/40 p-4">
-              <p className="text-red-400 text-sm font-medium">Conversion failed</p>
-              <p className="text-red-300/70 text-xs mt-1">{output.error}</p>
-            </div>
-          )}
-
-          {/* Save error */}
-          {saveState?.error && (
-            <div className="px-3 py-2 rounded-lg bg-red-950/30 border border-red-700/30">
-              <p className="text-red-400 text-xs">{saveState.error}</p>
-            </div>
-          )}
-
-          {/* Result */}
-          {output?.result && (
-            <>
-              {/* Summary chips */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-green-950/40 text-green-400 border border-green-700/40">
-                  ✓ {output.result.images.length} service{output.result.images.length !== 1 ? 's' : ''}
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
-                  {Object.keys(output.result.default_env_vars).length} env vars
-                </span>
-                {output.result.images.map(img => (
-                  <span key={img.name} className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 font-mono">
-                    {img.name}: {img.image}:{img.tag}
-                  </span>
-                ))}
-              </div>
-
-              {/* Optional presentation metadata — written into the saved template
-                  and used by the New Workspace picker (card title, blurb, tag chips
-                  and search). Leave blank to use sensible defaults. */}
-              <div className="space-y-2 rounded-xl border border-gray-800 bg-gray-900/40 p-3">
-                <p className="text-xs font-semibold text-gray-400">
-                  Template details <span className="font-normal text-gray-600">— optional, shown in the New Workspace picker</span>
-                </p>
-                <input
-                  type="text"
-                  value={label}
-                  onChange={e => setLabel(e.target.value)}
-                  placeholder={`Label (default: ${output.result.label})`}
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
-                />
-                <textarea
-                  value={desc}
-                  onChange={e => setDesc(e.target.value)}
-                  rows={2}
-                  placeholder="Description — a short blurb about what this stack is for"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-y"
-                />
-                <input
-                  type="text"
-                  value={tagsInput}
-                  onChange={e => setTagsInput(e.target.value)}
-                  placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
-                />
-              </div>
-
-              {/* JSON — same min-height as compose textarea */}
-              <pre className="overflow-auto rounded-xl bg-gray-950 border border-gray-700 p-4 text-xs text-gray-200 font-mono leading-relaxed"
-                style={{ minHeight: '28rem' }}>
-                {JSON.stringify(finalResult, null, 2)}
-              </pre>
-
-              {/* Save hint */}
-              {saveState === 'saved' && (
-                <p className="text-xs text-green-400/70">
-                  Saved to <code className="font-mono">{output.result.name}.json</code> — available immediately in the New Workspace wizard (no rebuild needed).
+              {/* Validation results */}
+              {validation && !validation.checking && !validation.ok && (
+                <div className="rounded-lg bg-red-950/30 border border-red-700/30 p-3">
+                  <p className="text-red-400 text-xs font-semibold mb-1">Validation failed</p>
+                  <ul className="text-red-300/80 text-xs list-disc list-inside space-y-0.5">
+                    {validation.errors.map((er, i) => <li key={i}>{er}</li>)}
+                  </ul>
+                </div>
+              )}
+              {validation?.ok && saveState !== 'saved' && (
+                <p className="text-xs text-green-400/80">
+                  ✓ Valid — name <code className="font-mono">{validation.name}</code> is available ({validation.services} service{validation.services !== 1 ? 's' : ''}). Ready to save.
                 </p>
               )}
-              {saveState !== 'saved' && (
-                <p className="text-xs text-gray-600">
-                  Use <strong className="text-gray-500">Save as template</strong> to write directly to{' '}
-                  <code className="font-mono text-gray-500">templates/stacks/{output.result.name}.json</code>,
-                  or download and copy manually. No rebuild required.
+
+              {/* Save error / success */}
+              {saveState?.error && (
+                <div className="px-3 py-2 rounded-lg bg-red-950/30 border border-red-700/30">
+                  <p className="text-red-400 text-xs">{saveState.error}</p>
+                </div>
+              )}
+              {saveState === 'saved' && parsed && (
+                <p className="text-xs text-green-400/70">
+                  Saved to <code className="font-mono">{parsed.name}.json</code> — available immediately in the New Workspace wizard (no rebuild needed).
                 </p>
               )}
             </>
@@ -930,8 +1024,8 @@ function WorkspaceBackup() {
 const TOOLS = [
   {
     id: 'compose-to-template',
-    label: 'Compose → Template',
-    description: 'Convert a docker-compose.yml into a reusable Rigger prebuilt template.',
+    label: 'Template Manager',
+    description: 'Convert a docker-compose.yml, or upload an existing template, then edit, validate and save it as a reusable Rigger prebuilt template.',
     component: ComposeToTemplate,
   },
   {
