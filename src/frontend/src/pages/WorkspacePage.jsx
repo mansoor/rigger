@@ -442,7 +442,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           URLs) on the right. */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col min-w-0">
-          <h3 className="font-semibold text-white text-base truncate">{envName}</h3>
+          <div className="flex items-center gap-2 min-w-0">
+            <h3 className="font-semibold text-white text-base truncate">{envName}</h3>
+            {/* Deployment mode is configured per-environment (compose / swarm). */}
+            <span title={`Deployment mode: ${deployment}`}
+              className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-800 text-gray-400">
+              {deployment}
+            </span>
+          </div>
           <span
             title={hostName ? `Runs on remote host ${hostName}` : 'Runs on the local control plane'}
             className={`inline-flex items-center gap-1 text-[11px] mt-0.5 ${hostName ? 'text-indigo-300' : 'text-gray-500'}`}
@@ -1710,10 +1717,6 @@ export default function WorkspacePage() {
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                 type === 'image' ? 'bg-blue-950 text-blue-300' : 'bg-purple-950 text-purple-300'
               }`}>{type}</span>
-              {(() => {
-                const dep = cfg?.environments?.[envs[0]]?.deployment || 'compose'
-                return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">{dep}</span>
-              })()}
             </div>
             <p className="text-sm text-gray-400 mt-1">
               {stackParts.join(' · ')}
