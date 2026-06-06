@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
+import ErrorBoundary from './components/ErrorBoundary'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
 import DashboardPage from './pages/DashboardPage'
@@ -21,6 +22,7 @@ function RequireAuth({ children }) {
 function AppRoutes() {
   const tryRefresh = useAuthStore((s) => s.tryRefresh)
   const ready      = useAuthStore((s) => s.ready)
+  const location   = useLocation()
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -40,18 +42,22 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
-      <Route path="/setup" element={<SetupPage />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
-      <Route path="/workspaces/:name" element={<RequireAuth><WorkspacePage /></RequireAuth>} />
-      <Route path="/new" element={<RequireAuth><NewWorkspacePage /></RequireAuth>} />
-      <Route path="/workspaces/:name/edit" element={<RequireAuth><EditWorkspacePage /></RequireAuth>} />
-      <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
-      <Route path="/housekeeping" element={<RequireAuth><HousekeepingPage /></RequireAuth>} />
-      <Route path="/tools"        element={<RequireAuth><ToolsPage /></RequireAuth>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    // Keyed by route so a crash on one page clears itself when the user
+    // navigates elsewhere, instead of staying stuck on the fallback.
+    <ErrorBoundary key={location.pathname}>
+      <Routes>
+        <Route path="/setup" element={<SetupPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+        <Route path="/workspaces/:name" element={<RequireAuth><WorkspacePage /></RequireAuth>} />
+        <Route path="/new" element={<RequireAuth><NewWorkspacePage /></RequireAuth>} />
+        <Route path="/workspaces/:name/edit" element={<RequireAuth><EditWorkspacePage /></RequireAuth>} />
+        <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
+        <Route path="/housekeeping" element={<RequireAuth><HousekeepingPage /></RequireAuth>} />
+        <Route path="/tools"        element={<RequireAuth><ToolsPage /></RequireAuth>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </ErrorBoundary>
   )
 }
 
