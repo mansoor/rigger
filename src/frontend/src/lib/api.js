@@ -121,6 +121,14 @@ export const restoreWorkspace = (formData) =>
   api.post('/tools/workspace-restore', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data)
+// Restore directly from a backup already stored on the server (no re-upload).
+export const restoreWorkspaceFromArchive = (filename, force = false) =>
+  api.post(`/tools/workspace-archives/${encodeURIComponent(filename)}/restore`, { force }).then(r => r.data)
+// Upload a .rwb backup to the server (stored, then restored from the list).
+export const uploadWorkspaceArchive = (formData) =>
+  api.post('/tools/workspace-archives/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data)
 // ── Workspace configuration snapshots (.rws — config only, no data) ──
 export const createWorkspaceSnapshot = (workspace, name) =>
   api.post('/tools/workspace-snapshots', { workspace, name }).then(r => r.data)

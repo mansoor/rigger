@@ -8,10 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// archiveNameSanitizer maps any character outside the safe set to "-".
+var archiveNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 // ── Job store ─────────────────────────────────────────────────────────────────
 
@@ -58,6 +62,23 @@ func (s *JobStore) update(id string, fn func(*BackupJob)) {
 }
 
 // ── Archive helpers ───────────────────────────────────────────────────────────
+
+// archiveExt is the canonical extension for a full workspace backup
+// ("rigger workspace backup"). Older archives may still carry ".tar.gz" —
+// listing accepts both, new backups are always written as .rwb.
+const archiveExt = ".rwb"
+
+// archiveSuffixes are the extensions recognised as workspace backups.
+var archiveSuffixes = []string{".rwb", ".tar.gz"}
+
+func hasArchiveSuffix(name string) bool {
+	for _, s := range archiveSuffixes {
+		if strings.HasSuffix(name, s) {
+			return true
+		}
+	}
+	return false
+}
 
 func archivesDir(dataDir string) string {
 	return filepath.Join(dataDir, "workspace-archives")
@@ -167,7 +188,7 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 	// Run backup asynchronously
 	go func() {
 		ts := job.StartedAt.UTC().Format("20060102-150405")
-		archiveName := fmt.Sprintf("%s-%s.tar.gz", body.Workspace, ts)
+		archiveName := fmt.Sprintf("%s-%s%s", body.Workspace, ts, archiveExt)
 		destPath := filepath.Join(archivesDir(h.dataDir), archiveName)
 
 		size, err := createArchive(wsDir, body.Workspace, destPath)
@@ -222,7 +243,7 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 
 	var archives []ArchiveInfo
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".tar.gz") {
+		if e.IsDir() || !hasArchiveSuffix(e.Name()) {
 			continue
 		}
 		fi, err := e.Info()
@@ -244,10 +265,17 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, archives)
 }
 
-// wsNameFromArchive extracts the workspace name from "<name>-YYYYMMDD-HHMMSS.tar.gz"
+// wsNameFromArchive extracts the workspace name from "<name>-YYYYMMDD-HHMMSS.rwb"
+// (or the legacy ".tar.gz").
 func wsNameFromArchive(filename string) string {
-	name := strings.TrimSuffix(filename, ".tar.gz")
-	// Strip trailing "-YYYYMMDD-HHMMSS" (17 chars)
+	name := filename
+	for _, s := range archiveSuffixes {
+		if strings.HasSuffix(name, s) {
+			name = strings.TrimSuffix(name, s)
+			break
+		}
+	}
+	// Strip trailing "-YYYYMMDD-HHMMSS" (16 chars)
 	if len(name) > 16 {
 		return name[:len(name)-16]
 	}
@@ -293,6 +321,42 @@ func (h *Handler) DeleteWorkspaceArchive(w http.ResponseWriter, r *http.Request)
 
 // ── Restore ───────────────────────────────────────────────────────────────────
 
+// restoreFromReader extracts an archive stream into the workspaces directory.
+// It returns the restored workspace name and an HTTP status code: 200 on
+// success, 409 when the workspace exists and force is false, 400 for a bad
+// archive, 500 for filesystem errors.
+func (h *Handler) restoreFromReader(rd io.Reader, force bool) (string, int, error) {
+	tmpDir, err := os.MkdirTemp("", "rigger-restore-*")
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("could not create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	wsName, err := extractArchive(rd, tmpDir)
+	if err != nil {
+		return "", http.StatusBadRequest, fmt.Errorf("invalid archive: %w", err)
+	}
+
+	destDir := filepath.Join(h.workspacesDir, wsName)
+	if _, statErr := os.Stat(destDir); statErr == nil {
+		if !force {
+			return wsName, http.StatusConflict, fmt.Errorf("workspace already exists")
+		}
+		if err := os.RemoveAll(destDir); err != nil {
+			return wsName, http.StatusInternalServerError, fmt.Errorf("could not remove existing workspace: %w", err)
+		}
+	}
+
+	srcDir := filepath.Join(tmpDir, wsName)
+	if err := os.Rename(srcDir, destDir); err != nil {
+		// Rename may fail across filesystems — fall back to copy
+		if err2 := copyDir(srcDir, destDir); err2 != nil {
+			return wsName, http.StatusInternalServerError, fmt.Errorf("failed to restore: %w", err2)
+		}
+	}
+	return wsName, http.StatusOK, nil
+}
+
 // POST /api/tools/workspace-restore  (multipart: field "archive")
 func (h *Handler) RestoreWorkspace(w http.ResponseWriter, r *http.Request) {
 	// 4 GB max upload
@@ -310,45 +374,190 @@ func (h *Handler) RestoreWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Extract to temp directory
-	tmpDir, err := os.MkdirTemp("", "rigger-restore-*")
+	wsName, code, err := h.restoreFromReader(file, force)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create temp dir"})
+		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName})
 		return
 	}
-	defer os.RemoveAll(tmpDir)
-
-	wsName, err := extractArchive(file, tmpDir)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid archive: " + err.Error()})
-		return
-	}
-
-	destDir := filepath.Join(h.workspacesDir, wsName)
-	if _, statErr := os.Stat(destDir); statErr == nil {
-		if !force {
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error":     "workspace already exists",
-				"workspace": wsName,
-			})
-			return
-		}
-		if err := os.RemoveAll(destDir); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove existing workspace"})
-			return
-		}
-	}
-
-	srcDir := filepath.Join(tmpDir, wsName)
-	if err := os.Rename(srcDir, destDir); err != nil {
-		// Rename may fail across filesystems — fall back to copy
-		if err2 := copyDir(srcDir, destDir); err2 != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to restore: " + err2.Error()})
-			return
-		}
-	}
-
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName})
+}
+
+// POST /api/tools/workspace-archives/{filename}/restore  (body: {force})
+// Restores directly from an archive already stored on the server — no re-upload.
+func (h *Handler) RestoreWorkspaceFromArchive(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+	var body struct {
+		Force bool `json:"force"`
+	}
+	_ = readJSON(r, &body)
+
+	path := filepath.Join(archivesDir(h.dataDir), filename)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "archive not found"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		return
+	}
+	defer f.Close()
+
+	wsName, code, err := h.restoreFromReader(f, body.Force)
+	if err != nil {
+		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName})
+}
+
+// POST /api/tools/workspace-archives/upload  (multipart: field "archive")
+// Stores an uploaded backup archive on the server (validated) without
+// restoring it — the user then restores it from the list like any other.
+func (h *Handler) UploadWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(4 << 30); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse upload: " + err.Error()})
+		return
+	}
+	file, hdr, err := r.FormFile("archive")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "archive field required"})
+		return
+	}
+	defer file.Close()
+
+	// Stream to a temp file first so we can both validate it and move it into place.
+	dir := archivesDir(h.dataDir)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".upload-*")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once renamed away
+	if _, err := io.Copy(tmp, file); err != nil {
+		tmp.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store upload: " + err.Error()})
+		return
+	}
+	tmp.Close()
+
+	// Validate it's a real workspace backup and recover the workspace name.
+	wsName, err := validateArchiveFile(tmpPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid workspace backup: " + err.Error()})
+		return
+	}
+
+	// Pick a destination filename: keep the uploaded basename if it's a recognised
+	// archive name, otherwise synthesise one. Avoid collisions with a -N suffix.
+	base := filepath.Base(hdr.Filename)
+	base = sanitizeArchiveName(base)
+	if base == "" || !hasArchiveSuffix(base) {
+		base = wsName + "-uploaded" + archiveExt
+	}
+	dest := uniqueArchiveName(dir, base)
+
+	if err := os.Rename(tmpPath, filepath.Join(dir, dest)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save archive: " + err.Error()})
+		return
+	}
+
+	fi, _ := os.Stat(filepath.Join(dir, dest))
+	var size int64
+	if fi != nil {
+		size = fi.Size()
+	}
+	writeJSON(w, http.StatusOK, ArchiveInfo{
+		Filename:  dest,
+		Workspace: wsName,
+		SizeBytes: size,
+	})
+}
+
+// sanitizeArchiveName strips any directory parts and disallowed characters.
+func sanitizeArchiveName(name string) string {
+	name = filepath.Base(name)
+	return archiveNameSanitizer.ReplaceAllString(name, "-")
+}
+
+// validateArchiveFile confirms the file at path is a gzip+tar workspace backup
+// (a single top-level directory containing config.json) and returns that
+// directory name (the workspace name).
+func validateArchiveFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return "", fmt.Errorf("not a gzip archive")
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	wsName := ""
+	hasConfig := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("not a valid tar archive")
+		}
+		clean := filepath.ToSlash(filepath.Clean(hdr.Name))
+		if strings.HasPrefix(clean, "..") {
+			continue
+		}
+		parts := strings.SplitN(clean, "/", 2)
+		if wsName == "" && parts[0] != "" {
+			wsName = parts[0]
+		}
+		if len(parts) == 2 && parts[1] == "config.json" {
+			hasConfig = true
+		}
+	}
+	if wsName == "" {
+		return "", fmt.Errorf("archive is empty")
+	}
+	if !hasConfig {
+		return "", fmt.Errorf("missing config.json (not a Rigger workspace)")
+	}
+	return wsName, nil
+}
+
+// uniqueArchiveName returns base, or base with a -2/-3… suffix inserted before
+// the extension if a file by that name already exists in dir.
+func uniqueArchiveName(dir, base string) string {
+	if _, err := os.Stat(filepath.Join(dir, base)); os.IsNotExist(err) {
+		return base
+	}
+	ext := ""
+	for _, s := range archiveSuffixes {
+		if strings.HasSuffix(base, s) {
+			ext = s
+			break
+		}
+	}
+	stem := strings.TrimSuffix(base, ext)
+	for i := 2; i < 1000; i++ {
+		cand := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if _, err := os.Stat(filepath.Join(dir, cand)); os.IsNotExist(err) {
+			return cand
+		}
+	}
+	return base
 }
 
 // extractArchive reads a .tar.gz from r, writes files under destDir,

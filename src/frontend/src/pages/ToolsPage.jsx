@@ -5,7 +5,7 @@ import {
   saveToolTemplate, fetchTemplates,
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive,
-  restoreWorkspace, fetchWorkspaces,
+  restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchWorkspaces,
   createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot, uploadWorkspaceSnapshot,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -725,22 +725,57 @@ function fmtDate(s) {
   return new Date(s).toLocaleString()
 }
 
+// ── Shared styling so the snapshot and full-backup panels look identical ──
+const ROW_BTN         = 'text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-50 shrink-0'
+const ROW_BTN_PRIMARY = `${ROW_BTN} border-amber-700/60 text-amber-300 hover:bg-amber-900/30`            // Roll back / Restore
+const ROW_BTN_NEUTRAL = `${ROW_BTN} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500` // Download
+const ROW_BTN_DELETE  = `${ROW_BTN} border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-700/60` // Delete
+const UPLOAD_BTN      = 'text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-50'
+const createBtnClass  = (enabled) =>
+  `w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
+    enabled ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
+  }`
+
+// A single saved-file row (snapshot or backup) — identical layout for both.
+function FileRow({ title, meta, children }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-800/50 border border-gray-700/60 rounded-lg">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-mono text-gray-300 truncate" title={title}>{title}</p>
+        <p className="text-xs text-gray-600 mt-0.5">{meta}</p>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// A list header with a count and a consistent "Upload" button + hidden input.
+function SavedList({ label, count, uploadRef, uploading, onUpload, ext, accept, children }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
+        <h4 className="text-sm font-semibold text-gray-300">
+          {label} <span className="ml-1 text-xs font-normal text-gray-600">({count})</span>
+        </h4>
+        <button onClick={() => uploadRef.current?.click()} disabled={uploading} className={UPLOAD_BTN}>
+          {uploading ? 'Uploading…' : `↑ Upload ${ext}`}
+        </button>
+        <input ref={uploadRef} type="file" accept={accept} onChange={onUpload} className="hidden" />
+      </div>
+      {children}
+    </div>
+  )
+}
+
 function WorkspaceBackup() {
   const qc    = useQueryClient()
   const token = useAuthStore(s => s.token)
   const confirm = useConfirm()
 
+  // Shared
   const [selectedWs, setSelectedWs]   = useState('')
-  const [activeJobId, setActiveJobId] = useState(null)  // job ID string while running
-  const [backupErr, setBackupErr]     = useState(null)
-  const [restoreFile, setRestoreFile] = useState(null)
-  const [restoreForce, setForce]      = useState(false)
-  const [restoreMsg, setRestoreMsg]   = useState(null)
-  const [restoring, setRestoring]     = useState(false)
-  const [deleting, setDeleting]       = useState({})
-  const [downloading, setDownloading] = useState({})
-  const restoreRef = useRef(null)
-  // Config snapshot (.rws) state
+
+  // Configuration snapshot (.rws) state
   const [snapName, setSnapName]         = useState('')
   const [snapBusy, setSnapBusy]         = useState(false)
   const [snapMsg, setSnapMsg]           = useState(null) // { ok, text }
@@ -748,6 +783,16 @@ function WorkspaceBackup() {
   const [rollingBack, setRollingBack]   = useState({})
   const [snapUploading, setSnapUploading] = useState(false)
   const snapUploadRef = useRef(null)
+
+  // Full backup (.rwb) state
+  const [activeJobId, setActiveJobId]       = useState(null)  // job ID string while running
+  const [backupErr, setBackupErr]           = useState(null)
+  const [bkpMsg, setBkpMsg]                 = useState(null)  // { ok, text } — restore/upload/delete
+  const [deleting, setDeleting]             = useState({})
+  const [downloading, setDownloading]       = useState({})
+  const [restoringArchive, setRestoringArchive] = useState({})
+  const [archiveUploading, setArchiveUploading] = useState(false)
+  const archiveUploadRef = useRef(null)
 
   // Workspace list
   const { data: workspaces = [] } = useQuery({
@@ -812,7 +857,7 @@ function WorkspaceBackup() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
-      alert(`Download failed: ${e.message}`)
+      setBkpMsg({ ok: false, text: `Download failed: ${e.message}` })
     } finally {
       setDownloading(d => ({ ...d, [filename]: false }))
     }
@@ -820,8 +865,8 @@ function WorkspaceBackup() {
 
   async function deleteArchive(filename) {
     if (!(await confirm({
-      title: 'Delete archive?',
-      message: `Permanently delete the backup archive "${filename}"? This can't be undone.`,
+      title: 'Delete backup?',
+      message: `Permanently delete the backup "${filename}"? This can't be undone.`,
       confirmLabel: 'Delete',
     }))) return
     setDeleting(d => ({ ...d, [filename]: true }))
@@ -830,30 +875,50 @@ function WorkspaceBackup() {
       refetchArchives()
       qc.removeQueries({ queryKey: ['workspace-archives'] })
     } catch (e) {
-      alert(e?.response?.data?.error || e.message)
+      setBkpMsg({ ok: false, text: e?.response?.data?.error || e.message })
     } finally {
       setDeleting(d => ({ ...d, [filename]: false }))
     }
   }
 
-  async function doRestore() {
-    if (!restoreFile) return
-    setRestoring(true)
-    setRestoreMsg(null)
-    const fd = new FormData()
-    fd.append('archive', restoreFile)
-    if (restoreForce) fd.append('force', 'true')
+  // Restore directly from a backup already on the server (overwrites if it exists).
+  async function restoreArchive(a) {
+    const ok = await confirm({
+      title: `Restore ${a.workspace || 'workspace'}?`,
+      message: `This restores "${a.workspace || 'the workspace'}" from "${a.filename}", including all volume data. If a workspace named "${a.workspace}" already exists it will be REPLACED and its current data lost. Stop its containers first to avoid conflicts.`,
+      confirmLabel: 'Restore',
+    })
+    if (!ok) return
+    setRestoringArchive(s => ({ ...s, [a.filename]: true }))
+    setBkpMsg(null)
     try {
-      const res = await restoreWorkspace(fd)
-      setRestoreMsg({ ok: true, text: `Workspace "${res.workspace}" restored successfully.` })
+      const res = await restoreWorkspaceFromArchive(a.filename, true)
+      setBkpMsg({ ok: true, text: `Restored "${res.workspace}". Refresh its compose files and redeploy.` })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
-      setRestoreFile(null)
-      setForce(false)
+      qc.invalidateQueries({ queryKey: ['workspace', res.workspace] })
     } catch (e) {
-      const msg = e?.response?.data?.error || e.message
-      setRestoreMsg({ ok: false, text: msg, conflict: e?.response?.status === 409 })
+      setBkpMsg({ ok: false, text: e?.response?.data?.error || e.message })
     } finally {
-      setRestoring(false)
+      setRestoringArchive(s => ({ ...s, [a.filename]: false }))
+    }
+  }
+
+  // Upload a .rwb to the server — it joins the list, then restore it like any other.
+  async function uploadArchive(e) {
+    const f = e.target.files?.[0]
+    e.target.value = '' // allow re-uploading the same file
+    if (!f) return
+    setArchiveUploading(true); setBkpMsg(null)
+    try {
+      const fd = new FormData()
+      fd.append('archive', f)
+      const a = await uploadWorkspaceArchive(fd)
+      setBkpMsg({ ok: true, text: `Uploaded ${a.filename}${a.workspace ? ` (workspace: ${a.workspace})` : ''}. Restore it from the list below.` })
+      refetchArchives()
+    } catch (err) {
+      setBkpMsg({ ok: false, text: err?.response?.data?.error || err.message })
+    } finally {
+      setArchiveUploading(false)
     }
   }
 
@@ -943,32 +1008,43 @@ function WorkspaceBackup() {
   const isRunning = activeJob?.status === 'running' || (activeJobId && !activeJob)
 
   return (
-    <div className="space-y-8">
-      {/* ── Configuration snapshots (.rws) ── */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-base font-semibold text-white">Configuration snapshots</h3>
-          <p className="text-sm text-gray-500 mt-1">
-            Save a lightweight snapshot of just the workspace <strong className="text-gray-400">configuration</strong> —{' '}
-            <code className="font-mono text-xs">config.json</code> and each environment's{' '}
-            <code className="font-mono text-xs">.env</code> (secrets included) — and roll back to it later.
-            No volume data is captured (use a full backup below for that).
-          </p>
-        </div>
+    <div className="space-y-6">
+      {/* Intro */}
+      <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
+        Pick a workspace, then take a lightweight <strong className="text-gray-300">configuration snapshot</strong>{' '}
+        (<code className="font-mono text-xs">.rws</code> — <code className="font-mono text-xs">config.json</code> + each{' '}
+        <code className="font-mono text-xs">.env</code>, no data) or a <strong className="text-gray-300">full backup</strong>{' '}
+        (<code className="font-mono text-xs">.rwb</code> — config plus all volume data). Both can be downloaded, uploaded
+        and restored on the server.
+      </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">Workspace</label>
-              <select
-                value={selectedWs}
-                onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBackupErr(null); setActiveJobId(null) }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
-              >
-                <option value="">— select workspace —</option>
-                {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
-              </select>
-            </div>
+      {/* Shared workspace selector */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <label className="block text-xs font-medium text-gray-400 mb-1.5">Workspace</label>
+        <select
+          value={selectedWs}
+          onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBkpMsg(null); setBackupErr(null); setActiveJobId(null) }}
+          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
+        >
+          <option value="">— select workspace —</option>
+          {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
+        </select>
+        <p className="text-xs text-gray-600 mt-2">Applies to both <strong className="text-gray-500">Take snapshot</strong> and <strong className="text-gray-500">Start backup</strong> below.</p>
+      </div>
+
+      {/* Two consistent panels */}
+      <div className="grid grid-cols-2 gap-6 items-start">
+        {/* ── Configuration snapshot (.rws) ── */}
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-base font-semibold text-white">Configuration snapshot <span className="text-xs font-normal text-gray-600">.rws</span></h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Just <code className="font-mono text-xs">config.json</code> and each env's{' '}
+              <code className="font-mono text-xs">.env</code> (secrets included). No volume data — fast to take, easy to roll back.
+            </p>
+          </div>
+
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-400 mb-1.5">
                 Snapshot name <span className="text-gray-600 font-normal">(optional)</span>
@@ -980,103 +1056,50 @@ function WorkspaceBackup() {
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
               />
             </div>
+            <button onClick={takeSnapshot} disabled={!selectedWs || snapBusy} className={createBtnClass(!!selectedWs && !snapBusy)}>
+              {snapBusy ? 'Saving…' : 'Take configuration snapshot'}
+            </button>
+            {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{snapMsg.text}</p>}
           </div>
-          <button
-            onClick={takeSnapshot}
-            disabled={!selectedWs || snapBusy}
-            className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-              !selectedWs || snapBusy ? 'bg-gray-800 text-gray-600 cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700 text-white'
-            }`}
-          >{snapBusy ? 'Saving…' : 'Take configuration snapshot'}</button>
-          {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{snapMsg.text}</p>}
-        </div>
 
-        {/* Saved snapshots */}
-        <div>
-          <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-3">
-            <h4 className="text-sm font-semibold text-gray-300">
-              Saved snapshots <span className="ml-2 text-xs font-normal text-gray-600">({snapshots.length})</span>
-            </h4>
-            <button
-              onClick={() => snapUploadRef.current?.click()}
-              disabled={snapUploading}
-              className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors disabled:opacity-50"
-            >{snapUploading ? 'Uploading…' : '↑ Upload .rws'}</button>
-            <input ref={snapUploadRef} type="file" accept=".rws" onChange={uploadSnapshot} className="hidden" />
+          <SavedList label="Saved snapshots" count={snapshots.length}
+            uploadRef={snapUploadRef} uploading={snapUploading} onUpload={uploadSnapshot} ext=".rws" accept=".rws">
+            {snapshots.length === 0
+              ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
+              : (
+                <div className="space-y-2">
+                  {snapshots.map(s => (
+                    <FileRow key={s.filename} title={s.filename}
+                      meta={<>{s.workspace ? <span className="text-gray-500">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}</>}>
+                      <button onClick={() => rollbackSnapshot(s)} disabled={rollingBack[s.filename]} className={ROW_BTN_PRIMARY}>
+                        {rollingBack[s.filename] ? '…' : 'Roll back'}
+                      </button>
+                      <button onClick={() => downloadSnapshot(s.filename)} className={ROW_BTN_NEUTRAL}>⬇ Download</button>
+                      <button onClick={() => removeSnapshot(s.filename)} disabled={snapDeleting[s.filename]} className={ROW_BTN_DELETE}>
+                        {snapDeleting[s.filename] ? '…' : 'Delete'}
+                      </button>
+                    </FileRow>
+                  ))}
+                </div>
+              )}
+          </SavedList>
+        </section>
+
+        {/* ── Full backup (.rwb) ── */}
+        <section className="space-y-3">
+          <div>
+            <h3 className="text-base font-semibold text-white">Full backup <span className="text-xs font-normal text-gray-600">.rwb</span></h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Config plus <strong className="text-gray-400">all volume data</strong> (per-env backup folders excluded).
+              Larger and slower; restoring re-creates the whole workspace.
+            </p>
           </div>
-          {snapshots.length === 0
-            ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
-            : (
-              <div className="space-y-2">
-                {snapshots.map(s => (
-                  <div key={s.filename} className="flex items-center gap-3 px-3 py-2.5 bg-gray-800/50 border border-gray-700/60 rounded-lg">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-mono text-gray-300 truncate" title={s.filename}>{s.filename}</p>
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        {s.workspace ? <span className="text-gray-500">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}
-                      </p>
-                    </div>
-                    <button onClick={() => rollbackSnapshot(s)} disabled={rollingBack[s.filename]}
-                      className="text-xs px-2.5 py-1 rounded border border-amber-700/60 text-amber-300 hover:bg-amber-900/30 transition-colors disabled:opacity-50">
-                      {rollingBack[s.filename] ? '…' : 'Roll back'}
-                    </button>
-                    <button onClick={() => downloadSnapshot(s.filename)}
-                      className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors">Download</button>
-                    <button onClick={() => removeSnapshot(s.filename)} disabled={snapDeleting[s.filename]}
-                      className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-500 hover:text-red-400 transition-colors disabled:opacity-50">
-                      {snapDeleting[s.filename] ? '…' : 'Delete'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-        </div>
-      </div>
 
-      {/* ── Full backup & restore (config + all volume data) ── */}
-      <div className="border-t border-gray-800 pt-6">
-        <h3 className="text-base font-semibold text-white mb-1">Full backup &amp; restore</h3>
-        <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-          Create a full backup of any workspace — config, environment files, and all volume data
-          (per-env backup snapshots excluded). Archives are stored on the server; download to keep locally.
-          To restore, upload a previously downloaded archive.
-          <span className="block mt-1 text-gray-600">
-            Tip: stop the workspace's containers before restoring to avoid data conflicts.
-          </span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-8 items-start">
-        {/* ── Left: Create Backup + Archives ── */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-gray-300 border-b border-gray-800 pb-2">Create backup</h3>
-
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">Workspace</label>
-              <select
-                value={selectedWs}
-                onChange={e => { setSelectedWs(e.target.value); setBackupErr(null); setActiveJobId(null) }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
-              >
-                <option value="">— select workspace —</option>
-                {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
-              </select>
-            </div>
-
-            <button
-              onClick={startBackup}
-              disabled={!selectedWs || isRunning}
-              className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-                !selectedWs || isRunning
-                  ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                  : 'bg-brand-600 hover:bg-brand-700 text-white'
-              }`}
-            >{isRunning ? '⏳ Backing up…' : 'Start backup'}</button>
-
-            {backupErr && (
-              <p className="text-xs text-red-400 px-1">{backupErr}</p>
-            )}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+            <button onClick={startBackup} disabled={!selectedWs || isRunning} className={createBtnClass(!!selectedWs && !isRunning)}>
+              {isRunning ? '⏳ Backing up…' : 'Start full backup'}
+            </button>
+            {backupErr && <p className="text-xs text-red-400 px-1">{backupErr}</p>}
 
             {/* Job status card */}
             {activeJob && (
@@ -1107,111 +1130,48 @@ function WorkspaceBackup() {
                 )}
               </div>
             )}
+            {!activeJob && !backupErr && (
+              <p className="text-xs text-gray-600 px-1">Stored on the server; download to keep a copy off-box.</p>
+            )}
           </div>
 
-          {/* Archives list */}
-          <div className="pt-2">
-            <h3 className="text-sm font-semibold text-gray-300 border-b border-gray-800 pb-2 mb-3">
-              Archives on server
-              <span className="ml-2 text-xs font-normal text-gray-600">({archives.length})</span>
-            </h3>
+          <SavedList label="Backups on server" count={archives.length}
+            uploadRef={archiveUploadRef} uploading={archiveUploading} onUpload={uploadArchive} ext=".rwb" accept=".rwb,.tar.gz,.gz">
+            {bkpMsg && <p className={`text-xs px-1 mb-2 ${bkpMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{bkpMsg.text}</p>}
             {archives.length === 0
-              ? <p className="text-xs text-gray-600 py-4 text-center">No archives yet.</p>
+              ? <p className="text-xs text-gray-600 py-4 text-center">No backups yet.</p>
               : (
                 <div className="space-y-2">
                   {archives.map(a => (
-                    <div key={a.filename} className="flex items-center gap-3 px-3 py-2.5 bg-gray-800/50 border border-gray-700/60 rounded-lg">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-mono text-gray-300 truncate" title={a.filename}>{a.filename}</p>
-                        <p className="text-xs text-gray-600 mt-0.5">{fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}</p>
-                      </div>
-                      <button
-                        onClick={() => downloadArchive(a.filename)}
-                        disabled={!!downloading[a.filename]}
-                        className="text-xs px-2.5 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 transition-colors shrink-0"
-                      >{downloading[a.filename] ? '…' : '⬇ Download'}</button>
-                      <button
-                        onClick={() => deleteArchive(a.filename)}
-                        disabled={!!deleting[a.filename]}
-                        className="text-xs px-2.5 py-1 rounded border border-gray-700 text-red-500 hover:text-red-300 hover:border-red-700 transition-colors shrink-0"
-                      >{deleting[a.filename] ? '…' : 'Delete'}</button>
-                    </div>
+                    <FileRow key={a.filename} title={a.filename}
+                      meta={<>{a.workspace ? <span className="text-gray-500">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}</>}>
+                      <button onClick={() => restoreArchive(a)} disabled={restoringArchive[a.filename]} className={ROW_BTN_PRIMARY}>
+                        {restoringArchive[a.filename] ? '…' : 'Restore'}
+                      </button>
+                      <button onClick={() => downloadArchive(a.filename)} disabled={!!downloading[a.filename]} className={ROW_BTN_NEUTRAL}>
+                        {downloading[a.filename] ? '…' : '⬇ Download'}
+                      </button>
+                      <button onClick={() => deleteArchive(a.filename)} disabled={!!deleting[a.filename]} className={ROW_BTN_DELETE}>
+                        {deleting[a.filename] ? '…' : 'Delete'}
+                      </button>
+                    </FileRow>
                   ))}
                 </div>
               )}
-          </div>
-        </div>
+          </SavedList>
+        </section>
+      </div>
 
-        {/* ── Right: Restore ── */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-gray-300 border-b border-gray-800 pb-2">Restore workspace</h3>
-
-          <div className="space-y-3">
-            <div
-              onClick={() => restoreRef.current?.click()}
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) { setRestoreFile(f); setRestoreMsg(null); setForce(false) } }}
-              className="border-2 border-dashed border-gray-700 hover:border-brand-600 rounded-xl p-8 text-center cursor-pointer transition-colors"
-            >
-              {restoreFile ? (
-                <div>
-                  <p className="text-sm text-white font-medium">{restoreFile.name}</p>
-                  <p className="text-xs text-gray-500 mt-1">{fmtBytes(restoreFile.size)}</p>
-                  <button type="button" onClick={e => { e.stopPropagation(); setRestoreFile(null); setRestoreMsg(null); setForce(false) }}
-                    className="text-xs text-red-400 hover:text-red-300 mt-2">Remove</button>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm text-gray-400">Drop archive here or click to browse</p>
-                  <p className="text-xs text-gray-600 mt-1">.tar.gz workspace archive</p>
-                </div>
-              )}
-              <input ref={restoreRef} type="file" accept=".tar.gz,.gz"
-                onChange={e => { const f = e.target.files?.[0]; if (f) { setRestoreFile(f); setRestoreMsg(null); setForce(false) }; e.target.value = '' }}
-                className="hidden" />
-            </div>
-
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" checked={restoreForce} onChange={e => setForce(e.target.checked)}
-                className="accent-brand-500 w-3.5 h-3.5" />
-              <span className="text-xs text-gray-400">Overwrite if workspace already exists</span>
-            </label>
-
-            <button
-              onClick={doRestore}
-              disabled={!restoreFile || restoring}
-              className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-                !restoreFile || restoring
-                  ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
-                  : 'bg-green-700 hover:bg-green-600 text-white'
-              }`}
-            >{restoring ? '⏳ Restoring…' : 'Restore workspace'}</button>
-
-            {restoreMsg && (
-              <div className={`px-4 py-3 rounded-xl border text-sm ${
-                restoreMsg.ok
-                  ? 'bg-green-950/40 border-green-700/40 text-green-300'
-                  : 'bg-red-950/40 border-red-700/40 text-red-300'
-              }`}>
-                <p>{restoreMsg.text}</p>
-                {restoreMsg.conflict && (
-                  <p className="text-xs mt-1.5 opacity-70">Enable "Overwrite if workspace already exists" and try again.</p>
-                )}
-              </div>
-            )}
-
-            <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Steps to restore</p>
-              <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
-                <li>Stop the workspace's containers if running</li>
-                <li>Download the archive from the list on the left</li>
-                <li>Drop or select the archive above</li>
-                <li>Click Restore — workspace appears in the sidebar immediately</li>
-                <li>Run <code className="font-mono text-gray-400">./run.sh refresh &lt;env&gt;</code> to regenerate compose files</li>
-              </ol>
-            </div>
-          </div>
-        </div>
+      {/* Restore guidance (applies to full backups) */}
+      <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Restoring a full backup</p>
+        <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
+          <li>Stop the workspace's containers if it already exists</li>
+          <li>If the <code className="font-mono text-gray-400">.rwb</code> lives elsewhere, Upload it first — it joins the list</li>
+          <li>Click <strong className="text-gray-400">Restore</strong> on the backup row (an existing workspace is replaced)</li>
+          <li>The workspace appears in the sidebar immediately</li>
+          <li>Run <code className="font-mono text-gray-400">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
+        </ol>
       </div>
     </div>
   )
@@ -1221,16 +1181,16 @@ function WorkspaceBackup() {
 
 const TOOLS = [
   {
-    id: 'compose-to-template',
-    label: 'Template Manager',
-    description: 'Convert a docker-compose.yml, or upload an existing template, then edit, validate and save it as a reusable Rigger prebuilt template.',
-    component: ComposeToTemplate,
-  },
-  {
     id: 'workspace-backup',
     label: 'Workspace Manager',
     description: 'Snapshot or roll back workspace configuration, and create/restore full workspace backups (config + data).',
     component: WorkspaceBackup,
+  },
+  {
+    id: 'compose-to-template',
+    label: 'Template Manager',
+    description: 'Convert a docker-compose.yml, or upload an existing template, then edit, validate and save it as a reusable Rigger prebuilt template.',
+    component: ComposeToTemplate,
   },
 ]
 

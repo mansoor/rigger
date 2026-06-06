@@ -111,6 +111,11 @@ func main() {
 			handler.GetBackupJob(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/tools/workspace-archives":
 			handler.ListWorkspaceArchives(w, r)
+		case r.Method == "POST" && r.URL.Path == "/api/tools/workspace-archives/upload":
+			handler.UploadWorkspaceArchive(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/tools/workspace-archives/") && hasSuffix(r.URL.Path, "/restore"):
+			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
+			handler.RestoreWorkspaceFromArchive(w, r)
 		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/tools/workspace-archives/"):
 			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
 			handler.DownloadWorkspaceArchive(w, r)
