@@ -298,6 +298,9 @@ function BackupStatsLine({ name, envName }) {
       <span>·</span>
       <span>{fmtBytes(data.total_bytes)}</span>
       {data.retention > 0 && <><span>·</span><span>keep {data.retention}</span></>}
+      {data.enabled && data.schedule && data.schedule !== 'manual' && (
+        <><span>·</span><span title="Scheduled backups run at 03:00 UTC">auto {data.schedule}</span></>
+      )}
     </div>
   )
 }

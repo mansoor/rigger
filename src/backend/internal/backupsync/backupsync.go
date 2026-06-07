@@ -28,6 +28,9 @@ type Syncer interface {
 	// UploadDir mirrors every regular file under localDir to the target,
 	// rooted at keyPrefix (joined with the target's own prefix/remote path).
 	UploadDir(ctx context.Context, localDir, keyPrefix string) (Result, error)
+	// UploadFile uploads a single local file to remoteKey (joined with the
+	// target's own prefix/remote path). Returns the bytes written.
+	UploadFile(ctx context.Context, localPath, remoteKey string) (int64, error)
 }
 
 // New builds a Syncer from a backup target's stored config.

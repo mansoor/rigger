@@ -118,6 +118,21 @@ func (s *sftpSyncer) UploadDir(ctx context.Context, localDir, keyPrefix string) 
 	return res, nil
 }
 
+func (s *sftpSyncer) UploadFile(ctx context.Context, localPath, remoteKey string) (int64, error) {
+	conn, sc, err := s.dial()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	defer sc.Close()
+
+	remote := path.Join(s.cfg.RemotePath, remoteKey)
+	if err := sc.MkdirAll(path.Dir(remote)); err != nil {
+		return 0, fmt.Errorf("mkdir %s: %w", path.Dir(remote), err)
+	}
+	return uploadOne(sc, localPath, remote)
+}
+
 func uploadOne(sc *sftp.Client, local, remote string) (int64, error) {
 	src, err := os.Open(local)
 	if err != nil {

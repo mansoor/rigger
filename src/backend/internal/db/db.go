@@ -178,6 +178,18 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (workspace, env, date)
 		);
 
+		-- 11a: remote-sync state for full workspace archives (.rwb), keyed by the
+		-- archive filename. ListWorkspaceArchives joins this for a synced badge.
+		CREATE TABLE IF NOT EXISTS archive_syncs (
+			filename    TEXT    NOT NULL PRIMARY KEY,
+			target_id   INTEGER NOT NULL,
+			target_name TEXT    NOT NULL DEFAULT '',
+			status      TEXT    NOT NULL DEFAULT 'ok',
+			message     TEXT    NOT NULL DEFAULT '',
+			bytes       INTEGER NOT NULL DEFAULT 0,
+			synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+
 		-- 8d: Secret audit trail. Every read (reveal), write, rotate or delete of a
 		-- secret-flagged env var is recorded here — key name only, never the value.
 		CREATE TABLE IF NOT EXISTS secret_events (

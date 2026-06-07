@@ -85,6 +85,7 @@ func main() {
 
 	// Start daily automated housekeeping (networks + dangling images) at 03:00 UTC
 	handler.StartHousekeepingScheduler(3)
+	handler.StartBackupScheduler(3) // Phase 11a — scheduled workspace backups at 03:00 UTC
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -116,6 +117,9 @@ func main() {
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/tools/workspace-archives/") && hasSuffix(r.URL.Path, "/restore"):
 			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
 			handler.RestoreWorkspaceFromArchive(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/tools/workspace-archives/") && hasSuffix(r.URL.Path, "/sync"):
+			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
+			handler.SyncWorkspaceArchive(w, r)
 		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/tools/workspace-archives/"):
 			r.SetPathValue("filename", pathSegment(r.URL.Path, 3))
 			handler.DownloadWorkspaceArchive(w, r)

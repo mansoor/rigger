@@ -78,3 +78,13 @@ func (s *s3Syncer) UploadDir(ctx context.Context, localDir, keyPrefix string) (R
 	}
 	return res, nil
 }
+
+func (s *s3Syncer) UploadFile(ctx context.Context, localPath, remoteKey string) (int64, error) {
+	key := path.Join(s.cfg.PathPrefix, remoteKey)
+	info, err := s.client.FPutObject(ctx, s.cfg.Bucket, key, localPath,
+		minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	if err != nil {
+		return 0, err
+	}
+	return info.Size, nil
+}

@@ -3,8 +3,10 @@ package api
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mansoor/rigger/ui/internal/settings"
 )
 
 // archiveNameSanitizer maps any character outside the safe set to "-".
@@ -221,6 +225,19 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 			j.SizeBytes = size
 			j.DoneAt    = &now
 		})
+
+		// Auto-upload to the workspace's configured remote target (11a). The
+		// outcome (ok/fail) is recorded in archive_syncs for the UI badge; we
+		// only log on failure for operability.
+		if tid, err := h.configBackupTarget(body.Workspace); err == nil && tid != nil {
+			if target, err := settings.GetBackupTarget(h.db, *tid); err == nil && target != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+				if _, ae := h.uploadArchive(ctx, archiveName, target); ae != nil {
+					log.Printf("auto-sync of %s to %s failed: %v", archiveName, target.Name, ae)
+				}
+				cancel()
+			}
+		}
 	}()
 
 	writeJSON(w, http.StatusAccepted, job)
@@ -240,10 +257,11 @@ func (h *Handler) GetBackupJob(w http.ResponseWriter, r *http.Request) {
 // ── Archive management ────────────────────────────────────────────────────────
 
 type ArchiveInfo struct {
-	Filename  string    `json:"filename"`
-	Workspace string    `json:"workspace"`
-	CreatedAt time.Time `json:"created_at"`
-	SizeBytes int64     `json:"size_bytes"`
+	Filename  string     `json:"filename"`
+	Workspace string     `json:"workspace"`
+	CreatedAt time.Time  `json:"created_at"`
+	SizeBytes int64      `json:"size_bytes"`
+	Sync      *syncState `json:"sync,omitempty"` // 11a: remote-sync state, if any
 }
 
 // GET /api/tools/workspace-archives
@@ -255,6 +273,7 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	syncStates := h.archiveSyncStates()
 	var archives []ArchiveInfo
 	for _, e := range entries {
 		if e.IsDir() || !hasArchiveSuffix(e.Name()) {
@@ -266,12 +285,17 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 		}
 		// Derive workspace name: everything before the last "-YYYYMMDD-HHMMSS.tar.gz"
 		ws := wsNameFromArchive(e.Name())
-		archives = append(archives, ArchiveInfo{
+		ai := ArchiveInfo{
 			Filename:  e.Name(),
 			Workspace: ws,
 			CreatedAt: fi.ModTime(),
 			SizeBytes: fi.Size(),
-		})
+		}
+		if st, ok := syncStates[e.Name()]; ok {
+			s := st
+			ai.Sync = &s
+		}
+		archives = append(archives, ai)
 	}
 	if archives == nil {
 		archives = []ArchiveInfo{}

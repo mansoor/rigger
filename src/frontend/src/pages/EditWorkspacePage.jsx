@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchBackupTargets } from '../lib/api'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
@@ -876,13 +876,13 @@ function EnvVarsInline({ workspaceName, envName }) {
 
 // serializeConfig builds the same config object that Save writes, stringified —
 // used to detect unsaved changes by comparing against the loaded baseline.
-function serializeConfig(project, envs, images, rawConfig) {
+function serializeConfig(project, envs, images, backup, rawConfig) {
   const cleanEnvs = {}
   for (const [k, v] of Object.entries(envs || {})) {
     const { _initial_vars, _id, ...rest } = v // eslint-disable-line no-unused-vars
     cleanEnvs[k] = rest
   }
-  const updated = { ...rawConfig, project, environments: cleanEnvs, ...(project?.type === 'image' && { images }) }
+  const updated = { ...rawConfig, project, environments: cleanEnvs, ...(project?.type === 'image' && { images }), ...(backup && { backup }) }
   return JSON.stringify(updated)
 }
 
@@ -907,6 +907,7 @@ export default function EditWorkspacePage() {
   const [firstEnvVars, setFirstEnvVars] = useState({})
   const [baseline, setBaseline] = useState(null)        // serialized config at load
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [backup, setBackup]   = useState(null)          // backup config block
 
   useEffect(() => {
     if (rawConfig && envs === null) {
@@ -918,7 +919,9 @@ export default function EditWorkspacePage() {
       setEnvs(withIds)
       setProject(rawConfig.project || {})
       setImages(rawConfig.images || [])
-      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.images || [], rawConfig))
+      const bkp = rawConfig.backup || { enabled: false, target_id: null, target_name: 'local', schedule: 'daily', retention: 7 }
+      setBackup(bkp)
+      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.images || [], bkp, rawConfig))
       // Pre-load vars from first env for use when adding new environments
       const firstEnvName = Object.keys(rawConfig.environments || {})[0]
       if (firstEnvName) {
@@ -943,6 +946,7 @@ export default function EditWorkspacePage() {
         project,
         environments: cleanEnvs,
         ...(project?.type === 'image' && { images }),
+        ...(backup && { backup }),
       }
       await putConfig(name, JSON.stringify(updated, null, 2))
 
@@ -1020,7 +1024,7 @@ export default function EditWorkspacePage() {
   // Unsaved-changes detection: compare the current editable config to the load
   // baseline. Save is enabled only when something changed; Cancel confirms first.
   const dirty = baseline !== null && envs !== null && project !== null &&
-    serializeConfig(project, envs, images, rawConfig) !== baseline
+    serializeConfig(project, envs, images, backup, rawConfig) !== baseline
 
   function leave() { navigate(`/workspaces/${name}`) }
   function handleCancel() { if (dirty) setConfirmCancel(true); else leave() }
@@ -1188,6 +1192,9 @@ export default function EditWorkspacePage() {
 
         {/* Move the whole workspace to another host (Phase 7) */}
         <MigrateSection name={name} />
+
+        {/* Backup configuration (Phase 11a) */}
+        {backup && <BackupSection backup={backup} onChange={setBackup} workspaceName={name} />}
 
         {/* Danger zone */}
         <DangerZone name={name} />
@@ -1491,6 +1498,82 @@ function MigrateSection({ name }) {
         />
       )}
     </section>
+  )
+}
+
+// ── Backup configuration (Phase 11a) ──────────────────────────────────────────
+
+const EDIT_SCHEDULE_OPTIONS = [
+  { value: 'daily',  label: 'Daily (03:00 UTC)' },
+  { value: 'weekly', label: 'Weekly (Sun 03:00 UTC)' },
+  { value: 'manual', label: 'Manual only' },
+]
+const EDIT_RETENTION_OPTIONS = [3, 7, 14, 30]
+const editSelectCls = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+const editLabelCls = 'block text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1'
+
+function BackupSection({ backup, onChange }) {
+  const { data: targets = [] } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
+  const upd = (k, v) => onChange({ ...backup, [k]: v })
+  const selectedVal = backup.target_id ? String(backup.target_id) : 'local'
+
+  function handleTarget(val) {
+    if (val === 'local') { onChange({ ...backup, target_id: null, target_name: 'local' }); return }
+    const t = targets.find(t => String(t.id) === val)
+    onChange({ ...backup, target_id: t?.id ?? null, target_name: t?.name ?? val })
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-5">
+      <h2 className="text-sm font-semibold text-content-strong mb-1">Backups</h2>
+      <p className="text-xs text-content-subtle mb-4">
+        Scheduled backups run at 03:00 UTC. Snapshots beyond the retention count are pruned automatically;
+        if a remote target is set, each new snapshot is uploaded to it.
+      </p>
+
+      <label className="flex items-center gap-2 cursor-pointer select-none mb-4">
+        <button
+          type="button" onClick={() => upd('enabled', !backup.enabled)}
+          className={`relative w-9 h-5 rounded-full transition-colors ${backup.enabled ? 'bg-brand-600' : 'bg-surface-overlay'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${backup.enabled ? 'translate-x-4' : ''}`} />
+        </button>
+        <span className="text-sm text-content">Enable scheduled backups</span>
+      </label>
+
+      {backup.enabled && (
+        <div className="space-y-4">
+          <div>
+            <label className={editLabelCls}>Destination</label>
+            <select value={selectedVal} onChange={e => handleTarget(e.target.value)} className={editSelectCls}>
+              <option value="local">Local filesystem (default)</option>
+              {targets.map(t => (
+                <option key={t.id} value={String(t.id)}>{t.name} ({t.type.toUpperCase()})</option>
+              ))}
+            </select>
+            {targets.length === 0 && (
+              <p className="text-xs text-content-subtle mt-1.5">
+                Only local backups available. Add an S3 or SFTP target in Settings to enable remote backups.
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={editLabelCls}>Schedule</label>
+              <select value={backup.schedule || 'daily'} onChange={e => upd('schedule', e.target.value)} className={editSelectCls}>
+                {EDIT_SCHEDULE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={editLabelCls}>Retention</label>
+              <select value={String(backup.retention || 7)} onChange={e => upd('retention', parseInt(e.target.value))} className={editSelectCls}>
+                {EDIT_RETENTION_OPTIONS.map(n => <option key={n} value={n}>{n} backups</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

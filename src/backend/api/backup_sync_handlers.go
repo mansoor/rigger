@@ -108,24 +108,9 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	syncer, err := backupsync.New(*target)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	keyPrefix := path.Join(name, env, date)
-	res, syncErr := syncer.UploadDir(ctx, snapDir, keyPrefix)
-
-	// Record outcome (ok or fail) so the UI can show a badge either way.
-	status, msg := "ok", ""
-	if syncErr != nil {
-		status, msg = "fail", syncErr.Error()
-	}
-	h.recordBackupSync(name, env, date, target, status, msg, res)
-
+	res, syncErr := h.uploadSnapshot(ctx, name, env, target, date)
 	if syncErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": syncErr.Error()})
 		return
@@ -133,6 +118,23 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok", "target": target.Name, "files": res.Files, "bytes": res.Bytes, "date": date,
 	})
+}
+
+// uploadSnapshot mirrors one env snapshot dir to a target and records the
+// outcome in backup_syncs. Shared by SyncEnvBackup and the scheduler.
+func (h *Handler) uploadSnapshot(ctx context.Context, ws, env string, target *settings.BackupTarget, date string) (backupsync.Result, error) {
+	syncer, err := backupsync.New(*target)
+	if err != nil {
+		return backupsync.Result{}, err
+	}
+	snapDir := filepath.Join(h.workspacesDir, ws, "backups", env, date)
+	res, syncErr := syncer.UploadDir(ctx, snapDir, path.Join(ws, env, date))
+	status, msg := "ok", ""
+	if syncErr != nil {
+		status, msg = "fail", syncErr.Error()
+	}
+	h.recordBackupSync(ws, env, date, target, status, msg, res)
+	return res, syncErr
 }
 
 // configBackupTarget reads backup.target_id from a workspace's config.json.
@@ -179,6 +181,8 @@ func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
 		Oldest     string `json:"oldest"`
 		Newest     string `json:"newest"`
 		Retention  int    `json:"retention"`
+		Schedule   string `json:"schedule"`
+		Enabled    bool   `json:"enabled"`
 	}
 	st := stats{}
 	entries, _ := os.ReadDir(dir)
@@ -202,6 +206,8 @@ func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg, err := h.readBackupCfg(name); err == nil {
 		st.Retention = cfg.Retention
+		st.Schedule = cfg.Schedule
+		st.Enabled = cfg.Enabled
 	}
 	writeJSON(w, http.StatusOK, st)
 }
@@ -234,6 +240,95 @@ func (h *Handler) recordBackupSync(ws, env, date string, t *settings.BackupTarge
 			status=excluded.status, message=excluded.message,
 			files=excluded.files, bytes=excluded.bytes, synced_at=CURRENT_TIMESTAMP`,
 		ws, env, date, t.ID, t.Name, status, msg, res.Files, res.Bytes) //nolint:errcheck
+}
+
+// ── Full workspace archive (.rwb) remote sync (11a) ──────────────────────────
+
+// uploadArchive uploads a single .rwb archive to a target and records the
+// outcome in archive_syncs. Shared by the manual endpoint and auto-upload.
+func (h *Handler) uploadArchive(ctx context.Context, filename string, target *settings.BackupTarget) (int64, error) {
+	syncer, err := backupsync.New(*target)
+	if err != nil {
+		return 0, err
+	}
+	localPath := filepath.Join(archivesDir(h.dataDir), filename)
+	n, upErr := syncer.UploadFile(ctx, localPath, path.Join("workspace-archives", filename))
+	status, msg := "ok", ""
+	if upErr != nil {
+		status, msg = "fail", upErr.Error()
+	}
+	h.recordArchiveSync(filename, target, status, msg, n)
+	return n, upErr
+}
+
+func (h *Handler) recordArchiveSync(filename string, t *settings.BackupTarget, status, msg string, bytes int64) {
+	h.db.Exec(`
+		INSERT INTO archive_syncs (filename, target_id, target_name, status, message, bytes, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(filename) DO UPDATE SET
+			target_id=excluded.target_id, target_name=excluded.target_name,
+			status=excluded.status, message=excluded.message, bytes=excluded.bytes,
+			synced_at=CURRENT_TIMESTAMP`,
+		filename, t.ID, t.Name, status, msg, bytes) //nolint:errcheck
+}
+
+func (h *Handler) archiveSyncStates() map[string]syncState {
+	out := map[string]syncState{}
+	rows, err := h.db.Query(`SELECT filename, target_name, status, synced_at FROM archive_syncs`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fn, target, status, at string
+		if err := rows.Scan(&fn, &target, &status, &at); err != nil {
+			continue
+		}
+		out[fn] = syncState{Target: target, Status: status, SyncedAt: at}
+	}
+	return out
+}
+
+// POST /api/tools/workspace-archives/{filename}/sync
+// Pushes a full .rwb archive to a target (body {target_id} override, else the
+// source workspace's configured target).
+func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
+	filename := r.PathValue("filename")
+	if strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+	if _, err := os.Stat(filepath.Join(archivesDir(h.dataDir), filename)); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "archive not found"})
+		return
+	}
+	var body struct {
+		TargetID *int64 `json:"target_id"`
+	}
+	_ = readJSON(r, &body)
+	targetID := body.TargetID
+	if targetID == nil {
+		if t, err := h.configBackupTarget(wsNameFromArchive(filename)); err == nil {
+			targetID = t
+		}
+	}
+	if targetID == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no remote backup target configured for this workspace"})
+		return
+	}
+	target, err := settings.GetBackupTarget(h.db, *targetID)
+	if err != nil || target == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup target not found"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+	n, upErr := h.uploadArchive(ctx, filename, target)
+	if upErr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": upErr.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "target": target.Name, "bytes": n})
 }
 
 // syncState is the per-snapshot sync info joined into ListBackups.

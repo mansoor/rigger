@@ -210,6 +210,10 @@ export const syncEnvBackup        = (name, env, body = {}) =>
 export const fetchBackupStats     = (name, env) =>
   api.get(`/workspaces/${name}/envs/${env}/backup-stats`).then(r => r.data)
 
+// 11a: push a full .rwb workspace archive to a remote target.
+export const syncWorkspaceArchive = (filename, body = {}) =>
+  api.post(`/tools/workspace-archives/${encodeURIComponent(filename)}/sync`, body).then(r => r.data)
+
 // ── Settings: Docker Registries ───────────────────────────────────────────────
 
 export const fetchRegistries      = ()          => api.get('/settings/registries').then(r => r.data)

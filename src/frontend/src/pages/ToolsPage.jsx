@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft,
   startWorkspaceBackup, getBackupJob,
-  listWorkspaceArchives, deleteWorkspaceArchive,
+  listWorkspaceArchives, deleteWorkspaceArchive, syncWorkspaceArchive,
   restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchWorkspaces,
   createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot, uploadWorkspaceSnapshot,
 } from '../lib/api'
@@ -959,6 +959,7 @@ function WorkspaceBackup() {
   const [bkpMsg, setBkpMsg]                 = useState(null)  // { ok, text } — restore/upload/delete
   const [deleting, setDeleting]             = useState({})
   const [downloading, setDownloading]       = useState({})
+  const [syncingArchive, setSyncingArchive] = useState({})
   const [restoringArchive, setRestoringArchive] = useState({})
   const [archiveUploading, setArchiveUploading] = useState(false)
 
@@ -1069,6 +1070,21 @@ function WorkspaceBackup() {
       setBkpMsg({ ok: false, text: e?.response?.data?.error || e.message })
     } finally {
       setRestoringArchive(s => ({ ...s, [a.filename]: false }))
+    }
+  }
+
+  // Push a full archive to the workspace's configured remote backup target (11a).
+  async function syncArchive(a) {
+    setSyncingArchive(s => ({ ...s, [a.filename]: true }))
+    setBkpMsg(null)
+    try {
+      const res = await syncWorkspaceArchive(a.filename)
+      setBkpMsg({ ok: true, text: `Synced ${a.filename} to ${res.target}.` })
+      qc.invalidateQueries({ queryKey: ['workspace-archives'] })
+    } catch (e) {
+      setBkpMsg({ ok: false, text: `Sync failed: ${e?.response?.data?.error || e.message}` })
+    } finally {
+      setSyncingArchive(s => ({ ...s, [a.filename]: false }))
     }
   }
 
@@ -1334,9 +1350,16 @@ function WorkspaceBackup() {
                 <div className="space-y-2">
                   {archives.map(a => (
                     <FileRow key={a.filename} title={a.filename}
-                      meta={<>{a.workspace ? <span className="text-content-subtle">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}</>}>
+                      meta={<>
+                        {a.workspace ? <span className="text-content-subtle">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}
+                        {a.sync?.status === 'ok' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg border border-success-border/60" title={`Synced to ${a.sync.target}`}>↑ {a.sync.target}</span>}
+                        {a.sync?.status === 'fail' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-danger-subtle text-danger-fg border border-danger-border/60" title="Last sync failed">↑!</span>}
+                      </>}>
                       <button onClick={() => restoreArchive(a)} disabled={restoringArchive[a.filename]} className={ROW_BTN_PRIMARY}>
                         {restoringArchive[a.filename] ? '…' : 'Restore'}
+                      </button>
+                      <button onClick={() => syncArchive(a)} disabled={!!syncingArchive[a.filename]} className={ROW_BTN_NEUTRAL} title="Push to remote backup target">
+                        {syncingArchive[a.filename] ? '…' : '↑ Sync'}
                       </button>
                       <button onClick={() => downloadArchive(a.filename)} disabled={!!downloading[a.filename]} className={ROW_BTN_NEUTRAL}>
                         {downloading[a.filename] ? '…' : '⬇ Download'}
