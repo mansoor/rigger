@@ -4,12 +4,12 @@
 export default function PortWarnings({ warnings }) {
   if (!warnings || warnings.length === 0) return null
   return (
-    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+    <div className="mt-2 rounded-lg border border-warning/30 bg-amber-500/10 px-3 py-2 text-xs text-warning-fg">
       <p className="font-medium mb-0.5">⚠ Possible port conflict</p>
-      <ul className="list-disc list-inside space-y-0.5 text-amber-200/90">
+      <ul className="list-disc list-inside space-y-0.5 text-warning-fg/90">
         {warnings.map((w, i) => <li key={i}>{w}</li>)}
       </ul>
-      <p className="text-amber-300/70 mt-1">You can still save — but the deploy may fail until each host port is unique.</p>
+      <p className="text-warning-fg/70 mt-1">You can still save — but the deploy may fail until each host port is unique.</p>
     </div>
   )
 }

@@ -27,45 +27,45 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-950">
+    <div className="min-h-screen flex items-center justify-center bg-canvas">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white">Rigger</h1>
-          <p className="text-gray-400 mt-1">Rig once. Deploy anywhere</p>
+          <h1 className="text-3xl font-bold text-content-strong">Rigger</h1>
+          <p className="text-content-muted mt-1">Rig once. Deploy anywhere</p>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8">
-          <h2 className="text-lg font-semibold text-white mb-1">First-run setup</h2>
-          <p className="text-sm text-gray-400 mb-6">Create your admin account to get started.</p>
+        <div className="bg-surface border border-border rounded-xl p-8">
+          <h2 className="text-lg font-semibold text-content-strong mb-1">First-run setup</h2>
+          <p className="text-sm text-content-muted mb-6">Create your admin account to get started.</p>
 
           {error && (
-            <div className="mb-4 px-4 py-3 bg-red-950 border border-red-800 text-red-300 rounded-lg text-sm">
+            <div className="mb-4 px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Username</label>
+              <label className="block text-sm font-medium text-content mb-1">Username</label>
               <input
                 type="text" value={username} onChange={e => setUsername(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
                 autoFocus required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Password</label>
+              <label className="block text-sm font-medium text-content mb-1">Password</label>
               <input
                 type="password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Confirm password</label>
+              <label className="block text-sm font-medium text-content mb-1">Confirm password</label>
               <input
                 type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
                 required
               />
             </div>

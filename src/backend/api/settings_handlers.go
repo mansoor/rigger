@@ -17,7 +17,7 @@ import (
 
 // GET /api/settings/general
 func (h *Handler) GetGeneralSettings(w http.ResponseWriter, r *http.Request) {
-	keys := []string{"acme_email", "rigger_domain", "traefik_enabled", "confirm_destructive"}
+	keys := []string{"acme_email", "rigger_domain", "traefik_enabled", "confirm_destructive", "appearance_prefs"}
 	result := map[string]string{}
 	for _, k := range keys {
 		var val string
@@ -34,7 +34,7 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "traefik_enabled": true, "confirm_destructive": true}
+	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true}
 	for k, v := range body {
 		if !allowed[k] {
 			continue

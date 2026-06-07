@@ -36,8 +36,8 @@ function AppRoutes() {
 
   if (!ready) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
-        <span className="text-gray-700 text-sm">Loading…</span>
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <span className="text-content-faint text-sm">Loading…</span>
       </div>
     )
   }

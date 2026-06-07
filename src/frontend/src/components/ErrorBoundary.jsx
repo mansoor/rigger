@@ -21,13 +21,13 @@ export default class ErrorBoundary extends Component {
     if (!error) return this.props.children
 
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center p-6">
-        <div className="max-w-lg w-full bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-3">
-          <h1 className="text-lg font-semibold text-white">Something went wrong</h1>
-          <p className="text-sm text-gray-400">
+      <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
+        <div className="max-w-lg w-full bg-surface border border-border rounded-xl p-6 space-y-3">
+          <h1 className="text-lg font-semibold text-content-strong">Something went wrong</h1>
+          <p className="text-sm text-content-muted">
             This view hit an unexpected error and couldn't render. Reloading usually clears it; your data is unaffected.
           </p>
-          <pre className="text-xs text-red-300/80 bg-red-950/30 border border-red-800/40 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap font-mono">
+          <pre className="text-xs text-danger-fg/80 bg-danger-subtle/30 border border-danger-border/40 rounded-lg p-3 overflow-auto max-h-40 whitespace-pre-wrap font-mono">
             {String(error?.stack || error)}
           </pre>
           <div className="flex gap-2">
@@ -39,7 +39,7 @@ export default class ErrorBoundary extends Component {
             </button>
             <button
               onClick={() => this.setState({ error: null })}
-              className="px-4 py-2 text-sm rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
+              className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors"
             >
               Try again
             </button>

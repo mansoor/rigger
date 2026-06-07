@@ -5,13 +5,14 @@ import { useAuthStore } from '../store/auth'
 import { fetchWorkspaces, fetchEnvStatus, changePassword, fetchAlertUnread } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
+import ThemeToggle from './ThemeToggle'
 
 const STATUS_DOT = {
   running: 'bg-green-400',
   partial: 'bg-amber-400 animate-pulse',
   stopped: 'bg-red-500',
   building: 'bg-amber-400 animate-pulse',
-  unknown:  'bg-gray-600',
+  unknown:  'bg-surface-overlay',
 }
 
 // Polls the first environment of a workspace to determine its dot color
@@ -49,8 +50,8 @@ function WorkspaceSidebarItem({ ws, active }) {
       to={`/workspaces/${ws.name}`}
       className={`block px-3 py-2.5 rounded-lg transition-colors ${
         active
-          ? 'bg-gray-800 text-white'
-          : 'text-gray-400 hover:bg-gray-800/60 hover:text-gray-200'
+          ? 'bg-surface-raised text-content-strong'
+          : 'text-content-muted hover:bg-surface-raised/60 hover:text-content'
       }`}
     >
       <div className="flex items-center gap-2.5">
@@ -58,7 +59,7 @@ function WorkspaceSidebarItem({ ws, active }) {
         <span className="font-medium text-sm truncate">{ws.name}</span>
       </div>
       {stackLine && (
-        <p className="text-xs text-gray-500 mt-0.5 ml-4.5 truncate pl-4">{stackLine}</p>
+        <p className="text-xs text-content-subtle mt-0.5 ml-4.5 truncate pl-4">{stackLine}</p>
       )}
     </Link>
   )
@@ -87,24 +88,24 @@ function ChangePasswordModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <form
-        className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-sm mx-4 p-6 space-y-4"
+        className="bg-surface border border-border rounded-xl w-full max-w-sm mx-4 p-6 space-y-4"
         onClick={e => e.stopPropagation()}
         onSubmit={submit}
       >
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Change password</h3>
-          <button type="button" onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <h3 className="font-semibold text-content-strong">Change password</h3>
+          <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
-        {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+        {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
         {['Current password', 'New password', 'Confirm new password'].map((label, i) => {
           const val  = [current, next, confirm][i]
           const set  = [setCurrent, setNext, setConfirm][i]
           return (
             <div key={label}>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{label}</label>
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">{label}</label>
               <input
                 type="password" value={val} onChange={e => set(e.target.value)} required
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
               />
             </div>
           )
@@ -137,31 +138,31 @@ function UserMenu({ user, onLogout }) {
       <div ref={ref} className="relative">
         <button
           onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition-colors"
+          className="flex items-center gap-2 px-3 py-1.5 text-sm text-content-muted hover:text-content-strong rounded-lg hover:bg-surface-raised transition-colors"
         >
           <span className="w-6 h-6 rounded-full bg-brand-700 text-white text-xs font-bold flex items-center justify-center shrink-0">
             {user?.sub?.[0]?.toUpperCase() || '?'}
           </span>
           <span>{user?.sub}</span>
-          <span className="text-xs text-gray-600">▾</span>
+          <span className="text-xs text-content-faint">▾</span>
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full mt-1 z-30 bg-gray-800 border border-gray-700 rounded-xl shadow-xl min-w-[180px] py-1 overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-700">
-              <p className="text-xs text-gray-400">Signed in as</p>
-              <p className="text-sm font-semibold text-white truncate">{user?.sub}</p>
+          <div className="absolute right-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[180px] py-1 overflow-hidden">
+            <div className="px-3 py-2 border-b border-border-strong">
+              <p className="text-xs text-content-muted">Signed in as</p>
+              <p className="text-sm font-semibold text-content-strong truncate">{user?.sub}</p>
             </div>
             <button
               onClick={() => { setOpen(false); setPwOpen(true) }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white transition-colors"
+              className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
             >
               Change password
             </button>
-            <div className="border-t border-gray-700 mt-1 pt-1">
+            <div className="border-t border-border-strong mt-1 pt-1">
               <button
                 onClick={() => { setOpen(false); onLogout() }}
-                className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-gray-700 hover:text-red-300 transition-colors"
+                className="w-full text-left px-3 py-2 text-sm text-danger-fg hover:bg-surface-overlay hover:text-danger-fg transition-colors"
               >
                 Sign out
               </button>
@@ -196,22 +197,23 @@ export default function Layout({ children }) {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-gray-950 flex flex-col">
+    <div className="h-screen overflow-hidden bg-canvas flex flex-col">
       {/* Top nav */}
-      <nav className="border-b border-gray-800 bg-gray-900 shrink-0 z-10">
+      <nav className="border-b border-border bg-surface shrink-0 z-10">
         <div className="px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <Link to="/" className="flex items-center shrink-0">
               <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
             </Link>
-            <span className="text-gray-400 text-sm hidden sm:inline">Rig once. Deploy anywhere</span>
+            <span className="text-content-muted text-sm hidden sm:inline">Rig once. Deploy anywhere</span>
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
             <NavBtn to="/housekeeping" label="Housekeeping" />
             <NavBtn to="/tools" label="Tools" />
             <NavBtn to="/settings" label="Settings" />
-            <div className="w-px h-4 bg-gray-700 mx-1" />
+            <div className="w-px h-4 bg-surface-overlay mx-1" />
+            <ThemeToggle />
             <AlertBell active={slidePanel === 'alerts'} onClick={() => setSlidePanel(p => p === 'alerts' ? null : 'alerts')} />
             <UserMenu user={user} onLogout={handleLogout} />
           </div>
@@ -220,10 +222,10 @@ export default function Layout({ children }) {
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <aside className="w-56 shrink-0 border-r border-gray-800 bg-gray-900 flex flex-col min-h-0">
+        <aside className="w-56 shrink-0 border-r border-border bg-surface flex flex-col min-h-0">
           {/* Workspace list — scrolls internally so the actions below stay in view */}
-          <div className="flex-1 min-h-0 flex flex-col p-3 border-b border-gray-800">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider px-1 mb-2 shrink-0">Workspaces</p>
+          <div className="flex-1 min-h-0 flex flex-col p-3 border-b border-border">
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider px-1 mb-2 shrink-0">Workspaces</p>
             <div className="space-y-0.5 overflow-y-auto min-h-0">
               {(workspaces || []).map(ws => (
                 <WorkspaceSidebarItem key={ws.name} ws={ws} active={ws.name === activeName} />
@@ -266,7 +268,7 @@ function NavBtn({ to, label }) {
   return (
     <Link
       to={to}
-      className="px-3 py-1.5 text-sm text-gray-300 hover:text-white rounded-lg hover:bg-gray-800 transition-colors border border-gray-700 hover:border-gray-600"
+      className="px-3 py-1.5 text-sm text-content hover:text-content-strong rounded-lg hover:bg-surface-raised transition-colors border border-border-strong hover:border-border-strong"
     >
       {label}
     </Link>
@@ -289,7 +291,7 @@ function AlertBell({ active, onClick }) {
       onClick={onClick}
       title="Alerts"
       className={`relative flex items-center justify-center w-9 h-8 rounded-lg transition-colors ${
-        active ? 'bg-gray-800 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
+        active ? 'bg-surface-raised text-content-strong' : 'text-content-muted hover:text-content-strong hover:bg-surface-raised'
       }`}
     >
       <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -308,7 +310,7 @@ function SidebarAction({ to, label, icon }) {
   return (
     <Link
       to={to}
-      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-gray-300 rounded-lg hover:bg-gray-800/60 transition-colors"
+      className="flex items-center gap-2 px-3 py-2 text-sm text-content-subtle hover:text-content rounded-lg hover:bg-surface-raised/60 transition-colors"
     >
       <span className="text-xs">{icon}</span>
       {label}
@@ -322,13 +324,13 @@ function SidebarBtn({ label, icon, onClick, active }) {
       onClick={onClick}
       className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
         active
-          ? 'bg-gray-800 text-gray-200'
-          : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/60'
+          ? 'bg-surface-raised text-content'
+          : 'text-content-subtle hover:text-content hover:bg-surface-raised/60'
       }`}
     >
       <span className="text-xs">{icon}</span>
       {label}
-      {active && <span className="ml-auto text-xs text-gray-500">▶</span>}
+      {active && <span className="ml-auto text-xs text-content-subtle">▶</span>}
     </button>
   )
 }

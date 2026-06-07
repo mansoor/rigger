@@ -39,7 +39,7 @@ const sw = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinec
 function EntryIcon({ type }) {
   const cls = 'w-4 h-4 shrink-0'
   if (type === 'dir') return (
-    <svg viewBox="0 0 20 20" className={`${cls} text-amber-400/80`} fill="currentColor" aria-hidden="true">
+    <svg viewBox="0 0 20 20" className={`${cls} text-warning-fg/80`} fill="currentColor" aria-hidden="true">
       <path d="M2 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" />
     </svg>
   )
@@ -50,7 +50,7 @@ function EntryIcon({ type }) {
     </svg>
   )
   return (
-    <svg viewBox="0 0 20 20" className={`${cls} text-gray-500`} {...sw} aria-hidden="true">
+    <svg viewBox="0 0 20 20" className={`${cls} text-content-subtle`} {...sw} aria-hidden="true">
       <path d="M5 3h6l4 4v10a1 1 0 01-1 1H5a1 1 0 01-1-1V4a1 1 0 011-1z" />
       <path d="M11 3v4h4" />
     </svg>
@@ -86,16 +86,16 @@ const UploadIcon = () => (
   <svg viewBox="0 0 20 20" className="w-4 h-4" {...sw} aria-hidden="true"><path d="M10 14V5m0 0L6.8 8.2M10 5l3.2 3.2" /><path d="M4 15.5h12" /></svg>
 )
 
-function ActBtn({ title, onClick, hover = 'hover:text-gray-200', children }) {
+function ActBtn({ title, onClick, hover = 'hover:text-content', children }) {
   return (
     <button title={title} onClick={onClick}
-      className={`p-1 rounded text-gray-600 ${hover} hover:bg-gray-800 transition-colors`}>{children}</button>
+      className={`p-1 rounded text-content-faint ${hover} hover:bg-surface-raised transition-colors`}>{children}</button>
   )
 }
 function ToolBtn({ title, onClick, disabled, children }) {
   return (
     <button title={title} onClick={onClick} disabled={disabled}
-      className="p-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 disabled:opacity-40 transition-colors">{children}</button>
+      className="p-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content disabled:opacity-40 transition-colors">{children}</button>
   )
 }
 
@@ -193,39 +193,39 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div
-        className="relative bg-gray-900 border border-gray-700 rounded-xl flex flex-col shadow-2xl w-full max-w-4xl h-[600px] max-h-[88vh]"
+        className="relative bg-surface border border-border-strong rounded-xl flex flex-col shadow-2xl w-full max-w-4xl h-[600px] max-h-[88vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 shrink-0">
-          <span className="text-sm font-medium text-gray-200">Files</span>
-          <span className="font-mono text-xs text-gray-500 truncate">{short || service}</span>
-          <span className="text-xs text-gray-600">· {wsName}/{env}</span>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
+          <span className="text-sm font-medium text-content">Files</span>
+          <span className="font-mono text-xs text-content-subtle truncate">{short || service}</span>
+          <span className="text-xs text-content-faint">· {wsName}/{env}</span>
           <div className="ml-auto flex items-center gap-1.5">
             <ToolBtn title="New file" onClick={onNewFile} disabled={busy}><NewFileIcon /></ToolBtn>
             <ToolBtn title="New folder" onClick={onNewFolder} disabled={busy}><NewFolderIcon /></ToolBtn>
             <ToolBtn title="Upload file" onClick={() => fileInputRef.current?.click()} disabled={busy}><UploadIcon /></ToolBtn>
             <input ref={fileInputRef} type="file" className="hidden" onChange={onUpload} />
             <ToolBtn title="Refresh" onClick={() => refetch()} disabled={busy}><span className="text-sm leading-none">⟳</span></ToolBtn>
-            <button onClick={onClose} className="ml-1 text-gray-500 hover:text-white text-lg leading-none transition-colors" title="Close">×</button>
+            <button onClick={onClose} className="ml-1 text-content-subtle hover:text-content-strong text-lg leading-none transition-colors" title="Close">×</button>
           </div>
         </div>
 
         {/* Breadcrumb */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-800 text-xs shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-border text-xs shrink-0 overflow-x-auto">
           <button onClick={() => { setView(null); setCwd('/') }}
-            className={`px-1.5 py-0.5 rounded hover:bg-gray-800 ${cwd === '/' ? 'text-gray-200' : 'text-gray-400'}`}>/</button>
+            className={`px-1.5 py-0.5 rounded hover:bg-surface-raised ${cwd === '/' ? 'text-content' : 'text-content-muted'}`}>/</button>
           {crumbs.map((c, i) => (
             <span key={i} className="flex items-center gap-1">
-              <span className="text-gray-700">/</span>
+              <span className="text-content-faint">/</span>
               <button onClick={() => { setView(null); setCwd(crumbPath(i)) }}
-                className={`px-1.5 py-0.5 rounded hover:bg-gray-800 ${i === crumbs.length - 1 ? 'text-gray-200' : 'text-gray-400'}`}>{c}</button>
+                className={`px-1.5 py-0.5 rounded hover:bg-surface-raised ${i === crumbs.length - 1 ? 'text-content' : 'text-content-muted'}`}>{c}</button>
             </span>
           ))}
         </div>
 
         {error && (
-          <div className="px-4 py-2 bg-red-950/50 border-b border-red-900/50 text-xs text-red-400 shrink-0">{error}</div>
+          <div className="px-4 py-2 bg-danger-subtle/50 border-b border-danger-border/50 text-xs text-danger-fg shrink-0">{error}</div>
         )}
 
         {/* Body: file viewer/editor OR directory listing */}
@@ -239,8 +239,8 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
             />
           ) : (
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-[1] bg-gray-900">
-                <tr className="text-gray-500 border-b border-gray-800">
+              <thead className="sticky top-0 z-[1] bg-surface">
+                <tr className="text-content-subtle border-b border-border">
                   <th className="text-left font-medium py-1.5 pl-4 pr-2">Name</th>
                   <th className="text-right font-medium py-1.5 px-2">Size</th>
                   <th className="text-left font-medium py-1.5 px-2 hidden sm:table-cell">Permission</th>
@@ -250,37 +250,37 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
               </thead>
               <tbody>
                 {cwd !== '/' && (
-                  <tr className="border-b border-gray-800/60 hover:bg-gray-800/40 cursor-pointer"
+                  <tr className="border-b border-border/60 hover:bg-surface-raised/40 cursor-pointer"
                     onClick={() => { setView(null); setCwd(parentOf(cwd)) }}>
-                    <td className="py-1.5 px-4 text-gray-400" colSpan={5}>↑ ..</td>
+                    <td className="py-1.5 px-4 text-content-muted" colSpan={5}>↑ ..</td>
                   </tr>
                 )}
-                {isLoading && <tr><td className="py-6 px-4 text-gray-500" colSpan={5}>Loading…</td></tr>}
-                {isError && <tr><td className="py-6 px-4 text-red-400" colSpan={5}>{errMsg(listErr)}</td></tr>}
+                {isLoading && <tr><td className="py-6 px-4 text-content-subtle" colSpan={5}>Loading…</td></tr>}
+                {isError && <tr><td className="py-6 px-4 text-danger-fg" colSpan={5}>{errMsg(listErr)}</td></tr>}
                 {!isLoading && !isError && entries.length === 0 && (
-                  <tr><td className="py-6 px-4 text-gray-600" colSpan={5}>Empty directory</td></tr>
+                  <tr><td className="py-6 px-4 text-content-faint" colSpan={5}>Empty directory</td></tr>
                 )}
                 {entries.map(e => (
-                  <tr key={e.name} className="border-b border-gray-800/60 hover:bg-gray-800/40">
+                  <tr key={e.name} className="border-b border-border/60 hover:bg-surface-raised/40">
                     <td className="py-1.5 pl-4 pr-2 cursor-pointer" onClick={() => openEntry(e)}>
                       <div className="flex items-center gap-2 min-w-0">
                         <EntryIcon type={e.type} />
-                        <span className={`font-mono truncate ${e.type === 'dir' ? 'text-gray-200' : 'text-gray-300'}`}>{e.name}</span>
-                        {e.link && <span className="text-gray-600 truncate">→ {e.link}</span>}
+                        <span className={`font-mono truncate ${e.type === 'dir' ? 'text-content' : 'text-content'}`}>{e.name}</span>
+                        {e.link && <span className="text-content-faint truncate">→ {e.link}</span>}
                       </div>
                     </td>
-                    <td className="py-1.5 px-2 text-right text-gray-500 whitespace-nowrap cursor-pointer" onClick={() => openEntry(e)}>
+                    <td className="py-1.5 px-2 text-right text-content-subtle whitespace-nowrap cursor-pointer" onClick={() => openEntry(e)}>
                       {e.type === 'file' ? humanSize(e.size) : ''}
                     </td>
-                    <td className="py-1.5 px-2 text-gray-600 font-mono whitespace-nowrap hidden sm:table-cell">{e.mode}</td>
-                    <td className="py-1.5 px-2 text-gray-600 font-mono whitespace-nowrap hidden sm:table-cell">{e.mtime}</td>
+                    <td className="py-1.5 px-2 text-content-faint font-mono whitespace-nowrap hidden sm:table-cell">{e.mode}</td>
+                    <td className="py-1.5 px-2 text-content-faint font-mono whitespace-nowrap hidden sm:table-cell">{e.mtime}</td>
                     <td className="py-1.5 pl-2 pr-4">
                       <div className="flex items-center justify-end gap-0.5">
                         {e.type === 'file' && <ActBtn title="View" onClick={() => openEntry(e)}><EyeIcon /></ActBtn>}
-                        {e.type === 'file' && <ActBtn title="Download" hover="hover:text-blue-400" onClick={() => onDownload(e)}><DownloadIcon /></ActBtn>}
+                        {e.type === 'file' && <ActBtn title="Download" hover="hover:text-info-fg" onClick={() => onDownload(e)}><DownloadIcon /></ActBtn>}
                         <ActBtn title="Rename" onClick={() => onRename(e)}><PencilIcon /></ActBtn>
                         <ActBtn title="Change permissions" onClick={() => onChmod(e)}><ShieldLockIcon /></ActBtn>
-                        <ActBtn title="Delete" hover="hover:text-red-400" onClick={() => setConfirmDel(e)}><TrashIcon /></ActBtn>
+                        <ActBtn title="Delete" hover="hover:text-danger-fg" onClick={() => setConfirmDel(e)}><TrashIcon /></ActBtn>
                       </div>
                     </td>
                   </tr>
@@ -293,17 +293,17 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
         {/* Delete confirm */}
         {confirmDel && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60" onClick={() => setConfirmDel(null)}>
-            <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 max-w-sm" onClick={e => e.stopPropagation()}>
-              <p className="text-sm text-gray-200 mb-1">Delete {confirmDel.type === 'dir' ? 'directory' : 'file'}?</p>
-              <p className="font-mono text-xs text-gray-400 break-all mb-4">{joinPath(cwd, confirmDel.name)}</p>
+            <div className="bg-surface border border-border-strong rounded-xl p-5 max-w-sm" onClick={e => e.stopPropagation()}>
+              <p className="text-sm text-content mb-1">Delete {confirmDel.type === 'dir' ? 'directory' : 'file'}?</p>
+              <p className="font-mono text-xs text-content-muted break-all mb-4">{joinPath(cwd, confirmDel.name)}</p>
               {confirmDel.type === 'dir' && (
-                <p className="text-xs text-amber-400/80 mb-4">This removes the directory and everything inside it.</p>
+                <p className="text-xs text-warning-fg/80 mb-4">This removes the directory and everything inside it.</p>
               )}
               <div className="flex justify-end gap-2">
                 <button onClick={() => setConfirmDel(null)}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300">Cancel</button>
+                  className="px-3 py-1.5 text-xs rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
                 <button onClick={() => onDelete(confirmDel)} disabled={busy}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-red-900/80 hover:bg-red-800 text-red-200 disabled:opacity-40">Delete</button>
+                  className="px-3 py-1.5 text-xs rounded-lg bg-danger-subtle/80 hover:bg-danger/20 text-danger-fg disabled:opacity-40">Delete</button>
               </div>
             </div>
           </div>
@@ -323,15 +323,15 @@ function PromptDialog({ title, label, initial, placeholder, confirmLabel = 'OK',
   const submit = () => { const v = val.trim(); if (v) onSubmit(v) }
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60" onClick={onCancel}>
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 w-80" onClick={e => e.stopPropagation()}>
-        <p className="text-sm text-gray-200 mb-3">{title}</p>
-        {label && <label className="block text-xs text-gray-500 mb-1">{label}</label>}
+      <div className="bg-surface border border-border-strong rounded-xl p-5 w-80" onClick={e => e.stopPropagation()}>
+        <p className="text-sm text-content mb-3">{title}</p>
+        {label && <label className="block text-xs text-content-subtle mb-1">{label}</label>}
         <input ref={ref} value={val} placeholder={placeholder}
           onChange={e => setVal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel() }}
-          className="w-full bg-gray-950 border border-gray-700 rounded-lg px-2.5 py-1.5 text-sm text-gray-200 font-mono focus:outline-none focus:border-brand-500" />
+          className="w-full bg-canvas border border-border-strong rounded-lg px-2.5 py-1.5 text-sm text-content font-mono focus:outline-none focus:border-brand-500" />
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onCancel} className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300">Cancel</button>
+          <button onClick={onCancel} className="px-3 py-1.5 text-xs rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
           <button onClick={submit} disabled={busy}
             className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40">{confirmLabel}</button>
         </div>
@@ -343,18 +343,18 @@ function PromptDialog({ title, label, initial, placeholder, confirmLabel = 'OK',
 function FileViewer({ view, editing, draft, setDraft, onEdit, onCancel, onSave, onBack, onDownloadPath, busy }) {
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 shrink-0">
-        <button onClick={onBack} className="px-2 py-0.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">← Back</button>
-        <span className="font-mono text-xs text-gray-300 truncate">{view.path}</span>
-        {view.truncated && <span className="text-xs text-amber-400/80">· truncated</span>}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
+        <button onClick={onBack} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content">← Back</button>
+        <span className="font-mono text-xs text-content truncate">{view.path}</span>
+        {view.truncated && <span className="text-xs text-warning-fg/80">· truncated</span>}
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={onDownloadPath} className="px-2 py-0.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-400">↓ Download</button>
+          <button onClick={onDownloadPath} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content-muted">↓ Download</button>
           {!view.binary && !view.truncated && !editing && (
-            <button onClick={onEdit} className="px-2 py-0.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300">Edit</button>
+            <button onClick={onEdit} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content">Edit</button>
           )}
           {editing && (
             <>
-              <button onClick={onCancel} className="px-2 py-0.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-400">Cancel</button>
+              <button onClick={onCancel} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content-muted">Cancel</button>
               <button onClick={onSave} disabled={busy}
                 className="px-2.5 py-0.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40">Save</button>
             </>
@@ -363,16 +363,16 @@ function FileViewer({ view, editing, draft, setDraft, onEdit, onCancel, onSave, 
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         {view.binary ? (
-          <div className="p-6 text-sm text-gray-500">
+          <div className="p-6 text-sm text-content-subtle">
             Binary file ({humanSize(view.size)}) — use Download to retrieve it.
           </div>
         ) : editing ? (
           <textarea
             value={draft} onChange={e => setDraft(e.target.value)} spellCheck={false}
-            className="w-full h-full min-h-[380px] bg-gray-950 text-gray-200 font-mono text-xs p-4 resize-none focus:outline-none"
+            className="w-full h-full min-h-[380px] bg-canvas text-content font-mono text-xs p-4 resize-none focus:outline-none"
           />
         ) : (
-          <pre className="p-4 font-mono text-xs text-gray-300 whitespace-pre-wrap break-words">{view.content}</pre>
+          <pre className="p-4 font-mono text-xs text-content whitespace-pre-wrap break-words">{view.content}</pre>
         )}
       </div>
     </div>

@@ -4,10 +4,13 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { fetchContainers } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useTheme } from '../theme/ThemeProvider'
+import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
 
 export default function TerminalModal({ wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
+  const { prefs, resolvedTheme } = useTheme()
   const termRef       = useRef(null)   // xterm instance
   const fitRef        = useRef(null)   // FitAddon instance
   const mountRef      = useRef(null)   // DOM element for xterm
@@ -42,15 +45,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
   // Initialise xterm once on mount
   useEffect(() => {
     const term = new Terminal({
-      theme: {
-        background: '#030712',
-        foreground: '#f3f4f6',
-        cursor: '#6366f1',
-        selectionBackground: '#374151',
-      },
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 13,
-      lineHeight: 1.5,
+      ...xtermOptions(prefs),
       cursorBlink: true,
       convertEol: false,
       scrollback: 5000,
@@ -79,7 +74,12 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
       ro.disconnect()
       term.dispose()
     }
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live re-theme / re-size when the user switches theme or log-font prefs.
+  useEffect(() => {
+    applyXterm(termRef.current, fitRef.current, prefs)
+  }, [resolvedTheme, prefs.fontMono, prefs.logFontSize, prefs.logLineHeight])
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -170,16 +170,16 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
       <div
-        className="bg-gray-900 border border-gray-700 rounded-xl flex flex-col shadow-2xl"
+        className="bg-surface border border-border-strong rounded-xl flex flex-col shadow-2xl"
         style={{ width: '860px', maxWidth: '100%', height: '560px' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 shrink-0">
-          <span className="font-mono text-xs text-green-400 bg-gray-800 px-2 py-0.5 rounded shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0">
+          <span className="font-mono text-xs text-success-fg bg-surface-raised px-2 py-0.5 rounded shrink-0">
             &gt; bash
           </span>
-          <span className="text-xs text-gray-500 shrink-0">{wsName} / {envName}</span>
+          <span className="text-xs text-content-subtle shrink-0">{wsName} / {envName}</span>
 
           <div className="flex items-center gap-2 ml-auto">
             {/* Container selector — running only */}
@@ -187,7 +187,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
               value={service}
               onChange={e => { setService(e.target.value); disconnect() }}
               disabled={isLoading || connected || connecting}
-              className="bg-gray-800 border border-gray-700 text-white text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+              className="bg-surface-raised border border-border-strong text-content-strong text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-500 disabled:opacity-50"
             >
               {isLoading
                 ? <option value="">Loading…</option>
@@ -214,7 +214,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
             ) : (
               <button
                 onClick={disconnect}
-                className="px-3 py-1.5 bg-red-900/70 hover:bg-red-800 text-red-300 text-xs font-medium rounded-lg transition-colors"
+                className="px-3 py-1.5 bg-danger-subtle/70 hover:bg-danger/20 text-danger-fg text-xs font-medium rounded-lg transition-colors"
               >
                 Disconnect
               </button>
@@ -222,7 +222,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
 
             {/* Connected indicator */}
             {connected && (
-              <span className="flex items-center gap-1.5 text-xs text-green-400">
+              <span className="flex items-center gap-1.5 text-xs text-success-fg">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                 connected
               </span>
@@ -231,7 +231,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
             {/* Close */}
             <button
               onClick={() => { disconnect(); onClose() }}
-              className="ml-1 text-gray-500 hover:text-white text-lg leading-none transition-colors"
+              className="ml-1 text-content-subtle hover:text-content-strong text-lg leading-none transition-colors"
               title="Close terminal"
             >
               ×
@@ -241,7 +241,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
 
         {/* Error banner */}
         {error && (
-          <div className="px-4 py-2 bg-red-950/50 border-b border-red-900/50 text-xs text-red-400 shrink-0">
+          <div className="px-4 py-2 bg-danger-subtle/50 border-b border-danger-border/50 text-xs text-danger-fg shrink-0">
             {error}
           </div>
         )}
@@ -250,7 +250,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
         <div
           ref={mountRef}
           className="flex-1 p-2 min-h-0"
-          style={{ background: '#030712' }}
+          style={{ background: 'rgb(var(--canvas))' }}
         />
       </div>
     </div>

@@ -7,6 +7,30 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <script>
+      // No-FOUC init: apply the saved theme + typography to <html> BEFORE the
+      // app paints, so light-mode users never flash dark. Mirrors the prefs
+      // shape written by src/theme/ThemeProvider.jsx. Defensive: any failure
+      // falls back to the dark default baked into :root.
+      (function () {
+        try {
+          var p = JSON.parse(localStorage.getItem('rigger.prefs') || '{}');
+          var root = document.documentElement;
+          var theme = p.theme || 'system';
+          if (theme === 'system') {
+            theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          root.setAttribute('data-theme', theme);
+          var sysSans = 'ui-sans-serif, system-ui, sans-serif';
+          var sysMono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+          root.style.setProperty('--font-sans', !p.fontSans || p.fontSans === 'system' ? sysSans : "'" + p.fontSans + "'");
+          root.style.setProperty('--font-mono', !p.fontMono || p.fontMono === 'system' ? sysMono : "'" + p.fontMono + "'");
+          if (p.logFontSize) root.style.setProperty('--log-font-size', p.logFontSize + 'px');
+          if (p.logLineHeight) root.style.setProperty('--log-line-height', String(p.logLineHeight));
+          root.style.fontSize = p.density === 'compact' ? '14px' : '16px';
+        } catch (e) { /* keep dark default */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

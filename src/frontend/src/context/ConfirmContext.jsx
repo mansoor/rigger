@@ -64,21 +64,21 @@ export function ConfirmProvider({ children }) {
           onClick={() => close(false)}
         >
           <div
-            className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md mx-4 p-6 space-y-4"
+            className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4"
             onClick={e => e.stopPropagation()}
           >
-            <h3 className="font-semibold text-white">{dialog.title || 'Are you sure?'}</h3>
-            {dialog.message && <p className="text-sm text-gray-400 leading-relaxed">{dialog.message}</p>}
+            <h3 className="font-semibold text-content-strong">{dialog.title || 'Are you sure?'}</h3>
+            {dialog.message && <p className="text-sm text-content-muted leading-relaxed">{dialog.message}</p>}
             <div className="flex justify-end gap-3 pt-1">
               <button
                 onClick={() => close(false)}
-                className="px-4 py-2 text-sm rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
+                className="px-4 py-2 text-sm rounded-lg border border-border-strong bg-surface-raised hover:bg-surface-overlay text-content transition-colors"
               >
                 {dialog.cancelLabel || 'Cancel'}
               </button>
               <button
                 onClick={() => close(true)}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg text-white transition-colors ${
+                className={`px-4 py-2 text-sm font-semibold rounded-lg text-content-strong transition-colors ${
                   danger ? 'bg-red-700 hover:bg-red-600' : 'bg-brand-600 hover:bg-brand-700'
                 }`}
               >

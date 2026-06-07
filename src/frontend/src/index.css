@@ -1,11 +1,25 @@
+/* @import must precede all other statements (CSS spec). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Fira+Code:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+/*
+ * Typography preferences (configurable per-user via ThemeProvider). Defaults
+ * here so the first paint is sane before JS sets overrides. Color tokens live
+ * in src/styles/themes.css (imported in main.jsx).
+ */
+:root {
+  --font-sans: 'Inter';
+  --font-mono: 'JetBrains Mono';
+  --log-font-size: 13px;
+  --log-line-height: 1.5;
+}
 
 body {
-  @apply bg-gray-950 text-gray-100 antialiased;
+  @apply bg-canvas text-content antialiased;
+  font-family: theme('fontFamily.sans');
 }
 
 /* xterm.js terminal overrides */
@@ -20,12 +34,12 @@ body {
 }
 .tab-fade { animation: tabfade 0.15s ease both; }
 
-/* Dark, themed scrollbars so they don't look out of place against the UI */
+/* Themed scrollbars — driven by theme tokens so they match light/dark. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #374151 transparent; /* thumb=gray-700, track=transparent */
+  scrollbar-color: rgb(var(--scrollbar-thumb)) transparent;
 }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
-*::-webkit-scrollbar-thumb:hover { background: #4b5563; } /* gray-600 */
+*::-webkit-scrollbar-thumb { background: rgb(var(--scrollbar-thumb)); border-radius: 4px; }
+*::-webkit-scrollbar-thumb:hover { background: rgb(var(--scrollbar-thumb-hover)); }

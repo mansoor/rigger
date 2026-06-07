@@ -4,7 +4,7 @@
 export default function Sparkline({ values, height = 24, stroke = '#22d3ee', fill = true }) {
   const pts = (values || []).filter(v => typeof v === 'number' && !isNaN(v))
   if (pts.length < 2) {
-    return <div style={{ height }} className="w-full flex items-center justify-center text-[10px] text-gray-600">—</div>
+    return <div style={{ height }} className="w-full flex items-center justify-center text-[10px] text-content-faint">—</div>
   }
   const W = 100 // viewBox width units; the SVG scales horizontally to its container
   const max = Math.max(...pts)

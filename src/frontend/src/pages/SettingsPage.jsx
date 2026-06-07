@@ -11,13 +11,18 @@ import {
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
 } from '../lib/api'
+import { useTheme } from '../theme/ThemeProvider'
+import {
+  THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS,
+  LOG_FONT_SIZE_MIN, LOG_FONT_SIZE_MAX,
+} from '../theme/themes'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
 function Label({ children, required }) {
   return (
-    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-red-400 ml-0.5">*</span>}
+    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
+      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
     </label>
   )
 }
@@ -27,7 +32,7 @@ function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest 
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder} disabled={disabled}
-      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 text-sm focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-50"
+      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-50"
       {...rest}
     />
   )
@@ -37,7 +42,7 @@ function Select({ value, onChange, options, disabled }) {
   return (
     <select
       value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50"
+      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50"
     >
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
@@ -49,11 +54,11 @@ function Toggle({ checked, onChange, label }) {
     <label className="flex items-center gap-2 cursor-pointer select-none">
       <button
         type="button" onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-gray-700'}`}
+        className={`relative w-9 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}
       >
         <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
       </button>
-      <span className="text-sm text-gray-300">{label}</span>
+      <span className="text-sm text-content">{label}</span>
     </label>
   )
 }
@@ -63,9 +68,9 @@ function Btn({ onClick, disabled, variant = 'primary', children, type = 'button'
   const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm' }
   const variants = {
     primary:   'bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50',
-    secondary: 'bg-gray-700 hover:bg-gray-600 text-gray-200 disabled:opacity-50',
-    danger:    'bg-red-900/60 hover:bg-red-800 text-red-300 disabled:opacity-50',
-    ghost:     'text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-50',
+    secondary: 'bg-surface-overlay hover:bg-surface-overlay text-content disabled:opacity-50',
+    danger:    'bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg disabled:opacity-50',
+    ghost:     'text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50',
   }
   return (
     <button type={type} onClick={onClick} disabled={disabled}
@@ -79,8 +84,8 @@ function EmptyState({ icon, title, description, action }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="text-4xl mb-3 opacity-40">{icon}</div>
-      <p className="text-gray-300 font-medium mb-1">{title}</p>
-      <p className="text-sm text-gray-500 mb-4">{description}</p>
+      <p className="text-content font-medium mb-1">{title}</p>
+      <p className="text-sm text-content-subtle mb-4">{description}</p>
       {action}
     </div>
   )
@@ -89,9 +94,9 @@ function EmptyState({ icon, title, description, action }) {
 function ConfirmDeleteModal({ name, onConfirm, onClose, loading }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-sm mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-white">Delete {name}?</h3>
-        <p className="text-sm text-gray-400">This cannot be undone.</p>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-content-strong">Delete {name}?</h3>
+        <p className="text-sm text-content-muted">This cannot be undone.</p>
         <div className="flex gap-2 justify-end pt-2">
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
           <Btn variant="danger" onClick={onConfirm} disabled={loading}>
@@ -154,13 +159,13 @@ function BackupTargetForm({ initial, onSave, onCancel, saving }) {
       </div>
 
       {type === 's3' && (
-        <div className="space-y-4 border border-gray-700/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">S3 Configuration</p>
+        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
+          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">S3 Configuration</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label required>Endpoint</Label>
               <Input value={cfg.endpoint} onChange={v => setField('endpoint', v)} placeholder="s3.amazonaws.com" />
-              <p className="text-xs text-gray-600 mt-1">Use custom endpoint for MinIO / Wasabi / R2</p>
+              <p className="text-xs text-content-faint mt-1">Use custom endpoint for MinIO / Wasabi / R2</p>
             </div>
             <div>
               <Label required>Bucket</Label>
@@ -188,8 +193,8 @@ function BackupTargetForm({ initial, onSave, onCancel, saving }) {
       )}
 
       {type === 'sftp' && (
-        <div className="space-y-4 border border-gray-700/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">SFTP Configuration</p>
+        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
+          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">SFTP Configuration</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label required>Host</Label>
@@ -226,14 +231,14 @@ function BackupTargetForm({ initial, onSave, onCancel, saving }) {
                 value={cfg.private_key} onChange={e => setField('private_key', e.target.value)}
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
                 rows={6}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 text-xs font-mono focus:outline-none focus:border-brand-500 resize-none"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-xs font-mono focus:outline-none focus:border-brand-500 resize-none"
               />
             </div>
           )}
         </div>
       )}
 
-      {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -264,14 +269,14 @@ function BackupTargetsTab() {
     return saveMut.mutateAsync({ id, body })
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-base font-semibold text-white">Backup Targets</h2>
-          <p className="text-sm text-gray-500 mt-0.5">S3-compatible object storage and SFTP destinations for workspace backups.</p>
+          <h2 className="text-base font-semibold text-content-strong">Backup Targets</h2>
+          <p className="text-sm text-content-subtle mt-0.5">S3-compatible object storage and SFTP destinations for workspace backups.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add target</Btn>
       </div>
@@ -286,16 +291,16 @@ function BackupTargetsTab() {
       ) : (
         <div className="space-y-2">
           {targets.map(t => (
-            <div key={t.id} className="flex items-center gap-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+            <div key={t.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
               <div className="flex-shrink-0">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider
-                  ${t.type === 's3' ? 'bg-amber-900/60 text-amber-300' : 'bg-cyan-900/60 text-cyan-300'}`}>
+                  ${t.type === 's3' ? 'bg-warning-subtle/60 text-warning-fg' : 'bg-cyan-100/70 text-cyan-700 dark:bg-cyan-900/60 dark:text-cyan-300'}`}>
                   {t.type}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white">{t.name}</p>
-                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                <p className="text-sm font-semibold text-content-strong">{t.name}</p>
+                <p className="text-xs text-content-subtle mt-0.5 truncate">
                   {t.type === 's3'
                     ? `${t.config?.endpoint || 's3'} / ${t.config?.bucket || '—'}`
                     : `${t.config?.username || ''}@${t.config?.host || '—'}:${t.config?.port || 22}`
@@ -314,10 +319,10 @@ function BackupTargetsTab() {
       {/* Add / Edit modal */}
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white">{modal === 'new' ? 'Add backup target' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white text-xl">×</button>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add backup target' : `Edit "${modal.editing.name}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
             <BackupTargetForm
               initial={modal === 'new' ? null : modal.editing}
@@ -374,7 +379,7 @@ function RegistryForm({ initial, onSave, onCancel, saving }) {
         <div>
           <Label required>Registry URL</Label>
           <Input value={url} onChange={setUrl} placeholder="registry.example.com" />
-          <p className="text-xs text-gray-600 mt-1">e.g. docker.io, ghcr.io, registry.example.com</p>
+          <p className="text-xs text-content-faint mt-1">e.g. docker.io, ghcr.io, registry.example.com</p>
         </div>
         <div>
           <Label required>Username</Label>
@@ -383,11 +388,11 @@ function RegistryForm({ initial, onSave, onCancel, saving }) {
         <div>
           <Label required={!isEdit}>Password / Token</Label>
           <Input value={password} onChange={setPassword} type="password" placeholder={isEdit ? '(unchanged)' : '••••••••'} />
-          {isEdit && <p className="text-xs text-gray-600 mt-1">Leave blank to keep existing password</p>}
+          {isEdit && <p className="text-xs text-content-faint mt-1">Leave blank to keep existing password</p>}
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -430,14 +435,14 @@ function RegistriesTab() {
     return saveMut.mutateAsync({ id, body })
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-base font-semibold text-white">Docker Registries</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Pre-authenticated registries available when creating new workspaces.</p>
+          <h2 className="text-base font-semibold text-content-strong">Docker Registries</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Pre-authenticated registries available when creating new workspaces.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add registry</Btn>
       </div>
@@ -454,18 +459,18 @@ function RegistriesTab() {
           {regs.map(r => {
             const ts = testStatus[r.id]
             return (
-              <div key={r.id} className="flex items-center gap-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
-                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-sm">
+              <div key={r.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
+                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">
                   📦
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white">{r.name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{r.url} · {r.username}</p>
+                  <p className="text-sm font-semibold text-content-strong">{r.name}</p>
+                  <p className="text-xs text-content-subtle mt-0.5">{r.url} · {r.username}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {ts?.loading && <span className="text-xs text-gray-500">Testing…</span>}
-                  {ts?.ok && <span className="text-xs text-green-400">✓ Connected</span>}
-                  {ts?.error && <span className="text-xs text-red-400 max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                  {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                  {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
+                  {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(r.id)} disabled={ts?.loading}>Test</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: r })}>Edit</Btn>
                   <Btn variant="danger" size="sm" onClick={() => setDeleting(r)}>Delete</Btn>
@@ -478,10 +483,10 @@ function RegistriesTab() {
 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white">{modal === 'new' ? 'Add registry' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white text-xl">×</button>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add registry' : `Edit "${modal.editing.name}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
             <RegistryForm
               initial={modal === 'new' ? null : modal.editing}
@@ -576,7 +581,7 @@ function HostForm({ initial, onSave, onCancel, saving }) {
       <div>
         <Label>Remote workspaces directory</Label>
         <Input value={wsDir} onChange={setWsDir} placeholder="/opt/rigger/workspaces" />
-        <p className="text-xs text-gray-600 mt-1">
+        <p className="text-xs text-content-faint mt-1">
           Absolute path on the host where workspaces live (for scan/import) and are pushed (for deploy/migrate).
           Leave blank to use the server default (<code className="font-mono">REMOTE_WORKSPACES_DIR</code>).
         </p>
@@ -585,24 +590,24 @@ function HostForm({ initial, onSave, onCancel, saving }) {
       {/* Rigger-managed key toggle */}
       <label className="flex items-center gap-2.5 cursor-pointer select-none">
         <input type="checkbox" checked={managed} onChange={e => setManaged(e.target.checked)} className="accent-brand-500" />
-        <span className="text-sm text-gray-200">Use Rigger-managed key</span>
-        <span className="text-xs text-gray-500">— Rigger holds the private key; you just install its public key on the host</span>
+        <span className="text-sm text-content">Use Rigger-managed key</span>
+        <span className="text-xs text-content-subtle">— Rigger holds the private key; you just install its public key on the host</span>
       </label>
 
       {managed ? (
-        <div className="space-y-2 rounded-lg border border-gray-700 bg-gray-950/60 p-3">
-          <p className="text-xs text-gray-400">
-            1. Run this on <strong className="text-gray-300">{user || 'the host'}@{address || 'the host'}</strong> to authorize Rigger:
+        <div className="space-y-2 rounded-lg border border-border-strong bg-canvas/60 p-3">
+          <p className="text-xs text-content-muted">
+            1. Run this on <strong className="text-content">{user || 'the host'}@{address || 'the host'}</strong> to authorize Rigger:
           </p>
           <div className="flex items-start gap-2">
-            <pre className="flex-1 overflow-auto bg-gray-950 border border-gray-800 rounded-lg p-2 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">{installCmd || 'Loading Rigger public key…'}</pre>
+            <pre className="flex-1 overflow-auto bg-canvas border border-border rounded-lg p-2 text-[11px] font-mono text-content whitespace-pre-wrap">{installCmd || 'Loading Rigger public key…'}</pre>
             <button type="button" onClick={() => copy(installCmd)} disabled={!installCmd}
-              className="shrink-0 px-2.5 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg disabled:opacity-40">
+              className="shrink-0 px-2.5 py-1.5 text-xs bg-surface-raised hover:bg-surface-overlay text-content rounded-lg disabled:opacity-40">
               {copied ? '✓' : 'Copy'}
             </button>
           </div>
-          <p className="text-xs text-gray-500">
-            2. Then add the host and click <strong className="text-gray-400">Test</strong>. The host only needs Docker + SSH.
+          <p className="text-xs text-content-subtle">
+            2. Then add the host and click <strong className="text-content-muted">Test</strong>. The host only needs Docker + SSH.
             (The private key never leaves Rigger.)
           </p>
         </div>
@@ -613,15 +618,15 @@ function HostForm({ initial, onSave, onCancel, saving }) {
             value={key} onChange={e => setKey(e.target.value)}
             rows={6} spellCheck={false}
             placeholder={isEdit ? '(unchanged — paste a new key to replace)' : '-----BEGIN OPENSSH PRIVATE KEY-----'}
-            className="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-gray-200 focus:border-brand-500 focus:outline-none"
+            className="w-full bg-canvas border border-border-strong rounded-lg px-3 py-2 text-xs font-mono text-content focus:border-brand-500 focus:outline-none"
           />
-          <div className="text-xs text-gray-600 mt-1 space-y-1">
+          <div className="text-xs text-content-faint mt-1 space-y-1">
             <p>
               Paste the <strong>private</strong> key Rigger should log in with — its public half must be in the SSH user's
               <code className="font-mono"> ~/.ssh/authorized_keys</code> on the host. Must have <strong>no passphrase</strong>.
               Stored encrypted at rest.{isEdit && ' Leave blank to keep the existing key.'}
             </p>
-            <p className="text-gray-500">
+            <p className="text-content-subtle">
               Generate one with <code className="font-mono">ssh-keygen -t ed25519 -N "" -f rigger_host</code> — paste
               <code className="font-mono"> rigger_host</code> here and install <code className="font-mono">rigger_host.pub</code> on the host.
             </p>
@@ -629,7 +634,7 @@ function HostForm({ initial, onSave, onCancel, saving }) {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -673,14 +678,14 @@ function HostsTab() {
     return saveMut.mutateAsync({ id: modal?.editing?.id, body })
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-base font-semibold text-white">Remote Hosts</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Manage Docker workloads on other servers over SSH. Hosts need only Docker + SSH.</p>
+          <h2 className="text-base font-semibold text-content-strong">Remote Hosts</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Manage Docker workloads on other servers over SSH. Hosts need only Docker + SSH.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add host</Btn>
       </div>
@@ -697,16 +702,16 @@ function HostsTab() {
           {hosts.map(host => {
             const ts = testStatus[host.id]
             return (
-              <div key={host.id} className="flex items-center gap-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
-                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-800 flex items-center justify-center text-sm">🖥️</div>
+              <div key={host.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
+                <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">🖥️</div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white">{host.name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
+                  <p className="text-sm font-semibold text-content-strong">{host.name}</p>
+                  <p className="text-xs text-content-subtle mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  {ts?.loading && <span className="text-xs text-gray-500">Testing…</span>}
-                  {ts?.ok && <span className="text-xs text-green-400 max-w-[200px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
-                  {ts?.error && <span className="text-xs text-red-400 max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
+                  {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                  {ts?.ok && <span className="text-xs text-success-fg max-w-[200px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                  {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setHealth(host)}>Health</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setScanning(host)}>Scan</Btn>
@@ -721,10 +726,10 @@ function HostsTab() {
 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white">{modal === 'new' ? 'Add host' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white text-xl">×</button>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add host' : `Edit "${modal.editing.name}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
             <HostForm
               initial={modal === 'new' ? null : modal.editing}
@@ -779,15 +784,15 @@ function HostStatsModal({ host, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-white">Health · {host.name}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <h3 className="font-semibold text-content-strong">Health · {host.name}</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
 
-        {isLoading && <div className="py-8 text-center text-gray-500 text-sm">Loading…</div>}
+        {isLoading && <div className="py-8 text-center text-content-subtle text-sm">Loading…</div>}
         {!isLoading && failed && (
-          <div className="py-3 px-4 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+          <div className="py-3 px-4 bg-red-500/10 border border-danger/30 rounded-lg text-sm text-danger-fg">
             {data?.error || error?.response?.data?.error || 'Failed to reach host'}
           </div>
         )}
@@ -795,9 +800,9 @@ function HostStatsModal({ host, onClose }) {
         {!isLoading && !failed && (
           <div className="space-y-4">
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Docker</p>
+              <p className="text-xs font-semibold text-content-muted uppercase tracking-wider mb-2">Docker</p>
               {d.error ? (
-                <p className="text-sm text-red-400">{d.error}</p>
+                <p className="text-sm text-danger-fg">{d.error}</p>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   <StatCell label="Server" value={d.server_version || '—'} />
@@ -810,7 +815,7 @@ function HostStatsModal({ host, onClose }) {
               )}
             </div>
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">System</p>
+              <p className="text-xs font-semibold text-content-muted uppercase tracking-wider mb-2">System</p>
               <div className="grid grid-cols-2 gap-3">
                 <StatCell label="OS" value={hs.os || '—'} />
                 <StatCell label="Arch · CPUs" value={`${hs.arch || '—'} · ${hs.cpus || 0}`} />
@@ -829,9 +834,9 @@ function HostStatsModal({ host, onClose }) {
 
 function StatCell({ label, value }) {
   return (
-    <div className="bg-gray-950/50 border border-gray-800 rounded-lg px-3 py-2">
-      <p className="text-[11px] text-gray-500 uppercase tracking-wider">{label}</p>
-      <p className="text-sm text-white mt-0.5 truncate" title={String(value)}>{value}</p>
+    <div className="bg-canvas/50 border border-border rounded-lg px-3 py-2">
+      <p className="text-[11px] text-content-subtle uppercase tracking-wider">{label}</p>
+      <p className="text-sm text-content-strong mt-0.5 truncate" title={String(value)}>{value}</p>
     </div>
   )
 }
@@ -876,34 +881,34 @@ function ScanHostModal({ host, onClose, onImported }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-white">Scan "{host.name}"</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <h3 className="font-semibold text-content-strong">Scan "{host.name}"</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
 
-        {loading && <div className="py-8 text-center text-gray-500 text-sm">Scanning host…</div>}
-        {error && <div className="py-3 px-4 mb-4 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">{error}</div>}
+        {loading && <div className="py-8 text-center text-content-subtle text-sm">Scanning host…</div>}
+        {error && <div className="py-3 px-4 mb-4 bg-red-500/10 border border-danger/30 rounded-lg text-sm text-danger-fg">{error}</div>}
 
         {!loading && !error && (
           done ? (
-            <div className="text-sm text-gray-300 space-y-2">
-              <p className="text-green-400">✓ Imported {done.imported?.length || 0} workspace(s).</p>
+            <div className="text-sm text-content space-y-2">
+              <p className="text-success-fg">✓ Imported {done.imported?.length || 0} workspace(s).</p>
               {done.errors && Object.keys(done.errors).length > 0 && (
-                <ul className="text-red-400 text-xs space-y-1">
+                <ul className="text-danger-fg text-xs space-y-1">
                   {Object.entries(done.errors).map(([n, e]) => <li key={n}>{n}: {e}</li>)}
                 </ul>
               )}
               <div className="flex justify-end pt-2"><Btn onClick={onClose}>Done</Btn></div>
             </div>
           ) : rows.length === 0 ? (
-            <div className="py-8 text-center text-gray-500 text-sm">No workspaces found in the remote workspaces directory.</div>
+            <div className="py-8 text-center text-content-subtle text-sm">No workspaces found in the remote workspaces directory.</div>
           ) : (
             <>
-              <p className="text-xs text-gray-500 mb-3">Select workspaces to import. Already-imported workspaces are disabled.</p>
+              <p className="text-xs text-content-subtle mb-3">Select workspaces to import. Already-imported workspaces are disabled.</p>
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {rows.map(w => (
-                  <label key={w.name} className={`flex items-center gap-3 p-3 rounded-lg border ${w.imported ? 'border-gray-800 bg-gray-900/50 opacity-60' : 'border-gray-800 bg-gray-900 cursor-pointer hover:border-gray-700'}`}>
+                  <label key={w.name} className={`flex items-center gap-3 p-3 rounded-lg border ${w.imported ? 'border-border bg-surface/50 opacity-60' : 'border-border bg-surface cursor-pointer hover:border-border-strong'}`}>
                     <input
                       type="checkbox"
                       disabled={w.imported}
@@ -911,8 +916,8 @@ function ScanHostModal({ host, onClose, onImported }) {
                       onChange={e => setSel(s => ({ ...s, [w.name]: e.target.checked }))}
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white">{w.name}{w.imported && <span className="ml-2 text-xs text-gray-500">(imported)</span>}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">{w.project} · {w.type} · {w.envs?.join(', ') || 'no envs'}</p>
+                      <p className="text-sm font-medium text-content-strong">{w.name}{w.imported && <span className="ml-2 text-xs text-content-subtle">(imported)</span>}</p>
+                      <p className="text-xs text-content-subtle mt-0.5">{w.project} · {w.type} · {w.envs?.join(', ') || 'no envs'}</p>
                     </div>
                   </label>
                 ))}
@@ -962,19 +967,19 @@ function GeneralTab() {
     setSynced(true)
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div className="space-y-8 max-w-2xl">
       {/* SSL / Let's Encrypt */}
       <div>
-        <h2 className="text-base font-semibold text-white mb-1">SSL Certificates — Let's Encrypt</h2>
-        <p className="text-sm text-gray-500 mb-4">
+        <h2 className="text-base font-semibold text-content-strong mb-1">SSL Certificates — Let's Encrypt</h2>
+        <p className="text-sm text-content-subtle mb-4">
           Traefik automatically issues and renews certificates via Let's Encrypt. Set your email
           below — it is sent to Let's Encrypt for cert expiry notifications and account recovery.
         </p>
 
-        <div className="space-y-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+        <div className="space-y-4 p-4 bg-surface border border-border rounded-xl">
           <div>
             <Label required>ACME email address</Label>
             <Input
@@ -983,16 +988,16 @@ function GeneralTab() {
               placeholder="admin@example.com"
               type="email"
             />
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-content-subtle mt-1">
               Must match the <code className="font-mono text-xs">ACME_EMAIL</code> value in{' '}
               <code className="font-mono text-xs">src/.env</code>. Traefik reads it from there;
               this field stores it for reference and future automation.
             </p>
           </div>
 
-          <div className="px-4 py-3 bg-amber-950/40 border border-amber-800/50 rounded-lg">
-            <p className="text-xs text-amber-300 font-semibold mb-1">Requirements for SSL to work</p>
-            <ul className="text-xs text-amber-400 space-y-0.5 list-disc pl-4">
+          <div className="px-4 py-3 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
+            <p className="text-xs text-warning-fg font-semibold mb-1">Requirements for SSL to work</p>
+            <ul className="text-xs text-warning-fg space-y-0.5 list-disc pl-4">
               <li>Port 80 must be publicly reachable (for the HTTP-01 ACME challenge)</li>
               <li>Each domain must have a DNS A record pointing to this server</li>
               <li>Let's Encrypt rate limits: max 5 certs per domain per week</li>
@@ -1003,21 +1008,21 @@ function GeneralTab() {
 
       {/* Rigger domain */}
       <div>
-        <h2 className="text-base font-semibold text-white mb-1">Rigger UI Domain</h2>
-        <p className="text-sm text-gray-500 mb-4">
+        <h2 className="text-base font-semibold text-content-strong mb-1">Rigger UI Domain</h2>
+        <p className="text-sm text-content-subtle mb-4">
           Optionally expose the Rigger UI itself through Traefik with an SSL cert.
           After setting this, uncomment the <code className="font-mono text-xs">labels</code> block
           in <code className="font-mono text-xs">src/docker-compose.yml</code> and rebuild.
         </p>
 
-        <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+        <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Rigger UI domain</Label>
           <Input
             value={riggerDomain}
             onChange={setRiggerDomain}
             placeholder="rigger.example.com"
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-content-subtle mt-1">
             Leave blank to access Rigger UI on port {' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
           </p>
@@ -1026,18 +1031,18 @@ function GeneralTab() {
 
       {/* Confirmations */}
       <div>
-        <h2 className="text-base font-semibold text-white mb-1">Confirmations</h2>
-        <p className="text-sm text-gray-500 mb-4">
+        <h2 className="text-base font-semibold text-content-strong mb-1">Confirmations</h2>
+        <p className="text-sm text-content-subtle mb-4">
           Show a confirmation dialog before destructive actions — removing a service or
           environment, deleting backups/archives, clearing history, inactivating a stack, and the like.
         </p>
-        <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+        <div className="p-4 bg-surface border border-border rounded-xl">
           <Toggle
             checked={confirmDestructive}
             onChange={setConfirmDestructive}
             label="Confirm before destructive actions"
           />
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs text-content-subtle mt-2">
             Recommended (on by default). Turn off to skip these prompts. Stronger safeguards —
             type-to-confirm workspace deletion and the Housekeeping prune flows — always stay on.
           </p>
@@ -1050,7 +1055,7 @@ function GeneralTab() {
           {saveMut.isPending ? 'Saving…' : 'Save settings'}
         </Btn>
         {saveMut.isSuccess && (
-          <span className="text-xs text-green-400">✓ Saved</span>
+          <span className="text-xs text-success-fg">✓ Saved</span>
         )}
       </div>
     </div>
@@ -1060,9 +1065,9 @@ function GeneralTab() {
 // ── Alert Rules (Phase 6a) ──────────────────────────────────────────────────────
 
 const SEVERITY_BADGE = {
-  critical: 'bg-red-500/15 text-red-300 border-red-800/50',
-  warning:  'bg-amber-500/15 text-amber-300 border-amber-700/50',
-  info:     'bg-blue-500/15 text-blue-300 border-blue-700/50',
+  critical: 'bg-red-500/15 text-danger-fg border-danger-border/50',
+  warning:  'bg-amber-500/15 text-warning-fg border-warning-border/50',
+  info:     'bg-blue-500/15 text-info-fg border-info-border/50',
 }
 
 function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, saving }) {
@@ -1148,8 +1153,8 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
 
       {/* Targeting — hidden for host-scoped conditions (e.g. disk) */}
       {isHost ? (
-        <div className="px-4 py-3 bg-gray-800/40 border border-gray-700/60 rounded-lg">
-          <p className="text-xs text-gray-400">This condition is evaluated against the <span className="text-gray-200 font-medium">host</span> and applies globally.</p>
+        <div className="px-4 py-3 bg-surface-raised/40 border border-border-strong/60 rounded-lg">
+          <p className="text-xs text-content-muted">This condition is evaluated against the <span className="text-content font-medium">host</span> and applies globally.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4">
@@ -1160,7 +1165,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
           <div>
             <Label>Environment</Label>
             <Select value={env} onChange={setEnv} options={envOptions} disabled={!workspace} />
-            {!workspace && <p className="text-xs text-gray-600 mt-1">Applies to all environments.</p>}
+            {!workspace && <p className="text-xs text-content-faint mt-1">Applies to all environments.</p>}
           </div>
         </div>
       )}
@@ -1169,7 +1174,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
         <div>
           <Label>Cooldown (minutes)</Label>
           <Input value={cooldown} onChange={v => setCooldown(v)} type="number" placeholder="15" />
-          <p className="text-xs text-gray-600 mt-1">Minimum gap before re-firing for the same target.</p>
+          <p className="text-xs text-content-faint mt-1">Minimum gap before re-firing for the same target.</p>
         </div>
         <div className="pb-2">
           <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
@@ -1180,8 +1185,8 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
       <div>
         <Label>Notify channels</Label>
         {channels.length === 0 ? (
-          <p className="text-xs text-gray-600 mt-1">
-            No channels yet — add one on the <span className="text-gray-400">Notifications</span> tab to deliver this alert. The alert still shows in the inbox without a channel.
+          <p className="text-xs text-content-faint mt-1">
+            No channels yet — add one on the <span className="text-content-muted">Notifications</span> tab to deliver this alert. The alert still shows in the inbox without a channel.
           </p>
         ) : (
           <div className="flex flex-wrap gap-2 mt-1">
@@ -1192,11 +1197,11 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
                   key={ch.id} type="button" onClick={() => toggleChannel(ch.id)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
                     on ? 'bg-brand-600/20 border-brand-500 text-brand-300'
-                       : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-gray-200'
+                       : 'bg-surface-raised border-border-strong text-content-muted hover:text-content'
                   }`}
                 >
                   {on ? '✓ ' : ''}{ch.name}
-                  <span className="ml-1 text-gray-500">{ch.type}</span>
+                  <span className="ml-1 text-content-subtle">{ch.type}</span>
                 </button>
               )
             })}
@@ -1204,7 +1209,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
         )}
       </div>
 
-      {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -1248,14 +1253,14 @@ function RulesTab() {
     return r.env ? `${r.workspace} / ${r.env}` : `${r.workspace} (all envs)`
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-base font-semibold text-white">Alert Rules</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Conditions evaluated every 60s. Matches open an alert in the inbox; clearing auto-resolves it.</p>
+          <h2 className="text-base font-semibold text-content-strong">Alert Rules</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Conditions evaluated every 60s. Matches open an alert in the inbox; clearing auto-resolves it.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add rule</Btn>
       </div>
@@ -1270,16 +1275,16 @@ function RulesTab() {
       ) : (
         <div className="space-y-2">
           {rules.map(r => (
-            <div key={r.id} className="flex items-center gap-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+            <div key={r.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider border ${SEVERITY_BADGE[r.severity] || SEVERITY_BADGE.warning}`}>
                 {r.severity}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-white truncate">{r.name}</p>
-                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                <p className="text-sm font-semibold text-content-strong truncate">{r.name}</p>
+                <p className="text-xs text-content-subtle mt-0.5 truncate">
                   {condLabel(r.condition_type)}
                   {r.threshold > 0 ? ` ${r.threshold}${condUnit(r.condition_type)}` : ''} · {targetLabel(r)}
-                  {r.notify_channel_ids?.length > 0 && <span className="text-gray-400"> · 🔔 {r.notify_channel_ids.length}</span>}
+                  {r.notify_channel_ids?.length > 0 && <span className="text-content-muted"> · 🔔 {r.notify_channel_ids.length}</span>}
                 </p>
               </div>
               <Toggle checked={r.enabled} onChange={() => toggleMut.mutate(r)} label="" />
@@ -1294,10 +1299,10 @@ function RulesTab() {
 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white">{modal === 'new' ? 'Add alert rule' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white text-xl">×</button>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add alert rule' : `Edit "${modal.editing.name}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
             <RuleForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1377,14 +1382,14 @@ function ChannelForm({ initial, onSave, onCancel, saving }) {
       </div>
 
       {type === 'apprise' && (
-        <div className="space-y-2 border border-gray-700/60 rounded-lg p-4">
+        <div className="space-y-2 border border-border-strong/60 rounded-lg p-4">
           <Label required>Apprise URL(s)</Label>
           <textarea
             value={cfg.urls} onChange={e => setField('urls', e.target.value)}
             placeholder={APPRISE_EXAMPLES} rows={4}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-600 text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-faint text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
           />
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-content-subtle">
             One Apprise URL per line. Delivered via the Apprise sidecar — see the{' '}
             <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Apprise wiki</a>{' '}
             for the URL format of each service.
@@ -1393,8 +1398,8 @@ function ChannelForm({ initial, onSave, onCancel, saving }) {
       )}
 
       {type === 'email' && (
-        <div className="space-y-4 border border-gray-700/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">SMTP (sent directly by Rigger)</p>
+        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
+          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">SMTP (sent directly by Rigger)</p>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label required>SMTP host</Label>
@@ -1403,7 +1408,7 @@ function ChannelForm({ initial, onSave, onCancel, saving }) {
             <div>
               <Label required>Port</Label>
               <Input value={cfg.port} onChange={v => setField('port', parseInt(v) || 0)} type="number" placeholder="587" />
-              <p className="text-xs text-gray-600 mt-1">465 = implicit TLS; 587/25 = STARTTLS</p>
+              <p className="text-xs text-content-faint mt-1">465 = implicit TLS; 587/25 = STARTTLS</p>
             </div>
             <div>
               <Label>Username</Label>
@@ -1428,7 +1433,7 @@ function ChannelForm({ initial, onSave, onCancel, saving }) {
 
       <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
 
-      {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -1480,14 +1485,14 @@ function NotificationsTab() {
     return urls.length ? `${urls.length} Apprise URL${urls.length > 1 ? 's' : ''}: ${urls[0].split('://')[0]}…` : 'no URLs'
   }
 
-  if (isLoading) return <div className="py-12 text-center text-gray-500 text-sm">Loading…</div>
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h2 className="text-base font-semibold text-white">Notification Channels</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Where alerts are delivered. Assign channels to rules on the Alert Rules tab.</p>
+          <h2 className="text-base font-semibold text-content-strong">Notification Channels</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Where alerts are delivered. Assign channels to rules on the Alert Rules tab.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add channel</Btn>
       </div>
@@ -1504,18 +1509,18 @@ function NotificationsTab() {
           {channels.map(ch => {
             const ts = testStatus[ch.id]
             return (
-              <div key={ch.id} className="flex items-center gap-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
+              <div key={ch.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider
-                  ${ch.type === 'email' ? 'bg-cyan-900/60 text-cyan-300' : 'bg-purple-900/60 text-purple-300'}`}>
+                  ${ch.type === 'email' ? 'bg-cyan-100/70 text-cyan-700 dark:bg-cyan-900/60 dark:text-cyan-300' : 'bg-purple-100/70 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>
                   {ch.type}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{ch.name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{summary(ch)}</p>
+                  <p className="text-sm font-semibold text-content-strong truncate">{ch.name}</p>
+                  <p className="text-xs text-content-subtle mt-0.5 truncate">{summary(ch)}</p>
                 </div>
-                {ts?.loading && <span className="text-xs text-gray-500">Sending…</span>}
-                {ts?.ok && <span className="text-xs text-green-400">✓ Sent</span>}
-                {ts?.error && <span className="text-xs text-red-400 max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
+                {ts?.loading && <span className="text-xs text-content-subtle">Sending…</span>}
+                {ts?.ok && <span className="text-xs text-success-fg">✓ Sent</span>}
+                {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                 <Toggle checked={ch.enabled} onChange={() => toggleMut.mutate(ch)} label="" />
                 <div className="flex items-center gap-2">
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(ch.id)} disabled={ts?.loading}>Test</Btn>
@@ -1530,10 +1535,10 @@ function NotificationsTab() {
 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-white">{modal === 'new' ? 'Add notification channel' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-gray-500 hover:text-white text-xl">×</button>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add notification channel' : `Edit "${modal.editing.name}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
             <ChannelForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1559,10 +1564,143 @@ function NotificationsTab() {
 
 function safeParse(s) { try { return JSON.parse(s) } catch { return {} } }
 
+// ── Appearance ──────────────────────────────────────────────────────────────
+
+// Tiny preview swatch per theme (literal colors — JS can't read CSS vars of an
+// inactive theme; these mirror src/styles/themes.css).
+const THEME_SWATCH = {
+  system: { bg: 'linear-gradient(105deg, #0f172a 0 50%, #f8fafc 50% 100%)', fg: '#94a3b8', border: '#334155' },
+  dark:   { bg: '#0b1220', fg: '#f3f4f6', border: '#1f2937' },
+  light:  { bg: '#f8fafc', fg: '#0f172a', border: '#cbd5e1' },
+}
+
+function SettingsSection({ title, description, children }) {
+  return (
+    <section className="bg-surface border border-border rounded-xl p-5">
+      <h2 className="text-sm font-bold text-content-strong">{title}</h2>
+      {description && <p className="text-xs text-content-subtle mt-0.5 mb-4">{description}</p>}
+      <div className={description ? '' : 'mt-4'}>{children}</div>
+    </section>
+  )
+}
+
+function AppearanceTab() {
+  const { prefs, setPrefs, resolvedTheme, resetPrefs } = useTheme()
+  const opt = (list) => list.map(o => ({ value: o.id, label: o.label }))
+
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <SettingsSection
+        title="Color theme"
+        description="Pick a scheme, or follow your operating system automatically."
+      >
+        <div className="grid grid-cols-3 gap-3">
+          {THEMES.map(t => {
+            const sw = THEME_SWATCH[t.id] || THEME_SWATCH.dark
+            const active = prefs.theme === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => setPrefs({ theme: t.id })}
+                className={`text-left rounded-xl border p-3 transition-colors ${
+                  active ? 'border-brand-500 ring-1 ring-brand-500/40' : 'border-border hover:border-border-strong'
+                }`}
+              >
+                <div
+                  className="h-12 rounded-lg mb-2 flex items-center justify-center"
+                  style={{ background: sw.bg, border: `1px solid ${sw.border}` }}
+                >
+                  <span className="text-xs font-semibold" style={{ color: sw.fg }}>Aa</span>
+                </div>
+                <div className="text-sm font-medium text-content-strong">{t.label}</div>
+                <div className="text-[11px] text-content-subtle">{t.hint}</div>
+              </button>
+            )
+          })}
+        </div>
+        {prefs.theme === 'system' && (
+          <p className="text-xs text-content-subtle mt-3">
+            Following your system — currently showing <span className="text-content font-medium">{resolvedTheme}</span>.
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Typography"
+        description="Fonts and overall density of the interface."
+      >
+        <div className="grid sm:grid-cols-3 gap-4">
+          <div>
+            <Label>Interface font</Label>
+            <Select value={prefs.fontSans} onChange={v => setPrefs({ fontSans: v })} options={opt(FONT_SANS_OPTIONS)} />
+          </div>
+          <div>
+            <Label>Monospace font</Label>
+            <Select value={prefs.fontMono} onChange={v => setPrefs({ fontMono: v })} options={opt(FONT_MONO_OPTIONS)} />
+          </div>
+          <div>
+            <Label>Density</Label>
+            <Select value={prefs.density} onChange={v => setPrefs({ density: v })} options={opt(DENSITY_OPTIONS)} />
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Logs & terminal"
+        description="Applies to live log views and the container terminal."
+      >
+        <div className="grid sm:grid-cols-2 gap-5 items-start">
+          <div>
+            <Label>Font size — {prefs.logFontSize}px</Label>
+            <input
+              type="range" min={LOG_FONT_SIZE_MIN} max={LOG_FONT_SIZE_MAX} step={1}
+              value={prefs.logFontSize}
+              onChange={e => setPrefs({ logFontSize: Number(e.target.value) })}
+              className="w-full accent-brand-500 mt-1"
+            />
+            <div className="mt-3">
+              <Label>Line spacing</Label>
+              <Select
+                value={String(prefs.logLineHeight)}
+                onChange={v => setPrefs({ logLineHeight: Number(v) })}
+                options={[
+                  { value: '1.3', label: 'Compact' },
+                  { value: '1.5', label: 'Normal' },
+                  { value: '1.7', label: 'Relaxed' },
+                ]}
+              />
+            </div>
+          </div>
+          <div>
+            <Label>Preview</Label>
+            <pre
+              className="bg-canvas border border-border rounded-lg p-3 overflow-hidden text-content"
+              style={{
+                fontFamily: prefs.fontMono === 'system' ? 'ui-monospace, monospace' : `'${prefs.fontMono}', monospace`,
+                fontSize: `${prefs.logFontSize}px`,
+                lineHeight: prefs.logLineHeight,
+              }}
+            >{`$ docker compose up -d
+[+] Running 3/3
+ ✔ Container db     Started
+ ✔ Container cache  Started
+ ✔ Container web    Started`}</pre>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <div>
+        <Btn variant="secondary" onClick={resetPrefs}>Reset appearance to defaults</Btn>
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'general',        label: 'General' },
+  { id: 'appearance',     label: 'Appearance' },
   { id: 'alerts',         label: 'Alert Rules' },
   { id: 'notifications',  label: 'Notifications' },
   { id: 'registries',     label: 'Docker Registries' },
@@ -1578,19 +1716,19 @@ export default function SettingsPage() {
       <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Page header */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-white">Settings</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Configure SSL, integrations, and backup destinations.</p>
+          <h1 className="text-xl font-bold text-content-strong">Settings</h1>
+          <p className="text-sm text-content-subtle mt-0.5">Configure SSL, integrations, and backup destinations.</p>
         </div>
 
         {/* Tab bar */}
-        <div className="flex gap-1 border-b border-gray-800 mb-6">
+        <div className="flex gap-1 border-b border-border mb-6">
           {TABS.map(t => (
             <button
               key={t.id} onClick={() => setTab(t.id)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
                 tab === t.id
                   ? 'border-brand-500 text-brand-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
+                  : 'border-transparent text-content-subtle hover:text-content'
               }`}
             >
               {t.label}
@@ -1600,6 +1738,7 @@ export default function SettingsPage() {
 
         {/* Tab content */}
         {tab === 'general'        && <GeneralTab />}
+        {tab === 'appearance'     && <AppearanceTab />}
         {tab === 'alerts'         && <RulesTab />}
         {tab === 'notifications'  && <NotificationsTab />}
         {tab === 'registries'     && <RegistriesTab />}

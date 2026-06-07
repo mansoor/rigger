@@ -13,8 +13,8 @@ import { useConfirm } from '../context/ConfirmContext'
 
 function Label({ children, required }) {
   return (
-    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-red-400 ml-0.5">*</span>}
+    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
+      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
     </label>
   )
 }
@@ -24,7 +24,7 @@ function Input({ value, onChange, placeholder, type = 'text', ...rest }) {
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-brand-500 transition-colors"
+      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
       {...rest}
     />
   )
@@ -34,15 +34,15 @@ function Toggle({ label, hint, checked, onChange, disabled = false }) {
   return (
     <div className={`flex items-center justify-between ${disabled ? 'opacity-50' : ''}`}>
       <div>
-        <p className="text-sm text-gray-200">{label}</p>
-        {hint && <p className="text-xs text-gray-500 mt-0.5">{hint}</p>}
+        <p className="text-sm text-content">{label}</p>
+        {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
       </div>
       <button
         type="button"
         onClick={() => !disabled && onChange(!checked)}
         disabled={disabled}
         className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${
-          checked && !disabled ? 'bg-brand-600' : checked ? 'bg-brand-800' : 'bg-gray-700'
+          checked && !disabled ? 'bg-brand-600' : checked ? 'bg-brand-800' : 'bg-surface-overlay'
         }`}
       >
         <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
@@ -54,7 +54,7 @@ function Toggle({ label, hint, checked, onChange, disabled = false }) {
 function Select({ value, onChange, options }) {
   return (
     <select value={value ?? ''} onChange={e => onChange(e.target.value)}
-      className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
+      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   )
@@ -104,7 +104,7 @@ function portRowsToFields(rows) {
 
 function VolModeToggle({ mode, onChange }) {
   return (
-    <div className="flex items-center rounded overflow-hidden border border-gray-700 shrink-0 text-xs font-mono">
+    <div className="flex items-center rounded overflow-hidden border border-border-strong shrink-0 text-xs font-mono">
       {['rw', 'ro'].map(m => (
         <button
           key={m}
@@ -114,8 +114,8 @@ function VolModeToggle({ mode, onChange }) {
             mode === m
               ? m === 'ro'
                 ? 'bg-amber-600 text-white'
-                : 'bg-gray-600 text-white'
-              : 'bg-gray-900 text-gray-500 hover:text-gray-300'
+                : 'bg-surface-overlay text-content-strong'
+              : 'bg-surface text-content-subtle hover:text-content'
           }`}
         >{m.toUpperCase()}</button>
       ))}
@@ -188,13 +188,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
 
   const otherNames = allImages.map((m, j) => j !== idx ? m.name : null).filter(Boolean)
 
-  const monoInput = 'px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-brand-500'
+  const monoInput = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500'
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 space-y-4">
+    <div className="bg-surface-raised/50 border border-border-strong rounded-xl p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Service {idx + 1}</p>
+        <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">Service {idx + 1}</p>
         {allImages.length > 1 && (
           <button type="button"
             onClick={async () => {
@@ -204,7 +204,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
                 confirmLabel: 'Remove',
               })) onRemove(idx)
             }}
-            className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+            className="text-xs text-danger-fg hover:text-danger-fg transition-colors">Remove</button>
         )}
       </div>
 
@@ -221,9 +221,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       {/* Port mappings */}
       <div>
         <Label>Port mappings</Label>
-        <p className="text-xs text-gray-500 mb-2">
+        <p className="text-xs text-content-subtle mb-2">
           <code className="font-mono text-xs">HOST PORT</code> : <code className="font-mono text-xs">CONTAINER PORT</code> — leave host blank to expose internally only.
-          <span className="ml-2 text-gray-600">🔗 = show as link on env card</span>
+          <span className="ml-2 text-content-faint">🔗 = show as link on env card</span>
         </p>
         <div className="space-y-1.5">
           {portRows.map((row, ri) => (
@@ -231,12 +231,12 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
               <input type="text" value={row.host}
                 onChange={e => { const r = portRows.map((x,j)=>j===ri?{...x,host:e.target.value}:x); syncPorts(r) }}
                 placeholder="8080" className={`flex-1 ${monoInput}`} />
-              <span className="text-gray-500 font-bold shrink-0">:</span>
+              <span className="text-content-subtle font-bold shrink-0">:</span>
               <input type="text" value={row.container}
                 onChange={e => { const r = portRows.map((x,j)=>j===ri?{...x,container:e.target.value}:x); syncPorts(r) }}
                 placeholder="80" className={`flex-1 ${monoInput}`} />
               {/* Link checkbox — only meaningful when a host port is set */}
-              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-gray-400 hover:text-brand-400' : 'text-gray-700 cursor-not-allowed'}`}>
+              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-content-muted hover:text-brand-400' : 'text-content-faint cursor-not-allowed'}`}>
                 <input
                   type="checkbox"
                   checked={!!row.link}
@@ -248,7 +248,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
               </label>
               {portRows.length > 1 && (
                 <button type="button" onClick={() => syncPorts(portRows.filter((_,j)=>j!==ri))}
-                  className="text-gray-500 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-red-950/30"><TrashIcon /></button>
+                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
               )}
             </div>
           ))}
@@ -262,7 +262,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       {/* Volume mappings */}
       <div>
         <Label>Volume mappings</Label>
-        <p className="text-xs text-gray-500 mb-2">
+        <p className="text-xs text-content-subtle mb-2">
           <code className="font-mono text-xs">SOURCE</code> : <code className="font-mono text-xs">CONTAINER PATH</code> —
           use <code className="font-mono text-xs">./volumes/name</code> for a bind mount scoped to this env, or a plain name for a Docker named volume.
         </p>
@@ -272,18 +272,18 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
             return (
               <div key={ri} className="flex items-center gap-2">
                 <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                  isBind ? 'bg-blue-950 text-blue-300' : 'bg-purple-950 text-purple-300'
+                  isBind ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
                 }`}>{isBind ? 'bind' : 'named'}</span>
                 <input type="text" value={row.source}
                   onChange={e => { const r = volumeRows.map((x,j)=>j===ri?{...x,source:e.target.value}:x); syncVolumes(r) }}
                   placeholder="./volumes/app_data" className={`flex-1 ${monoInput}`} />
-                <span className="text-gray-500 font-bold shrink-0">:</span>
+                <span className="text-content-subtle font-bold shrink-0">:</span>
                 <input type="text" value={row.path}
                   onChange={e => { const r = volumeRows.map((x,j)=>j===ri?{...x,path:e.target.value}:x); syncVolumes(r) }}
                   placeholder="/var/lib/data" className={`flex-1 ${monoInput}`} />
                 <VolModeToggle mode={row.mode || 'rw'} onChange={m => { const r = volumeRows.map((x,j)=>j===ri?{...x,mode:m}:x); syncVolumes(r) }} />
                 <button type="button" onClick={() => syncVolumes(volumeRows.filter((_,j)=>j!==ri))}
-                  className="text-gray-500 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-red-950/30"><TrashIcon /></button>
+                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
               </div>
             )
           })}
@@ -304,7 +304,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       <div className="space-y-3">
         <div>
           <Label>Healthcheck command</Label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-content-subtle mb-2">
             Shell command Docker runs to test container health. Leave blank to disable.
             Example: <code className="font-mono text-xs">curl -sf http://localhost/health || exit 1</code>
           </p>
@@ -313,13 +313,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
             value={img.healthcheck || ''}
             onChange={e => upd('healthcheck', e.target.value)}
             placeholder="curl -sf http://localhost/health || exit 1"
-            className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-brand-500"
+            className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono placeholder-content-faint focus:outline-none focus:border-brand-500"
           />
         </div>
         {/* Time parameters — only shown when a command is set */}
         {img.healthcheck && (
           <div>
-            <p className="text-xs text-gray-500 mb-2">
+            <p className="text-xs text-content-subtle mb-2">
               Timing parameters — enter seconds only (numbers). <code className="font-mono text-xs">start_interval</code> requires Docker Engine 25+.
             </p>
             <div className="grid grid-cols-5 gap-2">
@@ -335,8 +335,8 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
                 const display = raw.replace(/s$/, '')
                 return (
                   <div key={key}>
-                    <label className="block text-xs text-gray-500 mb-1">
-                      {label}{!noSuffix && <span className="text-gray-600"> (s)</span>}
+                    <label className="block text-xs text-content-subtle mb-1">
+                      {label}{!noSuffix && <span className="text-content-faint"> (s)</span>}
                     </label>
                     <input
                       type="number"
@@ -351,7 +351,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
                           [key]: stored,
                         })
                       }}
-                      className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-brand-500"
+                      className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 )
@@ -365,7 +365,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       {otherNames.length > 0 && (
         <div>
           <Label>Depends on</Label>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-content-subtle mb-2">
             This service waits for selected services before starting.
             Compose waits for healthy status if the dependency has a healthcheck.
           </p>
@@ -381,9 +381,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
                         ? [...deps, svcName]
                         : deps.filter(d => d !== svcName))
                     }}
-                    className="rounded border-gray-600 bg-gray-700 text-brand-500 focus:ring-brand-500"
+                    className="rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500"
                   />
-                  <span className="text-sm text-gray-300 font-mono">{svcName}</span>
+                  <span className="text-sm text-content font-mono">{svcName}</span>
                 </label>
               )
             })}
@@ -393,12 +393,12 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
 
       {/* Advanced — extra_compose YAML */}
       <details className="group">
-        <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 transition-colors select-none list-none flex items-center gap-1">
+        <summary className="text-xs text-content-subtle cursor-pointer hover:text-content transition-colors select-none list-none flex items-center gap-1">
           <span className="group-open:rotate-90 transition-transform inline-block">▶</span>
           Advanced YAML overrides
         </summary>
         <div className="mt-2 space-y-1">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-content-subtle">
             Raw YAML appended to this service in the generated compose file.
             Use for: <code className="font-mono text-xs">mem_limit</code>,{' '}
             <code className="font-mono text-xs">cpus</code>,{' '}
@@ -412,7 +412,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
             rows={4}
             placeholder={"mem_limit: 512m\ncpus: '0.5'\nlogging:\n  driver: json-file"}
             spellCheck={false}
-            className="w-full px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-green-300 text-xs font-mono placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-y"
+            className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-success-fg text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y"
           />
         </div>
       </details>
@@ -443,7 +443,7 @@ function ImagesEditor({ images, onChange }) {
           volumes: [], depends_on: [], extra_ports: [],
           restart: 'unless-stopped', extra_compose: '',
         }])}
-        className="w-full py-2 border border-dashed border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 rounded-xl text-sm transition-colors"
+        className="w-full py-2 border border-dashed border-border-strong text-content-muted hover:text-content hover:border-border-strong rounded-xl text-sm transition-colors"
       >
         + Add service
       </button>
@@ -464,11 +464,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
   })
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
+    <div className="bg-surface-raised/50 border border-border-strong rounded-xl p-5 space-y-4">
       {/* Env name + remove */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 flex-1">
-          <div className="w-2 h-2 rounded-full bg-gray-500 shrink-0" />
+          <div className="w-2 h-2 rounded-full bg-surface-overlay shrink-0" />
           {/* defaultValue (uncontrolled) — React never updates this input's DOM value
               while the user is typing, so focus is never lost. onBlur fires rename. */}
           <input
@@ -476,7 +476,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             defaultValue={envName}
             onBlur={e => { if (e.target.value !== envName) onRename(e.target.value) }}
             placeholder="prod"
-            className="bg-transparent text-white font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32"
+            className="bg-transparent text-content-strong font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32"
           />
           {isNew && <span className="text-xs text-brand-400 bg-brand-950 px-2 py-0.5 rounded-full">new</span>}
         </div>
@@ -491,7 +491,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           }}
           disabled={isOnlyEnv}
           title={isOnlyEnv ? 'Cannot remove the only environment' : undefined}
-          className={`text-xs transition-colors ${isOnlyEnv ? 'text-gray-600 cursor-not-allowed' : 'text-red-400 hover:text-red-300'}`}
+          className={`text-xs transition-colors ${isOnlyEnv ? 'text-content-faint cursor-not-allowed' : 'text-danger-fg hover:text-danger-fg'}`}
         >Remove</button>
       </div>
 
@@ -509,12 +509,12 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <div>
             <Label>HTTP port</Label>
             <Input type="number" value={cfg.http_port} onChange={v => upd('http_port', parseInt(v) || 80)} />
-            <p className="text-xs text-gray-500 mt-1">Host port Nginx binds to — access at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></p>
+            <p className="text-xs text-content-subtle mt-1">Host port Nginx binds to — access at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></p>
           </div>
         )}
       </div>
 
-      <div className="space-y-3 pt-3 border-t border-gray-700/50">
+      <div className="space-y-3 pt-3 border-t border-border-strong/50">
         <Toggle
           label="Traefik reverse proxy"
           hint="Route via Traefik instead of direct port binding"
@@ -532,7 +532,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </div>
 
             {/* SSL toggle — enabled only when domain is set */}
-            <div className={`pl-3 border-l-2 ${cfg.ssl_enabled ? 'border-green-700' : 'border-gray-700'}`}>
+            <div className={`pl-3 border-l-2 ${cfg.ssl_enabled ? 'border-success-border' : 'border-border-strong'}`}>
               <Toggle
                 label="SSL certificate (Let's Encrypt)"
                 hint={cfg.domain
@@ -543,7 +543,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                 disabled={!cfg.domain}
               />
               {cfg.ssl_enabled && cfg.domain && (
-                <p className="text-xs text-green-400/70 mt-1">
+                <p className="text-xs text-success-fg/70 mt-1">
                   🔒 Run <code className="font-mono text-xs">./run.sh refresh {'{env}'}</code> after saving to regenerate the compose file with TLS labels.
                 </p>
               )}
@@ -554,8 +554,8 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
 
       {/* Custom-stack-only fields */}
       {projectType === 'custom' && (
-        <div className="space-y-4 pt-3 border-t border-gray-700/50">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Application stack</p>
+        <div className="space-y-4 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Application stack</p>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <Label>Backend</Label>
@@ -588,7 +588,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       )}
 
       {/* Git */}
-      <div className="space-y-3 pt-3 border-t border-gray-700/50">
+      <div className="space-y-3 pt-3 border-t border-border-strong/50">
         <Toggle
           label="Git sync"
           hint="Enable ./run.sh sync"
@@ -634,24 +634,24 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
   const hasAny = imageNames.some(n => overrides[n]?.extra_compose?.trim())
 
   return (
-    <div className="pt-3 border-t border-gray-700/50">
+    <div className="pt-3 border-t border-border-strong/50">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         className="flex items-center justify-between w-full text-left group"
       >
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Service overrides</span>
+          <span className="text-xs font-semibold text-content-muted uppercase tracking-wider">Service overrides</span>
           {hasAny && (
             <span className="text-xs px-1.5 py-0.5 rounded bg-brand-900 text-brand-400 border border-brand-700">active</span>
           )}
         </div>
-        <span className="text-gray-600 group-hover:text-gray-400 text-xs transition-colors">{open ? '▲' : '▼'}</span>
+        <span className="text-content-faint group-hover:text-content-muted text-xs transition-colors">{open ? '▲' : '▼'}</span>
       </button>
 
       {open && (
         <div className="mt-3 space-y-4">
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-content-subtle">
             Env-specific YAML appended to each service after the base config. Use for resource limits, logging drivers, replica counts, etc.
             Keys defined here override the service-level Advanced YAML for this environment only.
           </p>
@@ -659,9 +659,9 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
             const yaml = overrides[svcName]?.extra_compose || ''
             return (
               <div key={svcName}>
-                <label className="block text-xs font-medium text-gray-400 mb-1.5">
+                <label className="block text-xs font-medium text-content-muted mb-1.5">
                   <span className="font-mono text-brand-400">{svcName}</span>
-                  <span className="text-gray-600 ml-1">— env override</span>
+                  <span className="text-content-faint ml-1">— env override</span>
                 </label>
                 <textarea
                   value={yaml}
@@ -669,7 +669,7 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
                   rows={yaml.trim().split('\n').length + 2}
                   placeholder={`mem_limit: 2g\ncpus: "1.5"\nlogging:\n  driver: "none"`}
                   spellCheck={false}
-                  className="w-full px-3 py-2 bg-gray-950 border border-gray-700 rounded-lg text-gray-200 text-xs font-mono placeholder-gray-700 focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
+                  className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-content text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
                 />
               </div>
             )
@@ -700,45 +700,45 @@ function NewEnvVarsEditor({ cfg, onChange }) {
   const entries = Object.entries(vars)
 
   return (
-    <div className="pt-3 border-t border-gray-700/50">
+    <div className="pt-3 border-t border-border-strong/50">
       <button type="button" onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-200 transition-colors w-full">
+        className="flex items-center gap-2 text-xs font-semibold text-content-muted uppercase tracking-wider hover:text-content transition-colors w-full">
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
         {entries.length > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{entries.length} inherited</span>}
-        <span className="ml-auto text-gray-600 normal-case font-normal">.env file</span>
+        <span className="ml-auto text-content-faint normal-case font-normal">.env file</span>
       </button>
       {open && (
         <div className="mt-3 space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-amber-400/80 flex items-center gap-1">
+            <p className="text-xs text-warning-fg/80 flex items-center gap-1">
               <span>⚠</span> These will be written to <code className="font-mono">.env</code> on save.
             </p>
             <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
               <input type="checkbox" checked={reveal} onChange={e => setReveal(e.target.checked)}
                 className="w-3 h-3 accent-brand-500" />
-              <span className="text-xs text-gray-400 select-none">Show values</span>
+              <span className="text-xs text-content-muted select-none">Show values</span>
             </label>
           </div>
           <div className="space-y-1.5">
             {entries.map(([k, v]) => (
               <div key={k} className="flex items-center gap-2">
-                <span className="font-mono text-xs text-gray-300 w-44 shrink-0 truncate">{k}</span>
+                <span className="font-mono text-xs text-content w-44 shrink-0 truncate">{k}</span>
                 <input type={reveal ? 'text' : 'password'} value={v}
                   onChange={e => setVar(k, e.target.value)}
-                  className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm font-mono text-white focus:outline-none focus:border-brand-500" />
+                  className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
                 <button type="button" onClick={() => removeVar(k)}
-                  className="text-gray-500 hover:text-red-400 transition-colors shrink-0 p-0.5 rounded hover:bg-red-950/30"><TrashIcon /></button>
+                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
               </div>
             ))}
           </div>
           <div className="flex gap-2 pt-1">
             <input type="text" placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
-              className="w-44 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm font-mono text-white focus:outline-none focus:border-brand-500" />
+              className="w-44 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
             <input type="text" placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
-              className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm font-mono text-white focus:outline-none focus:border-brand-500" />
+              className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
             <button type="button" onClick={addVar}
               className="text-xs text-brand-400 hover:text-brand-300 shrink-0 px-2">Add</button>
           </div>
@@ -785,53 +785,53 @@ function EnvVarsInline({ workspaceName, envName }) {
   }
 
   return (
-    <div className="pt-3 border-t border-gray-700/50">
+    <div className="pt-3 border-t border-border-strong/50">
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-200 transition-colors w-full"
+        className="flex items-center gap-2 text-xs font-semibold text-content-muted uppercase tracking-wider hover:text-content transition-colors w-full"
       >
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
-        <span className="ml-auto text-gray-600 normal-case font-normal">.env file</span>
+        <span className="ml-auto text-content-faint normal-case font-normal">.env file</span>
       </button>
 
       {open && (
         <div className="mt-3 space-y-3">
           {/* Reveal + hint */}
           <div className="flex items-center justify-between">
-            <p className="text-xs text-amber-400/80 flex items-center gap-1">
+            <p className="text-xs text-warning-fg/80 flex items-center gap-1">
               <span>⚠</span> Use <strong>Deploy ▾ → Refresh</strong> after saving to apply.
             </p>
             <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
               <input type="checkbox" checked={reveal}
                 onChange={e => { setReveal(e.target.checked); setEdits({}) }}
                 className="w-3 h-3 accent-brand-500" />
-              <span className="text-xs text-gray-400 select-none">Show values</span>
+              <span className="text-xs text-content-muted select-none">Show values</span>
             </label>
           </div>
 
           {/* Existing vars */}
           {isLoading
-            ? <p className="text-xs text-gray-500">Loading…</p>
+            ? <p className="text-xs text-content-subtle">Loading…</p>
             : (
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {Object.entries(vars || {}).map(([k, v]) => {
                   const marked = deletes.has(k)
                   return (
                     <div key={k} className={`flex items-center gap-2 ${marked ? 'opacity-40' : ''}`}>
-                      <span className="font-mono text-xs text-gray-400 w-36 shrink-0 truncate" title={k}>{k}</span>
+                      <span className="font-mono text-xs text-content-muted w-36 shrink-0 truncate" title={k}>{k}</span>
                       <input
                         type={reveal ? 'text' : 'password'}
                         placeholder={reveal ? v : '••••••••'}
                         value={marked ? '' : (edits[k] ?? (reveal ? v : ''))}
                         disabled={marked}
                         onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                        className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-white font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
+                        className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
                       />
                       <button type="button" onClick={() => toggleDelete(k)}
                         className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
-                          marked ? 'bg-red-800 text-red-200 hover:bg-red-700' : 'text-gray-600 hover:text-red-400 hover:bg-gray-700'
+                          marked ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'
                         }`}>
                         {marked ? '↩' : '×'}
                       </button>
@@ -843,16 +843,16 @@ function EnvVarsInline({ workspaceName, envName }) {
           }
 
           {/* Add new variable */}
-          <div className="flex gap-2 pt-2 border-t border-gray-700/40">
+          <div className="flex gap-2 pt-2 border-t border-border-strong/40">
             <input type="text" placeholder="NEW_KEY" value={newKey}
               onChange={e => setNewKey(e.target.value)}
-              className="w-36 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-white font-mono focus:outline-none focus:border-brand-500" />
+              className="w-36 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
             <input type={reveal ? 'text' : 'password'} placeholder="value" value={newVal}
               onChange={e => setNewVal(e.target.value)}
-              className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-white font-mono focus:outline-none focus:border-brand-500" />
+              className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
             <button type="button" onClick={() => newKey.trim() && handleSave()}
               disabled={!newKey.trim() || saveMut.isPending}
-              className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-xs rounded transition-colors shrink-0">
+              className="px-2.5 py-1 bg-surface-overlay hover:bg-surface-overlay disabled:opacity-40 text-content-strong text-xs rounded transition-colors shrink-0">
               Add
             </button>
           </div>
@@ -863,8 +863,8 @@ function EnvVarsInline({ workspaceName, envName }) {
               className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
               {saveMut.isPending ? 'Saving…' : 'Save changes'}
             </button>
-            {saveMut.isSuccess && <span className="text-green-400 text-xs">Saved ✓</span>}
-            {saveMut.isError   && <span className="text-red-400 text-xs">Failed</span>}
+            {saveMut.isSuccess && <span className="text-success-fg text-xs">Saved ✓</span>}
+            {saveMut.isError   && <span className="text-danger-fg text-xs">Failed</span>}
           </div>
         </div>
       )}
@@ -1040,8 +1040,8 @@ export default function EditWorkspacePage() {
   }
   const hostWarnings = usePortConflicts(hostChecks, name)
 
-  if (isLoading) return <Layout><div className="p-8 text-gray-500 text-sm">Loading…</div></Layout>
-  if (error)     return <Layout><div className="p-8 text-red-400 text-sm">{error.message}</div></Layout>
+  if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
+  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">{error.message}</div></Layout>
 
   return (
     <Layout>
@@ -1049,11 +1049,11 @@ export default function EditWorkspacePage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Edit workspace</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Edit workspace</p>
             <div className="flex items-center gap-2.5 mt-0.5">
-              <h1 className="text-2xl font-bold text-white">{name}</h1>
+              <h1 className="text-2xl font-bold text-content-strong">{name}</h1>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                project?.type === 'image' ? 'bg-blue-950 text-blue-300' : 'bg-purple-950 text-purple-300'
+                project?.type === 'image' ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
               }`}>
                 {project?.type === 'image' ? 'image' : 'custom'}
               </span>
@@ -1062,7 +1062,7 @@ export default function EditWorkspacePage() {
           <div className="flex items-center gap-3">
             <button
               onClick={handleCancel}
-              className="text-sm font-medium px-4 py-2 rounded-lg border border-amber-700/60 bg-amber-900/30 hover:bg-amber-800/50 text-amber-300 transition-colors"
+              className="text-sm font-medium px-4 py-2 rounded-lg border border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg transition-colors"
             >
               Cancel
             </button>
@@ -1078,13 +1078,13 @@ export default function EditWorkspacePage() {
         </div>
 
         {saveError && (
-          <div className="mb-5 px-4 py-3 bg-red-950 border border-red-800 text-red-300 rounded-lg text-sm">{saveError}</div>
+          <div className="mb-5 px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">{saveError}</div>
         )}
 
         {/* Project settings */}
         <section className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Project</h2>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-content mb-3">Project</h2>
+          <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
             <div className={`grid gap-4 ${project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <div>
                 <Label>Project name</Label>
@@ -1093,11 +1093,11 @@ export default function EditWorkspacePage() {
                     folder is never renamed, so changing it would orphan the stack. */}
                 <div
                   title="Fixed after creation — it's the Docker resource prefix"
-                  className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm cursor-not-allowed select-none truncate"
+                  className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm cursor-not-allowed select-none truncate"
                 >
                   {project?.name}
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
+                <p className="text-xs text-content-subtle mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
               </div>
               {/* Registry only applies to custom (build) stacks — image stacks pull
                   images directly, so hide it (matches the New Workspace wizard). */}
@@ -1115,11 +1115,11 @@ export default function EditWorkspacePage() {
               <Label>Workspace folder</Label>
               <div
                 title={ws?.host_path || ws?.path || ''}
-                className="w-full px-3 py-2 bg-gray-800/40 border border-gray-700/60 rounded-lg text-gray-400 text-sm font-mono cursor-not-allowed select-all truncate"
+                className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
               >
                 {ws?.host_path || ws?.path || '—'}
               </div>
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="text-xs text-content-subtle mt-1">
                 {ws?.host_path
                   ? 'Location on the host — holds config, compose files and bind-mounted volumes.'
                   : 'Path inside the Rigger container. Set HOST_WORKSPACES_DIR to show the host path.'}
@@ -1131,18 +1131,18 @@ export default function EditWorkspacePage() {
         {/* Images (image stacks only) */}
         {project?.type === 'image' && (
           <section className="mb-6">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">Services</h2>
+            <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages} />
             <PortWarnings warnings={hostWarnings} />
-            <p className="text-xs text-gray-500 mt-2">After saving, redeploy each environment to pick up image changes.</p>
+            <p className="text-xs text-content-subtle mt-2">After saving, redeploy each environment to pick up image changes.</p>
           </section>
         )}
 
         {/* Environments */}
         <section className="mb-6">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-300">Environments</h2>
-            <p className="text-xs text-gray-500">
+            <h2 className="text-sm font-semibold text-content">Environments</h2>
+            <p className="text-xs text-content-subtle">
               {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''}
               {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
                 <span className="ml-2 text-brand-400">· new environments will need bootstrapping after save</span>
@@ -1170,7 +1170,7 @@ export default function EditWorkspacePage() {
 
           <button
             type="button" onClick={addEnv}
-            className="mt-4 w-full py-2.5 border border-dashed border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500 rounded-xl text-sm transition-colors"
+            className="mt-4 w-full py-2.5 border border-dashed border-border-strong text-content-muted hover:text-content hover:border-border-strong rounded-xl text-sm transition-colors"
           >
             + Add environment
           </button>
@@ -1178,7 +1178,7 @@ export default function EditWorkspacePage() {
 
         {/* After-save hint for new envs */}
         {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
-          <div className="bg-amber-950/40 border border-amber-800/50 rounded-xl px-4 py-3 text-sm text-amber-300">
+          <div className="bg-warning-subtle/40 border border-warning-border/50 rounded-xl px-4 py-3 text-sm text-warning-fg">
             After saving, go to the workspace and click <strong>Init</strong> for each new environment to generate its compose file and .env.
           </div>
         )}
@@ -1196,15 +1196,15 @@ export default function EditWorkspacePage() {
       {/* Discard-changes confirmation */}
       {confirmCancel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setConfirmCancel(false)}>
-          <div className="bg-gray-900 border border-amber-900/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-warning-border/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="text-2xl">⚠️</span>
-              <h3 className="font-semibold text-white">Discard unsaved changes?</h3>
+              <h3 className="font-semibold text-content-strong">Discard unsaved changes?</h3>
             </div>
-            <p className="text-sm text-gray-400">You have unsaved changes to <strong className="text-gray-300">{name}</strong>. Leaving now will discard them.</p>
+            <p className="text-sm text-content-muted">You have unsaved changes to <strong className="text-content">{name}</strong>. Leaving now will discard them.</p>
             <div className="flex gap-3">
               <button onClick={() => { setConfirmCancel(false); leave() }} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Discard &amp; leave</button>
-              <button onClick={() => setConfirmCancel(false)} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">Keep editing</button>
+              <button onClick={() => setConfirmCancel(false)} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors">Keep editing</button>
             </div>
           </div>
         </div>
@@ -1218,22 +1218,22 @@ export default function EditWorkspacePage() {
 function MigrateWarning({ what, from, to, warnings, onConfirm, onCancel }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onCancel}>
-      <div className="bg-gray-900 border border-amber-900/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-warning-border/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-3">
           <span className="text-2xl">⚠️</span>
-          <h3 className="font-semibold text-white">Move {what}?</h3>
+          <h3 className="font-semibold text-content-strong">Move {what}?</h3>
         </div>
-        <p className="text-sm text-gray-300">
-          Moving <strong className="text-white">{what}</strong> from <strong className="text-white">{from}</strong> to <strong className="text-white">{to}</strong>.
+        <p className="text-sm text-content">
+          Moving <strong className="text-content-strong">{what}</strong> from <strong className="text-content-strong">{from}</strong> to <strong className="text-content-strong">{to}</strong>.
         </p>
-        <ul className="text-xs text-gray-400 space-y-2 list-disc pl-5">
+        <ul className="text-xs text-content-muted space-y-2 list-disc pl-5">
           <li>
-            <strong className="text-amber-300">Downtime:</strong> if it's currently running, it goes down the
+            <strong className="text-warning-fg">Downtime:</strong> if it's currently running, it goes down the
             moment the source stops and stays down until it's back up and restored on the target. This runs in
             the background — you'll get a notification when it's done, so you can leave this page.
           </li>
           <li>
-            <strong className="text-amber-300">Data left on the source:</strong> {from} keeps the stopped
+            <strong className="text-warning-fg">Data left on the source:</strong> {from} keeps the stopped
             containers, volumes (your data) and files (including <code className="font-mono">.env</code> secrets) —
             they are <strong>not</strong> deleted. If you plan to decommission {from}, wipe them afterward in{' '}
             <a href="/housekeeping" className="text-brand-400 underline">Housekeeping → Migration leftovers</a>.
@@ -1242,7 +1242,7 @@ function MigrateWarning({ what, from, to, warnings, onConfirm, onCancel }) {
         <PortWarnings warnings={warnings} />
         <div className="flex gap-3 pt-1">
           <button onClick={onConfirm} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Move</button>
-          <button onClick={onCancel} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">Cancel</button>
+          <button onClick={onCancel} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors">Cancel</button>
         </div>
       </div>
     </div>
@@ -1270,12 +1270,12 @@ function MigrationProgress({ jobId, onDone }) {
   const banner = job.status === 'running'
     ? '▶ Running in the background — you can safely leave this page; you\'ll be notified when it completes.'
     : job.status === 'completed' ? '✓ Migration completed.' : `✗ Migration failed${job.error ? ': ' + job.error : '.'}`
-  const cls = job.status === 'running' ? 'text-blue-400' : job.status === 'completed' ? 'text-green-400' : 'text-red-400'
+  const cls = job.status === 'running' ? 'text-info-fg' : job.status === 'completed' ? 'text-success-fg' : 'text-danger-fg'
   return (
     <div className="space-y-2">
       <p className={`text-sm ${cls}`}>{banner}</p>
       {job.log && (
-        <pre className="max-h-72 overflow-auto bg-gray-950 border border-gray-800 rounded-lg p-3 text-xs text-gray-300 whitespace-pre-wrap">{job.log}</pre>
+        <pre className="max-h-72 overflow-auto bg-canvas border border-border rounded-lg p-3 text-xs text-content whitespace-pre-wrap">{job.log}</pre>
       )}
     </div>
   )
@@ -1339,10 +1339,10 @@ function EnvHostsSection({ name }) {
 
   return (
     <section className="mt-8">
-      <div className="border border-gray-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 bg-gray-900/60 border-b border-gray-800">
-          <h2 className="text-sm font-semibold text-gray-200">Environment hosts</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+      <div className="border border-border rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface/60 border-b border-border">
+          <h2 className="text-sm font-semibold text-content">Environment hosts</h2>
+          <p className="text-xs text-content-subtle mt-0.5">
             Run each environment on a different host. Changing a <strong>deployed</strong> environment's
             host migrates its data (and stops the old copy, keeping its data); an undeployed one just
             repoints and provisions on next deploy.
@@ -1357,14 +1357,14 @@ function EnvHostsSection({ name }) {
             return (
               <div key={env} className="flex items-center gap-3">
                 <div className="w-40 shrink-0">
-                  <p className="text-sm text-gray-200">{env}</p>
-                  <p className="text-xs text-gray-500">on {hostName(curId)}</p>
+                  <p className="text-sm text-content">{env}</p>
+                  <p className="text-xs text-content-subtle">on {hostName(curId)}</p>
                 </div>
                 <select
                   value={target[env] ?? ''}
                   onChange={e => setTarget(t => ({ ...t, [env]: e.target.value }))}
                   disabled={running}
-                  className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                  className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-info"
                 >
                   <option value="">Move to…</option>
                   {opts.map(o => <option key={o.id} value={String(o.id)}>{o.label}</option>)}
@@ -1379,7 +1379,7 @@ function EnvHostsSection({ name }) {
               </div>
             )
           })}
-          {err && <p className="text-sm text-red-400">✗ {err}</p>}
+          {err && <p className="text-sm text-danger-fg">✗ {err}</p>}
           <MigrationProgress jobId={jobId} onDone={onJobDone} />
         </div>
       </div>
@@ -1446,13 +1446,13 @@ function MigrateSection({ name }) {
 
   return (
     <section className="mt-8">
-      <div className="border border-gray-800 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 bg-gray-900/60 border-b border-gray-800">
-          <h2 className="text-sm font-semibold text-gray-200">Move the whole workspace</h2>
-          <p className="text-xs text-gray-500 mt-0.5">
+      <div className="border border-border rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-surface/60 border-b border-border">
+          <h2 className="text-sm font-semibold text-content">Move the whole workspace</h2>
+          <p className="text-xs text-content-subtle mt-0.5">
             {mixed
               ? 'Environments are on different hosts — move them individually above.'
-              : <>Currently on <strong className="text-gray-400">{currentLabel}</strong>. Moves every environment together (back up → ship → restore). Source data is left intact.</>}
+              : <>Currently on <strong className="text-content-muted">{currentLabel}</strong>. Moves every environment together (back up → ship → restore). Source data is left intact.</>}
           </p>
         </div>
         {!mixed && (
@@ -1462,7 +1462,7 @@ function MigrateSection({ name }) {
                 value={target}
                 onChange={e => setTarget(e.target.value)}
                 disabled={running}
-                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-info"
               >
                 <option value="">Select a target…</option>
                 {options.map(o => <option key={o.id} value={String(o.id)}>{o.label}</option>)}
@@ -1475,7 +1475,7 @@ function MigrateSection({ name }) {
                 {running ? 'Migrating…' : 'Migrate'}
               </button>
             </div>
-            {err && <p className="text-sm text-red-400">✗ {err}</p>}
+            {err && <p className="text-sm text-danger-fg">✗ {err}</p>}
             <MigrationProgress jobId={jobId} onDone={onJobDone} />
           </div>
         )}
@@ -1520,21 +1520,21 @@ function DangerZone({ name }) {
 
   return (
     <section className="mt-8">
-      <div className="border border-red-900/50 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 bg-red-950/30 border-b border-red-900/50 flex items-center justify-between">
+      <div className="border border-danger-border/50 rounded-xl overflow-hidden">
+        <div className="px-5 py-3 bg-danger-subtle/30 border-b border-danger-border/50 flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-red-400">Danger zone</h2>
-            <p className="text-xs text-red-400/70 mt-0.5">Irreversible actions — proceed with caution</p>
+            <h2 className="text-sm font-semibold text-danger-fg">Danger zone</h2>
+            <p className="text-xs text-danger-fg/70 mt-0.5">Irreversible actions — proceed with caution</p>
           </div>
         </div>
         <div className="px-5 py-4 flex items-center justify-between">
           <div>
-            <p className="text-sm text-gray-200">Delete this workspace</p>
-            <p className="text-xs text-gray-500 mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-gray-400">{name}</strong>. Running containers are not stopped automatically.</p>
+            <p className="text-sm text-content">Delete this workspace</p>
+            <p className="text-xs text-content-subtle mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</p>
           </div>
           <button
             onClick={() => { setOpen(true); setConfirm(''); setError('') }}
-            className="ml-6 shrink-0 px-4 py-2 bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200 text-sm font-medium rounded-lg border border-red-800/50 transition-colors"
+            className="ml-6 shrink-0 px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors"
           >
             Delete workspace
           </button>
@@ -1544,19 +1544,19 @@ function DangerZone({ name }) {
       {/* Confirmation modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setOpen(false)}>
-          <div className="bg-gray-900 border border-red-900/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface border border-danger-border/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="text-2xl">⚠️</span>
-              <h3 className="font-semibold text-white">Delete <span className="text-red-400">{name}</span>?</h3>
+              <h3 className="font-semibold text-content-strong">Delete <span className="text-danger-fg">{name}</span>?</h3>
             </div>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-content-muted">
               This will permanently delete the workspace directory and all its contents including configs, environment files, and backups.
-              <strong className="text-gray-300 block mt-1">This cannot be undone.</strong>
+              <strong className="text-content block mt-1">This cannot be undone.</strong>
             </p>
-            {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+            {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
             <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
-                Type <span className="text-red-400 font-mono">{name}</span> to confirm
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">
+                Type <span className="text-danger-fg font-mono">{name}</span> to confirm
               </label>
               <input
                 type="text"
@@ -1565,7 +1565,7 @@ function DangerZone({ name }) {
                 onKeyDown={e => e.key === 'Enter' && handleDelete()}
                 placeholder={name}
                 autoFocus
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm font-mono focus:outline-none focus:border-red-500 transition-colors"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger transition-colors"
               />
             </div>
             <div className="flex gap-3">
@@ -1578,7 +1578,7 @@ function DangerZone({ name }) {
               </button>
               <button
                 onClick={() => setOpen(false)}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
+                className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors"
               >
                 Cancel
               </button>

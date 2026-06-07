@@ -33,23 +33,23 @@ function ioSum(s) { const [a, b] = String(s || '').split('/'); return parseSize(
 
 function KV({ k, v, mono = true }) {
   return (
-    <div className="flex gap-3 py-1 border-b border-gray-800/40">
-      <span className="text-gray-500 w-44 shrink-0">{k}</span>
-      <span className={`text-gray-300 break-all ${mono ? 'font-mono' : ''}`}>{v === undefined || v === null || v === '' ? '—' : v}</span>
+    <div className="flex gap-3 py-1 border-b border-border/40">
+      <span className="text-content-subtle w-44 shrink-0">{k}</span>
+      <span className={`text-content break-all ${mono ? 'font-mono' : ''}`}>{v === undefined || v === null || v === '' ? '—' : v}</span>
     </div>
   )
 }
 function Section({ title, children }) {
   return (
     <div className="mb-4">
-      {title && <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">{title}</div>}
+      {title && <div className="text-[11px] font-semibold text-content-subtle uppercase tracking-wider mb-1.5">{title}</div>}
       {children}
     </div>
   )
 }
 function Pre({ text, empty }) {
-  if (!text || !text.trim()) return <div className="text-gray-600 text-xs">{empty || 'No output.'}</div>
-  return <pre className="text-[11px] text-gray-300 font-mono whitespace-pre overflow-x-auto bg-gray-950/60 rounded-lg p-3 border border-gray-800">{text}</pre>
+  if (!text || !text.trim()) return <div className="text-content-faint text-xs">{empty || 'No output.'}</div>
+  return <pre className="text-[11px] text-content font-mono whitespace-pre overflow-x-auto bg-canvas/60 rounded-lg p-3 border border-border">{text}</pre>
 }
 
 // ── tabs ──────────────────────────────────────────────────────────────────────
@@ -66,10 +66,10 @@ function Overview({ c, charts }) {
         <Section title="Live metrics">
           <div className="grid grid-cols-2 gap-2">
             {charts.map(ch => (
-              <div key={ch.label} className="bg-gray-900/40 border border-gray-800/60 rounded-lg px-3 py-2 min-w-0">
+              <div key={ch.label} className="bg-surface/40 border border-border/60 rounded-lg px-3 py-2 min-w-0">
                 <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{ch.label}</span>
-                  <span className="text-[11px] font-mono text-gray-300 truncate">{ch.value}</span>
+                  <span className="text-[11px] font-semibold text-content-subtle uppercase tracking-wider">{ch.label}</span>
+                  <span className="text-[11px] font-mono text-content truncate">{ch.value}</span>
                 </div>
                 <Sparkline values={ch.series} stroke={ch.stroke} height={24} />
               </div>
@@ -95,8 +95,8 @@ function Overview({ c, charts }) {
         <KV k="User" v={cfg.User || 'root'} />
       </Section>
       <Section title="Published ports">
-        {published.length ? published.map((p, i) => <div key={i} className="font-mono text-gray-300 py-0.5">{p}</div>)
-          : <div className="text-gray-600">None published</div>}
+        {published.length ? published.map((p, i) => <div key={i} className="font-mono text-content py-0.5">{p}</div>)
+          : <div className="text-content-faint">None published</div>}
       </Section>
     </div>
   )
@@ -108,8 +108,8 @@ function Resources({ c, stats }) {
   return (
     <div className="text-xs">
       <Section title="Live usage">
-        {stats.isLoading && <div className="text-gray-500">Loading…</div>}
-        {stats.error && <div className="text-amber-400">{errText(stats.error)} (container may be stopped)</div>}
+        {stats.isLoading && <div className="text-content-subtle">Loading…</div>}
+        {stats.error && <div className="text-warning-fg">{errText(stats.error)} (container may be stopped)</div>}
         {s && <>
           <KV k="CPU" v={s.CPUPerc} />
           <KV k="Memory" v={`${s.MemUsage}  (${s.MemPerc})`} />
@@ -141,21 +141,21 @@ function Network({ c }) {
           <KV k="Aliases" v={(n.Aliases || []).join(', ')} />
         </Section>
       ))}
-      {!Object.keys(nets).length && <div className="text-gray-600">No networks.</div>}
+      {!Object.keys(nets).length && <div className="text-content-faint">No networks.</div>}
     </div>
   )
 }
 
 function Mounts({ c }) {
   const mounts = c.Mounts || []
-  if (!mounts.length) return <div className="text-gray-600 text-xs">No mounts.</div>
+  if (!mounts.length) return <div className="text-content-faint text-xs">No mounts.</div>
   return (
     <div className="text-xs space-y-2">
       {mounts.map((m, i) => (
-        <div key={i} className="border border-gray-800 rounded-lg p-2.5">
+        <div key={i} className="border border-border rounded-lg p-2.5">
           <div className="flex items-center gap-2 mb-1">
-            <span className="px-1.5 py-0 rounded bg-gray-800 text-gray-400 text-[10px] uppercase">{m.Type}</span>
-            <span className={`text-[10px] ${m.RW ? 'text-green-400' : 'text-amber-400'}`}>{m.RW ? 'rw' : 'ro'}</span>
+            <span className="px-1.5 py-0 rounded bg-surface-raised text-content-muted text-[10px] uppercase">{m.Type}</span>
+            <span className={`text-[10px] ${m.RW ? 'text-success-fg' : 'text-warning-fg'}`}>{m.RW ? 'rw' : 'ro'}</span>
           </div>
           <KV k="Source" v={m.Source || m.Name} />
           <KV k="Destination" v={m.Destination} />
@@ -170,7 +170,7 @@ function Environment({ c }) {
   const env = c.Config?.Env || []
   return (
     <div className="text-xs">
-      <label className="flex items-center gap-1.5 mb-2 text-gray-400 cursor-pointer select-none">
+      <label className="flex items-center gap-1.5 mb-2 text-content-muted cursor-pointer select-none">
         <input type="checkbox" checked={reveal} onChange={e => setReveal(e.target.checked)} className="accent-brand-500" />
         Show values
       </label>
@@ -180,20 +180,20 @@ function Environment({ c }) {
         const v = eq >= 0 ? e.slice(eq + 1) : ''
         return <KV key={i} k={k} v={reveal ? v : '••••••••'} />
       })}
-      {!env.length && <div className="text-gray-600">No environment variables.</div>}
+      {!env.length && <div className="text-content-faint">No environment variables.</div>}
     </div>
   )
 }
 
 function Labels({ c }) {
   const labels = Object.entries(c.Config?.Labels || {})
-  if (!labels.length) return <div className="text-gray-600 text-xs">No labels.</div>
+  if (!labels.length) return <div className="text-content-faint text-xs">No labels.</div>
   return <div className="text-xs">{labels.map(([k, v]) => <KV key={k} k={k} v={v} />)}</div>
 }
 
 function Health({ c }) {
   const h = c.State?.Health
-  if (!h) return <div className="text-gray-600 text-xs">No healthcheck configured.</div>
+  if (!h) return <div className="text-content-faint text-xs">No healthcheck configured.</div>
   return (
     <div className="text-xs">
       <Section>
@@ -202,12 +202,12 @@ function Health({ c }) {
       </Section>
       <Section title="Recent checks">
         {(h.Log || []).slice(-5).reverse().map((l, i) => (
-          <div key={i} className="border-b border-gray-800/40 py-1.5">
-            <div className="flex gap-3 text-gray-500">
+          <div key={i} className="border-b border-border/40 py-1.5">
+            <div className="flex gap-3 text-content-subtle">
               <span>{fmtDate(l.Start)}</span>
-              <span className={l.ExitCode === 0 ? 'text-green-400' : 'text-red-400'}>exit {l.ExitCode}</span>
+              <span className={l.ExitCode === 0 ? 'text-success-fg' : 'text-danger-fg'}>exit {l.ExitCode}</span>
             </div>
-            {l.Output?.trim() && <div className="text-gray-400 font-mono whitespace-pre-wrap break-all mt-0.5">{l.Output.trim().slice(0, 500)}</div>}
+            {l.Output?.trim() && <div className="text-content-muted font-mono whitespace-pre-wrap break-all mt-0.5">{l.Output.trim().slice(0, 500)}</div>}
           </div>
         ))}
       </Section>
@@ -244,22 +244,22 @@ function parseTop(text) {
 }
 
 function Processes({ top }) {
-  if (top.isLoading) return <div className="text-gray-500 text-xs">Loading…</div>
-  if (top.error) return <div className="text-amber-400 text-xs">{errText(top.error)} (container may be stopped)</div>
+  if (top.isLoading) return <div className="text-content-subtle text-xs">Loading…</div>
+  if (top.error) return <div className="text-warning-fg text-xs">{errText(top.error)} (container may be stopped)</div>
   const { headers, rows } = parseTop(top.data?.output)
-  if (!headers.length) return <div className="text-gray-600 text-xs">No processes.</div>
+  if (!headers.length) return <div className="text-content-faint text-xs">No processes.</div>
   const keep = headers.map((_, i) => i).filter(i => !TOP_DROP.has(headers[i]))
   return (
     <div className="overflow-x-auto">
       <table className="text-[11px] font-mono w-full">
         <thead>
-          <tr className="text-gray-500 text-left border-b border-gray-800">
+          <tr className="text-content-subtle text-left border-b border-border">
             {keep.map(i => <th key={i} className="py-1 pr-4 font-semibold uppercase tracking-wider whitespace-nowrap">{headers[i]}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, ri) => (
-            <tr key={ri} className="border-b border-gray-800/30 text-gray-300">
+            <tr key={ri} className="border-b border-border/30 text-content">
               {keep.map(i => <td key={i} className={`py-1 pr-4 align-top ${headers[i] === 'CMD' ? 'break-all' : 'whitespace-nowrap'}`}>{r[i] ?? ''}</td>)}
             </tr>
           ))}
@@ -274,7 +274,7 @@ function CopyBtn({ text }) {
   return (
     <button type="button"
       onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }}
-      className="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">
+      className="text-xs px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
       {copied ? 'Copied ✓' : 'Copy'}
     </button>
   )
@@ -285,7 +285,7 @@ function RawJson({ data }) {
   return (
     <div>
       <div className="flex justify-end mb-2"><CopyBtn text={json} /></div>
-      <pre className="text-[11px] text-gray-300 font-mono whitespace-pre overflow-x-auto bg-gray-950/60 rounded-lg p-3 border border-gray-800">{json}</pre>
+      <pre className="text-[11px] text-content font-mono whitespace-pre overflow-x-auto bg-canvas/60 rounded-lg p-3 border border-border">{json}</pre>
     </div>
   )
 }
@@ -349,30 +349,30 @@ export default function ContainerInfoModal({ wsName, env, service, short, onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-4xl h-[600px] max-h-[88vh] flex flex-col shadow-2xl"
+      <div className="bg-surface border border-border rounded-xl w-full max-w-4xl h-[600px] max-h-[88vh] flex flex-col shadow-2xl"
         onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-baseline gap-2 min-w-0">
-            <h3 className="text-sm font-semibold text-white">{short}</h3>
-            <span className="text-xs text-gray-500 font-mono truncate">{service}</span>
+            <h3 className="text-sm font-semibold text-content-strong">{short}</h3>
+            <span className="text-xs text-content-subtle font-mono truncate">{service}</span>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-200 text-lg leading-none px-1">×</button>
+          <button onClick={onClose} className="text-content-subtle hover:text-content text-lg leading-none px-1">×</button>
         </div>
         {/* Tabs */}
-        <div className="flex gap-1 px-3 pt-2 border-b border-gray-800 overflow-x-auto shrink-0">
+        <div className="flex gap-1 px-3 pt-2 border-b border-border overflow-x-auto shrink-0">
           {TABS.map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-2.5 py-1.5 text-xs rounded-t-lg whitespace-nowrap transition-colors ${
-                tab === t ? 'text-white bg-gray-800' : 'text-gray-500 hover:text-gray-300'}`}>
+                tab === t ? 'text-content-strong bg-surface-raised' : 'text-content-subtle hover:text-content'}`}>
               {t}
             </button>
           ))}
         </div>
         {/* Body — fixed height, scrolls internally so the modal never resizes per tab */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
-          {insp.isLoading && <div className="text-gray-500 text-xs">Loading…</div>}
-          {insp.error && <div className="text-red-400 text-xs">{errText(insp.error)}</div>}
+          {insp.isLoading && <div className="text-content-subtle text-xs">Loading…</div>}
+          {insp.error && <div className="text-danger-fg text-xs">{errText(insp.error)}</div>}
           {c && (
             <div key={tab} className="tab-fade">
               {tab === 'Overview' && <Overview c={c} charts={liveCharts} />}
@@ -384,8 +384,8 @@ export default function ContainerInfoModal({ wsName, env, service, short, onClos
               {tab === 'Labels' && <Labels c={c} />}
               {tab === 'Health' && <Health c={c} />}
               {tab === 'Security' && <Security c={c} />}
-              {tab === 'Layers' && (hist.isLoading ? <div className="text-gray-500 text-xs">Loading…</div>
-                : hist.error ? <div className="text-amber-400 text-xs">{errText(hist.error)}</div>
+              {tab === 'Layers' && (hist.isLoading ? <div className="text-content-subtle text-xs">Loading…</div>
+                : hist.error ? <div className="text-warning-fg text-xs">{errText(hist.error)}</div>
                   : <Pre text={hist.data?.output} />)}
               {tab === 'JSON' && <RawJson data={insp.data} />}
             </div>

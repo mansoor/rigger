@@ -70,26 +70,26 @@ export default function ComposeEditor({ name, env, onClose, onRefresh }) {
                   : 'Copy'
 
   const copyClass = copyState === 'copied'
-    ? 'border-green-600 bg-green-950 text-green-400'
+    ? 'border-success bg-success-subtle text-success-fg'
     : copyState === 'error'
-    ? 'border-red-600 bg-red-950 text-red-400'
-    : 'border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300'
+    ? 'border-danger bg-danger-subtle text-danger-fg'
+    : 'border-border-strong bg-surface-raised hover:bg-surface-overlay text-content'
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="mt-16 mx-auto w-full max-w-4xl flex flex-col bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden shadow-2xl"
+        className="mt-16 mx-auto w-full max-w-4xl flex flex-col bg-surface border border-border-strong rounded-2xl overflow-hidden shadow-2xl"
         style={{ maxHeight: 'calc(100vh - 80px)' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800 shrink-0">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-white">docker-compose.yml</h3>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">read-only</span>
+              <h3 className="font-semibold text-content-strong">docker-compose.yml</h3>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-surface-overlay text-content-muted">read-only</span>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">{name} / {env}</p>
+            <p className="text-xs text-content-subtle mt-0.5">{name} / {env}</p>
           </div>
           <div className="flex items-center gap-2">
             {onRefresh && (
@@ -109,23 +109,23 @@ export default function ComposeEditor({ name, env, onClose, onRefresh }) {
             >
               {copyLabel}
             </button>
-            <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none ml-1">×</button>
+            <button onClick={onClose} className="text-content-muted hover:text-content-strong text-xl leading-none ml-1">×</button>
           </div>
         </div>
 
         {/* Read-only content with line numbers */}
-        <div ref={containerRef} className="flex-1 overflow-auto min-h-0 bg-gray-950">
-          {isLoading && <p className="p-6 text-gray-400 text-sm">Loading…</p>}
-          {error     && <p className="p-6 text-red-400 text-sm">{error.message}</p>}
+        <div ref={containerRef} className="flex-1 overflow-auto min-h-0 bg-canvas">
+          {isLoading && <p className="p-6 text-content-muted text-sm">Loading…</p>}
+          {error     && <p className="p-6 text-danger-fg text-sm">{error.message}</p>}
           {!isLoading && !error && (
             <table className="w-full font-mono text-sm leading-relaxed border-collapse min-h-full">
               <tbody>
                 {content.split('\n').map((line, i) => (
-                  <tr key={i} className="hover:bg-gray-800/40">
-                    <td className="select-none text-right text-gray-600 px-4 py-0 w-12 shrink-0 border-r border-gray-800 align-top">
+                  <tr key={i} className="hover:bg-surface-raised/40">
+                    <td className="select-none text-right text-content-faint px-4 py-0 w-12 shrink-0 border-r border-border align-top">
                       {i + 1}
                     </td>
-                    <td className="text-gray-200 px-4 py-0 whitespace-pre align-top">{line || ' '}</td>
+                    <td className="text-content px-4 py-0 whitespace-pre align-top">{line || ' '}</td>
                   </tr>
                 ))}
               </tbody>
@@ -134,11 +134,11 @@ export default function ComposeEditor({ name, env, onClose, onRefresh }) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-2.5 border-t border-gray-800 bg-gray-900/80 shrink-0">
-          <p className="text-xs text-gray-500">
-            Generated from <code className="font-mono text-gray-400">config.json</code>.
-            Use <strong className="text-gray-400">Edit Workspace</strong> to change configuration,
-            then <strong className="text-gray-400">Deploy ▾ → Refresh</strong> to regenerate.
+        <div className="px-5 py-2.5 border-t border-border bg-surface/80 shrink-0">
+          <p className="text-xs text-content-subtle">
+            Generated from <code className="font-mono text-content-muted">config.json</code>.
+            Use <strong className="text-content-muted">Edit Workspace</strong> to change configuration,
+            then <strong className="text-content-muted">Deploy ▾ → Refresh</strong> to regenerate.
             Select text in the viewer then click Copy to copy only the selection.
           </p>
         </div>

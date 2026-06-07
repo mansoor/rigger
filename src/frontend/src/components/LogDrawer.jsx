@@ -1,24 +1,19 @@
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { useTheme } from '../theme/ThemeProvider'
+import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
 
 export default function LogDrawer({ ws, title, onClose }) {
   const containerRef = useRef(null)
   const termRef      = useRef(null)
   const fitRef       = useRef(null)
+  const { prefs, resolvedTheme } = useTheme()
 
   useEffect(() => {
     const term = new Terminal({
-      theme: {
-        background: '#030712',   // gray-950
-        foreground: '#f3f4f6',   // gray-100
-        cursor:     '#6366f1',   // brand-500
-        selectionBackground: '#374151',
-      },
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-      fontSize: 13,
-      lineHeight: 1.5,
+      ...xtermOptions(prefs),
       convertEol: true,
       scrollback: 5000,
     })
@@ -41,23 +36,28 @@ export default function LogDrawer({ ws, title, onClose }) {
       ro.disconnect()
       term.dispose()
     }
-  }, [ws])
+  }, [ws]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live re-theme / re-size when the user switches theme or log-font prefs.
+  useEffect(() => {
+    applyXterm(termRef.current, fitRef.current, prefs)
+  }, [resolvedTheme, prefs.fontMono, prefs.logFontSize, prefs.logLineHeight])
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="mt-auto h-2/3 bg-gray-950 border-t border-gray-800 flex flex-col"
+        className="mt-auto h-2/3 bg-canvas border-t border-border flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Drawer header */}
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-800 shrink-0">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="font-mono text-sm text-gray-300">{title}</span>
+            <span className="font-mono text-sm text-content">{title}</span>
           </div>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-white text-xl leading-none transition-colors"
+            className="text-content-subtle hover:text-content-strong text-xl leading-none transition-colors"
           >
             ×
           </button>

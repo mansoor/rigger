@@ -184,6 +184,16 @@ export const cleanMigrationLeftover   = (id, onChunk) =>
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
 
+// Appearance prefs are persisted as a JSON blob under the general-settings
+// `appearance_prefs` key (cross-device sync; localStorage is the local cache).
+export const fetchAppearancePrefs = () =>
+  api.get('/settings/general').then(r => {
+    try { return r.data?.appearance_prefs ? JSON.parse(r.data.appearance_prefs) : null }
+    catch { return null }
+  })
+export const saveAppearancePrefs = (prefs) =>
+  api.put('/settings/general', { appearance_prefs: JSON.stringify(prefs) }).then(r => r.data)
+
 // ── Settings: Backup Targets ──────────────────────────────────────────────────
 
 export const fetchBackupTargets   = ()          => api.get('/settings/backup-targets').then(r => r.data)

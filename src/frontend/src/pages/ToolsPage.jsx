@@ -340,15 +340,15 @@ function highlightJson(code) {
   while ((m = JSON_TOKEN_RE.exec(code))) {
     out += escapeHtml(code.slice(last, m.index))
     if (m[1] && m[2] !== undefined) {            // "key":
-      out += `<span class="text-sky-300">${escapeHtml(m[1])}</span><span class="text-gray-500">${escapeHtml(m[2])}</span>`
+      out += `<span class="text-sky-300">${escapeHtml(m[1])}</span><span class="text-content-subtle">${escapeHtml(m[2])}</span>`
     } else if (m[1]) {                           // "string value"
       out += `<span class="text-emerald-300">${escapeHtml(m[1])}</span>`
     } else if (m[3]) {                           // number
-      out += `<span class="text-amber-300">${escapeHtml(m[3])}</span>`
+      out += `<span class="text-warning-fg">${escapeHtml(m[3])}</span>`
     } else if (m[4]) {                           // true | false | null
       out += `<span class="text-purple-300">${escapeHtml(m[4])}</span>`
     } else if (m[5]) {                           // punctuation
-      out += `<span class="text-gray-500">${escapeHtml(m[5])}</span>`
+      out += `<span class="text-content-subtle">${escapeHtml(m[5])}</span>`
     }
     last = m.index + m[0].length
   }
@@ -374,19 +374,19 @@ function JsonEditor({ value, onChange, valid, height = '20rem' }) {
   const shared = 'm-0 px-3 py-3 text-xs font-mono leading-relaxed whitespace-pre'
   return (
     <div
-      className={`relative w-full flex rounded-xl bg-gray-950 border overflow-hidden ${valid ? 'border-gray-700 focus-within:border-brand-500' : 'border-red-700/60 focus-within:border-red-500'}`}
+      className={`relative w-full flex rounded-xl bg-canvas border overflow-hidden ${valid ? 'border-border-strong focus-within:border-brand-500' : 'border-danger-border/60 focus-within:border-danger'}`}
       style={{ height }}
     >
       {/* Line-number gutter (scrolls in sync, no scrollbar of its own) */}
       <pre ref={gutterRef} aria-hidden="true"
-        className="m-0 py-3 pl-3 pr-2 text-xs font-mono leading-relaxed text-right text-gray-600 select-none overflow-hidden whitespace-pre border-r border-gray-800/80 bg-gray-950"
+        className="m-0 py-3 pl-3 pr-2 text-xs font-mono leading-relaxed text-right text-content-faint select-none overflow-hidden whitespace-pre border-r border-border/80 bg-canvas"
         style={{ minWidth: '2.75rem' }}
       >{gutter}</pre>
 
       {/* Code area: highlighted <pre> behind, transparent <textarea> on top */}
       <div className="relative flex-1 overflow-hidden">
         <pre ref={preRef} aria-hidden="true"
-          className={`${shared} absolute inset-0 overflow-hidden text-gray-200 pointer-events-none`}
+          className={`${shared} absolute inset-0 overflow-hidden text-content pointer-events-none`}
           dangerouslySetInnerHTML={{ __html: highlightJson(value) + '\n' }} />
         <textarea
           ref={taRef}
@@ -411,38 +411,38 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Select an image workspace</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <h3 className="font-semibold text-content-strong">Select an image workspace</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-content-subtle">
           Pulls the stack's images and environment-variable defaults (secrets masked) into the editor as a draft template.
         </p>
 
         {workspaces.length === 0 ? (
-          <p className="text-sm text-gray-400 bg-gray-800/50 border border-gray-700/60 rounded-lg px-3 py-3">
+          <p className="text-sm text-content-muted bg-surface-raised/50 border border-border-strong/60 rounded-lg px-3 py-3">
             No image workspaces found. Only image stacks can become templates.
           </p>
         ) : (
           <>
             <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Workspace</label>
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Workspace</label>
               <select value={ws} onChange={e => { setWs(e.target.value); setEnv('') }}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
                 {workspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                Environment <span className="normal-case font-normal text-gray-500">(for env-var defaults)</span>
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
+                Environment <span className="normal-case font-normal text-content-subtle">(for env-var defaults)</span>
               </label>
               <select value={chosenEnv} onChange={e => setEnv(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500">
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
                 {envs.map(en => <option key={en} value={en}>{en}</option>)}
               </select>
             </div>
-            {error && <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>}
+            {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
             <button onClick={() => onLoad(ws, chosenEnv)} disabled={!ws || busy}
               className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
               {busy ? 'Loading…' : 'Load into editor'}
@@ -488,21 +488,21 @@ function ComposeModal({ onLoad, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-3xl p-6 space-y-3" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-3xl p-6 space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-white">Convert Docker Compose</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl">×</button>
+          <h3 className="font-semibold text-content-strong">Convert Docker Compose</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-content-subtle">
           Paste or import a <code className="font-mono text-xs">docker-compose.yml</code>; converting turns its services
           into a Rigger template and loads it into the editor for review.
         </p>
 
         <div className="flex items-center justify-between">
-          <label className="text-sm font-semibold text-gray-300">docker-compose.yml</label>
+          <label className="text-sm font-semibold text-content">docker-compose.yml</label>
           <div className="flex items-center gap-2">
-            <button onClick={paste} className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>⎘ Paste</button>
-            <button onClick={() => fileRef.current?.click()} className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>↑ Import file</button>
+            <button onClick={paste} className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>⎘ Paste</button>
+            <button onClick={() => fileRef.current?.click()} className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>↑ Import file</button>
             <button onClick={() => { setInput(PLACEHOLDER); setError('') }} className="text-xs text-brand-400 hover:text-brand-300 transition-colors">Example</button>
             <input ref={fileRef} type="file" accept=".yml,.yaml,.txt" onChange={importFile} className="hidden" />
           </div>
@@ -514,14 +514,14 @@ function ComposeModal({ onLoad, onClose }) {
           onChange={e => { setInput(e.target.value); setError('') }}
           placeholder={PLACEHOLDER}
           spellCheck={false}
-          className="w-full px-3 py-3 bg-gray-950 border border-gray-700 rounded-xl text-gray-200 text-xs font-mono placeholder-gray-700 focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
+          className="w-full px-3 py-3 bg-canvas border border-border-strong rounded-xl text-content text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
           style={{ minHeight: '24rem' }}
         />
 
         {error && (
-          <div className="rounded-lg bg-red-950/40 border border-red-700/40 px-3 py-2">
-            <p className="text-red-400 text-xs font-medium">Conversion failed</p>
-            <p className="text-red-300/70 text-xs mt-0.5">{error}</p>
+          <div className="rounded-lg bg-danger-subtle/40 border border-danger-border/40 px-3 py-2">
+            <p className="text-danger-fg text-xs font-medium">Conversion failed</p>
+            <p className="text-danger-fg/70 text-xs mt-0.5">{error}</p>
           </div>
         )}
 
@@ -529,7 +529,7 @@ function ComposeModal({ onLoad, onClose }) {
           onClick={convert}
           disabled={!input.trim()}
           className={`w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-            input.trim() ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
+            input.trim() ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-surface-raised text-content-faint cursor-not-allowed'
           }`}
         >Convert &amp; load into editor →</button>
       </div>
@@ -679,40 +679,40 @@ function ComposeToTemplate() {
   return (
     <div className="space-y-6">
       {/* Description */}
-      <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
+      <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
         Create a reusable prebuilt template from one of three sources —{' '}
-        <strong className="text-gray-300">Convert Docker Compose</strong>, <strong className="text-gray-300">Upload
-        template</strong>, or <strong className="text-gray-300">Select image workspace</strong> — then edit the JSON,
-        fill in name / label / description / tags, and <strong className="text-gray-300">Validate</strong> (which also
-        checks the name is unique) to unlock <strong className="text-gray-300">Save as template</strong>.
+        <strong className="text-content">Convert Docker Compose</strong>, <strong className="text-content">Upload
+        template</strong>, or <strong className="text-content">Select image workspace</strong> — then edit the JSON,
+        fill in name / label / description / tags, and <strong className="text-content">Validate</strong> (which also
+        checks the name is unique) to unlock <strong className="text-content">Save as template</strong>.
       </div>
 
       {/* ── Template editor (full width) ── */}
       <div className="space-y-2">
         {/* Editor toolbar */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <label className="text-sm font-semibold text-gray-300">Rigger template JSON</label>
+          <label className="text-sm font-semibold text-content">Rigger template JSON</label>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setComposeModalOpen(true)}
-              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
               ⇄ Convert Docker Compose
             </button>
             <button onClick={() => { setWsError(''); setWsModalOpen(true) }}
-              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
               ⊞ Select image workspace
             </button>
             <button onClick={() => tplFileRef.current?.click()}
-              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500`}>
+              className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
               ↑ Upload template
             </button>
             <input ref={tplFileRef} type="file" accept=".json,application/json"
               onChange={uploadTemplateFile} className="hidden" />
             <button onClick={copyResult} disabled={!hasContent}
-              className={`${btnBase} disabled:opacity-40 disabled:cursor-not-allowed ${copied ? 'border-green-600 bg-green-950 text-green-400' : 'border-gray-700 text-gray-400 hover:text-gray-200'}`}>
+              className={`${btnBase} disabled:opacity-40 disabled:cursor-not-allowed ${copied ? 'border-success bg-success-subtle text-success-fg' : 'border-border-strong text-content-muted hover:text-content'}`}>
               {copied ? '✓ Copied' : '⎘ Copy'}
             </button>
             <button onClick={downloadResult} disabled={!parsed}
-              className={`${btnBase} border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 disabled:cursor-not-allowed`}>
+              className={`${btnBase} border-border-strong text-content-muted hover:text-content disabled:opacity-40 disabled:cursor-not-allowed`}>
               ⬇ Download
             </button>
           </div>
@@ -721,16 +721,16 @@ function ComposeToTemplate() {
         {/* Summary chips — only when the JSON parses */}
               {parsed && Array.isArray(parsed.images) && (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-green-950/40 text-green-400 border border-green-700/40">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-success-subtle/40 text-success-fg border border-success-border/40">
                     ✓ {parsed.images.length} service{parsed.images.length !== 1 ? 's' : ''}
                   </span>
                   {parsed.default_env_vars && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-surface-raised text-content-subtle border border-border-strong">
                       {Object.keys(parsed.default_env_vars).length} env vars
                     </span>
                   )}
                   {parsed.images.map((img, i) => (
-                    <span key={img.name || i} className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 font-mono">
+                    <span key={img.name || i} className="text-xs px-2 py-0.5 rounded-full bg-surface-raised text-content-muted border border-border-strong font-mono">
                       {img.name}: {img.image}{img.tag ? ':' + img.tag : ''}
                     </span>
                   ))}
@@ -739,9 +739,9 @@ function ComposeToTemplate() {
 
               {/* Quick metadata editors — patch the JSON below. Shown in the New
                   Workspace picker (card title, blurb, tag chips and search). */}
-              <div className="space-y-2 rounded-xl border border-gray-800 bg-gray-900/40 p-3">
-                <p className="text-xs font-semibold text-gray-400">
-                  Template details <span className="font-normal text-gray-600">— shown in the New Workspace picker</span>
+              <div className="space-y-2 rounded-xl border border-border bg-surface/40 p-3">
+                <p className="text-xs font-semibold text-content-muted">
+                  Template details <span className="font-normal text-content-faint">— shown in the New Workspace picker</span>
                 </p>
                 <input
                   type="text"
@@ -749,7 +749,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => patchField('name', e.target.value)}
                   placeholder="Name (id / filename — lowercase, digits, hyphens)"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50 font-mono"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50 font-mono"
                 />
                 <input
                   type="text"
@@ -757,7 +757,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => patchField('label', e.target.value)}
                   placeholder="Label (e.g. Ghost CMS)"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
                 <textarea
                   value={parsed?.description ?? ''}
@@ -765,7 +765,7 @@ function ComposeToTemplate() {
                   onChange={e => patchField('description', e.target.value)}
                   rows={2}
                   placeholder="Description — a short blurb about what this stack is for"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 resize-y disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y disabled:opacity-50"
                 />
                 <input
                   type="text"
@@ -773,14 +773,14 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => { setTagsText(e.target.value); patchField('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean)) }}
                   placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
-                  className="w-full px-2.5 py-1.5 bg-gray-950 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
               </div>
 
               {/* Editable template JSON — color-coded, line-numbered, scrolls internally */}
               <JsonEditor value={tplJson} onChange={editJson} valid={!hasContent || !!parsed} height="min(20rem, 40vh)" />
               {hasContent && !parsed && (
-                <p className="text-xs text-red-400/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
+                <p className="text-xs text-danger-fg/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
               )}
 
               {/* Validate → Save (Save unlocks only after a successful validation) */}
@@ -789,7 +789,7 @@ function ComposeToTemplate() {
                   onClick={runValidate}
                   disabled={!parsed || validation?.checking}
                   className={`${btnBase} disabled:opacity-40 disabled:cursor-not-allowed ${
-                    validation?.ok ? 'border-green-600 bg-green-950 text-green-400'
+                    validation?.ok ? 'border-success bg-success-subtle text-success-fg'
                     : 'border-brand-600 bg-brand-950 text-brand-300 hover:bg-brand-900'
                   }`}
                 >
@@ -800,16 +800,16 @@ function ComposeToTemplate() {
                   disabled={!validation?.ok || saveState === 'saving' || saveState === 'saved'}
                   title={!validation?.ok ? 'Validate the template first' : undefined}
                   className={`${btnBase} ${
-                    saveState === 'saved'   ? 'border-green-600 bg-green-950 text-green-400' :
-                    saveState === 'saving'  ? 'border-gray-700 text-gray-500 cursor-wait' :
-                    !validation?.ok         ? 'border-gray-800 text-gray-600 cursor-not-allowed' :
+                    saveState === 'saved'   ? 'border-success bg-success-subtle text-success-fg' :
+                    saveState === 'saving'  ? 'border-border-strong text-content-subtle cursor-wait' :
+                    !validation?.ok         ? 'border-border text-content-faint cursor-not-allowed' :
                     'border-brand-600 bg-brand-950 text-brand-300 hover:bg-brand-900'
                   }`}
                 >
                   {saveState === 'saved' ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : '💾 Save as template'}
                 </button>
                 {validation && !validation.checking && (
-                  <span className="text-xs text-gray-600">
+                  <span className="text-xs text-content-faint">
                     {validation.ok ? '' : `${validation.errors.length} issue${validation.errors.length !== 1 ? 's' : ''} to fix`}
                   </span>
                 )}
@@ -817,27 +817,27 @@ function ComposeToTemplate() {
 
               {/* Validation results */}
               {validation && !validation.checking && !validation.ok && (
-                <div className="rounded-lg bg-red-950/30 border border-red-700/30 p-3">
-                  <p className="text-red-400 text-xs font-semibold mb-1">Validation failed</p>
-                  <ul className="text-red-300/80 text-xs list-disc list-inside space-y-0.5">
+                <div className="rounded-lg bg-danger-subtle/30 border border-danger-border/30 p-3">
+                  <p className="text-danger-fg text-xs font-semibold mb-1">Validation failed</p>
+                  <ul className="text-danger-fg/80 text-xs list-disc list-inside space-y-0.5">
                     {validation.errors.map((er, i) => <li key={i}>{er}</li>)}
                   </ul>
                 </div>
               )}
               {validation?.ok && saveState !== 'saved' && (
-                <p className="text-xs text-green-400/80">
+                <p className="text-xs text-success-fg/80">
                   ✓ Valid — name <code className="font-mono">{validation.name}</code> is available ({validation.services} service{validation.services !== 1 ? 's' : ''}). Ready to save.
                 </p>
               )}
 
               {/* Save error / success */}
               {saveState?.error && (
-                <div className="px-3 py-2 rounded-lg bg-red-950/30 border border-red-700/30">
-                  <p className="text-red-400 text-xs">{saveState.error}</p>
+                <div className="px-3 py-2 rounded-lg bg-danger-subtle/30 border border-danger-border/30">
+                  <p className="text-danger-fg text-xs">{saveState.error}</p>
                 </div>
               )}
               {saveState === 'saved' && parsed && (
-                <p className="text-xs text-green-400/70">
+                <p className="text-xs text-success-fg/70">
                   Saved to <code className="font-mono">{parsed.name}.json</code> — available immediately in the New Workspace wizard (no rebuild needed).
                 </p>
               )}
@@ -877,21 +877,21 @@ function fmtDate(s) {
 
 // ── Shared styling so the snapshot and full-backup panels look identical ──
 const ROW_BTN         = 'text-xs px-2.5 py-1 rounded border transition-colors disabled:opacity-50 shrink-0'
-const ROW_BTN_PRIMARY = `${ROW_BTN} border-amber-700/60 text-amber-300 hover:bg-amber-900/30`            // Roll back / Restore
-const ROW_BTN_NEUTRAL = `${ROW_BTN} border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500` // Download
-const ROW_BTN_DELETE  = `${ROW_BTN} border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-700/60` // Delete
+const ROW_BTN_PRIMARY = `${ROW_BTN} border-warning-border/60 text-warning-fg hover:bg-warning-subtle/30`            // Roll back / Restore
+const ROW_BTN_NEUTRAL = `${ROW_BTN} border-border-strong text-content-muted hover:text-content hover:border-border-strong` // Download
+const ROW_BTN_DELETE  = `${ROW_BTN} border-border-strong text-content-subtle hover:text-danger-fg hover:border-danger-border/60` // Delete
 const createBtnClass  = (enabled) =>
   `w-full py-2 text-sm font-semibold rounded-lg transition-colors ${
-    enabled ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-gray-800 text-gray-600 cursor-not-allowed'
+    enabled ? 'bg-brand-600 hover:bg-brand-700 text-white' : 'bg-surface-raised text-content-faint cursor-not-allowed'
   }`
 
 // A single saved-file row (snapshot or backup) — identical layout for both.
 function FileRow({ title, meta, children }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5 bg-gray-800/50 border border-gray-700/60 rounded-lg">
+    <div className="flex items-center gap-3 px-3 py-2.5 bg-surface-raised/50 border border-border-strong/60 rounded-lg">
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-mono text-gray-300 truncate" title={title}>{title}</p>
-        <p className="text-xs text-gray-600 mt-0.5">{meta}</p>
+        <p className="text-xs font-mono text-content truncate" title={title}>{title}</p>
+        <p className="text-xs text-content-faint mt-0.5">{meta}</p>
       </div>
       {children}
     </div>
@@ -902,9 +902,9 @@ function FileRow({ title, meta, children }) {
 function SavedList({ label, count, children }) {
   return (
     <div>
-      <div className="border-b border-gray-800 pb-2 mb-3">
-        <h4 className="text-sm font-semibold text-gray-300">
-          {label} <span className="ml-1 text-xs font-normal text-gray-600">({count})</span>
+      <div className="border-b border-border pb-2 mb-3">
+        <h4 className="text-sm font-semibold text-content">
+          {label} <span className="ml-1 text-xs font-normal text-content-faint">({count})</span>
         </h4>
       </div>
       {children}
@@ -924,12 +924,12 @@ function DropZone({ onFile, accept, hint, busy, busyLabel }) {
       onDragLeave={() => setOver(false)}
       onDrop={e => { e.preventDefault(); setOver(false); if (busy) return; const f = e.dataTransfer.files?.[0]; if (f) onFile(f) }}
       className={`border-2 border-dashed rounded-xl px-4 py-3 text-center transition-colors ${
-        busy ? 'opacity-60 cursor-wait border-gray-700'
+        busy ? 'opacity-60 cursor-wait border-border-strong'
         : over ? 'border-brand-500 bg-brand-950/20 cursor-pointer'
-        : 'border-gray-700 hover:border-brand-600 cursor-pointer'
+        : 'border-border-strong hover:border-brand-600 cursor-pointer'
       }`}
     >
-      <p className="text-xs text-gray-400">{busy ? busyLabel : hint}</p>
+      <p className="text-xs text-content-muted">{busy ? busyLabel : hint}</p>
       <input ref={ref} type="file" accept={accept} className="hidden"
         onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onFile(f) }} />
     </div>
@@ -1175,26 +1175,26 @@ function WorkspaceBackup() {
   return (
     <div className="space-y-6">
       {/* Intro */}
-      <div className="bg-gray-800/50 border border-gray-700/60 rounded-xl p-4 text-sm text-gray-400 leading-relaxed">
-        Pick a workspace, then take a lightweight <strong className="text-gray-300">configuration snapshot</strong>{' '}
+      <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
+        Pick a workspace, then take a lightweight <strong className="text-content">configuration snapshot</strong>{' '}
         (<code className="font-mono text-xs">.rws</code> — <code className="font-mono text-xs">config.json</code> + each{' '}
-        <code className="font-mono text-xs">.env</code>, no data) or a <strong className="text-gray-300">full backup</strong>{' '}
+        <code className="font-mono text-xs">.env</code>, no data) or a <strong className="text-content">full backup</strong>{' '}
         (<code className="font-mono text-xs">.rwb</code> — config plus all volume data). Both can be downloaded, uploaded
         and restored on the server.
       </div>
 
       {/* Shared workspace selector */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <label className="block text-xs font-medium text-gray-400 mb-1.5">Workspace</label>
+      <div className="bg-surface border border-border rounded-xl p-4">
+        <label className="block text-xs font-medium text-content-muted mb-1.5">Workspace</label>
         <select
           value={selectedWs}
           onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBkpMsg(null); setBackupErr(null); setActiveJobId(null) }}
-          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-brand-500"
+          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
         >
           <option value="">— select workspace —</option>
           {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
         </select>
-        <p className="text-xs text-gray-600 mt-2">Applies to both <strong className="text-gray-500">Take snapshot</strong> and <strong className="text-gray-500">Start backup</strong> below.</p>
+        <p className="text-xs text-content-faint mt-2">Applies to both <strong className="text-content-subtle">Take snapshot</strong> and <strong className="text-content-subtle">Start backup</strong> below.</p>
       </div>
 
       {/* Two consistent panels */}
@@ -1202,39 +1202,39 @@ function WorkspaceBackup() {
         {/* ── Configuration snapshot (.rws) ── */}
         <section className="space-y-3">
           <div>
-            <h3 className="text-base font-semibold text-white">Configuration snapshot <span className="text-xs font-normal text-gray-600">.rws</span></h3>
-            <p className="text-sm text-gray-500 mt-1">
+            <h3 className="text-base font-semibold text-content-strong">Configuration snapshot <span className="text-xs font-normal text-content-faint">.rws</span></h3>
+            <p className="text-sm text-content-subtle mt-1">
               Just <code className="font-mono text-xs">config.json</code> and each env's{' '}
               <code className="font-mono text-xs">.env</code> (secrets included). No volume data — fast to take, easy to roll back.
             </p>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">
-                Snapshot name <span className="text-gray-600 font-normal">(optional)</span>
+              <label className="block text-xs font-medium text-content-muted mb-1.5">
+                Snapshot name <span className="text-content-faint font-normal">(optional)</span>
               </label>
               <input
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
                 placeholder={selectedWs ? `${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<timestamp>.rws'}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
             <button onClick={takeSnapshot} disabled={!selectedWs || snapBusy} className={createBtnClass(!!selectedWs && !snapBusy)}>
               {snapBusy ? 'Saving…' : 'Take configuration snapshot'}
             </button>
-            {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{snapMsg.text}</p>}
+            {snapMsg && <p className={`text-xs px-1 ${snapMsg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{snapMsg.text}</p>}
           </div>
 
           <SavedList label="Saved snapshots" count={snapshots.length}>
             {snapshots.length === 0
-              ? <p className="text-xs text-gray-600 py-4 text-center">No snapshots yet.</p>
+              ? <p className="text-xs text-content-faint py-4 text-center">No snapshots yet.</p>
               : (
                 <div className="space-y-2">
                   {snapshots.map(s => (
                     <FileRow key={s.filename} title={s.filename}
-                      meta={<>{s.workspace ? <span className="text-gray-500">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}</>}>
+                      meta={<>{s.workspace ? <span className="text-content-subtle">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}</>}>
                       <button onClick={() => rollbackSnapshot(s)} disabled={rollingBack[s.filename]} className={ROW_BTN_PRIMARY}>
                         {rollingBack[s.filename] ? '…' : 'Roll back'}
                       </button>
@@ -1254,11 +1254,11 @@ function WorkspaceBackup() {
             hint="↑ Drop a .rws snapshot here, or click to browse" />
 
           {/* Snapshot-specific guidance */}
-          <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Rolling back configuration</p>
-            <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
-              <li>Click <strong className="text-gray-400">Roll back</strong> on a snapshot to overwrite the workspace's <code className="font-mono text-gray-400">config.json</code> and every <code className="font-mono text-gray-400">.env</code></li>
-              <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-gray-400">.rws</code> above — it joins the list, then roll back to it</li>
+          <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Rolling back configuration</p>
+            <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
+              <li>Click <strong className="text-content-muted">Roll back</strong> on a snapshot to overwrite the workspace's <code className="font-mono text-content-muted">config.json</code> and every <code className="font-mono text-content-muted">.env</code></li>
+              <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-content-muted">.rws</code> above — it joins the list, then roll back to it</li>
               <li>If a secret (DB password, API key…) changed since the snapshot, update it afterward and redeploy</li>
               <li>Volume data is never touched — use a full backup for that</li>
             </ol>
@@ -1268,36 +1268,36 @@ function WorkspaceBackup() {
         {/* ── Full backup (.rwb) ── */}
         <section className="space-y-3">
           <div>
-            <h3 className="text-base font-semibold text-white">Full backup <span className="text-xs font-normal text-gray-600">.rwb</span></h3>
-            <p className="text-sm text-gray-500 mt-1">
-              Config plus <strong className="text-gray-400">all volume data</strong> (per-env backup folders excluded).
+            <h3 className="text-base font-semibold text-content-strong">Full backup <span className="text-xs font-normal text-content-faint">.rwb</span></h3>
+            <p className="text-sm text-content-subtle mt-1">
+              Config plus <strong className="text-content-muted">all volume data</strong> (per-env backup folders excluded).
               Larger and slower; restoring re-creates the whole workspace.
             </p>
           </div>
 
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+          <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1.5">
-                Backup name <span className="text-gray-600 font-normal">(optional)</span>
+              <label className="block text-xs font-medium text-content-muted mb-1.5">
+                Backup name <span className="text-content-faint font-normal">(optional)</span>
               </label>
               <input
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
                 placeholder={selectedWs ? `${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>-<timestamp>.rwb'}
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
             <button onClick={startBackup} disabled={!selectedWs || isRunning} className={createBtnClass(!!selectedWs && !isRunning)}>
               {isRunning ? '⏳ Backing up…' : 'Start full backup'}
             </button>
-            {backupErr && <p className="text-xs text-red-400 px-1">{backupErr}</p>}
+            {backupErr && <p className="text-xs text-danger-fg px-1">{backupErr}</p>}
 
             {/* Job status card */}
             {activeJob && (
               <div className={`px-4 py-3 rounded-xl border text-sm ${
                 activeJob.status === 'running'   ? 'bg-brand-950/40 border-brand-700/40 text-brand-300' :
-                activeJob.status === 'completed' ? 'bg-green-950/40 border-green-700/40 text-green-300' :
-                'bg-red-950/40 border-red-700/40 text-red-300'
+                activeJob.status === 'completed' ? 'bg-success-subtle/40 border-success-border/40 text-success-fg' :
+                'bg-danger-subtle/40 border-danger-border/40 text-danger-fg'
               }`}>
                 <div className="flex items-center gap-2">
                   <span className={activeJob.status === 'running' ? 'animate-spin inline-block' : ''}>
@@ -1322,19 +1322,19 @@ function WorkspaceBackup() {
               </div>
             )}
             {!activeJob && !backupErr && (
-              <p className="text-xs text-gray-600 px-1">Stored on the server; download to keep a copy off-box.</p>
+              <p className="text-xs text-content-faint px-1">Stored on the server; download to keep a copy off-box.</p>
             )}
           </div>
 
           <SavedList label="Backups on server" count={archives.length}>
-            {bkpMsg && <p className={`text-xs px-1 mb-2 ${bkpMsg.ok ? 'text-green-400' : 'text-red-400'}`}>{bkpMsg.text}</p>}
+            {bkpMsg && <p className={`text-xs px-1 mb-2 ${bkpMsg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{bkpMsg.text}</p>}
             {archives.length === 0
-              ? <p className="text-xs text-gray-600 py-4 text-center">No backups yet.</p>
+              ? <p className="text-xs text-content-faint py-4 text-center">No backups yet.</p>
               : (
                 <div className="space-y-2">
                   {archives.map(a => (
                     <FileRow key={a.filename} title={a.filename}
-                      meta={<>{a.workspace ? <span className="text-gray-500">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}</>}>
+                      meta={<>{a.workspace ? <span className="text-content-subtle">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}</>}>
                       <button onClick={() => restoreArchive(a)} disabled={restoringArchive[a.filename]} className={ROW_BTN_PRIMARY}>
                         {restoringArchive[a.filename] ? '…' : 'Restore'}
                       </button>
@@ -1356,14 +1356,14 @@ function WorkspaceBackup() {
             hint="↑ Drop a .rwb backup here, or click to browse" />
 
           {/* Backup-specific guidance */}
-          <div className="bg-gray-800/30 border border-gray-700/40 rounded-xl p-4 space-y-2">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Restoring a full backup</p>
-            <ol className="text-xs text-gray-500 space-y-1 list-decimal list-inside">
+          <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Restoring a full backup</p>
+            <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
               <li>Stop the workspace's containers if it already exists</li>
-              <li>To use a backup from elsewhere, drop the <code className="font-mono text-gray-400">.rwb</code> above — it joins the list</li>
-              <li>Click <strong className="text-gray-400">Restore</strong> on a backup row (an existing workspace is replaced)</li>
+              <li>To use a backup from elsewhere, drop the <code className="font-mono text-content-muted">.rwb</code> above — it joins the list</li>
+              <li>Click <strong className="text-content-muted">Restore</strong> on a backup row (an existing workspace is replaced)</li>
               <li>The workspace appears in the sidebar immediately</li>
-              <li>Run <code className="font-mono text-gray-400">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
+              <li>Run <code className="font-mono text-content-muted">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
             </ol>
           </div>
         </section>
@@ -1397,27 +1397,27 @@ export default function ToolsPage() {
     <Layout>
       <div className="p-6 max-w-[1400px] mx-auto">
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-white">Tools</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Utilities for working with Rigger workspaces and templates.</p>
+          <h1 className="text-xl font-bold text-content-strong">Tools</h1>
+          <p className="text-sm text-content-subtle mt-0.5">Utilities for working with Rigger workspaces and templates.</p>
         </div>
 
         {/* Tool tabs */}
-        <div className="flex items-center gap-1 mb-6 border-b border-gray-800 pb-0">
+        <div className="flex items-center gap-1 mb-6 border-b border-border pb-0">
           {TOOLS.map(tool => (
             <button
               key={tool.id}
               onClick={() => setActiveTool(tool.id)}
               className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
                 activeTool === tool.id
-                  ? 'border-brand-500 text-white bg-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                  ? 'border-brand-500 text-content-strong bg-surface'
+                  : 'border-transparent text-content-subtle hover:text-content hover:bg-surface-raised/50'
               }`}
             >{tool.label}</button>
           ))}
         </div>
 
         {/* Active tool */}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+        <div className="bg-surface border border-border rounded-2xl p-6">
           {ActiveComponent && <ActiveComponent />}
         </div>
       </div>

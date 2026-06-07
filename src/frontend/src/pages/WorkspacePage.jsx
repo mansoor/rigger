@@ -38,10 +38,10 @@ const METRIC_RANGES = [
 
 function MetricTile({ label, value, series, stroke }) {
   return (
-    <div className="bg-gray-900/40 border border-gray-800/60 rounded-lg px-3 py-2 min-w-0">
+    <div className="bg-surface/40 border border-border/60 rounded-lg px-3 py-2 min-w-0">
       <div className="flex items-center justify-between gap-1 mb-1">
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
-        <span className="text-xs font-mono text-gray-300 truncate">{value}</span>
+        <span className="text-xs font-semibold text-content-subtle uppercase tracking-wider">{label}</span>
+        <span className="text-xs font-mono text-content truncate">{value}</span>
       </div>
       <Sparkline values={series} stroke={stroke} height={24} />
     </div>
@@ -52,18 +52,18 @@ function MetricTile({ label, value, series, stroke }) {
 
 function StatusBadge({ label, color }) {
   const colors = {
-    running:  'bg-green-500/20 text-green-400 border-green-500/30',
-    partial:  'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    building: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    stopped:  'bg-red-500/15 text-red-400 border-red-500/30',
-    unknown:  'bg-gray-700/40 text-gray-500 border-gray-600/30',
+    running:  'bg-green-500/20 text-success-fg border-success/30',
+    partial:  'bg-amber-500/20 text-warning-fg border-warning/30',
+    building: 'bg-amber-500/20 text-warning-fg border-warning/30',
+    stopped:  'bg-red-500/15 text-danger-fg border-danger/30',
+    unknown:  'bg-surface-overlay/40 text-content-subtle border-border-strong/30',
   }
   const dot = {
     running:  'bg-green-400',
     partial:  'bg-amber-400 animate-pulse',
     building: 'bg-amber-400 animate-pulse',
     stopped:  'bg-red-500',
-    unknown:  'bg-gray-600',
+    unknown:  'bg-surface-overlay',
   }
   const c = colors[color] || colors.unknown
   const d = dot[color] || dot.unknown
@@ -149,14 +149,14 @@ function UrlBadge({ href, reachable, mono, children }) {
   if (!reachable) {
     return (
       <span title="Not reachable — the environment is not running or is unhealthy"
-        className={`${base} bg-gray-800/30 text-gray-600 border-gray-800 cursor-not-allowed`}>
+        className={`${base} bg-surface-raised/30 text-content-faint border-border cursor-not-allowed`}>
         {children}
       </span>
     )
   }
   return (
     <a href={href} target="_blank" rel="noreferrer" title={`Open ${href}`}
-      className={`${base} bg-gray-800 hover:bg-brand-900 text-gray-400 hover:text-brand-300 border-gray-700 hover:border-brand-600`}>
+      className={`${base} bg-surface-raised hover:bg-brand-900 text-content-muted hover:text-brand-300 border-border-strong hover:border-brand-600`}>
       {children}
     </a>
   )
@@ -168,7 +168,7 @@ function UrlBadge({ href, reachable, mono, children }) {
 function CtlBtn({ title, onClick, children, className = '' }) {
   return (
     <button type="button" title={title} onClick={onClick}
-      className={`rounded px-1 py-0.5 text-xs leading-none transition-colors hover:bg-gray-800 ${className || 'text-gray-600 hover:text-gray-200'}`}>
+      className={`rounded px-1 py-0.5 text-xs leading-none transition-colors hover:bg-surface-raised ${className || 'text-content-faint hover:text-content'}`}>
       {children}
     </button>
   )
@@ -201,8 +201,8 @@ function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
 function PrimaryBtn({ variant, icon, fill, disabled, pulse, onClick, title, children }) {
   const styles = {
     deploy: 'bg-brand-600 hover:bg-brand-700 text-white',
-    update: 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/25',
-    stop:   'bg-red-900/60 hover:bg-red-800/80 text-red-300 hover:text-red-200',
+    update: 'bg-amber-500/15 hover:bg-amber-500/25 text-warning-fg border border-warning/25',
+    stop:   'bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg',
   }
   return (
     <button type="button" onClick={onClick} disabled={disabled} title={title}
@@ -216,10 +216,10 @@ function PrimaryBtn({ variant, icon, fill, disabled, pulse, onClick, title, chil
 
 // ToolBtn — a compact muted icon button in the EnvCard action toolbar; gains its
 // accent color on hover (className), greys out when disabled.
-function ToolBtn({ icon, title, onClick, disabled, className = 'text-gray-500 hover:text-gray-200' }) {
+function ToolBtn({ icon, title, onClick, disabled, className = 'text-content-subtle hover:text-content' }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled} title={title}
-      className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-colors hover:bg-gray-900 disabled:opacity-25 disabled:pointer-events-none ${className}`}>
+      className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-colors hover:bg-surface disabled:opacity-25 disabled:pointer-events-none ${className}`}>
       <EnvIcon name={icon} className="w-[15px] h-[15px]" />
     </button>
   )
@@ -241,20 +241,20 @@ function AccessUrls({ urls, reachable }) {
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setOpen(o => !o)}
-        className="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 max-w-[150px] transition-colors">
+        className="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded-full bg-surface-raised hover:bg-surface-overlay text-content border border-border-strong max-w-[150px] transition-colors">
         <span className="truncate">🌐 {urls[0].label}</span>
         <span className="opacity-60 shrink-0">+{urls.length - 1} ▾</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[160px]">
+        <div className="absolute right-0 top-full mt-1 z-20 bg-surface-raised border border-border-strong rounded-lg shadow-xl py-1 min-w-[160px]">
           {urls.map((u, i) => reachable ? (
             <a key={i} href={u.href} target="_blank" rel="noreferrer"
-              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-gray-300 hover:bg-gray-700 hover:text-brand-300 transition-colors">
+              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-content hover:bg-surface-overlay hover:text-brand-300 transition-colors">
               <span className="truncate">{u.label}</span><span className="opacity-60">↗</span>
             </a>
           ) : (
             <span key={i} title="Not reachable — the environment is not running or is unhealthy"
-              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-gray-600 cursor-not-allowed">
+              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-content-faint cursor-not-allowed">
               <span className="truncate">{u.label}</span>
             </span>
           ))}
@@ -437,22 +437,22 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const hasCollapsible  = showMetrics || serviceRows.length > 0
 
   return (
-    <div className="w-full bg-gray-900 border border-gray-800 rounded-xl p-5 flex flex-col gap-4">
+    <div className="w-full bg-surface border border-border rounded-xl p-5 flex flex-col gap-4">
       {/* Card header: identity (name + host) on the left, state (status + access
           URLs) on the right. */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-col min-w-0">
           <div className="flex items-center gap-2 min-w-0">
-            <h3 className="font-semibold text-white text-base truncate">{envName}</h3>
+            <h3 className="font-semibold text-content-strong text-base truncate">{envName}</h3>
             {/* Deployment mode is configured per-environment (compose / swarm). */}
             <span title={`Deployment mode: ${deployment}`}
-              className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-800 text-gray-400">
+              className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-surface-raised text-content-muted">
               {deployment}
             </span>
           </div>
           <span
             title={hostName ? `Runs on remote host ${hostName}` : 'Runs on the local control plane'}
-            className={`inline-flex items-center gap-1 text-[11px] mt-0.5 ${hostName ? 'text-indigo-300' : 'text-gray-500'}`}
+            className={`inline-flex items-center gap-1 text-[11px] mt-0.5 ${hostName ? 'text-indigo-300' : 'text-content-subtle'}`}
           >
             🖥 {hostName || 'local'}
           </span>
@@ -464,7 +464,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       </div>
 
       {/* Details */}
-      <div className="space-y-1.5 text-sm text-gray-400">
+      <div className="space-y-1.5 text-sm text-content-muted">
         {/* Only show domain/url row if neither badge above applies */}
         {!cfg?.domain && !port && <DetailRow icon="○" value="no url configured" />}
         {gitBranch && <DetailRow icon="○" value={gitBranch} />}
@@ -489,11 +489,11 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         </div>
 
         {/* Toolbar: secondary lifecycle + files + terminal */}
-        <div className="flex items-center gap-0.5 p-1 bg-gray-800/40 border border-gray-800 rounded-lg">
+        <div className="flex items-center gap-0.5 p-1 bg-surface-raised/40 border border-border rounded-lg">
           <ToolBtn icon="refresh" title="Refresh — regenerate compose from config & deploy"
-            onClick={() => handleAction('refresh')} className="text-gray-500 hover:text-sky-400" />
+            onClick={() => handleAction('refresh')} className="text-content-subtle hover:text-sky-400" />
           <ToolBtn icon="restart" title="Restart the existing containers in place" disabled={!hasContainers}
-            onClick={() => handleAction('restart')} className="text-gray-500 hover:text-green-400" />
+            onClick={() => handleAction('restart')} className="text-content-subtle hover:text-success-fg" />
           <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
             onClick={async () => {
               if (await confirm({
@@ -501,14 +501,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                 message: 'Removes the containers (volumes are kept). Deploy brings it back.',
                 confirmLabel: 'Inactivate',
               })) handleAction('down')
-            }} className="text-red-400/50 hover:text-red-400" />
-          <span className="w-px self-stretch bg-gray-800 mx-1" />
-          <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-gray-500 hover:text-violet-400" />
-          <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-gray-500 hover:text-teal-400" />
+            }} className="text-danger-fg/50 hover:text-danger-fg" />
+          <span className="w-px self-stretch bg-surface-raised mx-1" />
+          <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-content-subtle hover:text-violet-400" />
+          <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
           <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
-            onClick={() => onTerminal()} className="text-gray-500 hover:text-emerald-400" />
+            onClick={() => onTerminal()} className="text-content-subtle hover:text-emerald-400" />
           <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
-            onClick={() => handleAction('backup')} className="text-gray-500 hover:text-indigo-400" />
+            onClick={() => handleAction('backup')} className="text-content-subtle hover:text-indigo-400" />
         </div>
       </div>
 
@@ -524,12 +524,12 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
               <div className="flex flex-col gap-4 pb-1">
                 {/* Resource history sparklines (Phase 6d). */}
                 {showMetrics && (
-                <div className="border-t border-gray-800/60 pt-3">
+                <div className="border-t border-border/60 pt-3">
           {/* Time-range selector — muted links, brighter on hover, active highlighted. */}
           <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 mb-2 text-[11px]">
             {METRIC_RANGES.map(r => (
               <button key={r.v} type="button" onClick={() => setRangeMin(r.v)}
-                className={`transition-colors ${rangeMin === r.v ? 'text-gray-200 font-medium' : 'text-gray-600 hover:text-gray-400'}`}>
+                className={`transition-colors ${rangeMin === r.v ? 'text-content font-medium' : 'text-content-faint hover:text-content-muted'}`}>
                 {r.label}
               </button>
             ))}
@@ -545,20 +545,20 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
                 {/* Container health panel — has its own inner toggle for the list. */}
                 {serviceRows.length > 0 && (
-                <div className="border-t border-gray-800/60 pt-3">
+                <div className="border-t border-border/60 pt-3">
           {/* Panel header / toggle */}
           <button
             type="button"
             onClick={() => setContainersOpen(o => !o)}
             className="flex items-center justify-between w-full group mb-2"
           >
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <span className="text-xs font-semibold text-content-subtle uppercase tracking-wider">
               Services
-              <span className="ml-1.5 font-normal normal-case text-gray-700">
+              <span className="ml-1.5 font-normal normal-case text-content-faint">
                 ({serviceRows.filter(c => c.State === 'running').length}/{serviceRows.length})
               </span>
             </span>
-            <span className="text-gray-700 group-hover:text-gray-400 text-xs transition-colors">
+            <span className="text-content-faint group-hover:text-content-muted text-xs transition-colors">
               {containersOpen ? '▲' : '▼'}
             </span>
           </button>
@@ -566,8 +566,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           {containersOpen && (
             <div className="space-y-1.5">
               {serviceRows.map(c => {
-                const dotCls    = c.State ? containerDotClass(c) : 'bg-gray-700'
-                const txtCls    = c.State ? containerTxtClass(c) : 'text-gray-600'
+                const dotCls    = c.State ? containerDotClass(c) : 'bg-surface-overlay'
+                const txtCls    = c.State ? containerTxtClass(c) : 'text-content-faint'
                 const label     = c.State ? containerStatusLabel(c) : 'Not started'
                 const isNeutral = !c.State || (c.State === 'running' && (c.Health === 'healthy' || c.Health === ''))
                 const isRunning = c.State === 'running'
@@ -576,14 +576,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                   <div key={c.short} className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotCls}`} />
-                      <span className="text-xs text-gray-400 font-mono truncate">{c.short}</span>
+                      <span className="text-xs text-content-muted font-mono truncate">{c.short}</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`text-xs ${isNeutral ? 'text-gray-600' : txtCls}`}>
+                      <span className={`text-xs ${isNeutral ? 'text-content-faint' : txtCls}`}>
                         {c.State === 'running' && c.Health ? `${c.State} · ${label}` : label}
                       </span>
                       {/* Per-container actions */}
-                      <div className="flex items-center gap-0.5 ml-1 border-l border-gray-800 pl-1">
+                      <div className="flex items-center gap-0.5 ml-1 border-l border-border pl-1">
                         {/* Info, Terminal, Files, Logs and Restart need a live
                             container — only shown while running. Start/Stop
                             toggles by state. */}
@@ -613,14 +613,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                           <CtlBtn title="Logs" onClick={() => onLogs(c.short)}>▤</CtlBtn>
                         )}
                         {isRunning
-                          ? <CtlBtn title="Stop" className="text-gray-600 hover:text-red-400" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
-                          : <CtlBtn title="Start" className="text-gray-600 hover:text-blue-400" onClick={() => handleAction('start', [c.Service])}>
+                          ? <CtlBtn title="Stop" className="text-content-faint hover:text-danger-fg" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
+                          : <CtlBtn title="Start" className="text-content-faint hover:text-info-fg" onClick={() => handleAction('start', [c.Service])}>
                               <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 inline-block align-middle" fill="currentColor" aria-hidden="true">
                                 <path d="M2 1.5L8.5 5L2 8.5Z" />
                               </svg>
                             </CtlBtn>}
                         {isRunning && (
-                          <CtlBtn title="Restart" className="text-gray-600 hover:text-green-400" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
+                          <CtlBtn title="Restart" className="text-content-faint hover:text-success-fg" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
                         )}
                         {/* Update icon doubles as the indicator: pulses amber when an
                             update is available, muted when the digest can't be compared. */}
@@ -629,9 +629,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                             title={upd?.has_update ? `Update available: ${upd.newer_tag} — pull & recreate`
                               : upd?.indeterminate ? 'Cannot compare digest — pull latest & recreate'
                               : 'Update image (pull & recreate)'}
-                            className={upd?.has_update ? 'text-amber-300 hover:text-amber-200 animate-pulse'
-                              : upd?.indeterminate ? 'text-gray-500 hover:text-gray-300'
-                              : 'text-gray-600 hover:text-gray-200'}
+                            className={upd?.has_update ? 'text-warning-fg hover:text-warning-fg animate-pulse'
+                              : upd?.indeterminate ? 'text-content-subtle hover:text-content'
+                              : 'text-content-faint hover:text-content'}
                             onClick={() => handleAction('update', [c.Service])}>
                             ↑
                           </CtlBtn>
@@ -657,7 +657,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             onClick={toggleExpanded}
             title={expanded ? 'Collapse details' : 'Expand details'}
             aria-expanded={expanded}
-            className="-mx-5 -mb-5 mt-1 flex w-[calc(100%+2.5rem)] items-center justify-center rounded-b-xl border-t border-gray-800/60 py-1 text-gray-600 hover:bg-gray-800/40 hover:text-gray-300 transition-colors"
+            className="-mx-5 -mb-5 mt-1 flex w-[calc(100%+2.5rem)] items-center justify-center rounded-b-xl border-t border-border/60 py-1 text-content-faint hover:bg-surface-raised/40 hover:text-content transition-colors"
           >
             <svg viewBox="0 0 16 16" className={`w-3.5 h-3.5 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
               fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -686,7 +686,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 function DetailRow({ icon, value }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-gray-600">{icon}</span>
+      <span className="text-xs text-content-faint">{icon}</span>
       <span className="truncate">{value}</span>
     </div>
   )
@@ -711,14 +711,14 @@ function ReleasePipeline({ ws }) {
   ]
 
   const stepStyle = {
-    done:    'bg-green-500 border-green-500 text-green-900',
-    active:  'bg-amber-400 border-amber-400 text-amber-900 animate-pulse',
-    pending: 'bg-gray-800 border-gray-700 text-gray-500',
+    done:    'bg-green-500 border-success text-green-900',
+    active:  'bg-amber-400 border-warning text-amber-900 animate-pulse',
+    pending: 'bg-surface-raised border-border-strong text-content-subtle',
   }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-gray-300 mb-5 flex items-center gap-2">
+    <div className="bg-surface border border-border rounded-xl p-5">
+      <h2 className="text-sm font-semibold text-content mb-5 flex items-center gap-2">
         <span className="text-xs">○</span> Release pipeline
       </h2>
 
@@ -729,31 +729,31 @@ function ReleasePipeline({ ws }) {
               <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepStyle[step.status]}`}>
                 {step.status === 'done' ? '✓' : step.status === 'active' ? '◎' : '○'}
               </div>
-              <span className={`text-xs text-center leading-tight ${step.status === 'pending' ? 'text-gray-600' : 'text-gray-300'}`}>
+              <span className={`text-xs text-center leading-tight ${step.status === 'pending' ? 'text-content-faint' : 'text-content'}`}>
                 {step.label}
               </span>
               {step.version && (
-                <span className="text-xs text-gray-500 font-mono">{step.version}</span>
+                <span className="text-xs text-content-subtle font-mono">{step.version}</span>
               )}
               {step.status === 'active' && (
-                <span className="text-xs text-amber-400">in progress</span>
+                <span className="text-xs text-warning-fg">in progress</span>
               )}
               {step.status === 'pending' && (
-                <span className="text-xs text-gray-600">—</span>
+                <span className="text-xs text-content-faint">—</span>
               )}
             </div>
             {i < steps.length - 1 && (
-              <div className={`h-0.5 w-8 shrink-0 mx-1 ${i < 2 ? 'bg-green-500' : 'bg-gray-700'}`} />
+              <div className={`h-0.5 w-8 shrink-0 mx-1 ${i < 2 ? 'bg-green-500' : 'bg-surface-overlay'}`} />
             )}
           </div>
         ))}
       </div>
 
-      <div className="flex items-center justify-between bg-gray-800/60 rounded-lg px-4 py-3">
-        <p className="text-sm text-gray-300">
-          Ready to promote? <span className="font-mono text-white">{vStr}</span> will be retagged and deployed to prod — no rebuild.
+      <div className="flex items-center justify-between bg-surface-raised/60 rounded-lg px-4 py-3">
+        <p className="text-sm text-content">
+          Ready to promote? <span className="font-mono text-content-strong">{vStr}</span> will be retagged and deployed to prod — no rebuild.
         </p>
-        <button className="ml-4 shrink-0 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5">
+        <button className="ml-4 shrink-0 bg-surface-overlay hover:bg-surface-overlay text-content hover:text-content-strong text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5">
           <span className="text-xs">○</span> Promote to prod
         </button>
       </div>
@@ -858,25 +858,25 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
   const shown = tail > 0 ? entries.slice(-tail) : entries
 
   return (
-    <div className="relative bg-gray-900 border border-gray-800 rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
+    <div className="relative bg-surface border border-border rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-300">Action output</span>
+          <span className="text-sm font-semibold text-content">Action output</span>
           {running && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />}
         </div>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1 text-xs text-gray-500">
+          <label className="flex items-center gap-1 text-xs text-content-subtle">
             Lines
             <select
               value={tail}
               onChange={e => { const v = Number(e.target.value); setTail(v); try { localStorage.setItem('rigger:actionlog:tail', String(v)) } catch {} }}
-              className="bg-gray-800 border border-gray-700 text-gray-300 rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-500"
+              className="bg-surface-raised border border-border-strong text-content rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-500"
             >
               {TAIL_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'All' : n}</option>)}
             </select>
           </label>
           <button onClick={loadHistory} title="Refresh history from the server"
-            className="p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            className="p-1 rounded text-content-subtle hover:text-content hover:bg-surface-raised transition-colors">
             <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" />
             </svg>
@@ -891,7 +891,7 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
                 })) clearLog()
               }}
               title="Delete recorded history"
-              className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors">
+              className="p-1 rounded text-content-subtle hover:text-danger-fg hover:bg-surface-raised transition-colors">
               <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M4 6h16M9 6V4h6v2M7 6l1 14h8l1-14" /><path d="M10 10v6M14 10v6" />
               </svg>
@@ -900,24 +900,24 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed bg-gray-950/60 min-h-0">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed bg-canvas/60 min-h-0">
         {entries.length === 0 ? (
-          <p className="text-gray-700 pt-2">
+          <p className="text-content-faint pt-2">
             Run Deploy, Stop, Restart, Backup, Update or other actions — output is recorded here per workspace.
           </p>
         ) : (
           shown.map((it, i) =>
             it.type === 'header' ? (
-              <div key={i} className="mt-3 first:mt-0 flex flex-wrap items-center gap-x-2 border-t border-gray-800 pt-2">
+              <div key={i} className="mt-3 first:mt-0 flex flex-wrap items-center gap-x-2 border-t border-border pt-2">
                 <span className="text-brand-300 font-semibold">▶ {it.action}{it.env ? ` · ${it.env}` : ''}</span>
-                <span className="text-gray-600">·</span>
-                <span className="text-gray-500">{it.user}</span>
-                <span className="text-gray-600">·</span>
-                <span className="text-gray-500">{fmtTs(it.ts)}</span>
+                <span className="text-content-faint">·</span>
+                <span className="text-content-subtle">{it.user}</span>
+                <span className="text-content-faint">·</span>
+                <span className="text-content-subtle">{fmtTs(it.ts)}</span>
               </div>
             ) : it.type === 'result' ? (
-              <div key={i} className={`mb-1 ${it.ok ? 'text-green-400' : 'text-red-400'}`}>
-                {it.ok ? '✓ Completed' : '✗ Failed'} <span className="text-gray-600">· {fmtTs(it.ts)}</span>
+              <div key={i} className={`mb-1 ${it.ok ? 'text-success-fg' : 'text-danger-fg'}`}>
+                {it.ok ? '✓ Completed' : '✗ Failed'} <span className="text-content-faint">· {fmtTs(it.ts)}</span>
               </div>
             ) : (
               <div key={i} dangerouslySetInnerHTML={{ __html: ansiToHtml(it.text) }} />
@@ -1039,21 +1039,21 @@ function containerDotClass(c) {
     case 'paused':     return 'bg-amber-400'
     case 'exited':
     case 'dead':       return 'bg-red-500'
-    case 'created':    return 'bg-gray-500'
-    default:           return 'bg-gray-600'
+    case 'created':    return 'bg-surface-overlay'
+    default:           return 'bg-surface-overlay'
   }
 }
 
 function containerTxtClass(c) {
   const health = (c.Health || '').toLowerCase()
   if (c.State === 'running') {
-    if (health === 'unhealthy') return 'text-red-400'
-    if (health === 'starting')  return 'text-amber-400'
-    return 'text-green-400'
+    if (health === 'unhealthy') return 'text-danger-fg'
+    if (health === 'starting')  return 'text-warning-fg'
+    return 'text-success-fg'
   }
-  if (c.State === 'restarting' || c.State === 'paused') return 'text-amber-400'
-  if (c.State === 'exited' || c.State === 'dead')       return 'text-red-400'
-  return 'text-gray-400'
+  if (c.State === 'restarting' || c.State === 'paused') return 'text-warning-fg'
+  if (c.State === 'exited' || c.State === 'dead')       return 'text-danger-fg'
+  return 'text-content-muted'
 }
 
 // Human-readable status label for a container
@@ -1100,14 +1100,14 @@ function ContainerSelector({ containers, wsName, activeEnv, activeContainers, on
   })
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-800/40 shrink-0 overflow-x-auto">
+    <div className="flex items-center gap-3 px-3 py-2 border-b border-border/40 shrink-0 overflow-x-auto">
       {/* All checkbox */}
       <label className="flex items-center gap-1.5 cursor-pointer shrink-0 select-none">
         <input type="checkbox" checked={allSelected} onChange={toggleAll}
           className="accent-brand-500 w-3 h-3" />
-        <span className={`text-xs ${allSelected ? 'text-white' : 'text-gray-500'}`}>all</span>
+        <span className={`text-xs ${allSelected ? 'text-content-strong' : 'text-content-subtle'}`}>all</span>
       </label>
-      <span className="w-px h-3 bg-gray-700 shrink-0" />
+      <span className="w-px h-3 bg-surface-overlay shrink-0" />
       {shortNames.map(({ c, short, fullSvc }) => {
         const checked   = allSelected || activeContainers.includes(short)
         const color     = serviceColorFallback(fullSvc, colorMap)
@@ -1153,14 +1153,14 @@ function LogOutput({ lines, filter, wrap, autoScroll, rowLimit = 0, showRowNumbe
   }, [lines, autoScroll])
 
   return (
-    <div ref={scrollRef} className={`flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed bg-gray-950/60 ${wrap ? 'break-all' : 'overflow-x-auto whitespace-nowrap'}`}>
+    <div ref={scrollRef} className={`flex-1 overflow-y-auto p-3 font-mono text-xs leading-relaxed bg-canvas/60 ${wrap ? 'break-all' : 'overflow-x-auto whitespace-nowrap'}`}>
       {displayed.map((line, i) => {
         const { svc, content } = parseLogLine(line)
         const color = svc ? serviceColorFallback(svc, colorMap) : null
         return (
           <div key={rowOffset + i} className="flex items-start gap-0">
             {showRowNumbers && (
-              <span className="text-gray-700 select-none shrink-0 w-10 text-right mr-2">{rowOffset + i + 1}</span>
+              <span className="text-content-faint select-none shrink-0 w-10 text-right mr-2">{rowOffset + i + 1}</span>
             )}
             {svc && (
               <span
@@ -1240,55 +1240,55 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
 
   const toggleBtn = (active, onClick, label, title) => (
     <button onClick={onClick} title={title}
-      className={`text-xs px-2 py-1 rounded border transition-colors shrink-0 ${active ? 'border-brand-600 text-brand-400 bg-brand-950' : 'border-gray-700 text-gray-500 hover:text-gray-300'}`}>
+      className={`text-xs px-2 py-1 rounded border transition-colors shrink-0 ${active ? 'border-brand-600 text-brand-400 bg-brand-950' : 'border-border-strong text-content-subtle hover:text-content'}`}>
       {label}
     </button>
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-gray-950" style={{ fontFamily: 'inherit' }}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-canvas" style={{ fontFamily: 'inherit' }}>
       {/* ── Top bar ── */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800 bg-gray-900 shrink-0 flex-wrap">
-        <h2 className="text-sm font-semibold text-gray-200 shrink-0">Logs</h2>
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-surface shrink-0 flex-wrap">
+        <h2 className="text-sm font-semibold text-content shrink-0">Logs</h2>
 
         {/* Env tabs */}
         <div className="flex items-center gap-1 overflow-x-auto shrink-0">
           {envs.map(env => (
             <button key={env} onClick={() => switchEnv(env)}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors shrink-0 ${activeEnv === env ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors shrink-0 ${activeEnv === env ? 'bg-brand-600 text-white' : 'text-content-muted hover:text-white hover:bg-surface-raised'}`}
             >{env}</button>
           ))}
         </div>
 
-        <span className="w-px h-4 bg-gray-700 shrink-0" />
+        <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
         {/* Filter */}
         <div className="relative shrink-0">
           <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
             placeholder="Filter lines…"
-            className="w-44 px-3 py-1 text-xs bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-brand-500 font-mono" />
-          {filter && <button onClick={() => setFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs">×</button>}
+            className="w-44 px-3 py-1 text-xs bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 font-mono" />
+          {filter && <button onClick={() => setFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content text-xs">×</button>}
         </div>
 
         {/* Line count */}
-        <span className="text-xs text-gray-600 shrink-0">
+        <span className="text-xs text-content-faint shrink-0">
           {filter.trim() || rowLimit > 0
             ? `${displayedCount} / ${lines.length}`
             : `${lines.length}`} lines
         </span>
 
-        <span className="w-px h-4 bg-gray-700 shrink-0" />
+        <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
         {/* Row limit */}
         <div className="flex items-center gap-1 shrink-0">
-          <span className="text-xs text-gray-600">show</span>
+          <span className="text-xs text-content-faint">show</span>
           <select value={rowLimit} onChange={e => setRowLimit(Number(e.target.value))}
-            className="text-xs bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-gray-300 focus:outline-none focus:border-brand-500">
+            className="text-xs bg-surface-raised border border-border-strong rounded px-1.5 py-1 text-content focus:outline-none focus:border-brand-500">
             {ROW_LIMIT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
 
-        <span className="w-px h-4 bg-gray-700 shrink-0" />
+        <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
         {/* Toggle buttons */}
         {toggleBtn(wrap,           () => setWrap(v => !v),           'wrap',       'Toggle line wrap')}
@@ -1296,16 +1296,16 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
         {toggleBtn(paused,         () => setPaused(v => !v),         paused ? '▶ resume' : '⏸ pause', 'Pause / resume stream')}
         {toggleBtn(showRowNumbers, () => setShowRowNumbers(v => !v), '# rows',     'Toggle row numbers')}
 
-        <span className="w-px h-4 bg-gray-700 shrink-0" />
+        <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
         {/* Action buttons */}
-        <button onClick={connect}       title="Reconnect"          className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0">↺</button>
-        <button onClick={() => setLines([])} title="Clear buffer"  className="text-xs text-gray-500 hover:text-red-400 transition-colors shrink-0">clear</button>
-        <button onClick={copyAll}       title="Copy visible log"   className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0">⎘ copy</button>
-        <button onClick={download}      title="Download as .txt"   className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0">⬇ download</button>
+        <button onClick={connect}       title="Reconnect"          className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">↺</button>
+        <button onClick={() => setLines([])} title="Clear buffer"  className="text-xs text-content-subtle hover:text-danger-fg transition-colors shrink-0">clear</button>
+        <button onClick={copyAll}       title="Copy visible log"   className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">⎘ copy</button>
+        <button onClick={download}      title="Download as .txt"   className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">⬇ download</button>
 
         <div className="flex-1" />
-        <button onClick={onClose} title="Close (Esc)" className="text-gray-500 hover:text-white transition-colors text-lg leading-none shrink-0">✕</button>
+        <button onClick={onClose} title="Close (Esc)" className="text-content-subtle hover:text-content-strong transition-colors text-lg leading-none shrink-0">✕</button>
       </div>
 
       {/* Container multi-selector */}
@@ -1314,9 +1314,9 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
 
       {/* Pause banner */}
       {paused && (
-        <div className="bg-amber-950/60 border-b border-amber-700/40 px-4 py-1.5 shrink-0 flex items-center gap-2">
-          <span className="text-xs text-amber-400 font-medium">⏸ Stream paused — new log lines are being discarded</span>
-          <button onClick={() => setPaused(false)} className="text-xs text-amber-300 hover:text-white underline">Resume</button>
+        <div className="bg-warning-subtle/60 border-b border-warning-border/40 px-4 py-1.5 shrink-0 flex items-center gap-2">
+          <span className="text-xs text-warning-fg font-medium">⏸ Stream paused — new log lines are being discarded</span>
+          <button onClick={() => setPaused(false)} className="text-xs text-warning-fg hover:text-content-strong underline">Resume</button>
         </div>
       )}
 
@@ -1352,43 +1352,43 @@ function LogViewer({ wsName, envs }) {
 
   return (
     <>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
+      <div className="bg-surface border border-border rounded-xl flex flex-col overflow-hidden" style={{ height: 380 }}>
         {/* Header */}
-        <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-800 shrink-0 gap-2 flex-wrap">
-          <h2 className="text-sm font-semibold text-gray-300 shrink-0">Logs</h2>
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0 gap-2 flex-wrap">
+          <h2 className="text-sm font-semibold text-content shrink-0">Logs</h2>
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Filter */}
             <div className="relative">
               <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
                 placeholder="filter…"
-                className="w-28 px-2 py-0.5 text-xs bg-gray-800 border border-gray-700 rounded text-white placeholder-gray-600 focus:outline-none focus:border-brand-500 font-mono" />
-              {filter && <button onClick={() => setFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs">×</button>}
+                className="w-28 px-2 py-0.5 text-xs bg-surface-raised border border-border-strong rounded text-content-strong placeholder-content-faint focus:outline-none focus:border-brand-500 font-mono" />
+              {filter && <button onClick={() => setFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content text-xs">×</button>}
             </div>
 
             {/* Auto-scroll checkbox */}
             <label className="flex items-center gap-1 cursor-pointer select-none shrink-0">
               <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)}
                 className="accent-brand-500 w-3 h-3" />
-              <span className="text-xs text-gray-500">auto</span>
+              <span className="text-xs text-content-subtle">auto</span>
             </label>
 
             {/* Pause */}
             <button onClick={() => setPaused(v => !v)} title={paused ? 'Resume stream' : 'Pause stream'}
-              className={`text-xs transition-colors shrink-0 ${paused ? 'text-amber-400 hover:text-amber-300' : 'text-gray-500 hover:text-gray-300'}`}>
+              className={`text-xs transition-colors shrink-0 ${paused ? 'text-warning-fg hover:text-warning-fg' : 'text-content-subtle hover:text-content'}`}>
               {paused ? '▶' : '⏸'}
             </button>
 
-            <button onClick={connect} title="Reconnect" className="text-xs text-gray-500 hover:text-gray-300 transition-colors shrink-0">↺</button>
-            <button onClick={() => setMaximized(true)} title="Maximize" className="text-xs text-gray-500 hover:text-gray-200 transition-colors shrink-0">⛶</button>
+            <button onClick={connect} title="Reconnect" className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">↺</button>
+            <button onClick={() => setMaximized(true)} title="Maximize" className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">⛶</button>
           </div>
         </div>
 
         {/* Env tabs */}
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-gray-800/60 shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-border/60 shrink-0 overflow-x-auto">
           {envs.map(env => (
             <button key={env} onClick={() => switchEnv(env)}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors shrink-0 ${activeEnv === env ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors shrink-0 ${activeEnv === env ? 'bg-brand-600 text-white' : 'text-content-muted hover:text-white hover:bg-surface-raised'}`}
             >{env}</button>
           ))}
         </div>
@@ -1399,9 +1399,9 @@ function LogViewer({ wsName, envs }) {
 
         {/* Pause banner */}
         {paused && (
-          <div className="bg-amber-950/50 px-3 py-1 shrink-0 flex items-center gap-2 border-b border-amber-800/30">
+          <div className="bg-warning-subtle/50 px-3 py-1 shrink-0 flex items-center gap-2 border-b border-warning-border/30">
             <span className="text-xs text-amber-500">⏸ paused</span>
-            <button onClick={() => setPaused(false)} className="text-xs text-amber-400 hover:text-amber-200 underline">resume</button>
+            <button onClick={() => setPaused(false)} className="text-xs text-warning-fg hover:text-warning-fg underline">resume</button>
           </div>
         )}
 
@@ -1511,24 +1511,24 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-white">Env vars — {env}</h3>
+          <h3 className="font-semibold text-content-strong">Env vars — {env}</h3>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowAudit(s => !s)} title="Secret audit trail"
-              className={`text-xs px-2 py-1 rounded transition-colors ${showAudit ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}>🕓 Audit</button>
-            <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+              className={`text-xs px-2 py-1 rounded transition-colors ${showAudit ? 'bg-surface-overlay text-content-strong' : 'text-content-subtle hover:text-content-strong hover:bg-surface-raised'}`}>🕓 Audit</button>
+            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl leading-none">×</button>
           </div>
         </div>
 
         {/* Deployment-aware secret status */}
         {swarm ? (
-          <div className="mb-3 text-xs rounded-lg border border-emerald-800/60 bg-emerald-950/40 text-emerald-300 px-3 py-2">
+          <div className="mb-3 text-xs rounded-lg border border-success-border bg-success-subtle text-success-fg px-3 py-2">
             🔒 Secrets are stored as <strong>Docker Swarm secrets</strong> — encrypted at rest and mounted in-memory at <code className="text-emerald-200">/run/secrets/&lt;KEY&gt;</code>. Their values can't be read back; use Rotate to change one.
           </div>
         ) : (
-          <div className="mb-3 text-xs rounded-lg border border-amber-800/60 bg-amber-950/40 text-amber-300/90 px-3 py-2">
-            ⚠ Compose stores values in <strong>plaintext</strong> in <code className="text-amber-200">.env</code> on disk. Deploy this environment with <strong>Swarm</strong> for encrypted-at-rest secrets.
+          <div className="mb-3 text-xs rounded-lg border border-warning-border/60 bg-warning-subtle/40 text-warning-fg/90 px-3 py-2">
+            ⚠ Compose stores values in <strong>plaintext</strong> in <code className="text-warning-fg">.env</code> on disk. Deploy this environment with <strong>Swarm</strong> for encrypted-at-rest secrets.
           </div>
         )}
 
@@ -1536,15 +1536,15 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 
         {/* Reveal toggle */}
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-500">Click the lock to flag a value as a secret.</p>
+          <p className="text-xs text-content-subtle">Click the lock to flag a value as a secret.</p>
           <label className="flex items-center gap-2 cursor-pointer shrink-0 ml-3">
             <input type="checkbox" checked={reveal} onChange={e => { setReveal(e.target.checked); setEdits({}) }}
               className="w-3.5 h-3.5 accent-brand-500" />
-            <span className="text-xs text-gray-400 select-none">Show values</span>
+            <span className="text-xs text-content-muted select-none">Show values</span>
           </label>
         </div>
 
-        {isLoading ? <p className="text-gray-500 text-sm">Loading…</p> : (
+        {isLoading ? <p className="text-content-subtle text-sm">Loading…</p> : (
           <div className="space-y-2 mb-4 max-h-72 overflow-y-auto pr-1">
             {Object.entries(vars || {}).map(([k, info]) => {
               const markedForDelete = deletes.has(k)
@@ -1552,18 +1552,18 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
               // Swarm secrets are write-only: their value can't be edited inline.
               const lockedValue = secret && swarm && !!info.secret
               return (
-                <div key={k} className={`flex items-center gap-2 rounded pl-1.5 transition-colors ${markedForDelete ? 'opacity-40' : ''} ${secret ? 'border-l-2 border-amber-500/70' : 'border-l-2 border-transparent'}`}>
+                <div key={k} className={`flex items-center gap-2 rounded pl-1.5 transition-colors ${markedForDelete ? 'opacity-40' : ''} ${secret ? 'border-l-2 border-warning/70' : 'border-l-2 border-transparent'}`}>
                   <button type="button" onClick={() => toggleFlag(k)} disabled={markedForDelete}
                     title={secret ? 'Flagged as secret — click to unflag' : 'Flag as secret'}
-                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-amber-400' : 'text-gray-600 hover:text-gray-300'}`}>
+                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
                     {secret ? '🔒' : '🔓'}
                   </button>
-                  <span className="font-mono text-xs text-gray-300 w-36 shrink-0 truncate" title={k}>{k}</span>
+                  <span className="font-mono text-xs text-content w-36 shrink-0 truncate" title={k}>{k}</span>
                   {lockedValue ? (
                     <div className="flex-1 flex items-center gap-2">
-                      <span className="flex-1 px-2 py-1 text-sm text-gray-500 italic select-none">stored in Docker secret</span>
+                      <span className="flex-1 px-2 py-1 text-sm text-content-subtle italic select-none">stored in Docker secret</span>
                       <button type="button" onClick={() => { setRotateKey(k); setRotateVal('') }}
-                        className="shrink-0 px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-white">Rotate</button>
+                        className="shrink-0 px-2 py-1 text-xs rounded bg-surface-overlay hover:bg-surface-overlay text-content-strong">Rotate</button>
                     </div>
                   ) : (
                     <input
@@ -1572,13 +1572,13 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
                       value={markedForDelete ? '' : (edits[k] ?? (reveal && !secret ? info.value : ''))}
                       disabled={markedForDelete}
                       onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                      className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
                     />
                   )}
                   <button type="button" onClick={() => toggleDelete(k)}
                     title={markedForDelete ? 'Undo delete' : 'Delete this variable'}
                     className={`shrink-0 w-6 h-6 flex items-center justify-center rounded transition-colors text-xs ${
-                      markedForDelete ? 'bg-red-800 text-red-200 hover:bg-red-700' : 'text-gray-600 hover:text-red-400 hover:bg-gray-700'}`}>
+                      markedForDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'}`}>
                     {markedForDelete ? '↩' : '×'}
                   </button>
                 </div>
@@ -1589,45 +1589,45 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 
         {/* Rotate sub-form */}
         {rotateKey && (
-          <div className="mb-3 rounded-lg border border-gray-700 bg-gray-800/60 p-3">
-            <p className="text-xs text-gray-300 mb-2">Rotate secret <span className="font-mono text-amber-300">{rotateKey}</span> — enter a new value:</p>
+          <div className="mb-3 rounded-lg border border-border-strong bg-surface-raised/60 p-3">
+            <p className="text-xs text-content mb-2">Rotate secret <span className="font-mono text-warning-fg">{rotateKey}</span> — enter a new value:</p>
             <div className="flex gap-2">
               <input type="password" autoFocus value={rotateVal} onChange={e => setRotateVal(e.target.value)}
                 placeholder="new value"
-                className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
+                className="flex-1 px-2 py-1 bg-surface border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
               <button type="button" disabled={!rotateVal || rotateMut.isPending}
                 onClick={() => rotateMut.mutate({ key: rotateKey, value: rotateVal })}
                 className="px-3 py-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm rounded">
                 {rotateMut.isPending ? 'Rotating…' : 'Rotate'}</button>
               <button type="button" onClick={() => setRotateKey(null)}
-                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded">Cancel</button>
+                className="px-3 py-1 bg-surface-overlay hover:bg-surface-overlay text-content-strong text-sm rounded">Cancel</button>
             </div>
-            {rotateMut.isError && <p className="text-red-400 text-xs mt-2">{rotateMut.error?.response?.data?.error || 'Rotation failed'}</p>}
+            {rotateMut.isError && <p className="text-danger-fg text-xs mt-2">{rotateMut.error?.response?.data?.error || 'Rotation failed'}</p>}
           </div>
         )}
 
         {/* Add new variable row */}
-        <div className="flex gap-2 pt-3 border-t border-gray-800">
+        <div className="flex gap-2 pt-3 border-t border-border">
           <button type="button" onClick={() => setNewSecret(s => !s)}
             title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
-            className={`shrink-0 w-7 h-7 flex items-center justify-center rounded text-xs ${newSecret ? 'text-amber-400 bg-gray-800' : 'text-gray-600 hover:text-gray-300'}`}>
+            className={`shrink-0 w-7 h-7 flex items-center justify-center rounded text-xs ${newSecret ? 'text-warning-fg bg-surface-raised' : 'text-content-faint hover:text-content'}`}>
             {newSecret ? '🔒' : '🔓'}
           </button>
           <input type="text" placeholder="NEW_KEY" value={newKey}
             onChange={e => setNewKey(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
-            className="w-40 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
+            className="w-40 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
           <input type={newSecret ? 'password' : 'text'} placeholder="value" value={newVal}
             onChange={e => setNewVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
-            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-sm text-white font-mono focus:outline-none focus:border-brand-500" />
+            className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
           <button type="button" onClick={() => { if (newKey.trim()) handleSave() }}
             disabled={!newKey.trim() || mutation.isPending}
-            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white text-sm rounded transition-colors shrink-0">Add</button>
+            className="px-3 py-1 bg-surface-overlay hover:bg-surface-overlay disabled:opacity-40 text-content-strong text-sm rounded transition-colors shrink-0">Add</button>
         </div>
 
         {/* Refresh hint */}
-        <p className="text-xs text-amber-400/80 flex items-center gap-1.5 mt-2">
+        <p className="text-xs text-warning-fg/80 flex items-center gap-1.5 mt-2">
           <span>⚠</span> After saving, use <strong>Deploy ▾ → Refresh</strong> to apply changes to running containers.
         </p>
 
@@ -1636,9 +1636,9 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
             className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
             {mutation.isPending ? 'Saving…' : 'Save changes'}
           </button>
-          {mutation.isSuccess && <span className="text-green-400 text-sm">Saved ✓</span>}
-          {mutation.isError && <span className="text-red-400 text-sm">{mutation.error?.response?.data?.error || 'Failed'}</span>}
-          {mutation.data?.warning && <span className="text-amber-400 text-sm">⚠ {mutation.data.warning}</span>}
+          {mutation.isSuccess && <span className="text-success-fg text-sm">Saved ✓</span>}
+          {mutation.isError && <span className="text-danger-fg text-sm">{mutation.error?.response?.data?.error || 'Failed'}</span>}
+          {mutation.data?.warning && <span className="text-warning-fg text-sm">⚠ {mutation.data.warning}</span>}
         </div>
       </div>
     </div>
@@ -1652,20 +1652,20 @@ function SecretAuditPanel({ name, env }) {
     queryKey: ['secret-events', name, env],
     queryFn: () => fetchSecretEvents(name, env),
   })
-  const color = { read: 'text-sky-400', write: 'text-emerald-400', rotate: 'text-amber-400', delete: 'text-red-400' }
+  const color = { read: 'text-sky-400', write: 'text-emerald-400', rotate: 'text-warning-fg', delete: 'text-danger-fg' }
   return (
-    <div className="mb-3 rounded-lg border border-gray-700 bg-gray-950/60 p-3 max-h-40 overflow-y-auto">
-      <p className="text-xs text-gray-400 mb-2 font-medium">Secret audit trail</p>
-      {isLoading ? <p className="text-xs text-gray-500">Loading…</p> :
-        (events || []).length === 0 ? <p className="text-xs text-gray-600">No secret events yet.</p> : (
+    <div className="mb-3 rounded-lg border border-border-strong bg-canvas/60 p-3 max-h-40 overflow-y-auto">
+      <p className="text-xs text-content-muted mb-2 font-medium">Secret audit trail</p>
+      {isLoading ? <p className="text-xs text-content-subtle">Loading…</p> :
+        (events || []).length === 0 ? <p className="text-xs text-content-faint">No secret events yet.</p> : (
           <table className="w-full text-xs">
             <tbody>
               {events.map((e, i) => (
-                <tr key={i} className="text-gray-400">
-                  <td className={`pr-2 font-medium ${color[e.action] || 'text-gray-300'}`}>{e.action}</td>
-                  <td className="pr-2 font-mono text-gray-300 truncate max-w-[8rem]" title={e.key}>{e.key}</td>
+                <tr key={i} className="text-content-muted">
+                  <td className={`pr-2 font-medium ${color[e.action] || 'text-content'}`}>{e.action}</td>
+                  <td className="pr-2 font-mono text-content truncate max-w-[8rem]" title={e.key}>{e.key}</td>
                   <td className="pr-2 truncate">{e.username || '—'}</td>
-                  <td className="text-gray-600 whitespace-nowrap">{e.created_at}</td>
+                  <td className="text-content-faint whitespace-nowrap">{e.created_at}</td>
                 </tr>
               ))}
             </tbody>
@@ -1700,8 +1700,8 @@ export default function WorkspacePage() {
     setActionWs(socket)
   }
 
-  if (isLoading) return <Layout><div className="p-8 text-gray-500 text-sm">Loading…</div></Layout>
-  if (error)     return <Layout><div className="p-8 text-red-400 text-sm">Failed to load workspace: {error.message}</div></Layout>
+  if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
+  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load workspace: {error.message}</div></Layout>
 
   const cfg = ws?.config
   const envs = ws?.envs || []
@@ -1728,14 +1728,14 @@ export default function WorkspacePage() {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-white">{name}</h1>
+              <h1 className="text-2xl font-bold text-content-strong">{name}</h1>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                type === 'image' ? 'bg-blue-950 text-blue-300' : 'bg-purple-950 text-purple-300'
+                type === 'image' ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
               }`}>{type}</span>
             </div>
-            <p className="text-sm text-gray-400 mt-1">
+            <p className="text-sm text-content-muted mt-1">
               {stackParts.join(' · ')}
-              {vStr && <span className="ml-2 font-mono text-gray-500 text-xs">{vStr}</span>}
+              {vStr && <span className="ml-2 font-mono text-content-subtle text-xs">{vStr}</span>}
             </p>
           </div>
 
@@ -1821,7 +1821,7 @@ function HeaderBtn({ label, onClick, primary }) {
       className={`flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-lg border transition-colors ${
         primary
           ? 'bg-brand-600 hover:bg-brand-700 text-white border-brand-600'
-          : 'bg-transparent hover:bg-gray-800 text-gray-300 hover:text-white border-gray-700'
+          : 'bg-transparent hover:bg-surface-raised text-content hover:text-content-strong border-border-strong'
       }`}
     >
       <span className="text-xs opacity-60">○</span> {label}
