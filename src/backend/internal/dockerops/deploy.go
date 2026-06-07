@@ -146,7 +146,11 @@ func Run(opts Options) (bool, error) {
 		opts:        opts,
 		cfgBytes:    cfgBytes,
 		projectType: cfg.Project.Type,
-		stack:       cfg.Project.Name + "_" + opts.Env,
+		// Compose project name MUST use the immutable resource prefix
+		// ({workspace}_{project}) so projects with the same display name in
+		// different workspaces don't share a compose project (which would make
+		// `compose up` for one tear down the other's containers).
+		stack:       cfg.stackPrefix() + "_" + opts.Env,
 		envDir:      envDir,
 		composePath: composePath,
 	}
