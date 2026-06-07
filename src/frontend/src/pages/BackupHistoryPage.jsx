@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { fetchBackups } from '../lib/api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchBackups, syncEnvBackup } from '../lib/api'
 import Layout from '../components/Layout'
 
 function formatBytes(bytes) {
@@ -16,6 +16,76 @@ function formatDate(dateStr) {
   if (!date || !time) return dateStr
   const t = time.replace(/-/g, ':')
   return `${date} ${t}`
+}
+
+function SnapshotRow({ snap, isOpen, onToggle }) {
+  const qc = useQueryClient()
+  const [err, setErr] = useState('')
+  const syncMut = useMutation({
+    mutationFn: () => syncEnvBackup(snap.workspace, snap.env, { date: snap.date }),
+    onSuccess: () => { setErr(''); qc.invalidateQueries({ queryKey: ['backups'] }) },
+    onError: (e) => setErr(e.response?.data?.error || 'Sync failed'),
+  })
+
+  const sync = snap.sync
+  return (
+    <div>
+      <div className="flex items-center hover:bg-surface-raised/50 transition-colors">
+        <button
+          className="flex-1 min-w-0 px-5 py-3 flex items-center justify-between text-left"
+          onClick={onToggle}
+        >
+          <div className="flex items-center gap-4 min-w-0">
+            <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-surface-raised text-content shrink-0">{snap.env}</span>
+            <span className="font-mono text-sm text-content truncate">{formatDate(snap.date)}</span>
+            {sync && sync.status === 'ok' && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg border border-success-border/60 shrink-0"
+                title={`Synced to ${sync.target}`}>↑ {sync.target}</span>
+            )}
+            {sync && sync.status === 'fail' && (
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-danger-subtle text-danger-fg border border-danger-border/60 shrink-0"
+                title="Last sync failed">sync failed</span>
+            )}
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            <span className="text-xs text-content-subtle">{formatBytes(snap.size_bytes)}</span>
+            <span className="text-xs text-content-subtle">{snap.files?.length || 0} file{snap.files?.length !== 1 ? 's' : ''}</span>
+            <span className="text-content-faint text-xs">{isOpen ? '▲' : '▼'}</span>
+          </div>
+        </button>
+        <div className="pr-5 pl-2 shrink-0">
+          <button
+            onClick={() => syncMut.mutate()}
+            disabled={syncMut.isPending}
+            title="Push this snapshot to the workspace's remote backup target"
+            className="text-xs font-medium px-2.5 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+          >
+            {syncMut.isPending ? 'Syncing…' : 'Sync'}
+          </button>
+        </div>
+      </div>
+
+      {err && <p className="px-5 pb-2 text-xs text-danger-fg">{err}</p>}
+
+      {isOpen && (
+        <div className="px-5 pb-4 bg-surface/60">
+          {(snap.files || []).length === 0
+            ? <p className="text-xs text-content-subtle">No files in this snapshot.</p>
+            : (
+              <div className="space-y-1">
+                {snap.files.map((f, fi) => (
+                  <div key={fi} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0">
+                    <span className="font-mono text-xs text-content">{f.name}</span>
+                    <span className="text-xs text-content-subtle">{formatBytes(f.size)}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          }
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function BackupHistoryPage() {
@@ -76,42 +146,13 @@ export default function BackupHistoryPage() {
               <div className="divide-y divide-border">
                 {snapshots.map((snap, i) => {
                   const key = `${snap.workspace}-${snap.env}-${snap.date}`
-                  const isOpen = expanded === key
                   return (
-                    <div key={i}>
-                      <button
-                        className="w-full px-5 py-3 flex items-center justify-between hover:bg-surface-raised/50 transition-colors text-left"
-                        onClick={() => setExpanded(isOpen ? null : key)}
-                      >
-                        <div className="flex items-center gap-4 min-w-0">
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-surface-raised text-content shrink-0">{snap.env}</span>
-                          <span className="font-mono text-sm text-content truncate">{formatDate(snap.date)}</span>
-                        </div>
-                        <div className="flex items-center gap-4 shrink-0">
-                          <span className="text-xs text-content-subtle">{formatBytes(snap.size_bytes)}</span>
-                          <span className="text-xs text-content-subtle">{snap.files?.length || 0} file{snap.files?.length !== 1 ? 's' : ''}</span>
-                          <span className="text-content-faint text-xs">{isOpen ? '▲' : '▼'}</span>
-                        </div>
-                      </button>
-
-                      {isOpen && (
-                        <div className="px-5 pb-4 bg-surface/60">
-                          {(snap.files || []).length === 0
-                            ? <p className="text-xs text-content-subtle">No files in this snapshot.</p>
-                            : (
-                              <div className="space-y-1">
-                                {snap.files.map((f, fi) => (
-                                  <div key={fi} className="flex items-center justify-between py-1.5 border-b border-border/60 last:border-0">
-                                    <span className="font-mono text-xs text-content">{f.name}</span>
-                                    <span className="text-xs text-content-subtle">{formatBytes(f.size)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )
-                          }
-                        </div>
-                      )}
-                    </div>
+                    <SnapshotRow
+                      key={i}
+                      snap={snap}
+                      isOpen={expanded === key}
+                      onToggle={() => setExpanded(expanded === key ? null : key)}
+                    />
                   )
                 })}
               </div>

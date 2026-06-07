@@ -1,0 +1,69 @@
+# Local backup-target test backends for Phase 11d (S3 + SFTP).
+#
+#   docker compose -f src/docker-compose.backup-test.yml up -d
+#
+# Joins the same external `traefik_net` as the rigger container, so inside
+# Rigger you configure the targets with the *service names* (not localhost):
+#
+#   S3 target  → endpoint: minio:9000   bucket: rigger-backups
+#                access_key: minioadmin  secret_key: minioadmin  use_ssl: false
+#   SFTP target→ host: sftp  port: 22  user: backupuser  password: backuppass
+#                remote_path: /backups   auth_type: password
+#
+# Host-side debugging: MinIO console at http://localhost:9001 (minioadmin/minioadmin).
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: rigger-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - rigger-minio-data:/data
+    networks:
+      - traefik_net
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: create the backups bucket once MinIO is up, then exit.
+  minio-setup:
+    image: minio/mc:latest
+    container_name: rigger-minio-setup
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb -p local/rigger-backups || true;
+      echo 'bucket rigger-backups ready';
+      "
+    networks:
+      - traefik_net
+
+  sftp:
+    image: atmoz/sftp:latest
+    container_name: rigger-sftp
+    # user:pass:uid:gid:dir → atmoz creates a writable /backups dir (owned by the
+    # user) under the chroot. No volume mount here on purpose: mounting a named
+    # volume over the dir makes it root-owned and the chrooted user can't write.
+    command: backupuser:backuppass:1001:1001:backups
+    ports:
+      - "2222:22"
+    networks:
+      - traefik_net
+
+networks:
+  traefik_net:
+    external: true
+    name: traefik_net
+
+volumes:
+  rigger-minio-data:

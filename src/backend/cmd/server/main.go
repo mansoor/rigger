@@ -260,6 +260,11 @@ func main() {
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
 			handler.RotateSecret(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/backup-sync"):
+			// /api/workspaces/{name}/envs/{env}/backup-sync — push latest snapshot to remote target (11d)
+			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			handler.SyncEnvBackup(w, r)
 		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/"):
 			name := pathSegment(r.URL.Path, 2)
 			sub := pathSegment(r.URL.Path, 3)
@@ -353,6 +358,8 @@ func main() {
 			handler.UpdateBackupTarget(w, r)
 		case r.Method == "DELETE" && matchPrefix(path, "/api/settings/backup-targets/"):
 			handler.DeleteBackupTarget(w, r)
+		case r.Method == "POST" && matchPrefix(path, "/api/settings/backup-targets/") && hasSuffix(path, "/test"):
+			handler.TestBackupTarget(w, r)
 		// Docker registries
 		case r.Method == "GET" && path == "/api/settings/registries":
 			handler.ListRegistries(w, r)

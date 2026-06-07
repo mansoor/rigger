@@ -1687,9 +1687,11 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 		Date      string       `json:"date"`
 		SizeBytes int64        `json:"size_bytes"`
 		Files     []BackupFile `json:"files"`
+		Sync      *syncState   `json:"sync,omitempty"` // 11d: remote-sync state, if any
 	}
 
 	var results []BackupSnapshot
+	syncStates := h.backupSyncStates()
 
 	wsEntries, err := os.ReadDir(h.workspacesDir)
 	if err != nil {
@@ -1740,13 +1742,18 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 					totalSize += size
 					bfiles = append(bfiles, BackupFile{Name: f.Name(), Size: size})
 				}
-				results = append(results, BackupSnapshot{
+				snapshot := BackupSnapshot{
 					Workspace: wsName,
 					Env:       envName,
 					Date:      snap.Name(),
 					SizeBytes: totalSize,
 					Files:     bfiles,
-				})
+				}
+				if st, ok := syncStates[wsName+"\x00"+envName+"\x00"+snap.Name()]; ok {
+					s := st
+					snapshot.Sync = &s
+				}
+				results = append(results, snapshot)
 			}
 		}
 	}

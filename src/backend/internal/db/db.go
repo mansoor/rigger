@@ -161,6 +161,23 @@ func (d *DB) migrate() error {
 		CREATE INDEX IF NOT EXISTS idx_backup_log_target
 			ON backup_log(workspace, env, created_at);
 
+		-- 11d: remote-sync state per snapshot. One row per (workspace, env, date)
+		-- snapshot pushed to an S3/SFTP backup target; ListBackups joins this to
+		-- show a "synced" badge.
+		CREATE TABLE IF NOT EXISTS backup_syncs (
+			workspace   TEXT    NOT NULL,
+			env         TEXT    NOT NULL,
+			date        TEXT    NOT NULL,
+			target_id   INTEGER NOT NULL,
+			target_name TEXT    NOT NULL DEFAULT '',
+			status      TEXT    NOT NULL DEFAULT 'ok',  -- ok | fail
+			message     TEXT    NOT NULL DEFAULT '',
+			files       INTEGER NOT NULL DEFAULT 0,
+			bytes       INTEGER NOT NULL DEFAULT 0,
+			synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (workspace, env, date)
+		);
+
 		-- 8d: Secret audit trail. Every read (reveal), write, rotate or delete of a
 		-- secret-flagged env var is recorded here — key name only, never the value.
 		CREATE TABLE IF NOT EXISTS secret_events (

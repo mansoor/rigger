@@ -200,6 +200,11 @@ export const fetchBackupTargets   = ()          => api.get('/settings/backup-tar
 export const createBackupTarget   = (body)      => api.post('/settings/backup-targets', body).then(r => r.data)
 export const updateBackupTarget   = (id, body)  => api.put(`/settings/backup-targets/${id}`, body).then(r => r.data)
 export const deleteBackupTarget   = (id)        => api.delete(`/settings/backup-targets/${id}`)
+export const testBackupTarget     = (id)        => api.post(`/settings/backup-targets/${id}/test`).then(r => r.data)
+
+// 11d: push the latest local snapshot of an env to its configured remote target.
+export const syncEnvBackup        = (name, env, body = {}) =>
+  api.post(`/workspaces/${name}/envs/${env}/backup-sync`, body).then(r => r.data)
 
 // ── Settings: Docker Registries ───────────────────────────────────────────────
 

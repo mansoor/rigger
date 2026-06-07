@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchAllActivity, fetchBackups, fetchWorkspaces, openActionSocket, deleteBackup,
-  fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
+  syncEnvBackup, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -297,6 +297,14 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
     },
   })
 
+  const [syncErr, setSyncErr] = useState('') // "key: message" of the last failed sync
+  const syncMut = useMutation({
+    mutationFn: (snap) => syncEnvBackup(snap.workspace, snap.env, { date: snap.date }),
+    onSuccess: () => { setSyncErr(''); qc.invalidateQueries({ queryKey: ['backups'] }) },
+    onError: (e, snap) => setSyncErr(`${snap.workspace}-${snap.env}-${snap.date}: ${e.response?.data?.error || 'Sync failed'}`),
+  })
+  const syncingKey = (s) => `${s.workspace}-${s.env}-${s.date}`
+
   const items = (data || []).filter(b => {
     if (workspaceFilter && !b.workspace?.toLowerCase().includes(workspaceFilter.toLowerCase())) return false
     if (typeFilter !== 'all') {
@@ -311,6 +319,11 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
 
   return (
     <>
+      {syncErr && (
+        <p className="mx-5 my-2 text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">
+          {syncErr}
+        </p>
+      )}
       <div className="divide-y divide-border">
         {items.map((snap, i) => {
           const key = `${snap.workspace}-${snap.env}-${snap.date}`
@@ -331,9 +344,26 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                     <p className="text-xs text-content-subtle font-mono">{formatDate(snap.date)}</p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {snap.sync?.status === 'ok' && (
+                      <span title={`Synced to ${snap.sync.target}`}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg border border-success-border/60">↑ {snap.sync.target}</span>
+                    )}
+                    {snap.sync?.status === 'fail' && (
+                      <span title="Last sync failed"
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-danger-subtle text-danger-fg border border-danger-border/60">↑!</span>
+                    )}
                     <span className="text-xs text-content-subtle">{formatBytes(snap.size_bytes)}</span>
                     <span className="text-xs text-content-faint">{isOpen ? '▲' : '▼'}</span>
                   </div>
+                </button>
+                {/* Sync-to-remote button */}
+                <button
+                  onClick={e => { e.stopPropagation(); setSyncErr(''); syncMut.mutate(snap) }}
+                  disabled={syncMut.isPending && syncingKey(syncMut.variables || {}) === key}
+                  className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+                  title="Push this snapshot to the workspace's remote backup target"
+                >
+                  {syncMut.isPending && syncingKey(syncMut.variables || {}) === key ? '…' : 'Sync'}
                 </button>
                 {/* Restore button */}
                 <button

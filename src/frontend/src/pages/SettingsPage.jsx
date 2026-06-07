@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import {
-  fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget,
+  fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, fetchManagedHostKey,
   fetchGeneralSettings, updateGeneralSettings,
@@ -253,6 +253,18 @@ function BackupTargetsTab() {
   const { data: targets = [], isLoading } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
   const [modal, setModal] = useState(null) // null | 'new' | { editing: target }
   const [deleting, setDeleting] = useState(null)
+  const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, error }
+
+  async function handleTest(id) {
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      await testBackupTarget(id)
+      setTestStatus(s => ({ ...s, [id]: { ok: true } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 6000)
+  }
 
   const saveMut = useMutation({
     mutationFn: ({ id, body }) => id ? updateBackupTarget(id, body) : createBackupTarget(body),
@@ -308,6 +320,10 @@ function BackupTargetsTab() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {testStatus[t.id]?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                {testStatus[t.id]?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
+                {testStatus[t.id]?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={testStatus[t.id].error}>{testStatus[t.id].error}</span>}
+                <Btn variant="ghost" size="sm" onClick={() => handleTest(t.id)} disabled={testStatus[t.id]?.loading}>Test</Btn>
                 <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: t })}>Edit</Btn>
                 <Btn variant="danger" size="sm" onClick={() => setDeleting(t)}>Delete</Btn>
               </div>
