@@ -23,6 +23,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
+	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
@@ -325,8 +326,24 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	send := func(s string) { conn.WriteMessage(websocket.TextMessage, []byte(s)) } //nolint:errcheck
 
 	wsName := msg.Workspace.Workspace
-	pkey := wsName + "_" + msg.Workspace.Name
-	send("Creating project " + msg.Workspace.Name + " in workspace " + wsName + "...\n")
+
+	// Resolve the project key (folder/URL/Docker identity): validated override, or
+	// derived from the display name, collision-free within this workspace.
+	min, max := h.keyLengths()
+	projKey := keygen.Normalize(msg.Workspace.Key)
+	if projKey == "" {
+		projKey = keygen.Suggest(msg.Workspace.Name, min, max, h.projectKeyTaken(wsName))
+	} else if !keygen.Valid(projKey, min, max) {
+		send("\033[31mError: key must be " + strconv.Itoa(min) + "–" + strconv.Itoa(max) + " lowercase letters/digits\033[0m\n")
+		return
+	} else if h.projectKeyTaken(wsName)(projKey) {
+		send("\033[31mError: project key " + projKey + " is already in use in this workspace\033[0m\n")
+		return
+	}
+	msg.Workspace.Key = projKey
+
+	pkey := wsName + "_" + projKey // resource_prefix / DB key
+	send("Creating project " + msg.Workspace.Name + " (" + projKey + ") in workspace " + wsName + "...\n")
 
 	// For pre-built templates, load images + default env vars and apply smart
 	// secret generation BEFORE writing config.json. The generated values are
@@ -357,7 +374,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// workspace lives without a runtime docker inspect (persisted in config as
 	// project.project_root_dir).
 	if hwd := h.hostBindSourceDir(); hwd != "" {
-		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + msg.Workspace.Name
+		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + projKey
 	}
 
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
@@ -389,7 +406,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		send("\n\033[2mBootstrapping environment: " + env.Name + "\033[0m\n")
-		if err := h.bridge.Bootstrap(wsName, msg.Workspace.Name, env.Name, pw, pw); err != nil {
+		if err := h.bridge.Bootstrap(wsName, projKey, env.Name, pw, pw); err != nil {
 			send("\033[31m✗ Bootstrap failed for " + env.Name + ": " + err.Error() + "\033[0m\n")
 			allOk = false
 		} else {
@@ -397,7 +414,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			// Write per-environment initial env vars (Phase 8 secret-aware: swarm
 			// secrets become Docker secrets, kept out of .env).
 			if len(env.Vars) > 0 || len(env.SecretKeys) > 0 {
-				if err2 := h.seedEnvVars(wsName, msg.Workspace.Name, env, auth.ClaimsFromContext(r.Context()), clientIP(r)); err2 != nil {
+				if err2 := h.seedEnvVars(wsName, projKey, env, auth.ClaimsFromContext(r.Context()), clientIP(r)); err2 != nil {
 					send("\033[33m⚠ env vars for " + env.Name + ": " + err2.Error() + "\033[0m\n")
 				} else {
 					send("\033[32m✓ " + env.Name + " env vars written\033[0m\n")
@@ -603,20 +620,36 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
+		Key  string `json:"key"` // optional override; derived from name when empty
 	}
-	if err := readJSON(r, &body); err != nil || body.Name == "" {
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Name) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	if err := workspace.EnsureWorkspace(h.workspacesDir, body.Name); err != nil {
+	body.Name = strings.TrimSpace(body.Name)
+
+	// Resolve the workspace key: validated override, or derived (collision-free).
+	min, max := h.keyLengths()
+	key := keygen.Normalize(body.Key)
+	if key == "" {
+		key = keygen.Suggest(body.Name, min, max, h.workspaceKeyTaken())
+	} else if !keygen.Valid(key, min, max) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key must be " + strconv.Itoa(min) + "–" + strconv.Itoa(max) + " lowercase letters/digits"})
+		return
+	} else if h.workspaceKeyTaken()(key) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace key " + key + " is already in use"})
+		return
+	}
+
+	if err := workspace.EnsureWorkspace(h.workspacesDir, key, body.Name); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
-			claims.UserID, claims.Username, body.Name, "create-workspace", "")
+			claims.UserID, claims.Username, key, "create-workspace", "")
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": body.Name})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "key": key, "name": body.Name})
 }
 
 // DELETE /api/workspaces/{workspace} — delete a whole workspace tier (all projects).
@@ -801,6 +834,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		var was, now struct {
 			Project struct {
 				ResourcePrefix string `json:"resource_prefix"`
+				Key            string `json:"key"`
 			} `json:"project"`
 		}
 		json.Unmarshal(existing, &was)             //nolint:errcheck
@@ -808,6 +842,12 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		if was.Project.ResourcePrefix != "" && now.Project.ResourcePrefix != was.Project.ResourcePrefix {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": "resource_prefix can't be changed after creation — it's the immutable Docker stack/container/volume/secret prefix.",
+			})
+			return
+		}
+		if was.Project.Key != "" && now.Project.Key != was.Project.Key {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "key can't be changed after creation — it's the immutable folder/URL/Docker identifier.",
 			})
 			return
 		}

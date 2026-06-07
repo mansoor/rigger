@@ -1839,7 +1839,8 @@ export default function ProjectPage() {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-bold text-content-strong">{name}</h1>
+              <h1 className="text-2xl font-bold text-content-strong">{cfg?.project?.name || name}</h1>
+              <span className="text-xs font-mono text-content-faint px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong" title="Resource prefix (folder / URL / Docker identifier)">{workspace}_{name}</span>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                 type === 'image' ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
               }`}>{type}</span>

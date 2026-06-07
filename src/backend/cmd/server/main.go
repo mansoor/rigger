@@ -163,6 +163,10 @@ func main() {
 			handler.GetAllActivity(w, r)
 		case r.Method == "POST" && r.URL.Path == "/api/port-check":
 			handler.PortCheck(w, r)
+		case r.Method == "GET" && r.URL.Path == "/api/keys/suggest":
+			handler.SuggestKey(w, r)
+		case r.Method == "GET" && r.URL.Path == "/api/keys/check":
+			handler.CheckKey(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/backups/coverage":
 			handler.GetBackupCoverage(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/backups":
@@ -360,6 +364,9 @@ func main() {
 
 	// Host-aware port-conflict check (New/Edit workspace)
 	mux.Handle("/api/port-check", protected)
+
+	// Key suggestion + availability check (workspace/project create)
+	mux.Handle("/api/keys/", protected)
 
 	// Backups (cross-workspace listing)
 	mux.Handle("/api/backups", protected)

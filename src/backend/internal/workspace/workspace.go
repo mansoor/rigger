@@ -173,7 +173,8 @@ type EnvHostRef struct {
 
 // WorkspaceInfo is one parent-tier workspace (a folder containing projects/).
 type WorkspaceInfo struct {
-	Name string `json:"name"`
+	Key  string `json:"key"`  // dir name = URL segment = Docker prefix part (identity)
+	Name string `json:"name"` // free-form display name (from workspace.json)
 	Path string `json:"path"`
 }
 
@@ -193,9 +194,25 @@ func ListWorkspaces(workspacesDir string) ([]WorkspaceInfo, error) {
 		if !isWorkspaceDir(dir) {
 			continue
 		}
-		out = append(out, WorkspaceInfo{Name: e.Name(), Path: dir})
+		out = append(out, WorkspaceInfo{Key: e.Name(), Name: workspaceDisplayName(dir, e.Name()), Path: dir})
 	}
 	return out, nil
+}
+
+// workspaceDisplayName reads the free-form display name from a workspace's
+// workspace.json marker, falling back to the key (dir name) when absent.
+func workspaceDisplayName(dir, key string) string {
+	data, err := os.ReadFile(filepath.Join(dir, "workspace.json"))
+	if err != nil {
+		return key
+	}
+	var m struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(data, &m) != nil || m.Name == "" {
+		return key
+	}
+	return m.Name
 }
 
 // isWorkspaceDir reports whether dir is a parent-tier workspace.

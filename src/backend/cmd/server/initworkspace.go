@@ -74,7 +74,7 @@ func runInitWorkspace(args []string) int {
 		return 1
 	}
 
-	if err := workspace.EnsureWorkspace(workspacesDir, *workspaceName); err != nil {
+	if err := workspace.EnsureWorkspace(workspacesDir, *workspaceName, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
 	}

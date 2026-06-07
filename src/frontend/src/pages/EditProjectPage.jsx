@@ -1053,7 +1053,8 @@ export default function EditProjectPage() {
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Edit project · {workspace}</p>
             <div className="flex items-center gap-2.5 mt-0.5">
-              <h1 className="text-2xl font-bold text-content-strong">{name}</h1>
+              <h1 className="text-2xl font-bold text-content-strong">{project?.name || name}</h1>
+              <span className="text-xs font-mono text-content-faint px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong" title="Resource prefix (folder / URL / Docker identifier)">{workspace}_{name}</span>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                 project?.type === 'image' ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
               }`}>
@@ -1112,7 +1113,7 @@ export default function EditProjectPage() {
                 title="Fixed after creation — the Docker stack / container / volume / network name prefix"
                 className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
               >
-                {project?.resource_prefix || `${workspace}_${project?.name || ''}`}
+                {project?.resource_prefix || `${workspace}_${name}`}
               </div>
               <p className="text-xs text-content-subtle mt-1">Fixed after creation — the Docker stack, container, volume and network name prefix.</p>
             </div>

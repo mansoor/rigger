@@ -4,8 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchProjects, fetchHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchHosts } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
+import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
@@ -86,21 +87,9 @@ function Step1({ data, onChange, errors, onConflict, workspace }) {
   // Registered remote hosts (Phase 7) — for the default-host selector.
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
 
-  // Uniqueness check — project names need only be unique within this workspace.
-  const { data: existingProjects = [] } = useQuery({
-    queryKey: ['projects', workspace],
-    queryFn: () => fetchProjects(workspace),
-    enabled: !!workspace,
-    staleTime: 30_000,
-  })
-  const existingNames = existingProjects.map(w => w.name)
-  const nameConflict = data.name.trim() && existingNames.includes(data.name.trim())
-    ? `A project named "${data.name.trim()}" already exists in workspace "${workspace}"`
-    : null
-  // Propagate conflict to parent so validate() can block Continue
-  useEffect(() => { onConflict(nameConflict) }, [nameConflict]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const resourcePrefix = workspace && data.name.trim() ? `${workspace}_${data.name.trim()}` : ''
+  // The key (set by KeyField) is the identity; display names may repeat within a
+  // workspace. onConflict carries key-validity up so validate() can block Continue.
+  const resourcePrefix = workspace && data.key ? `${workspace}_${data.key}` : ''
 
   return (
     <div className="space-y-5">
@@ -110,11 +99,18 @@ function Step1({ data, onChange, errors, onConflict, workspace }) {
         <Label required>Project name</Label>
         <Input
           value={data.name} onChange={v => onChange('name', v)}
-          placeholder="my-app" error={errors.name || nameConflict}
+          placeholder="My App" error={errors.name}
         />
-        {!errors.name && !nameConflict && (
-          <p className="text-xs text-content-subtle mt-1">Lowercase letters, numbers, hyphens. Unique within this workspace.</p>
+        {!errors.name && (
+          <p className="text-xs text-content-subtle mt-1">A descriptive label — 1–32 chars, letters/digits/space/dash/underscore.</p>
         )}
+      </div>
+
+      <div>
+        <KeyField
+          type="project" name={data.name} workspace={workspace} label="Project key"
+          onChange={(k, valid) => { onChange('key', k); onConflict(valid ? null : 'key') }}
+        />
         {resourcePrefix && (
           <p className="text-xs text-content-subtle mt-1">
             Docker resource prefix: <code className="font-mono text-content-muted">{resourcePrefix}</code> (immutable)
@@ -1497,7 +1493,7 @@ function Stepper({ current, maxVisited, onStepClick }) {
 // ── Main wizard page ──────────────────────────────────────────────────────────
 
 const DEFAULT_DATA = {
-  name: '', registry: '',
+  name: '', key: '', registry: '',
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
   backend: 'laravel', frontend: 'none', database: 'postgres', redis: false, garage: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
@@ -1537,8 +1533,8 @@ export default function NewProjectPage() {
   function validate() {
     const e = {}
     if (!data.name.trim()) e.name = 'Required'
-    else if (!/^[a-z0-9][a-z0-9\-]{0,62}$/.test(data.name)) e.name = 'Lowercase letters, numbers, hyphens only'
-    else if (nameConflict) e.name = nameConflict // uniqueness check propagated from Step1
+    else if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/.test(data.name.trim())) e.name = '1–32 chars: letters, digits, space, dash, underscore'
+    if (step === 1 && nameConflict) e.key = 'Choose a valid, available key' // key validity from Step1
     // Registry only matters for custom (build) stacks — and lives on step 2 now.
     if (step === 2 && data.stackType === 'custom' && !data.registry.trim()) e.registry = 'Required'
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'
@@ -1561,8 +1557,9 @@ export default function NewProjectPage() {
   function buildPayload() {
     const isImage = data.stackType === 'prebuilt' || data.stackType === 'image'
     return {
-      workspace: workspace, // parent-tier workspace (sets resource_prefix = {workspace}_{name})
-      name: data.name.trim(),
+      workspace: workspace, // parent-tier workspace KEY
+      name: data.name.trim(), // free-form display name
+      key: data.key,          // project key (resource_prefix = {workspace}_{key})
       // Registry is only used to tag/push built images (custom stacks). Image and
       // prebuilt stacks pull images directly, so send empty to avoid storing a
       // value that's never read.
@@ -1605,7 +1602,7 @@ export default function NewProjectPage() {
 
   function handleDone() {
     qc.invalidateQueries({ queryKey: ['projects', workspace] })
-    navigate(`/workspaces/${workspace}/projects/${data.name}`)
+    navigate(`/workspaces/${workspace}/projects/${data.key}`)
   }
 
   return (

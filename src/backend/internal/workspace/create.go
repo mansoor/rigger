@@ -6,16 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
-var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,62}$`)
+// validKey: the lowercase short identifier used for folders/URLs/Docker (the
+// effective length is enforced separately against the configured min/max).
+var validKey = regexp.MustCompile(`^[a-z0-9]{1,12}$`)
+
+// validDisplayName: the free-form label — 1..32 chars, must start alphanumeric,
+// then letters/digits/space/dash/underscore.
+var validDisplayName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$`)
 
 // CreateRequest is the payload sent from the wizard.
 type CreateRequest struct {
-	Workspace    string            `json:"workspace"` // parent tier the project is created under
-	Name         string            `json:"name"`
+	Workspace    string            `json:"workspace"` // parent tier KEY the project is created under
+	Name         string            `json:"name"`      // free-form display name
+	Key          string            `json:"key"`       // project key (folder/URL/Docker identity); derived if empty
 	Registry     string            `json:"registry"`
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
@@ -103,21 +111,27 @@ var defaultVersions = map[string]string{
 // Create validates the request, writes the workspace directory, config.json,
 // and run.sh. It does NOT run bootstrap — the caller does that to stream output.
 func Create(workspacesDir string, req CreateRequest) error {
-	if !validName.MatchString(req.Workspace) {
-		return fmt.Errorf("invalid workspace name %q: use lowercase letters, numbers, hyphens only", req.Workspace)
+	if !validKey.MatchString(req.Workspace) {
+		return fmt.Errorf("invalid workspace key %q", req.Workspace)
 	}
-	if !validName.MatchString(req.Name) {
-		return fmt.Errorf("invalid project name %q: use lowercase letters, numbers, hyphens only", req.Name)
+	req.Name = strings.TrimSpace(req.Name)
+	if !validDisplayName.MatchString(req.Name) {
+		return fmt.Errorf("invalid project name %q: 1–32 chars, letters/digits/space/dash/underscore", req.Name)
+	}
+	if !validKey.MatchString(req.Key) {
+		return fmt.Errorf("invalid project key %q: lowercase letters/digits only", req.Key)
 	}
 
-	// Ensure the parent workspace exists (create it + its marker on first use).
-	if err := EnsureWorkspace(workspacesDir, req.Workspace); err != nil {
+	// Ensure the parent workspace exists (idempotent; display name already set by
+	// CreateWorkspaceTier).
+	if err := EnsureWorkspace(workspacesDir, req.Workspace, ""); err != nil {
 		return err
 	}
 
-	wsPath := wspath.ProjectDir(workspacesDir, req.Workspace, req.Name)
+	// The folder/identity is the KEY, not the display name.
+	wsPath := wspath.ProjectDir(workspacesDir, req.Workspace, req.Key)
 	if _, err := os.Stat(wsPath); err == nil {
-		return fmt.Errorf("project %q already exists in workspace %q", req.Name, req.Workspace)
+		return fmt.Errorf("project key %q already exists in workspace %q", req.Key, req.Workspace)
 	}
 
 	if err := os.MkdirAll(wsPath, 0755); err != nil {
@@ -148,16 +162,23 @@ func Create(workspacesDir string, req CreateRequest) error {
 
 // EnsureWorkspace creates the parent-tier workspace directory (and its projects/
 // subdir + workspace.json marker) if it does not yet exist. Idempotent.
-func EnsureWorkspace(workspacesDir, name string) error {
-	if !validName.MatchString(name) {
-		return fmt.Errorf("invalid workspace name %q: use lowercase letters, numbers, hyphens only", name)
+// EnsureWorkspace creates the parent-tier workspace folder (named by its key) +
+// projects/ subdir + a workspace.json marker carrying the free-form display name.
+// Idempotent: if the marker already exists its display name is left untouched.
+func EnsureWorkspace(workspacesDir, key, displayName string) error {
+	if !validKey.MatchString(key) {
+		return fmt.Errorf("invalid workspace key %q", key)
 	}
-	if err := os.MkdirAll(wspath.ProjectsDir(workspacesDir, name), 0755); err != nil {
+	if err := os.MkdirAll(wspath.ProjectsDir(workspacesDir, key), 0755); err != nil {
 		return fmt.Errorf("create workspace dir: %w", err)
 	}
-	marker := wspath.WorkspaceMeta(workspacesDir, name)
+	marker := wspath.WorkspaceMeta(workspacesDir, key)
 	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		meta, _ := json.MarshalIndent(map[string]any{"name": name}, "", "  ")
+		name := strings.TrimSpace(displayName)
+		if name == "" {
+			name = key
+		}
+		meta, _ := json.MarshalIndent(map[string]any{"name": name, "key": key}, "", "  ")
 		if err := os.WriteFile(marker, meta, 0644); err != nil {
 			return fmt.Errorf("write workspace.json: %w", err)
 		}
@@ -167,11 +188,11 @@ func EnsureWorkspace(workspacesDir, name string) error {
 
 // DeleteWorkspace removes an entire parent-tier workspace directory (all its
 // projects). Caller is responsible for tearing down running stacks first.
-func DeleteWorkspace(workspacesDir, name string) error {
-	if !validName.MatchString(name) {
-		return fmt.Errorf("invalid workspace name %q", name)
+func DeleteWorkspace(workspacesDir, key string) error {
+	if !validKey.MatchString(key) {
+		return fmt.Errorf("invalid workspace key %q", key)
 	}
-	return os.RemoveAll(wspath.WorkspaceDir(workspacesDir, name))
+	return os.RemoveAll(wspath.WorkspaceDir(workspacesDir, key))
 }
 
 func buildConfig(req CreateRequest) (map[string]any, error) {
@@ -289,12 +310,13 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	}
 
 	project := map[string]any{
-		"name":     req.Name,
+		"name":     req.Name, // free-form display name
+		"key":      req.Key,  // immutable project key (folder/URL identity)
 		"type":     req.Type,
 		"registry": req.Registry,
-		// Immutable Docker resource prefix = {workspace}_{project}; globally unique
-		// even when project display names repeat across workspaces.
-		"resource_prefix": req.Workspace + "_" + req.Name,
+		// Immutable Docker resource prefix = {workspaceKey}_{projectKey}; globally
+		// unique and short, even when project display names repeat across workspaces.
+		"resource_prefix": req.Workspace + "_" + req.Key,
 		"version": map[string]any{
 			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},

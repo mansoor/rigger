@@ -7,6 +7,7 @@ import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, ch
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
+import KeyField from './KeyField'
 
 const STATUS_DOT = {
   running: 'bg-green-400',
@@ -57,7 +58,8 @@ function ProjectSidebarItem({ workspace, project, active }) {
     >
       <div className="flex items-center gap-2.5">
         <ProjectStatusDot workspace={workspace} name={project.name} envs={project.envs} />
-        <span className="font-medium text-sm truncate">{project.name}</span>
+        <span className="font-medium text-sm truncate">{project.config?.project?.name || project.name}</span>
+        <span className="text-[10px] font-mono text-content-faint shrink-0 ml-auto">{project.name}</span>
       </div>
       {stackLine && (
         <p className="text-xs text-content-subtle mt-0.5 ml-4.5 truncate pl-4">{stackLine}</p>
@@ -78,33 +80,38 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
+  // `current` is the workspace KEY; show its display name.
+  const currentWs = (workspaces || []).find(w => w.key === current)
+  const currentLabel = currentWs?.name || current
+
   return (
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors max-w-[200px]"
+        className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors max-w-[220px]"
       >
         <span className="text-xs text-content-subtle uppercase tracking-wider shrink-0">WS</span>
-        <span className="font-semibold truncate">{current || 'Select workspace'}</span>
+        <span className="font-semibold truncate">{currentLabel || 'Select workspace'}</span>
         <span className="text-xs text-content-faint shrink-0">▾</span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[220px] py-1 overflow-hidden">
+        <div className="absolute left-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[240px] py-1 overflow-hidden">
           <div className="max-h-72 overflow-y-auto">
             {(workspaces || []).length === 0 && (
               <p className="px-3 py-2 text-xs text-content-subtle">No workspaces yet.</p>
             )}
             {(workspaces || []).map(ws => (
               <button
-                key={ws.name}
-                onClick={() => { setOpen(false); onSelect(ws.name) }}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                  ws.name === current
+                key={ws.key}
+                onClick={() => { setOpen(false); onSelect(ws.key) }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between gap-2 ${
+                  ws.key === current
                     ? 'bg-surface-overlay text-content-strong font-semibold'
                     : 'text-content hover:bg-surface-overlay hover:text-content-strong'
                 }`}
               >
-                {ws.name}
+                <span className="truncate">{ws.name}</span>
+                <span className="text-[10px] font-mono text-content-faint shrink-0">{ws.key}</span>
               </button>
             ))}
           </div>
@@ -122,23 +129,29 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace }) {
   )
 }
 
+const DISPLAY_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/
+
 function NewWorkspaceModal({ onClose, onCreated }) {
   const [name, setName] = useState('')
+  const [key, setKey]   = useState('')
+  const [keyValid, setKeyValid] = useState(false)
   const [error, setError] = useState('')
   const mutation = useMutation({
-    mutationFn: () => createWorkspaceTier(name.trim()),
-    onSuccess: () => onCreated(name.trim()),
+    mutationFn: () => createWorkspaceTier(name.trim(), key),
+    onSuccess: (data) => onCreated(data.key, data.name),
     onError: (e) => setError(e.response?.data?.error || 'Failed to create workspace'),
   })
+
+  const nameOk = DISPLAY_NAME_RE.test(name.trim())
 
   function submit(e) {
     e.preventDefault()
     setError('')
-    const n = name.trim()
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(n)) {
-      setError('Use letters, numbers, dashes and underscores (must start alphanumeric).')
+    if (!nameOk) {
+      setError('Name: 1–32 chars, letters/digits/space/dash/underscore (must start alphanumeric).')
       return
     }
+    if (!keyValid) { setError('Pick a valid, available key.'); return }
     mutation.mutate()
   }
 
@@ -154,20 +167,21 @@ function NewWorkspaceModal({ onClose, onCreated }) {
           <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
         <p className="text-sm text-content-muted">
-          A workspace groups related projects. Project names only need to be unique
-          within a workspace.
+          A workspace groups related projects. The display name can be descriptive;
+          the short key identifies it in folders, URLs and Docker names.
         </p>
         {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Workspace name</label>
           <input
-            autoFocus value={name} onChange={e => setName(e.target.value)} required
-            placeholder="e.g. acme"
+            autoFocus value={name} onChange={e => setName(e.target.value)} required maxLength={32}
+            placeholder="e.g. Acme Corporation"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
           />
         </div>
+        <KeyField type="workspace" name={name} label="Workspace key" onChange={(k, v) => { setKey(k); setKeyValid(v) }} />
         <button
-          type="submit" disabled={mutation.isPending}
+          type="submit" disabled={mutation.isPending || !nameOk || !keyValid}
           className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
         >
           {mutation.isPending ? 'Creating…' : 'Create workspace'}
@@ -313,7 +327,7 @@ export default function Layout({ children }) {
   // once the list loads and nothing is selected yet.
   useEffect(() => {
     if (routeWs && routeWs !== current) { setCurrent(routeWs); return }
-    if (!current && workspaces?.length) setCurrent(workspaces[0].name)
+    if (!current && workspaces?.length) setCurrent(workspaces[0].key)
   }, [routeWs, current, workspaces, setCurrent])
 
   // Projects belonging to the selected workspace (the sidebar list).
@@ -422,10 +436,10 @@ export default function Layout({ children }) {
       {newWsOpen && (
         <NewWorkspaceModal
           onClose={() => setNewWsOpen(false)}
-          onCreated={(name) => {
+          onCreated={(key) => {
             setNewWsOpen(false)
             qc.invalidateQueries({ queryKey: ['workspaces'] })
-            setCurrent(name)
+            setCurrent(key)
             navigate('/')
           }}
         />

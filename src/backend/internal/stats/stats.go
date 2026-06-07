@@ -56,9 +56,11 @@ type WorkspaceSummary struct {
 }
 
 type WorkspaceInfo struct {
-	Name              string   `json:"name"`               // project name (unique within a workspace)
-	Workspace         string   `json:"workspace"`          // parent-tier workspace name
-	ResourcePrefix    string   `json:"resource_prefix"`    // Docker prefix ({workspace}_{project})
+	Name              string   `json:"name"`               // project key (folder/identity, unique within a workspace)
+	DisplayName       string   `json:"display_name"`       // project free-form display name
+	Workspace         string   `json:"workspace"`          // parent-tier workspace key
+	WorkspaceName     string   `json:"workspace_name"`     // parent-tier free-form display name
+	ResourcePrefix    string   `json:"resource_prefix"`    // Docker prefix ({workspaceKey}_{projectKey})
 	Type              string   `json:"type"`
 	Envs              []string `json:"envs"`
 	ImageCount        int      `json:"image_count"`
@@ -680,6 +682,16 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 		if perr != nil {
 			continue // not a workspace dir (no projects/) — skip
 		}
+		// Parent-tier display name from workspace.json (falls back to the key).
+		wsDisplay := wsName
+		if md, err := os.ReadFile(filepath.Join(workspacesDir, wsName, "workspace.json")); err == nil {
+			var m struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(md, &m) == nil && m.Name != "" {
+				wsDisplay = m.Name
+			}
+		}
 
 		for _, pe := range projEntries {
 			if !pe.IsDir() {
@@ -694,6 +706,7 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 
 			var cfg struct {
 				Project struct {
+					Name           string `json:"name"`
 					Type           string `json:"type"`
 					ResourcePrefix string `json:"resource_prefix"`
 				} `json:"project"`
@@ -702,6 +715,10 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 			}
 			if json.Unmarshal(data, &cfg) != nil {
 				continue
+			}
+			projDisplay := cfg.Project.Name
+			if projDisplay == "" {
+				projDisplay = projName
 			}
 
 			wsType := cfg.Project.Type
@@ -741,7 +758,9 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 			summary.ByType[wsType]++
 			summary.Workspaces = append(summary.Workspaces, WorkspaceInfo{
 				Name:              projName,
+				DisplayName:       projDisplay,
 				Workspace:         wsName,
+				WorkspaceName:     wsDisplay,
 				ResourcePrefix:    prefix,
 				Type:              wsType,
 				Envs:              envNames,

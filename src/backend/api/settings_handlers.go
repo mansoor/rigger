@@ -17,13 +17,18 @@ import (
 
 // GET /api/settings/general
 func (h *Handler) GetGeneralSettings(w http.ResponseWriter, r *http.Request) {
-	keys := []string{"acme_email", "rigger_domain", "traefik_enabled", "confirm_destructive", "appearance_prefs"}
+	keys := []string{"acme_email", "rigger_domain", "traefik_enabled", "confirm_destructive", "appearance_prefs", "key_min_length", "key_max_length"}
 	result := map[string]string{}
 	for _, k := range keys {
 		var val string
 		h.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, k).Scan(&val) //nolint:errcheck
 		result[k] = val
 	}
+	// Always report the effective (defaulted, coherent) key-length bounds so the
+	// UI shows real values even before an admin has set them.
+	min, max := h.keyLengths()
+	result["key_min_length"] = strconv.Itoa(min)
+	result["key_max_length"] = strconv.Itoa(max)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -34,10 +39,25 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true}
+	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true}
 	for k, v := range body {
 		if !allowed[k] {
 			continue
+		}
+		// Clamp the key-length bounds to a sane window on write; cross-coherence
+		// (min<=max) is enforced at read time by keyLengths().
+		if k == "key_min_length" || k == "key_max_length" {
+			n, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil {
+				continue
+			}
+			if n < 1 {
+				n = 1
+			}
+			if n > 12 {
+				n = 12
+			}
+			v = strconv.Itoa(n)
 		}
 		h.db.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,

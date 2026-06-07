@@ -41,8 +41,16 @@ export const recordTemplateUse = (name)      => api.post(`/templates/${name}/use
 
 // Workspace tier: list / create / delete the parent-tier workspaces.
 export const fetchWorkspaces      = ()      => api.get('/workspaces').then(r => r.data)
-export const createWorkspaceTier  = (name)  => api.post('/workspaces', { name }).then(r => r.data)
+export const createWorkspaceTier  = (name, key) => api.post('/workspaces', { name, key }).then(r => r.data)
 export const deleteWorkspaceTier  = (ws)    => api.delete(`/workspaces/${ws}`).then(r => r.data)
+
+// Key helpers (short identifier for folders/URLs/Docker). suggestKey returns a
+// derived, collision-free, validated key; checkKey validates a user override.
+// type = 'workspace' | 'project'; project checks require the parent workspace key.
+export const suggestKey = (type, name, workspace = '') =>
+  api.get('/keys/suggest', { params: { type, name, workspace } }).then(r => r.data)
+export const checkKey   = (type, key, workspace = '') =>
+  api.get('/keys/check', { params: { type, key, workspace } }).then(r => r.data)
 // Projects within a workspace.
 export const fetchProjects        = (ws)    => api.get(`/workspaces/${ws}/projects`).then(r => r.data)
 export const fetchWorkspace    = (ws, name)      => api.get(projBase(ws, name)).then(r => r.data)

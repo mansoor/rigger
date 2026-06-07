@@ -964,12 +964,16 @@ function GeneralTab() {
   const [acmeEmail, setAcmeEmail] = useState('')
   const [riggerDomain, setRiggerDomain] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
+  const [keyMin, setKeyMin] = useState(3)
+  const [keyMax, setKeyMax] = useState(4)
 
   const saveMut = useMutation({
     mutationFn: () => updateGeneralSettings({
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
       confirm_destructive: confirmDestructive ? 'true' : 'false',
+      key_min_length: String(keyMin),
+      key_max_length: String(Math.max(keyMin, keyMax)),
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
@@ -981,6 +985,8 @@ function GeneralTab() {
     setRiggerDomain(cfg.rigger_domain || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
+    setKeyMin(Number(cfg.key_min_length) || 3)
+    setKeyMax(Number(cfg.key_max_length) || 4)
     setSynced(true)
   }
 
@@ -1062,6 +1068,30 @@ function GeneralTab() {
           <p className="text-xs text-content-subtle mt-2">
             Recommended (on by default). Turn off to skip these prompts. Stronger safeguards —
             type-to-confirm workspace deletion and the Housekeeping prune flows — always stay on.
+          </p>
+        </div>
+      </div>
+
+      {/* Naming — key length */}
+      <div>
+        <h2 className="text-base font-semibold text-content-strong mb-1">Naming — resource keys</h2>
+        <p className="text-sm text-content-subtle mb-4">
+          Workspaces and projects are identified by a short lowercase <strong>key</strong> used for
+          folders, URLs and Docker artifact names. Keys are auto-derived from the display name; these
+          bounds control their length. Changing them affects only <em>new</em> keys — existing keys are immutable.
+        </p>
+        <div className="p-4 bg-surface border border-border rounded-xl grid grid-cols-2 gap-4 max-w-sm">
+          <div>
+            <Label>Min length</Label>
+            <Input type="number" value={String(keyMin)} onChange={v => setKeyMin(Math.min(12, Math.max(1, Number(v) || 1)))} />
+          </div>
+          <div>
+            <Label>Max length</Label>
+            <Input type="number" value={String(keyMax)} onChange={v => setKeyMax(Math.min(12, Math.max(1, Number(v) || 1)))} />
+          </div>
+          <p className="col-span-2 text-xs text-content-subtle">
+            1–12 characters. Collisions append a digit/letter within the max budget (e.g. <code className="font-mono">web → web2</code>).
+            Larger setups may prefer 5–7 to reduce clashes.
           </p>
         </div>
       </div>

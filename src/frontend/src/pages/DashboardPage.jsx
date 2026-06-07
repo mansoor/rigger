@@ -478,8 +478,9 @@ export default function DashboardPage() {
                       <td className={`px-5 py-3 ${as.cell}`}>
                         <div className="flex items-center gap-2">
                           <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="font-medium text-content-strong group-hover:text-brand-400 transition-colors">
-                            {w.name}
+                            {w.display_name || w.name}
                           </Link>
+                          <span className="text-[10px] font-mono text-content-faint" title="Resource prefix">{prefix}</span>
                           {as.badge && (
                             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${as.badge.cls}`} title="Active alerts">
                               {as.badge.text}
