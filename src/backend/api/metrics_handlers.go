@@ -50,7 +50,7 @@ func (h *Handler) GetEnvMetrics(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(
 		`SELECT cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes, recorded_at
 		 FROM metrics_snapshots
-		 WHERE workspace = ? AND env = ? AND recorded_at >= datetime('now', ?)
+		 WHERE project = ? AND env = ? AND recorded_at >= datetime('now', ?)
 		 ORDER BY recorded_at`,
 		name, env, fmt.Sprintf("-%d minutes", minutes),
 	)

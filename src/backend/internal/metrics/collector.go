@@ -113,7 +113,7 @@ func (c *Collector) collect() {
 	}
 
 	for _, w := range wss {
-		base := w.Config.Project.Name
+		base := w.Config.Project.Prefix()
 		if base == "" {
 			base = w.Name
 		}
@@ -122,7 +122,7 @@ func (c *Collector) collect() {
 			memBytes := int64(ps.MemMB * 1024 * 1024)
 			diskBytes := dirSizeBytes(filepath.Join(c.workspacesDir, w.Name, "envs", env))
 			if _, err := c.db.Exec(
-				`INSERT INTO metrics_snapshots (workspace, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
+				`INSERT INTO metrics_snapshots (project, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 				w.Name, env, ps.CPUPct, memBytes, diskBytes, int64(ps.NetRxBytes), int64(ps.NetTxBytes),
 			); err != nil {
@@ -153,7 +153,7 @@ func (c *Collector) thin(minHours, maxHours, bucketSec int) {
 		    SELECT MIN(id) FROM metrics_snapshots
 		    WHERE recorded_at < datetime('now', ?)
 		      AND recorded_at >= datetime('now', ?)
-		    GROUP BY workspace, env, CAST(strftime('%%s', recorded_at) AS INTEGER) / %d
+		    GROUP BY project, env, CAST(strftime('%%s', recorded_at) AS INTEGER) / %d
 		  )`, bucketSec)
 	if _, err := c.db.Exec(q, younger, older, younger, older); err != nil {
 		log.Printf("metrics: thin %d-%dh: %v", minHours, maxHours, err)
@@ -169,7 +169,7 @@ func (c *Collector) thinTail(minHours, bucketSec int) {
 		  AND id NOT IN (
 		    SELECT MIN(id) FROM metrics_snapshots
 		    WHERE recorded_at < datetime('now', ?)
-		    GROUP BY workspace, env, CAST(strftime('%%s', recorded_at) AS INTEGER) / %d
+		    GROUP BY project, env, CAST(strftime('%%s', recorded_at) AS INTEGER) / %d
 		  )`, bucketSec)
 	if _, err := c.db.Exec(q, older, older); err != nil {
 		log.Printf("metrics: thinTail >%dh: %v", minHours, err)

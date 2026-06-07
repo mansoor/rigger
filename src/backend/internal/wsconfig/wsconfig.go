@@ -31,6 +31,17 @@ type Project struct {
 	Type     string  `json:"type"`
 	Registry string  `json:"registry"`
 	Version  Version `json:"version"`
+	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
+	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
+	ResourcePrefix string `json:"resource_prefix,omitempty"`
+}
+
+// Prefix returns the immutable Docker resource prefix, falling back to Name.
+func (p Project) Prefix() string {
+	if p.ResourcePrefix != "" {
+		return p.ResourcePrefix
+	}
+	return p.Name
 }
 
 type Version struct {
@@ -109,13 +120,13 @@ func (c *Config) Version(key, def string) string {
 // "{registry}/{project}-{service}:{version}-{env}".
 func (c *Config) ImageTag(service, env string) string {
 	return fmt.Sprintf("%s/%s-%s:%s-%s",
-		c.Project.Registry, c.Project.Name, service, c.VersionString(), env)
+		c.Project.Registry, c.Project.Prefix(), service, c.VersionString(), env)
 }
 
 // StackName reproduces lib.sh stack_name(): "{project}_{env}". This is also the
 // compose project name / service prefix.
 func (c *Config) StackName(env string) string {
-	return c.Project.Name + "_" + env
+	return c.Project.Prefix() + "_" + env
 }
 
 // EnvNames returns the configured environment names, sorted (lib.sh cfg_envs

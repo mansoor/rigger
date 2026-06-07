@@ -28,7 +28,7 @@ func (g *gen) swarmSecrets() []secretEntry {
 		if n, ok := g.e.SecretVersions[k]; ok && n > 1 {
 			v = n
 		}
-		out = append(out, secretEntry{Key: k, Name: secretFullName(g.cfg.Project.Name, g.env, k, v)})
+		out = append(out, secretEntry{Key: k, Name: secretFullName(g.cfg.resourcePrefix(), g.env, k, v)})
 	}
 	return out
 }

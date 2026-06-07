@@ -55,7 +55,10 @@ func (h *Handler) resolveContainerRef(ex executor.Executor, ws, env, svc string)
 		return svc, nil // best-effort: fall back to the given name
 	}
 	var cfg struct {
-		Project      struct{ Name string } `json:"project"`
+		Project struct {
+			Name           string `json:"name"`
+			ResourcePrefix string `json:"resource_prefix"`
+		} `json:"project"`
 		Environments map[string]struct {
 			Deployment string `json:"deployment"`
 		} `json:"environments"`
@@ -65,7 +68,11 @@ func (h *Handler) resolveContainerRef(ex executor.Executor, ws, env, svc string)
 		return svc, nil // compose: svc is already the container_name
 	}
 
-	stack := cfg.Project.Name + "_" + env
+	prefix := cfg.Project.ResourcePrefix
+	if prefix == "" {
+		prefix = cfg.Project.Name
+	}
+	stack := prefix + "_" + env
 	full := resolveSwarmServiceName(ex, stack, svc)
 	out, err := ex.DockerOutput(executor.Spec{
 		Args: []string{"ps", "-q", "--filter", "label=com.docker.swarm.service.name=" + full},

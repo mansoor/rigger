@@ -47,10 +47,24 @@ type Project struct {
 	Type     string  `json:"type"`
 	Registry string  `json:"registry"`
 	Version  Version `json:"version"`
-	// WorkspaceRootDir is the host-side path of this workspace's folder, captured
-	// once at creation so the UI can show where it lives without a runtime docker
-	// inspect. May be empty for workspaces created before this was added.
-	WorkspaceRootDir string `json:"workspace_root_dir,omitempty"`
+	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project}),
+	// used to name volumes/networks/containers/stacks/secrets so they stay globally
+	// unique even when project display names repeat across workspaces. Set once at
+	// creation and never changed. Empty ⇒ fall back to Name (pre-tier configs).
+	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// ProjectRootDir is the host-side path of this project's folder, captured once
+	// at creation so the UI can show where it lives without a runtime docker
+	// inspect. May be empty for projects created before this was added.
+	ProjectRootDir string `json:"project_root_dir,omitempty"`
+}
+
+// Prefix returns the immutable Docker resource prefix, falling back to the
+// display name for configs created before resource_prefix existed.
+func (p Project) Prefix() string {
+	if p.ResourcePrefix != "" {
+		return p.ResourcePrefix
+	}
+	return p.Name
 }
 
 // ServiceOverride holds environment-specific YAML appended to a service definition.

@@ -62,12 +62,22 @@ type Options struct {
 
 type config struct {
 	Project struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name           string `json:"name"`
+		Type           string `json:"type"`
+		ResourcePrefix string `json:"resource_prefix"`
 	} `json:"project"`
 	Environments map[string]struct {
 		Deployment string `json:"deployment"`
 	} `json:"environments"`
+}
+
+// stackPrefix is the immutable Docker resource prefix, falling back to the
+// display name for configs created before resource_prefix existed.
+func (c config) stackPrefix() string {
+	if c.Project.ResourcePrefix != "" {
+		return c.Project.ResourcePrefix
+	}
+	return c.Project.Name
 }
 
 // Run executes a compose-lifecycle command. The bool return reports whether
@@ -123,7 +133,7 @@ func Run(opts Options) (bool, error) {
 			opts:        opts,
 			cfgBytes:    cfgBytes,
 			projectType: cfg.Project.Type,
-			stack:       cfg.Project.Name + "_" + opts.Env,
+			stack:       cfg.stackPrefix() + "_" + opts.Env,
 			envDir:      envDir,
 			composePath: composePath,
 		}

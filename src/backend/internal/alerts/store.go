@@ -124,7 +124,7 @@ func (r *Rule) Validate() error {
 // ── Rule CRUD ────────────────────────────────────────────────────────────────────
 
 // ruleColumns is the shared SELECT column list (must match scanRule order).
-const ruleColumns = `id, name, condition_type, threshold, workspace, env, severity,
+const ruleColumns = `id, name, condition_type, threshold, project, env, severity,
 	cooldown_minutes, enabled, notify_channel_ids, created_at, updated_at`
 
 func ListRules(d *db.DB) ([]Rule, error) {
@@ -181,7 +181,7 @@ func CreateRule(d *db.DB, r Rule) (*Rule, error) {
 		return nil, err
 	}
 	res, err := d.Exec(`
-		INSERT INTO alert_rules (name, condition_type, threshold, workspace, env,
+		INSERT INTO alert_rules (name, condition_type, threshold, project, env,
 		                         severity, cooldown_minutes, enabled, notify_channel_ids)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.Name, r.ConditionType, r.Threshold, r.Workspace, r.Env,
@@ -199,7 +199,7 @@ func UpdateRule(d *db.DB, id int64, r Rule) (*Rule, error) {
 	}
 	_, err := d.Exec(`
 		UPDATE alert_rules
-		SET name=?, condition_type=?, threshold=?, workspace=?, env=?,
+		SET name=?, condition_type=?, threshold=?, project=?, env=?,
 		    severity=?, cooldown_minutes=?, enabled=?, notify_channel_ids=?,
 		    updated_at=CURRENT_TIMESTAMP
 		WHERE id=?`,
@@ -233,7 +233,7 @@ func ListEvents(d *db.DB, opt ListEventsOptions) ([]Event, error) {
 	if !opt.IncludeDismissed {
 		where = append(where, "dismissed = 0")
 	}
-	q := `SELECT id, rule_id, rule_name, condition_type, workspace, env, message,
+	q := `SELECT id, rule_id, rule_name, condition_type, project, env, message,
 	             severity, value, fired_at, resolved_at, dismissed
 	      FROM alert_events`
 	if len(where) > 0 {
@@ -264,10 +264,10 @@ func ListEvents(d *db.DB, opt ListEventsOptions) ([]Event, error) {
 // OpenEventFor returns the active (unresolved) event for a rule+target, if any.
 func OpenEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, workspace, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events
-		WHERE rule_id = ? AND workspace = ? AND env = ? AND resolved_at IS NULL
+		WHERE rule_id = ? AND project = ? AND env = ? AND resolved_at IS NULL
 		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env)
 	e, err := scanEvent(row)
 	if err == sql.ErrNoRows {
@@ -283,10 +283,10 @@ func OpenEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 // used to enforce the cooldown window before re-firing.
 func LastEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, workspace, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events
-		WHERE rule_id = ? AND workspace = ? AND env = ?
+		WHERE rule_id = ? AND project = ? AND env = ?
 		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env)
 	e, err := scanEvent(row)
 	if err == sql.ErrNoRows {
@@ -300,7 +300,7 @@ func LastEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 
 func CreateEvent(d *db.DB, e Event) (*Event, error) {
 	res, err := d.Exec(`
-		INSERT INTO alert_events (rule_id, rule_name, condition_type, workspace,
+		INSERT INTO alert_events (rule_id, rule_name, condition_type, project,
 		                          env, message, severity, value)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.RuleID, e.RuleName, e.ConditionType, e.Workspace, e.Env,
@@ -314,7 +314,7 @@ func CreateEvent(d *db.DB, e Event) (*Event, error) {
 
 func GetEvent(d *db.DB, id int64) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, workspace, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events WHERE id = ?`, id)
 	e, err := scanEvent(row)
@@ -377,10 +377,10 @@ type SummaryResult struct {
 func Summary(d *db.DB) (SummaryResult, error) {
 	res := SummaryResult{ByWorkspace: map[string]WorkspaceAlertCount{}}
 	rows, err := d.Query(`
-		SELECT workspace, severity, COUNT(*)
+		SELECT project, severity, COUNT(*)
 		FROM alert_events
 		WHERE resolved_at IS NULL AND dismissed = 0
-		GROUP BY workspace, severity`)
+		GROUP BY project, severity`)
 	if err != nil {
 		return res, err
 	}
@@ -419,7 +419,7 @@ func LogBackup(d *db.DB, ws, env, status, message string, sizeBytes int64) error
 		status = "error"
 	}
 	_, err := d.Exec(`
-		INSERT INTO backup_log (workspace, env, status, message, size_bytes)
+		INSERT INTO backup_log (project, env, status, message, size_bytes)
 		VALUES (?, ?, ?, ?, ?)`, ws, env, status, message, sizeBytes)
 	return err
 }
@@ -429,7 +429,7 @@ func LogBackup(d *db.DB, ws, env, status, message string, sizeBytes int64) error
 func LatestBackupStatus(d *db.DB, ws, env string) (status string, at time.Time, ok bool, err error) {
 	row := d.QueryRow(`
 		SELECT status, created_at FROM backup_log
-		WHERE workspace = ? AND env = ? ORDER BY created_at DESC LIMIT 1`, ws, env)
+		WHERE project = ? AND env = ? ORDER BY created_at DESC LIMIT 1`, ws, env)
 	e := row.Scan(&status, &at)
 	if e == sql.ErrNoRows {
 		return "", time.Time{}, false, nil

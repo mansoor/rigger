@@ -26,7 +26,7 @@ func (h *Handler) recordSecretEvent(workspaceName, env, key, action string, clai
 		username = claims.Username
 	}
 	h.db.Exec( //nolint:errcheck
-		"INSERT INTO secret_events (workspace, env, key, action, username, ip) VALUES (?,?,?,?,?,?)",
+		"INSERT INTO secret_events (project, env, key, action, username, ip) VALUES (?,?,?,?,?,?)",
 		workspaceName, env, key, action, username, ip,
 	)
 }
@@ -116,7 +116,7 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 	h.recordSecretEvent(name, env, body.Key, "rotate", claims, ip)
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "secret-rotate", env,
 		)
 	}
@@ -129,7 +129,7 @@ func (h *Handler) GetSecretEvents(w http.ResponseWriter, r *http.Request) {
 	env := r.PathValue("env")
 	rows, err := h.db.Query(
 		`SELECT key, action, username, ip, created_at FROM secret_events
-		 WHERE workspace = ? AND env = ?
+		 WHERE project = ? AND env = ?
 		 ORDER BY created_at DESC LIMIT 200`, name, env,
 	)
 	if err != nil {

@@ -291,12 +291,12 @@ func SetHostKey(d *db.DB, id int64, hostKey string) error {
 // environments without an explicit binding.
 func SetEnvHost(d *db.DB, workspace, env string, hostID int64) error {
 	if hostID == 0 {
-		_, err := d.Exec(`DELETE FROM workspace_host_envs WHERE workspace=? AND env=?`, workspace, env)
+		_, err := d.Exec(`DELETE FROM workspace_host_envs WHERE project=? AND env=?`, workspace, env)
 		return err
 	}
 	_, err := d.Exec(
-		`INSERT INTO workspace_host_envs (workspace, env, host_id) VALUES (?, ?, ?)
-		 ON CONFLICT(workspace, env) DO UPDATE SET host_id=excluded.host_id`,
+		`INSERT INTO workspace_host_envs (project, env, host_id) VALUES (?, ?, ?)
+		 ON CONFLICT(project, env) DO UPDATE SET host_id=excluded.host_id`,
 		workspace, env, hostID)
 	return err
 }
@@ -309,7 +309,7 @@ func HostForEnv(d *db.DB, workspace, env string) (*Host, error) {
 	// A non-empty env sorts after '' lexicographically, so ORDER BY env DESC
 	// surfaces an exact-env row ahead of the env='' default.
 	err := d.QueryRow(
-		`SELECT host_id FROM workspace_host_envs WHERE workspace=? AND env IN (?, '') ORDER BY env DESC LIMIT 1`,
+		`SELECT host_id FROM workspace_host_envs WHERE project=? AND env IN (?, '') ORDER BY env DESC LIMIT 1`,
 		workspace, env).Scan(&hostID)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -334,7 +334,7 @@ type EnvHostBinding struct {
 func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 	rows, err := d.Query(
 		`SELECT we.env, hs.id, hs.name, hs.address FROM workspace_host_envs we
-		   JOIN hosts hs ON hs.id = we.host_id WHERE we.workspace=? ORDER BY we.env`, workspace)
+		   JOIN hosts hs ON hs.id = we.host_id WHERE we.project=? ORDER BY we.env`, workspace)
 	if err != nil {
 		return nil, err
 	}

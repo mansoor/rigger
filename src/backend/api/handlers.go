@@ -352,9 +352,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Capture the host-side folder path once, now, so the UI can show where the
 	// workspace lives without a runtime docker inspect (persisted in config as
-	// project.workspace_root_dir).
+	// project.project_root_dir).
 	if hwd := h.hostBindSourceDir(); hwd != "" {
-		msg.Workspace.WorkspaceRootDir = strings.TrimRight(hwd, "/\\") + "/" + msg.Workspace.Name
+		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + msg.Workspace.Name
 	}
 
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
@@ -424,7 +424,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Audit log
 	h.db.Exec( //nolint:errcheck
-		"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
+		"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 		claims.UserID, claims.Username, msg.Workspace.Name, "create", "",
 	)
 
@@ -667,7 +667,7 @@ func (h *Handler) PutCompose(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
-		h.db.Exec("INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
+		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
 			claims.UserID, claims.Username, name, "edit-compose", env)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -738,23 +738,23 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(h.workspacesDir, name, "config.json")
-	// Reject changes to project.name: it's the Docker resource prefix (compose
-	// project, container, named-volume and network names) and the workspace folder
-	// is never renamed — so changing it would orphan the running stack and its
-	// volume data on the next deploy. The folder name is the stable identity.
+	// Reject changes to project.resource_prefix: it's the immutable Docker resource
+	// prefix (compose project, container, named-volume, network and secret names)
+	// — changing it would orphan the running stack and its volume data on the next
+	// deploy. The display name (project.name) IS editable; only the prefix is frozen.
 	oldEnvs := map[string]bool{}
 	oldDeployments := map[string]string{}
 	if existing, rerr := os.ReadFile(path); rerr == nil {
 		var was, now struct {
 			Project struct {
-				Name string `json:"name"`
+				ResourcePrefix string `json:"resource_prefix"`
 			} `json:"project"`
 		}
 		json.Unmarshal(existing, &was)             //nolint:errcheck
 		json.Unmarshal([]byte(body.Content), &now) //nolint:errcheck
-		if was.Project.Name != "" && now.Project.Name != was.Project.Name {
+		if was.Project.ResourcePrefix != "" && now.Project.ResourcePrefix != was.Project.ResourcePrefix {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "Project name can't be changed after creation — it's the Docker stack/container/volume prefix and the workspace folder isn't renamed.",
+				"error": "resource_prefix can't be changed after creation — it's the immutable Docker stack/container/volume/secret prefix.",
 			})
 			return
 		}
@@ -812,7 +812,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
-		h.db.Exec("INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
+		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
 			claims.UserID, claims.Username, name, "edit-config", "")
 	}
 
@@ -860,7 +860,7 @@ func (h *Handler) regenCompose(workspaceName, configJSON string) {
 // GET /api/activity  — recent audit log entries across ALL workspaces (dashboard / slide-out)
 func (h *Handler) GetAllActivity(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(
-		`SELECT workspace, username, command, env, created_at FROM audit_log
+		`SELECT project, username, command, env, created_at FROM audit_log
 		 WHERE command NOT IN ('logs', 'ps')
 		 ORDER BY created_at DESC LIMIT 200`,
 	)
@@ -894,7 +894,7 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	rows, err := h.db.Query(
 		`SELECT username, command, env, created_at FROM audit_log
-		 WHERE workspace = ? AND command NOT IN ('logs', 'ps')
+		 WHERE project = ? AND command NOT IN ('logs', 'ps')
 		 ORDER BY created_at DESC LIMIT 20`, name,
 	)
 	if err != nil {
@@ -935,14 +935,21 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg struct {
-		Project      struct{ Name string } `json:"project"`
+		Project struct {
+			Name           string `json:"name"`
+			ResourcePrefix string `json:"resource_prefix"`
+		} `json:"project"`
 		Environments map[string]struct {
 			Deployment string `json:"deployment"`
 		} `json:"environments"`
 	}
 	json.Unmarshal(cfgData, &cfg) //nolint:errcheck
 
-	project := cfg.Project.Name + "_" + env
+	project := cfg.Project.ResourcePrefix
+	if project == "" {
+		project = cfg.Project.Name
+	}
+	project += "_" + env
 	envDir  := filepath.Join(h.workspacesDir, name, "envs", env)
 
 	// Query the daemon the env actually runs on (local, or its remote host).
@@ -1157,8 +1164,8 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Surface the host-side folder path so the UI can show where the workspace
 	// actually lives (not the container's /toolkit path). Prefer the value stamped
 	// into config at creation; fall back to resolving the bind-mount source for
-	// workspaces created before workspace_root_dir existed.
-	if rd := strings.TrimSpace(out.Config.Project.WorkspaceRootDir); rd != "" {
+	// workspaces created before project_root_dir existed.
+	if rd := strings.TrimSpace(out.Config.Project.ProjectRootDir); rd != "" {
 		out.HostPath = rd
 	} else if hwd := h.hostBindSourceDir(); hwd != "" {
 		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + name
@@ -1339,7 +1346,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	// Audit log
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "env-update", env,
 		)
 	}
@@ -1372,7 +1379,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "delete", "",
 		)
 	}
@@ -1421,7 +1428,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	// Audit log — skip read-only/streaming commands that aren't meaningful as activity
 	if req.Command != "logs" && req.Command != "ps" {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env) VALUES (?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 			claims.UserID, claims.Username, name, req.Command, req.Env,
 		)
 	}
@@ -1567,13 +1574,20 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg struct {
-		Project      struct{ Name string } `json:"project"`
+		Project struct {
+			Name           string `json:"name"`
+			ResourcePrefix string `json:"resource_prefix"`
+		} `json:"project"`
 		Environments map[string]struct {
 			Deployment string `json:"deployment"`
 		} `json:"environments"`
 	}
 	json.Unmarshal(data, &cfg) //nolint:errcheck
-	project := cfg.Project.Name + "_" + env
+	project := cfg.Project.ResourcePrefix
+	if project == "" {
+		project = cfg.Project.Name
+	}
+	project += "_" + env
 
 	envDir := filepath.Join(h.workspacesDir, name, "envs", env)
 

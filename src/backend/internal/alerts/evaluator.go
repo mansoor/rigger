@@ -100,7 +100,7 @@ func (e *Evaluator) expandTargets(rule Rule, wss []workspace.Workspace) []target
 		if rule.Workspace != "" && w.Name != rule.Workspace {
 			continue
 		}
-		proj := w.Config.Project.Name
+		proj := w.Config.Project.Prefix()
 		if proj == "" {
 			proj = w.Name
 		}

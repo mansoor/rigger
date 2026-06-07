@@ -66,7 +66,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil &&
 		body.Command != "logs" && body.Command != "ps" {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env, host) VALUES (?,?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
 			claims.UserID, claims.Username, name, body.Command, env, h.envHostName(name, env),
 		)
 	}
@@ -152,7 +152,7 @@ func (h *Handler) MigrateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env, host) VALUES (?,?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "migrate", "", h.envHostName(name, ""),
 		)
 	}
@@ -181,7 +181,7 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec( //nolint:errcheck
-			"INSERT INTO audit_log (user_id, username, workspace, command, env, host) VALUES (?,?,?,?,?,?)",
+			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
 			claims.UserID, claims.Username, name, "set-host", env, h.envHostName(name, env),
 		)
 	}

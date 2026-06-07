@@ -139,7 +139,7 @@ func (h *Handler) pruneScheduleSnapshots(ws, env, scheduleID string, retention i
 
 func (h *Handler) scheduleLastRun(ws, env, id string) time.Time {
 	var ts string
-	h.db.QueryRow(`SELECT last_run_at FROM backup_schedule_runs WHERE workspace=? AND env=? AND schedule_id=?`,
+	h.db.QueryRow(`SELECT last_run_at FROM backup_schedule_runs WHERE project=? AND env=? AND schedule_id=?`,
 		ws, env, id).Scan(&ts) //nolint:errcheck
 	if ts == "" {
 		return time.Time{}
@@ -152,9 +152,9 @@ func (h *Handler) scheduleLastRun(ws, env, id string) time.Time {
 
 func (h *Handler) recordScheduleRun(ws, env, id string) {
 	h.db.Exec(`
-		INSERT INTO backup_schedule_runs (workspace, env, schedule_id, last_run_at)
+		INSERT INTO backup_schedule_runs (project, env, schedule_id, last_run_at)
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(workspace, env, schedule_id) DO UPDATE SET last_run_at=CURRENT_TIMESTAMP`,
+		ON CONFLICT(project, env, schedule_id) DO UPDATE SET last_run_at=CURRENT_TIMESTAMP`,
 		ws, env, id) //nolint:errcheck
 }
 

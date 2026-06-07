@@ -246,9 +246,9 @@ func latestSnapshotDate(envBackupsDir string) (string, error) {
 
 func (h *Handler) recordBackupSync(ws, env, date string, t *settings.BackupTarget, status, msg string, res backupsync.Result) {
 	h.db.Exec(`
-		INSERT INTO backup_syncs (workspace, env, date, target_id, target_name, status, message, files, bytes, synced_at)
+		INSERT INTO backup_syncs (project, env, date, target_id, target_name, status, message, files, bytes, synced_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(workspace, env, date) DO UPDATE SET
+		ON CONFLICT(project, env, date) DO UPDATE SET
 			target_id=excluded.target_id, target_name=excluded.target_name,
 			status=excluded.status, message=excluded.message,
 			files=excluded.files, bytes=excluded.bytes, synced_at=CURRENT_TIMESTAMP`,
@@ -465,7 +465,7 @@ type syncState struct {
 // backupSyncStates returns a map keyed by "workspace\x00env\x00date".
 func (h *Handler) backupSyncStates() map[string]syncState {
 	out := map[string]syncState{}
-	rows, err := h.db.Query(`SELECT workspace, env, date, target_name, status, synced_at FROM backup_syncs`)
+	rows, err := h.db.Query(`SELECT project, env, date, target_name, status, synced_at FROM backup_syncs`)
 	if err != nil {
 		return out
 	}

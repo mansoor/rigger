@@ -75,8 +75,9 @@ func Run(opts Options) (bool, error) {
 
 type wsConfig struct {
 	Project struct {
-		Name string `json:"name"`
-		Type string `json:"type"`
+		Name           string `json:"name"`
+		Type           string `json:"type"`
+		ResourcePrefix string `json:"resource_prefix"`
 	} `json:"project"`
 	Images []struct {
 		Name  string `json:"name"`
@@ -143,13 +144,19 @@ func newCtx(opts Options, cfg *wsConfig) *ctx {
 			services[s] = true
 		}
 	}
+	// prefix is the immutable Docker resource prefix (names containers/volumes/the
+	// compose project); falls back to the display name for pre-tier configs.
+	rp := cfg.Project.ResourcePrefix
+	if rp == "" {
+		rp = cfg.Project.Name
+	}
 	return &ctx{
 		opts:     opts,
 		cfg:      cfg,
 		runner:   executor.Default(opts.Exec),
 		project:  cfg.Project.Name,
 		env:      opts.Env,
-		prefix:   cfg.Project.Name + "_" + opts.Env,
+		prefix:   rp + "_" + opts.Env,
 		envDir:   envDir,
 		envVars:  envVars,
 		services: services,

@@ -21,7 +21,7 @@ func TestDownsampleTiers(t *testing.T) {
 	insert := func(base string, n, spacingSec int) {
 		for i := 0; i < n; i++ {
 			if _, err := d.Exec(
-				`INSERT INTO metrics_snapshots (workspace, env, recorded_at)
+				`INSERT INTO metrics_snapshots (project, env, recorded_at)
 				 VALUES ('w','dev', datetime('now', ?, ?))`,
 				base, fmt.Sprintf("-%d seconds", i*spacingSec),
 			); err != nil {

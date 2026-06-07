@@ -36,7 +36,7 @@ func Record(d *db.DB, r Run) error {
 		out = "…(output truncated)…\n" + out[len(out)-maxOutputBytes:]
 	}
 	if _, err := d.Exec(
-		`INSERT INTO action_runs (workspace, env, command, extra, username, status, output, started_at, finished_at)
+		`INSERT INTO action_runs (project, env, command, extra, username, status, output, started_at, finished_at)
 		 VALUES (?,?,?,?,?,?,?,?,?)`,
 		r.Workspace, r.Env, r.Command, r.Extra, r.Username, r.Status, out, r.StartedAt, r.FinishedAt,
 	); err != nil {
@@ -44,8 +44,8 @@ func Record(d *db.DB, r Run) error {
 	}
 	// Prune: keep only the newest keepPerWorkspace rows for this workspace.
 	d.Exec( //nolint:errcheck
-		`DELETE FROM action_runs WHERE workspace=? AND id NOT IN
-		   (SELECT id FROM action_runs WHERE workspace=? ORDER BY id DESC LIMIT ?)`,
+		`DELETE FROM action_runs WHERE project=? AND id NOT IN
+		   (SELECT id FROM action_runs WHERE project=? ORDER BY id DESC LIMIT ?)`,
 		r.Workspace, r.Workspace, keepPerWorkspace,
 	)
 	return nil
@@ -57,8 +57,8 @@ func List(d *db.DB, workspace string, limit int) ([]Run, error) {
 		limit = 100
 	}
 	rows, err := d.Query(
-		`SELECT id, workspace, env, command, extra, username, status, output, started_at, finished_at
-		   FROM action_runs WHERE workspace=? ORDER BY id DESC LIMIT ?`,
+		`SELECT id, project, env, command, extra, username, status, output, started_at, finished_at
+		   FROM action_runs WHERE project=? ORDER BY id DESC LIMIT ?`,
 		workspace, limit,
 	)
 	if err != nil {
@@ -79,6 +79,6 @@ func List(d *db.DB, workspace string, limit int) ([]Run, error) {
 
 // Clear deletes all recorded runs for a workspace.
 func Clear(d *db.DB, workspace string) error {
-	_, err := d.Exec(`DELETE FROM action_runs WHERE workspace=?`, workspace)
+	_, err := d.Exec(`DELETE FROM action_runs WHERE project=?`, workspace)
 	return err
 }

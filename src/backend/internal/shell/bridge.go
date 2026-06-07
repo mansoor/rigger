@@ -353,15 +353,15 @@ func (b *Bridge) recordLeftover(hostID int64, hostName, ws, env, stack string) {
 	if b.db == nil {
 		return
 	}
-	b.db.Exec(`INSERT INTO migration_leftovers (host_id, host_name, workspace, env, stack)
+	b.db.Exec(`INSERT INTO migration_leftovers (host_id, host_name, project, env, stack)
 		VALUES (?,?,?,?,?)
-		ON CONFLICT(host_id, workspace, env) DO UPDATE SET host_name=excluded.host_name, stack=excluded.stack, created_at=CURRENT_TIMESTAMP`,
+		ON CONFLICT(host_id, project, env) DO UPDATE SET host_name=excluded.host_name, stack=excluded.stack, created_at=CURRENT_TIMESTAMP`,
 		hostID, hostName, ws, env, stack) //nolint:errcheck
 }
 
 // ListLeftovers returns all recorded source-host leftovers, newest first.
 func (b *Bridge) ListLeftovers() ([]Leftover, error) {
-	rows, err := b.db.Query(`SELECT id, host_id, host_name, workspace, env, stack, created_at FROM migration_leftovers ORDER BY created_at DESC`)
+	rows, err := b.db.Query(`SELECT id, host_id, host_name, project, env, stack, created_at FROM migration_leftovers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (b *Bridge) CleanLeftover(id int64, out io.Writer) error {
 		return fmt.Errorf("multi-host support is not configured")
 	}
 	var l Leftover
-	err := b.db.QueryRow(`SELECT id, host_id, host_name, workspace, env, stack FROM migration_leftovers WHERE id=?`, id).
+	err := b.db.QueryRow(`SELECT id, host_id, host_name, project, env, stack FROM migration_leftovers WHERE id=?`, id).
 		Scan(&l.ID, &l.HostID, &l.HostName, &l.Workspace, &l.Env, &l.Stack)
 	if err != nil {
 		return fmt.Errorf("leftover not found: %w", err)
@@ -677,7 +677,7 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, env, key, value string, versio
 	if err != nil {
 		return "", err
 	}
-	name := dockerops.SecretName(ws.Config.Project.Name, env, key, version)
+	name := dockerops.SecretName(ws.Config.Project.Prefix(), env, key, version)
 	if err := dockerops.EnsureSecret(ex, name, value); err != nil {
 		return "", err
 	}
@@ -695,7 +695,7 @@ func (b *Bridge) RemoveSwarmSecret(workspaceName, env, key string, version int) 
 	if err != nil {
 		return err
 	}
-	return dockerops.RemoveSecret(ex, dockerops.SecretName(ws.Config.Project.Name, env, key, version))
+	return dockerops.RemoveSecret(ex, dockerops.SecretName(ws.Config.Project.Prefix(), env, key, version))
 }
 
 // TermSession is an interactive PTY into a container — local (Docker socket) or

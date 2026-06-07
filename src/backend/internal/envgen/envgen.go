@@ -181,7 +181,11 @@ func generateImage(cfg *wsconfig.Config, env string, e wsconfig.Env, existing ma
 
 func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[string]string, r Rand) (string, string, error) {
 	project := cfg.Project.Name
-	prefix := project + "_" + env
+	// imgBase is the immutable Docker resource prefix (matches composegen container
+	// names and builder image tags); project (display name) stays for DB
+	// names/users/buckets so it can repeat across workspaces.
+	imgBase := cfg.Project.Prefix()
+	prefix := imgBase + "_" + env
 	prefixUpper := strings.ToUpper(prefix)
 	registry := cfg.Project.Registry
 	tag := cfg.VersionString() + "-" + env
@@ -217,9 +221,9 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 	p("# ── Image tags ─────────────────────────────────────────────\n")
 	p("REGISTRY=%s\n", registry)
 	p("IMAGE_TAG=%s\n", tag)
-	p("BACKEND_IMAGE=%s/%s-backend:%s\n", registry, project, tag)
+	p("BACKEND_IMAGE=%s/%s-backend:%s\n", registry, imgBase, tag)
 	if e.FrontendEnabled {
-		p("FRONTEND_IMAGE=%s/%s-frontend:%s\n", registry, project, tag)
+		p("FRONTEND_IMAGE=%s/%s-frontend:%s\n", registry, imgBase, tag)
 	}
 	p("\n")
 

@@ -50,7 +50,11 @@ func (g *gen) build() {
 	ptype := c.projectType()
 	ver := c.versionString()
 	tag := ver + "-" + g.env
-	prefix := project + "_" + g.env
+	// All Docker resource names derive from the immutable resource prefix
+	// ({workspace}_{project}), NOT the editable display name, so names stay
+	// globally unique when project display names repeat across workspaces.
+	rp := c.resourcePrefix()
+	prefix := rp + "_" + g.env
 	isSwarm := e.Deployment == "swarm"
 
 	// ── Header ──
@@ -86,7 +90,9 @@ func (g *gen) build() {
 	if ptype == "image" {
 		g.buildImageStack(prefix, isSwarm)
 	} else {
-		g.buildCustomStack(prefix, project, registry, tag, isSwarm)
+		// Pass the resource prefix (not the display name) as the image-name base so
+		// pushed image tags (registry/<prefix>-<service>) stay globally unique.
+		g.buildCustomStack(prefix, rp, registry, tag, isSwarm)
 	}
 }
 

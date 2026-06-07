@@ -83,7 +83,7 @@ func Bootstrap(workspacesDir, templatesDir, name, env string, regenEnv bool, out
 
 	// ── Custom stack ──────────────────────────────────────────────────────────────
 	project := cfg.Project.Name
-	prefix := project + "_" + env
+	prefix := cfg.Project.Prefix() + "_" + env
 
 	// 2. Backend Dockerfile + .dockerignore
 	beTmpl := filepath.Join(templatesDir, "dockerfiles", e.Backend)

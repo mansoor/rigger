@@ -27,6 +27,9 @@ type Project struct {
 	Type     string  `json:"type"`
 	Registry string  `json:"registry"`
 	Version  Version `json:"version"`
+	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
+	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
+	ResourcePrefix string `json:"resource_prefix,omitempty"`
 }
 
 type Version struct {
@@ -119,6 +122,15 @@ func (c *Config) version(key, def string) string {
 		return string(v)
 	}
 	return def
+}
+
+// resourcePrefix returns the immutable Docker resource prefix, falling back to
+// the project display name for configs created before resource_prefix existed.
+func (c *Config) resourcePrefix() string {
+	if c.Project.ResourcePrefix != "" {
+		return c.Project.ResourcePrefix
+	}
+	return c.Project.Name
 }
 
 // projectType returns the project type, defaulting to "custom".

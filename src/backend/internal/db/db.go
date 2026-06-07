@@ -40,7 +40,7 @@ func (d *DB) migrate() error {
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id     INTEGER REFERENCES users(id),
 			username    TEXT,
-			workspace   TEXT,
+			project     TEXT,
 			command     TEXT,
 			env         TEXT,
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -50,7 +50,7 @@ func (d *DB) migrate() error {
 		-- captured output and result, kept per workspace (pruned in actionruns.Record).
 		CREATE TABLE IF NOT EXISTS action_runs (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
-			workspace   TEXT    NOT NULL,
+			project     TEXT    NOT NULL,
 			env         TEXT,
 			command     TEXT    NOT NULL,
 			extra       TEXT,
@@ -60,7 +60,7 @@ func (d *DB) migrate() error {
 			started_at  INTEGER,           -- epoch ms
 			finished_at INTEGER            -- epoch ms
 		);
-		CREATE INDEX IF NOT EXISTS idx_action_runs_ws ON action_runs(workspace, id);
+		CREATE INDEX IF NOT EXISTS idx_action_runs_ws ON action_runs(project, id);
 
 		CREATE TABLE IF NOT EXISTS backup_targets (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +114,7 @@ func (d *DB) migrate() error {
 			name             TEXT    NOT NULL,
 			condition_type   TEXT    NOT NULL,
 			threshold        REAL    NOT NULL DEFAULT 0,
-			workspace        TEXT    NOT NULL DEFAULT '',
+			project          TEXT    NOT NULL DEFAULT '',
 			env              TEXT    NOT NULL DEFAULT '',
 			severity         TEXT    NOT NULL DEFAULT 'warning',
 			cooldown_minutes INTEGER NOT NULL DEFAULT 15,
@@ -131,7 +131,7 @@ func (d *DB) migrate() error {
 			rule_id        INTEGER REFERENCES alert_rules(id) ON DELETE SET NULL,
 			rule_name      TEXT    NOT NULL DEFAULT '',
 			condition_type TEXT    NOT NULL DEFAULT '',
-			workspace      TEXT    NOT NULL DEFAULT '',
+			project        TEXT    NOT NULL DEFAULT '',
 			env            TEXT    NOT NULL DEFAULT '',
 			message        TEXT    NOT NULL,
 			severity       TEXT    NOT NULL DEFAULT 'warning',
@@ -141,7 +141,7 @@ func (d *DB) migrate() error {
 			dismissed      INTEGER NOT NULL DEFAULT 0
 		);
 		CREATE INDEX IF NOT EXISTS idx_alert_events_open
-			ON alert_events(rule_id, workspace, env, resolved_at);
+			ON alert_events(rule_id, project, env, resolved_at);
 		CREATE INDEX IF NOT EXISTS idx_alert_events_inbox
 			ON alert_events(dismissed, fired_at);
 
@@ -151,7 +151,7 @@ func (d *DB) migrate() error {
 		-- Also seeds Phase 11 (Backup Verification & Scheduling).
 		CREATE TABLE IF NOT EXISTS backup_log (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			workspace  TEXT    NOT NULL,
+			project    TEXT    NOT NULL,
 			env        TEXT    NOT NULL,
 			status     TEXT    NOT NULL DEFAULT 'ok',
 			message    TEXT    NOT NULL DEFAULT '',
@@ -159,13 +159,13 @@ func (d *DB) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_backup_log_target
-			ON backup_log(workspace, env, created_at);
+			ON backup_log(project, env, created_at);
 
 		-- 11d: remote-sync state per snapshot. One row per (workspace, env, date)
 		-- snapshot pushed to an S3/SFTP backup target; ListBackups joins this to
 		-- show a "synced" badge.
 		CREATE TABLE IF NOT EXISTS backup_syncs (
-			workspace   TEXT    NOT NULL,
+			project     TEXT    NOT NULL,
 			env         TEXT    NOT NULL,
 			date        TEXT    NOT NULL,
 			target_id   INTEGER NOT NULL,
@@ -175,18 +175,18 @@ func (d *DB) migrate() error {
 			files       INTEGER NOT NULL DEFAULT 0,
 			bytes       INTEGER NOT NULL DEFAULT 0,
 			synced_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (workspace, env, date)
+			PRIMARY KEY (project, env, date)
 		);
 
 		-- Per-env backup schedule run-tracking (Phase 11 per-env redesign): last
 		-- time each schedule executed, so the interval-based scheduler knows when
 		-- the next run is due. Keyed by (workspace, env, schedule_id).
 		CREATE TABLE IF NOT EXISTS backup_schedule_runs (
-			workspace   TEXT NOT NULL,
+			project     TEXT NOT NULL,
 			env         TEXT NOT NULL,
 			schedule_id TEXT NOT NULL,
 			last_run_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (workspace, env, schedule_id)
+			PRIMARY KEY (project, env, schedule_id)
 		);
 
 		-- 11a: remote-sync state for full workspace archives (.rwb), keyed by the
@@ -205,7 +205,7 @@ func (d *DB) migrate() error {
 		-- secret-flagged env var is recorded here — key name only, never the value.
 		CREATE TABLE IF NOT EXISTS secret_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			workspace  TEXT    NOT NULL,
+			project    TEXT    NOT NULL,
 			env        TEXT    NOT NULL,
 			key        TEXT    NOT NULL,
 			action     TEXT    NOT NULL,            -- read | write | rotate | delete
@@ -214,7 +214,7 @@ func (d *DB) migrate() error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_secret_events_target
-			ON secret_events(workspace, env, key, created_at);
+			ON secret_events(project, env, key, created_at);
 
 		-- 6b: Notification channels. type 'email' is delivered directly via SMTP;
 		-- all other types ('apprise') are delivered through the Apprise API
@@ -236,7 +236,7 @@ func (d *DB) migrate() error {
 		-- Old rows are pruned (90-day retention) by the collector.
 		CREATE TABLE IF NOT EXISTS metrics_snapshots (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
-			workspace    TEXT    NOT NULL,
+			project      TEXT    NOT NULL,
 			env          TEXT    NOT NULL,
 			cpu_pct      REAL    NOT NULL DEFAULT 0,
 			memory_bytes INTEGER NOT NULL DEFAULT 0,
@@ -246,7 +246,7 @@ func (d *DB) migrate() error {
 			recorded_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE INDEX IF NOT EXISTS idx_metrics_target
-			ON metrics_snapshots(workspace, env, recorded_at);
+			ON metrics_snapshots(project, env, recorded_at);
 
 		-- ── Phase 7: Multi-Host Support ────────────────────────────────────────
 		-- 7a: registered remote hosts. ssh_key_encrypted is AES-256-GCM over the
@@ -268,24 +268,24 @@ func (d *DB) migrate() error {
 		-- below). Kept so existing rows can be mirrored forward; new code never
 		-- writes here.
 		CREATE TABLE IF NOT EXISTS workspace_hosts (
-			workspace TEXT    PRIMARY KEY,
+			project   TEXT    PRIMARY KEY,
 			host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE
 		);
 
-		-- Per-environment host binding. A row (workspace, env) pins one environment
-		-- to a host; env='' is the workspace-wide default used when an env has no
+		-- Per-environment host binding. A row (project, env) pins one environment
+		-- to a host; env='' is the project-wide default used when an env has no
 		-- explicit row. No matching row ⇒ that env runs on the local control plane.
 		CREATE TABLE IF NOT EXISTS workspace_host_envs (
-			workspace TEXT    NOT NULL,
+			project   TEXT    NOT NULL,
 			env       TEXT    NOT NULL,
 			host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-			PRIMARY KEY (workspace, env)
+			PRIMARY KEY (project, env)
 		);
 
-		-- Mirror any legacy per-workspace binding forward as the env='' default.
+		-- Mirror any legacy per-project binding forward as the env='' default.
 		-- Idempotent (PK + OR IGNORE); harmless once workspace_hosts is empty.
-		INSERT OR IGNORE INTO workspace_host_envs (workspace, env, host_id)
-			SELECT workspace, '', host_id FROM workspace_hosts;
+		INSERT OR IGNORE INTO workspace_host_envs (project, env, host_id)
+			SELECT project, '', host_id FROM workspace_hosts;
 
 		-- Data/files left on a SOURCE host after an environment was migrated away
 		-- (host_id 0 = local control plane). Recorded so the user can wipe them via
@@ -295,11 +295,11 @@ func (d *DB) migrate() error {
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			host_id    INTEGER NOT NULL,
 			host_name  TEXT    NOT NULL DEFAULT '',
-			workspace  TEXT    NOT NULL,
+			project    TEXT    NOT NULL,
 			env        TEXT    NOT NULL,
 			stack      TEXT    NOT NULL,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(host_id, workspace, env)
+			UNIQUE(host_id, project, env)
 		);
 
 		-- The single Rigger-managed SSH identity. Generated on first request; the

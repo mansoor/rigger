@@ -252,7 +252,7 @@ func (h *Handler) ScanHost(w http.ResponseWriter, r *http.Request) {
 
 	// Which of this host's workspaces are already imported locally?
 	imported := map[string]bool{}
-	if rows, qerr := h.db.Query(`SELECT DISTINCT workspace FROM workspace_host_envs WHERE host_id=?`, id); qerr == nil {
+	if rows, qerr := h.db.Query(`SELECT DISTINCT project FROM workspace_host_envs WHERE host_id=?`, id); qerr == nil {
 		for rows.Next() {
 			var ws string
 			if rows.Scan(&ws) == nil { //nolint:errcheck
