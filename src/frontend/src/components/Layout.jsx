@@ -1,8 +1,9 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState, useRef, useEffect } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { fetchWorkspaces, fetchEnvStatus, changePassword, fetchAlertUnread } from '../lib/api'
+import { useWorkspaceStore } from '../store/workspace'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -15,13 +16,13 @@ const STATUS_DOT = {
   unknown:  'bg-surface-overlay',
 }
 
-// Polls the first environment of a workspace to determine its dot color
-function WorkspaceStatusDot({ name, envs }) {
+// Polls the first environment of a project to determine its dot color
+function ProjectStatusDot({ workspace, name, envs }) {
   const firstEnv = envs?.[0]
   const { data } = useQuery({
-    queryKey: ['envstatus', name, firstEnv],
-    queryFn: () => fetchEnvStatus(name, firstEnv),
-    enabled: !!firstEnv,
+    queryKey: ['envstatus', workspace, name, firstEnv],
+    queryFn: () => fetchEnvStatus(workspace, name, firstEnv),
+    enabled: !!workspace && !!firstEnv,
     refetchInterval: 30_000, // SSE handles real-time; this is just a fallback
     retry: false,
   })
@@ -29,10 +30,10 @@ function WorkspaceStatusDot({ name, envs }) {
   return <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[status] || STATUS_DOT.unknown}`} />
 }
 
-function WorkspaceSidebarItem({ ws, active }) {
-  const cfg = ws.config
+function ProjectSidebarItem({ workspace, project, active }) {
+  const cfg = project.config
   const type = cfg?.project?.type || 'custom'
-  const envs = ws.envs || []
+  const envs = project.envs || []
 
   // Derive a short stack description from config
   let stackLine = ''
@@ -47,7 +48,7 @@ function WorkspaceSidebarItem({ ws, active }) {
 
   return (
     <Link
-      to={`/workspaces/${ws.name}`}
+      to={`/workspaces/${workspace}/projects/${project.name}`}
       className={`block px-3 py-2.5 rounded-lg transition-colors ${
         active
           ? 'bg-surface-raised text-content-strong'
@@ -55,13 +56,124 @@ function WorkspaceSidebarItem({ ws, active }) {
       }`}
     >
       <div className="flex items-center gap-2.5">
-        <WorkspaceStatusDot name={ws.name} envs={ws.envs} />
-        <span className="font-medium text-sm truncate">{ws.name}</span>
+        <ProjectStatusDot workspace={workspace} name={project.name} envs={project.envs} />
+        <span className="font-medium text-sm truncate">{project.name}</span>
       </div>
       {stackLine && (
         <p className="text-xs text-content-subtle mt-0.5 ml-4.5 truncate pl-4">{stackLine}</p>
       )}
     </Link>
+  )
+}
+
+// Top-nav dropdown to pick the active parent-tier Workspace. Changing it scopes
+// the whole UI (sidebar projects, dashboard) and navigates home.
+function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors max-w-[200px]"
+      >
+        <span className="text-xs text-content-subtle uppercase tracking-wider shrink-0">WS</span>
+        <span className="font-semibold truncate">{current || 'Select workspace'}</span>
+        <span className="text-xs text-content-faint shrink-0">▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[220px] py-1 overflow-hidden">
+          <div className="max-h-72 overflow-y-auto">
+            {(workspaces || []).length === 0 && (
+              <p className="px-3 py-2 text-xs text-content-subtle">No workspaces yet.</p>
+            )}
+            {(workspaces || []).map(ws => (
+              <button
+                key={ws.name}
+                onClick={() => { setOpen(false); onSelect(ws.name) }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                  ws.name === current
+                    ? 'bg-surface-overlay text-content-strong font-semibold'
+                    : 'text-content hover:bg-surface-overlay hover:text-content-strong'
+                }`}
+              >
+                {ws.name}
+              </button>
+            ))}
+          </div>
+          <div className="border-t border-border-strong mt-1 pt-1">
+            <button
+              onClick={() => { setOpen(false); onNewWorkspace() }}
+              className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
+            >
+              ＋ New workspace
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NewWorkspaceModal({ onClose, onCreated }) {
+  const [name, setName] = useState('')
+  const [error, setError] = useState('')
+  const mutation = useMutation({
+    mutationFn: () => createWorkspaceTier(name.trim()),
+    onSuccess: () => onCreated(name.trim()),
+    onError: (e) => setError(e.response?.data?.error || 'Failed to create workspace'),
+  })
+
+  function submit(e) {
+    e.preventDefault()
+    setError('')
+    const n = name.trim()
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(n)) {
+      setError('Use letters, numbers, dashes and underscores (must start alphanumeric).')
+      return
+    }
+    mutation.mutate()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <form
+        className="bg-surface border border-border rounded-xl w-full max-w-sm mx-4 p-6 space-y-4"
+        onClick={e => e.stopPropagation()}
+        onSubmit={submit}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">New workspace</h3>
+          <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        <p className="text-sm text-content-muted">
+          A workspace groups related projects. Project names only need to be unique
+          within a workspace.
+        </p>
+        {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Workspace name</label>
+          <input
+            autoFocus value={name} onChange={e => setName(e.target.value)} required
+            placeholder="e.g. acme"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
+          />
+        </div>
+        <button
+          type="submit" disabled={mutation.isPending}
+          className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+        >
+          {mutation.isPending ? 'Creating…' : 'Create workspace'}
+        </button>
+      </form>
+    </div>
   )
 }
 
@@ -180,16 +292,46 @@ export default function Layout({ children }) {
   const user     = useAuthStore((s) => s.user)
   const logout   = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
-  const { name: activeName } = useParams()
+  const qc       = useQueryClient()
+  const { workspace: routeWs, name: activeName } = useParams()
+  const current    = useWorkspaceStore((s) => s.current)
+  const setCurrent = useWorkspaceStore((s) => s.setCurrent)
   const [slidePanel, setSlidePanel] = useState(null) // 'activity' | 'backup' | 'version'
+  const [newWsOpen, setNewWsOpen]   = useState(false)
 
   useDockerEvents()
 
+  // List the parent-tier workspaces (the selector's options).
   const { data: workspaces } = useQuery({
     queryKey: ['workspaces'],
     queryFn: fetchWorkspaces,
     refetchInterval: 30_000,
   })
+
+  // The route is authoritative: a deep-link to /workspaces/:workspace/... syncs
+  // the selected workspace. Otherwise, default to the first available workspace
+  // once the list loads and nothing is selected yet.
+  useEffect(() => {
+    if (routeWs && routeWs !== current) { setCurrent(routeWs); return }
+    if (!current && workspaces?.length) setCurrent(workspaces[0].name)
+  }, [routeWs, current, workspaces, setCurrent])
+
+  // Projects belonging to the selected workspace (the sidebar list).
+  const { data: projects } = useQuery({
+    queryKey: ['projects', current],
+    queryFn: () => fetchProjects(current),
+    enabled: !!current,
+    refetchInterval: 30_000,
+  })
+
+  function selectWorkspace(ws) {
+    if (ws === current) return
+    setCurrent(ws)
+    // Project-scoped caches belong to the previous workspace — drop them so the
+    // new workspace's data can't be served from a stale same-named key.
+    qc.removeQueries({ queryKey: ['projects'] })
+    navigate('/')
+  }
 
   async function handleLogout() {
     await logout()
@@ -205,7 +347,12 @@ export default function Layout({ children }) {
             <Link to="/" className="flex items-center shrink-0">
               <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
             </Link>
-            <span className="text-content-muted text-sm hidden sm:inline">Rig once. Deploy anywhere</span>
+            <WorkspaceSelector
+              current={current}
+              workspaces={workspaces}
+              onSelect={selectWorkspace}
+              onNewWorkspace={() => setNewWsOpen(true)}
+            />
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
@@ -223,12 +370,21 @@ export default function Layout({ children }) {
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
         <aside className="w-56 shrink-0 border-r border-border bg-surface flex flex-col min-h-0">
-          {/* Workspace list — scrolls internally so the actions below stay in view */}
+          {/* Project list — scrolls internally so the actions below stay in view */}
           <div className="flex-1 min-h-0 flex flex-col p-3 border-b border-border">
-            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider px-1 mb-2 shrink-0">Workspaces</p>
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider px-1 mb-2 shrink-0">Projects</p>
             <div className="space-y-0.5 overflow-y-auto min-h-0">
-              {(workspaces || []).map(ws => (
-                <WorkspaceSidebarItem key={ws.name} ws={ws} active={ws.name === activeName} />
+              {!current ? (
+                <p className="text-xs text-content-subtle px-1 py-2">Select a workspace to see its projects.</p>
+              ) : (projects || []).length === 0 ? (
+                <p className="text-xs text-content-subtle px-1 py-2">No projects in this workspace yet.</p>
+              ) : (projects || []).map(p => (
+                <ProjectSidebarItem
+                  key={p.name}
+                  workspace={current}
+                  project={p}
+                  active={p.name === activeName && current === routeWs}
+                />
               ))}
             </div>
           </div>
@@ -236,11 +392,12 @@ export default function Layout({ children }) {
           {/* Actions — pinned at the bottom, always visible */}
           <div className="p-3 space-y-1.5 shrink-0">
             <Link
-              to="/new"
+              to={current ? `/workspaces/${current}/projects/new` : '#'}
+              onClick={(e) => { if (!current) { e.preventDefault(); setNewWsOpen(true) } }}
               className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
             >
               <span className="text-base leading-none">＋</span>
-              New workspace
+              New project
             </Link>
             <div className="pt-1 space-y-0.5">
               <SidebarBtn label="Recent activity" icon="◎" active={slidePanel === 'activity'} onClick={() => setSlidePanel(p => p === 'activity' ? null : 'activity')} />
@@ -259,6 +416,19 @@ export default function Layout({ children }) {
       {/* Slide-out panels (Activity / Backup / Version) */}
       {slidePanel && (
         <SlideOutPanel panel={slidePanel} onClose={() => setSlidePanel(null)} />
+      )}
+
+      {/* New-workspace (tier) modal */}
+      {newWsOpen && (
+        <NewWorkspaceModal
+          onClose={() => setNewWsOpen(false)}
+          onCreated={(name) => {
+            setNewWsOpen(false)
+            qc.invalidateQueries({ queryKey: ['workspaces'] })
+            setCurrent(name)
+            navigate('/')
+          }}
+        />
       )}
     </div>
   )

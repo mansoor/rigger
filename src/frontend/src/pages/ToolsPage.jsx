@@ -5,10 +5,11 @@ import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft,
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive, syncWorkspaceArchive,
-  restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchWorkspaces,
+  restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchProjects,
   createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot, uploadWorkspaceSnapshot,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceStore } from '../store/workspace'
 import { useConfirm } from '../context/ConfirmContext'
 
 // ── docker-compose → Rigger template converter ──────────────────────────────────
@@ -550,9 +551,13 @@ function ComposeToTemplate() {
   const [wsModalOpen, setWsModalOpen] = useState(false)
   const [wsBusy, setWsBusy]   = useState(false)
   const [wsError, setWsError] = useState('')
-  const { data: allWorkspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces, staleTime: 30_000 })
+  const currentWs = useWorkspaceStore(s => s.current)
+  const { data: allProjects = [] } = useQuery({
+    queryKey: ['projects', currentWs], queryFn: () => fetchProjects(currentWs),
+    enabled: !!currentWs, staleTime: 30_000,
+  })
   // Only image stacks can become templates (project.type lives in the nested config).
-  const imageWorkspaces = allWorkspaces.filter(w => w.config?.project?.type === 'image')
+  const imageWorkspaces = allProjects.filter(w => w.config?.project?.type === 'image')
 
   // Parse the editable JSON for the summary chips, metadata helpers and download.
   let parsed = null
@@ -581,7 +586,7 @@ function ComposeToTemplate() {
     if (!wsName) return
     setWsBusy(true); setWsError('')
     try {
-      const draft = await fetchTemplateDraft(wsName, env)
+      const draft = await fetchTemplateDraft(currentWs, wsName, env)
       const slug = wsName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
       loadTemplate({ ...draft, name: draft.name || slug, label: draft.label || wsName })
       setWsModalOpen(false)
@@ -940,6 +945,7 @@ function WorkspaceBackup() {
   const qc    = useQueryClient()
   const token = useAuthStore(s => s.token)
   const confirm = useConfirm()
+  const currentWs = useWorkspaceStore(s => s.current)
 
   // Shared
   const [selectedWs, setSelectedWs]   = useState('')
@@ -963,10 +969,11 @@ function WorkspaceBackup() {
   const [restoringArchive, setRestoringArchive] = useState({})
   const [archiveUploading, setArchiveUploading] = useState(false)
 
-  // Workspace list
+  // Project list for the selected workspace (the .rwb/.rws tools operate per project).
   const { data: workspaces = [] } = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: fetchWorkspaces,
+    queryKey: ['projects', currentWs],
+    queryFn: () => fetchProjects(currentWs),
+    enabled: !!currentWs,
     staleTime: 30_000,
   })
 

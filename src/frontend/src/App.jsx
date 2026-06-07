@@ -6,9 +6,9 @@ import { ConfirmProvider } from './context/ConfirmContext'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
 import DashboardPage from './pages/DashboardPage'
-import WorkspacePage from './pages/WorkspacePage'
-import NewWorkspacePage from './pages/NewWorkspacePage'
-import EditWorkspacePage from './pages/EditWorkspacePage'
+import ProjectPage from './pages/ProjectPage'
+import NewProjectPage from './pages/NewProjectPage'
+import EditProjectPage from './pages/EditProjectPage'
 import SettingsPage from './pages/SettingsPage'
 import HousekeepingPage from './pages/HousekeepingPage'
 import ToolsPage from './pages/ToolsPage'
@@ -50,9 +50,11 @@ function AppRoutes() {
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
-        <Route path="/workspaces/:name" element={<RequireAuth><WorkspacePage /></RequireAuth>} />
-        <Route path="/new" element={<RequireAuth><NewWorkspacePage /></RequireAuth>} />
-        <Route path="/workspaces/:name/edit" element={<RequireAuth><EditWorkspacePage /></RequireAuth>} />
+        <Route path="/workspaces/:workspace/projects/new" element={<RequireAuth><NewProjectPage /></RequireAuth>} />
+        <Route path="/workspaces/:workspace/projects/:name" element={<RequireAuth><ProjectPage /></RequireAuth>} />
+        <Route path="/workspaces/:workspace/projects/:name/edit" element={<RequireAuth><EditProjectPage /></RequireAuth>} />
+        {/* Back-compat: bare /new resolves to the create wizard (it reads the selected workspace) */}
+        <Route path="/new" element={<RequireAuth><NewProjectPage /></RequireAuth>} />
         <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
         <Route path="/housekeeping" element={<RequireAuth><HousekeepingPage /></RequireAuth>} />
         <Route path="/tools"        element={<RequireAuth><ToolsPage /></RequireAuth>} />

@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchWorkspaces, fetchHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchProjects, fetchHosts } from '../lib/api'
+import { useWorkspaceStore } from '../store/workspace'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
@@ -81,26 +82,29 @@ function StepHeader({ step, title, subtitle }) {
 
 const CUSTOM_REGISTRY = '__custom__'
 
-function Step1({ data, onChange, errors, onConflict }) {
+function Step1({ data, onChange, errors, onConflict, workspace }) {
   // Registered remote hosts (Phase 7) — for the default-host selector.
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
 
-  // Uniqueness check — fetch existing workspace names once and compare
-  const { data: existingWorkspaces = [] } = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: fetchWorkspaces,
+  // Uniqueness check — project names need only be unique within this workspace.
+  const { data: existingProjects = [] } = useQuery({
+    queryKey: ['projects', workspace],
+    queryFn: () => fetchProjects(workspace),
+    enabled: !!workspace,
     staleTime: 30_000,
   })
-  const existingNames = existingWorkspaces.map(w => w.name)
+  const existingNames = existingProjects.map(w => w.name)
   const nameConflict = data.name.trim() && existingNames.includes(data.name.trim())
-    ? `A workspace named "${data.name.trim()}" already exists`
+    ? `A project named "${data.name.trim()}" already exists in workspace "${workspace}"`
     : null
   // Propagate conflict to parent so validate() can block Continue
   useEffect(() => { onConflict(nameConflict) }, [nameConflict]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const resourcePrefix = workspace && data.name.trim() ? `${workspace}_${data.name.trim()}` : ''
+
   return (
     <div className="space-y-5">
-      <StepHeader step={1} title="Project" subtitle="Name your project and pick a default host." />
+      <StepHeader step={1} title="Project" subtitle={`Name your project in workspace "${workspace}" and pick a default host.`} />
 
       <div>
         <Label required>Project name</Label>
@@ -109,7 +113,12 @@ function Step1({ data, onChange, errors, onConflict }) {
           placeholder="my-app" error={errors.name || nameConflict}
         />
         {!errors.name && !nameConflict && (
-          <p className="text-xs text-content-subtle mt-1">Lowercase letters, numbers, hyphens. Becomes the Docker resource prefix.</p>
+          <p className="text-xs text-content-subtle mt-1">Lowercase letters, numbers, hyphens. Unique within this workspace.</p>
+        )}
+        {resourcePrefix && (
+          <p className="text-xs text-content-subtle mt-1">
+            Docker resource prefix: <code className="font-mono text-content-muted">{resourcePrefix}</code> (immutable)
+          </p>
         )}
       </div>
 
@@ -1341,7 +1350,7 @@ function Step6({ data }) {
 
 // ── Step 7: Creating (live terminal) ─────────────────────────────────────────
 
-function Step7({ workspace, onDone, onResult, onGoBack }) {
+function Step7({ payload, onDone, onResult, onGoBack }) {
   const termRef      = useRef(null)
   const containerRef = useRef(null)
   const [status, setStatus] = useState(null) // null | 'success' | 'failure'
@@ -1366,7 +1375,7 @@ function Step7({ workspace, onDone, onResult, onGoBack }) {
       onResult(result)
     }
 
-    const ws = openCreateSocket(workspace)
+    const ws = openCreateSocket(payload)
     ws.addEventListener('message', e => {
       term.write(e.data)
       const text = e.data
@@ -1399,8 +1408,8 @@ function Step7({ workspace, onDone, onResult, onGoBack }) {
     <div className="space-y-4">
       <StepHeader step={7} title="Result" subtitle={
         !isDone ? 'Bootstrap in progress — this takes a few seconds.' :
-        isSuccess ? 'Workspace created successfully.' :
-        'Workspace creation failed — review the output above.'
+        isSuccess ? 'Project created successfully.' :
+        'Project creation failed — review the output above.'
       } />
 
       <div ref={containerRef} className="rounded-xl overflow-hidden" style={{ height: 320 }} />
@@ -1413,7 +1422,7 @@ function Step7({ workspace, onDone, onResult, onGoBack }) {
         }`}>
           <span className="text-lg">{isSuccess ? '✓' : '✗'}</span>
           <span className="text-sm font-medium">
-            {isSuccess ? 'Workspace created successfully.' : 'Creation failed. Review output above for details.'}
+            {isSuccess ? 'Project created successfully.' : 'Creation failed. Review output above for details.'}
           </span>
         </div>
       )}
@@ -1497,8 +1506,13 @@ const DEFAULT_DATA = {
   templateVolumes: [], // read-only display list populated from selected prebuilt template
 }
 
-export default function NewWorkspacePage() {
+export default function NewProjectPage() {
   const navigate = useNavigate()
+  const params = useParams()
+  const storeWs = useWorkspaceStore(s => s.current)
+  // The parent-tier workspace: from the route (/workspaces/:workspace/projects/new),
+  // falling back to the selected workspace for the bare /new shortcut.
+  const workspace = params.workspace || storeWs
   const qc = useQueryClient()
   const [step, setStep]           = useState(1)
   const [data, setData]           = useState(DEFAULT_DATA)
@@ -1547,6 +1561,7 @@ export default function NewWorkspacePage() {
   function buildPayload() {
     const isImage = data.stackType === 'prebuilt' || data.stackType === 'image'
     return {
+      workspace: workspace, // parent-tier workspace (sets resource_prefix = {workspace}_{name})
       name: data.name.trim(),
       // Registry is only used to tag/push built images (custom stacks). Image and
       // prebuilt stacks pull images directly, so send empty to avoid storing a
@@ -1589,8 +1604,8 @@ export default function NewWorkspacePage() {
   }
 
   function handleDone() {
-    qc.invalidateQueries({ queryKey: ['workspaces'] })
-    navigate(`/workspaces/${data.name}`)
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
+    navigate(`/workspaces/${workspace}/projects/${data.name}`)
   }
 
   return (
@@ -1600,7 +1615,7 @@ export default function NewWorkspacePage() {
         <div className="px-6 h-12 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
-            <span className="text-content-muted text-sm">New workspace</span>
+            <span className="text-content-muted text-sm">New project{workspace ? ` · ${workspace}` : ''}</span>
           </div>
           {step < 7
             ? <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg transition-colors">Cancel</button>
@@ -1615,7 +1630,7 @@ export default function NewWorkspacePage() {
           <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} />
 
           <div className="bg-surface border border-border rounded-2xl p-8">
-            {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} />}
+            {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} />}
             {step === 2 && <Step2 data={data} onChange={update} errors={errors} />}
             {/* Services (3) then Environments (4) — define the stack shape before
                 its environments. Step4=Services component, Step3=Environments. */}
@@ -1625,7 +1640,7 @@ export default function NewWorkspacePage() {
             {step === 6 && <Step6 data={data} />}
             {step === 7 && (
               <Step7
-                workspace={buildPayload()}
+                payload={buildPayload()}
                 onDone={handleDone}
                 onResult={result => setCreateResult(result)}
                 onGoBack={() => { setCreateResult(null); setStep(6) }}
@@ -1656,7 +1671,7 @@ export default function NewWorkspacePage() {
                       : 'bg-brand-600 hover:bg-brand-700'
                   }`}
                 >
-                  {step === 6 ? 'Create workspace' : 'Continue →'}
+                  {step === 6 ? 'Create project' : 'Continue →'}
                 </button>
               </div>
             )}

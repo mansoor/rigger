@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage } from '../lib/api'
+import { useWorkspaceStore } from '../store/workspace'
 import Layout from '../components/Layout'
 
 // Aggregate the live per-project stats down to one workspace. Containers (running
@@ -10,8 +11,9 @@ import Layout from '../components/Layout'
 function aggregateLive(ws, live) {
   let running = 0, total = 0, cpu = 0, mem = 0, net = 0
   const svc = new Set()
+  const prefix = ws.resource_prefix || `${ws.workspace}_${ws.name}`
   for (const env of (ws.envs || [])) {
-    const p = live[`${ws.name}_${env}`]
+    const p = live[`${prefix}_${env}`]
     if (!p) continue
     running += p.running || 0
     total   += p.total || 0
@@ -109,10 +111,10 @@ function Bar({ pct }) {
 
 // ── Env status dot ────────────────────────────────────────────────────────────
 
-function EnvDot({ wsName, envName }) {
+function EnvDot({ workspace, wsName, envName }) {
   const { data } = useQuery({
-    queryKey:      ['envstatus', wsName, envName],
-    queryFn:       () => fetchEnvStatus(wsName, envName),
+    queryKey:      ['envstatus', workspace, wsName, envName],
+    queryFn:       () => fetchEnvStatus(workspace, wsName, envName),
     refetchInterval: 60_000,
     retry: false,
   })
@@ -256,7 +258,7 @@ function BackupCoverage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-content-subtle border-b border-border">
-              <th className="px-5 py-2 font-medium">Workspace / Env</th>
+              <th className="px-5 py-2 font-medium">Workspace / Project / Env</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Last backup</th>
               <th className="px-3 py-2 font-medium">Schedules</th>
@@ -269,7 +271,7 @@ function BackupCoverage() {
               const h = BACKUP_HEALTH[r.health] || BACKUP_HEALTH.disabled
               return (
                 <tr key={i} className="border-b border-border/50 last:border-0">
-                  <td className="px-5 py-2"><span className="text-content">{r.workspace}</span> <span className="text-content-faint">/ {r.env}</span></td>
+                  <td className="px-5 py-2"><span className="text-content-faint">{r.workspace} /</span> <span className="text-content">{r.project}</span> <span className="text-content-faint">/ {r.env}</span></td>
                   <td className="px-3 py-2">
                     <span className="inline-flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${h.dot}`} />
@@ -299,6 +301,7 @@ function BackupCoverage() {
 }
 
 export default function DashboardPage() {
+  const current = useWorkspaceStore(s => s.current)
   const { data: stats, isLoading } = useQuery({
     queryKey:      ['stats'],
     queryFn:       fetchStats,
@@ -322,7 +325,9 @@ export default function DashboardPage() {
   const docker = stats?.docker || {}
   const host   = stats?.host   || {}
   const ws     = stats?.workspaces || {}
-  const workspaces = ws.workspaces || []
+  const allProjects = ws.workspaces || []
+  // Scope the project table to the selected workspace tier.
+  const workspaces = current ? allProjects.filter(w => w.workspace === current) : allProjects
 
   // Near-real-time per-project stats (cpu/mem/net/running/services). Polled fast
   // and invalidated by Docker events (useDockerEvents), so the table tracks
@@ -341,14 +346,15 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!live || Object.keys(live).length === 0) return
     const now = Date.now()
-    const totals = {} // name → { rx, tx } cumulative bytes
+    const totals = {} // resource_prefix → { rx, tx } cumulative bytes
     for (const w of workspaces) {
+      const prefix = w.resource_prefix || `${w.workspace}_${w.name}`
       let rx = 0, tx = 0
       for (const env of (w.envs || [])) {
-        const p = live[`${w.name}_${env}`]
+        const p = live[`${prefix}_${env}`]
         if (p) { rx += p.net_rx_bytes || 0; tx += p.net_tx_bytes || 0 }
       }
-      totals[w.name] = { rx, tx }
+      totals[prefix] = { rx, tx }
     }
     if (prevNet.current) {
       const dt = (now - prevNet.current.t) / 1000
@@ -395,7 +401,7 @@ export default function DashboardPage() {
             accent={alertAccent}
           />
           <StatCard
-            label="Workspaces"
+            label="Projects"
             value={ws.total ?? '—'}
             sub={`${ws.by_type?.image || 0} image · ${ws.by_type?.custom || 0} custom`}
             accent="blue"
@@ -429,14 +435,20 @@ export default function DashboardPage() {
         {/* ── Workspaces table ── */}
         <div className="bg-surface border border-border rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-content">Workspaces</h2>
-            <Link to="/new" className="text-xs text-brand-400 hover:text-brand-300 transition-colors font-medium">+ New workspace</Link>
+            <h2 className="text-sm font-semibold text-content">
+              Projects{current ? <span className="text-content-subtle font-normal"> · {current}</span> : null}
+            </h2>
+            {current && (
+              <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-brand-400 hover:text-brand-300 transition-colors font-medium">+ New project</Link>
+            )}
           </div>
 
           {workspaces.length === 0 ? (
             <div className="px-5 py-10 text-center">
-              <p className="text-sm text-content-subtle">No workspaces yet.</p>
-              <Link to="/new" className="text-xs text-brand-400 hover:text-brand-300 mt-2 inline-block">Create your first workspace →</Link>
+              <p className="text-sm text-content-subtle">{current ? `No projects in “${current}” yet.` : 'Select a workspace to see its projects.'}</p>
+              {current && (
+                <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-brand-400 hover:text-brand-300 mt-2 inline-block">Create your first project →</Link>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -457,14 +469,15 @@ export default function DashboardPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {workspaces.map(w => {
-                    const as = wsAlertStyle(summary.by_workspace?.[w.name])
+                    const prefix = w.resource_prefix || `${w.workspace}_${w.name}`
+                    const as = wsAlertStyle(summary.by_workspace?.[prefix])
                     const lv = aggregateLive(w, live)
-                    const netRate = netRates[w.name] || { rx: 0, tx: 0 }
+                    const netRate = netRates[prefix] || { rx: 0, tx: 0 }
                     return (
-                    <tr key={w.name} className={`hover:bg-surface-raised/40 transition-colors group ${as.row}`}>
+                    <tr key={prefix} className={`hover:bg-surface-raised/40 transition-colors group ${as.row}`}>
                       <td className={`px-5 py-3 ${as.cell}`}>
                         <div className="flex items-center gap-2">
-                          <Link to={`/workspaces/${w.name}`} className="font-medium text-content-strong group-hover:text-brand-400 transition-colors">
+                          <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="font-medium text-content-strong group-hover:text-brand-400 transition-colors">
                             {w.name}
                           </Link>
                           {as.badge && (
@@ -485,7 +498,7 @@ export default function DashboardPage() {
                             const eh = w.env_hosts?.[env]
                             return (
                             <div key={env} className="flex items-center gap-1.5">
-                              <EnvDot wsName={w.name} envName={env} />
+                              <EnvDot workspace={w.workspace} wsName={w.name} envName={env} />
                               <span className="text-xs text-content-muted">{env}</span>
                               {eh?.host_name && (
                                 <span title={`runs on ${eh.host_name}`} className="text-[10px] px-1 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">🖥 {eh.host_name}</span>
@@ -542,7 +555,7 @@ export default function DashboardPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link to={`/workspaces/${w.name}`} className="text-xs text-content-faint group-hover:text-content-muted transition-colors">
+                        <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="text-xs text-content-faint group-hover:text-content-muted transition-colors">
                           Open →
                         </Link>
                       </td>

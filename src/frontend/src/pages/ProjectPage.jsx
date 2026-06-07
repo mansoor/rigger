@@ -281,9 +281,10 @@ function useMetricsInterval() {
 // total size on disk, and the configured retention limit. Hidden when there are
 // no local snapshots.
 function BackupStatsLine({ name, envName }) {
+  const { workspace } = useParams()
   const { data } = useQuery({
-    queryKey: ['backup-stats', name, envName],
-    queryFn: () => fetchBackupStats(name, envName),
+    queryKey: ['backup-stats', workspace, name, envName],
+    queryFn: () => fetchBackupStats(workspace, name, envName),
     refetchInterval: 120_000,
     retry: false,
   })
@@ -306,6 +307,7 @@ function BackupStatsLine({ name, envName }) {
 
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
+  const { workspace } = useParams() // parent-tier workspace (from the route)
   // Use server-resolved domain (${VAR} already substituted) for display
   const domain     = ws?.env_access?.[envName]?.domain || cfg?.domain || '—'
   const gitBranch  = cfg?.git?.branch || ''
@@ -315,8 +317,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   // Poll container status every 15 seconds, refresh immediately after actions
   const { data: statusData, refetch: refetchStatus } = useQuery({
-    queryKey: ['envstatus', name, envName],
-    queryFn: () => fetchEnvStatus(name, envName),
+    queryKey: ['envstatus', workspace, name, envName],
+    queryFn: () => fetchEnvStatus(workspace, name, envName),
     refetchInterval: 30_000,  // SSE invalidates immediately; polling is the fallback
     retry: false,
   })
@@ -324,8 +326,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   // Per-container health details — shared query key with LogViewer (React Query deduplicates)
   const { data: containers = [] } = useQuery({
-    queryKey: ['containers', name, envName],
-    queryFn: () => fetchContainers(name, envName),
+    queryKey: ['containers', workspace, name, envName],
+    queryFn: () => fetchContainers(workspace, name, envName),
     refetchInterval: 30_000,
     retry: false,
   })
@@ -337,8 +339,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   // collector move together (driven by METRICS_INTERVAL_SECONDS, default 30s).
   const metricsIntervalMs = useMetricsInterval() * 1000
   const { data: metrics = [] } = useQuery({
-    queryKey: ['metrics', name, envName, rangeMin],
-    queryFn: () => fetchEnvMetrics(name, envName, rangeMin),
+    queryKey: ['metrics', workspace, name, envName, rangeMin],
+    queryFn: () => fetchEnvMetrics(workspace, name, envName, rangeMin),
     refetchInterval: metricsIntervalMs,
     retry: false,
   })
@@ -357,8 +359,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   })
   const lastNetRate = netRateSeries[netRateSeries.length - 1] || 0
 
-  // Derive short service names for display
-  const stackPrefix = `${name}_${envName}_`
+  // Derive short service names for display. Container names use the immutable
+  // resource prefix ({workspace}_{project}); fall back to name for pre-tier cfgs.
+  const resourcePrefix = ws?.config?.project?.resource_prefix || name
+  const stackPrefix = `${resourcePrefix}_${envName}_`
   const containerDetails = containers.map(c => ({
     ...c,
     short: c.Service.startsWith(stackPrefix) ? c.Service.slice(stackPrefix.length) : c.Service,
@@ -370,8 +374,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   // Image update check — results come from hourly background cache; poll every 10 min
   const { data: imgUpdates } = useQuery({
-    queryKey: ['imageupdates', name, envName],
-    queryFn: () => fetchImageUpdates(name, envName),
+    queryKey: ['imageupdates', workspace, name, envName],
+    queryFn: () => fetchImageUpdates(workspace, name, envName),
     enabled: isImage,
     // While the backend reports `pending` (a fresh check is in flight — e.g. for a
     // just-added env), poll quickly so the update badges appear without needing a
@@ -409,16 +413,16 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       // after any action (deploy/refresh/etc.) so the card reflects reality.
       setTimeout(() => {
         refetchStatus()
-        qc.invalidateQueries({ queryKey: ['containers', name, envName] })
-        qc.invalidateQueries({ queryKey: ['metrics', name, envName] })
-        qc.invalidateQueries({ queryKey: ['backup-stats', name, envName] })
-        if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', name, envName] })
+        qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] })
+        qc.invalidateQueries({ queryKey: ['metrics', workspace, name, envName] })
+        qc.invalidateQueries({ queryKey: ['backup-stats', workspace, name, envName] })
+        if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
       }, 2000)
       // After update: backend invalidates its cache and runs a fresh check (~3-5s).
       // Wait 8s then refetch so the UI reflects the post-update digest comparison.
       if (cmd === 'update') {
         setTimeout(() => {
-          qc.invalidateQueries({ queryKey: ['imageupdates', name, envName] })
+          qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
         }, 8000)
       }
     }, extra, services)
@@ -702,13 +706,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
       {/* Per-container Info inspector */}
       {infoFor && (
-        <ContainerInfoModal wsName={name} env={envName} service={infoFor.service} short={infoFor.short}
+        <ContainerInfoModal workspace={workspace} wsName={name} env={envName} service={infoFor.service} short={infoFor.short}
           onClose={() => setInfoFor(null)} />
       )}
 
       {/* Per-container file browser */}
       {filesFor && (
-        <FileBrowserModal wsName={name} env={envName} service={filesFor.service} short={filesFor.short}
+        <FileBrowserModal workspace={workspace} wsName={name} env={envName} service={filesFor.service} short={filesFor.short}
           onClose={() => setFilesFor(null)} />
       )}
 
@@ -727,9 +731,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
 // ManualBackupModal — choose which services' data to include in a one-off backup.
 function ManualBackupModal({ name, envName, onClose, onRun }) {
+  const { workspace } = useParams()
   const { data: services = [], isLoading } = useQuery({
-    queryKey: ['backup-services', name, envName],
-    queryFn: () => fetchBackupServices(name, envName),
+    queryKey: ['backup-services', workspace, name, envName],
+    queryFn: () => fetchBackupServices(workspace, name, envName),
     retry: false,
   })
   const [selected, setSelected] = useState(null) // null = not yet initialized
@@ -894,6 +899,7 @@ function runsToEntries(runs) {
 
 // NOTE: mounted with key={wsName} by the parent, so it remounts per workspace.
 function ActionLog({ wsName, actionWs, actionMeta }) {
+  const { workspace } = useParams()
   const confirm = useConfirm()
   const [entries, setEntries] = useState([])
   const [running, setRunning] = useState(false)
@@ -908,7 +914,7 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
   // button, since there's no auto-refresh (another window or the CLI may have
   // recorded runs since this view loaded).
   const loadHistory = () => {
-    fetchActionRuns(wsName, 100).then(runs => setEntries(runsToEntries(runs))).catch(() => {})
+    fetchActionRuns(workspace, wsName, 100).then(runs => setEntries(runsToEntries(runs))).catch(() => {})
   }
   useEffect(() => { loadHistory() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -953,7 +959,7 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
 
   function clearLog() {
     setEntries([])
-    clearActionRuns(wsName).catch(() => {})
+    clearActionRuns(workspace, wsName).catch(() => {})
   }
 
   const shown = tail > 0 ? entries.slice(-tail) : entries
@@ -1088,7 +1094,7 @@ function parseLogLine(raw) {
 // ── Shared log connection hook ─────────────────────────────────────────────────
 
 // activeContainers: string[] — empty = all containers, non-empty = specific services
-function useLogStream({ wsName, activeEnv, activeContainers = [], token, maxLines = 2000 }) {
+function useLogStream({ workspace, wsName, activeEnv, activeContainers = [], token, maxLines = 2000 }) {
   const [lines, setLines]   = useState([])
   const [paused, setPaused] = useState(false)
   const wsRef    = useRef(null)
@@ -1105,7 +1111,7 @@ function useLogStream({ wsName, activeEnv, activeContainers = [], token, maxLine
     pausedRef.current = false
     setLines([`\x1b[2m--- connecting to ${activeEnv}${containerLabel} logs ---\x1b[0m`])
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${window.location.host}/api/workspaces/${wsName}/action`)
+    const ws = new WebSocket(`${proto}://${window.location.host}/api/workspaces/${workspace}/projects/${wsName}/action`)
     wsRef.current = ws
     ws.addEventListener('open', () => {
       ws.send(JSON.stringify({ token, command: 'logs', env: activeEnv, extra: activeContainers }))
@@ -1117,7 +1123,7 @@ function useLogStream({ wsName, activeEnv, activeContainers = [], token, maxLine
     })
     ws.addEventListener('close', () => setLines(prev => [...prev, '\x1b[2m--- stream closed ---\x1b[0m']))
     ws.addEventListener('error', () => setLines(prev => [...prev, '\x1b[31m--- connection error ---\x1b[0m']))
-  }, [wsName, activeEnv, activeContainers.join(','), token, maxLines]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [workspace, wsName, activeEnv, activeContainers.join(','), token, maxLines]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { connect(); return () => wsRef.current?.close() }, [connect])
 
@@ -1174,7 +1180,7 @@ function containerStatusLabel(c) {
   return c.State || 'Unknown'
 }
 
-function ContainerSelector({ containers, wsName, activeEnv, activeContainers, onSelect, colorMap }) {
+function ContainerSelector({ containers, workspace, wsName, activeEnv, activeContainers, onSelect, colorMap }) {
   if (!(containers || []).length) return null
 
   const allSelected = activeContainers.length === 0
@@ -1194,7 +1200,7 @@ function ContainerSelector({ containers, wsName, activeEnv, activeContainers, on
   }
 
   const shortNames = (containers || []).map(c => {
-    const prefix = `${wsName}_${activeEnv}_`
+    const prefix = `${workspace}_${wsName}_${activeEnv}_`
     const short = c.Service.startsWith(prefix) ? c.Service.slice(prefix.length) : c.Service
     // Full service name as it appears in compose logs (used for color lookup)
     return { c, short, fullSvc: c.Service }
@@ -1288,6 +1294,7 @@ const ROW_LIMIT_OPTIONS = [
 ]
 
 function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
+  const { workspace } = useParams()
   const token = useAuthStore(s => s.token)
   const [activeEnv, setActiveEnv]           = useState(initialEnv)
   const [activeContainers, setContainers]   = useState(initialContainers || [])
@@ -1298,13 +1305,13 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
   const [showRowNumbers, setShowRowNumbers] = useState(false)
 
   const { data: containers } = useQuery({
-    queryKey: ['containers', wsName, activeEnv, 'modal'],
-    queryFn:  () => fetchContainers(wsName, activeEnv),
+    queryKey: ['containers', workspace, wsName, activeEnv, 'modal'],
+    queryFn:  () => fetchContainers(workspace, wsName, activeEnv),
     enabled:  !!activeEnv, refetchInterval: 15_000, retry: false,
   })
 
   const { lines, setLines, connect, paused, setPaused } =
-    useLogStream({ wsName, activeEnv, activeContainers, token, maxLines: 10000 })
+    useLogStream({ workspace, wsName, activeEnv, activeContainers, token, maxLines: 10000 })
 
   function switchEnv(env) { setActiveEnv(env); setContainers([]) }
 
@@ -1410,7 +1417,7 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
       </div>
 
       {/* Container multi-selector */}
-      <ContainerSelector containers={containers} wsName={wsName} activeEnv={activeEnv}
+      <ContainerSelector containers={containers} workspace={workspace} wsName={wsName} activeEnv={activeEnv}
         activeContainers={activeContainers} onSelect={setContainers} colorMap={colorMap} />
 
       {/* Pause banner */}
@@ -1431,6 +1438,7 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
 // ── Inline log viewer ─────────────────────────────────────────────────────────
 
 function LogViewer({ wsName, envs }) {
+  const { workspace } = useParams()
   const token = useAuthStore(s => s.token)
   const [activeEnv, setActiveEnv]         = useState(envs[0] || '')
   const [activeContainers, setContainers] = useState([])
@@ -1439,13 +1447,13 @@ function LogViewer({ wsName, envs }) {
   const [autoScroll, setAutoScroll]       = useState(true)
 
   const { data: containers } = useQuery({
-    queryKey: ['containers', wsName, activeEnv],
-    queryFn:  () => fetchContainers(wsName, activeEnv),
+    queryKey: ['containers', workspace, wsName, activeEnv],
+    queryFn:  () => fetchContainers(workspace, wsName, activeEnv),
     enabled:  !!activeEnv, refetchInterval: 15_000, retry: false,
   })
 
   const { lines, connect, paused, setPaused } =
-    useLogStream({ wsName, activeEnv, activeContainers, token })
+    useLogStream({ workspace, wsName, activeEnv, activeContainers, token })
 
   function switchEnv(env) { setActiveEnv(env); setContainers([]) }
 
@@ -1495,7 +1503,7 @@ function LogViewer({ wsName, envs }) {
         </div>
 
         {/* Container multi-selector */}
-        <ContainerSelector containers={containers} wsName={wsName} activeEnv={activeEnv}
+        <ContainerSelector containers={containers} workspace={workspace} wsName={wsName} activeEnv={activeEnv}
           activeContainers={activeContainers} onSelect={setContainers} colorMap={colorMap} />
 
         {/* Pause banner */}
@@ -1548,6 +1556,7 @@ function ansiToHtml(text) {
 // ── Env vars editor (modal) ───────────────────────────────────────────────────
 
 function EnvVarsModal({ name, env, deployment, onClose }) {
+  const { workspace } = useParams()
   const qc = useQueryClient()
   const swarm = deployment === 'swarm'
   const [reveal, setReveal] = useState(false)
@@ -1562,27 +1571,27 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
   const [showAudit, setShowAudit] = useState(false)
 
   const { data: vars, isLoading } = useQuery({
-    queryKey: ['envvars', name, env, reveal],
-    queryFn: () => fetchEnvVars(name, env, reveal),
+    queryKey: ['envvars', workspace, name, env, reveal],
+    queryFn: () => fetchEnvVars(workspace, name, env, reveal),
   })
 
   // Effective secret flag for a key: a pending toggle wins, else the server value.
   const isSecret = (k) => (k in flags ? flags[k] : !!vars?.[k]?.secret)
 
   const mutation = useMutation({
-    mutationFn: ({ updates, dels, secretKeys }) => updateEnvVars(name, env, updates, dels, secretKeys),
+    mutationFn: ({ updates, dels, secretKeys }) => updateEnvVars(workspace, name, env, updates, dels, secretKeys),
     onSuccess: () => {
       setEdits({}); setDeletes(new Set()); setFlags({})
       setNewKey(''); setNewVal(''); setNewSecret(false)
-      qc.invalidateQueries({ queryKey: ['envvars', name, env] })
+      qc.invalidateQueries({ queryKey: ['envvars', workspace, name, env] })
     },
   })
 
   const rotateMut = useMutation({
-    mutationFn: ({ key, value }) => rotateSecret(name, env, key, value),
+    mutationFn: ({ key, value }) => rotateSecret(workspace, name, env, key, value),
     onSuccess: () => {
       setRotateKey(null); setRotateVal('')
-      qc.invalidateQueries({ queryKey: ['envvars', name, env] })
+      qc.invalidateQueries({ queryKey: ['envvars', workspace, name, env] })
     },
   })
 
@@ -1749,9 +1758,10 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 // SecretAuditPanel renders the recent secret read/write/rotate/delete events for
 // one environment (Phase 8d).
 function SecretAuditPanel({ name, env }) {
+  const { workspace } = useParams()
   const { data: events, isLoading } = useQuery({
-    queryKey: ['secret-events', name, env],
-    queryFn: () => fetchSecretEvents(name, env),
+    queryKey: ['secret-events', workspace, name, env],
+    queryFn: () => fetchSecretEvents(workspace, name, env),
   })
   const color = { read: 'text-sky-400', write: 'text-emerald-400', rotate: 'text-warning-fg', delete: 'text-danger-fg' }
   return (
@@ -1778,8 +1788,8 @@ function SecretAuditPanel({ name, env }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function WorkspacePage() {
-  const { name } = useParams()
+export default function ProjectPage() {
+  const { workspace, name } = useParams()
   const navigate = useNavigate()
   const [actionWs, setActionWs]           = useState(null)   // current action WebSocket → ActionLog
   const [actionMeta, setActionMeta]       = useState(null)   // {cmd, env, extra, user, ts} for the run's header
@@ -1790,19 +1800,19 @@ export default function WorkspacePage() {
   const [logModal, setLogModal]           = useState(null) // {env, service}
 
   const { data: ws, isLoading, error } = useQuery({
-    queryKey: ['workspace', name],
-    queryFn: () => fetchWorkspace(name),
+    queryKey: ['workspace', workspace, name],
+    queryFn: () => fetchWorkspace(workspace, name),
   })
 
   function runAction(cmd, env, onComplete, extra = [], services = []) {
-    const socket = openActionSocket(name, cmd, env, extra, services)
+    const socket = openActionSocket(workspace, name, cmd, env, extra, services)
     if (onComplete) socket.addEventListener('close', onComplete)
     setActionMeta({ cmd, env, extra, user: username, ts: Date.now() })
     setActionWs(socket)
   }
 
   if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
-  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load workspace: {error.message}</div></Layout>
+  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load project: {error.message}</div></Layout>
 
   const cfg = ws?.config
   const envs = ws?.envs || []
@@ -1842,7 +1852,7 @@ export default function WorkspacePage() {
 
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <HeaderBtn label="Edit workspace" onClick={() => navigate(`/workspaces/${name}/edit`)} />
+            <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />
             {type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
           </div>
         </div>
@@ -1892,6 +1902,7 @@ export default function WorkspacePage() {
       )}
       {composeModal && (
         <ComposeEditor
+          workspace={workspace}
           name={name}
           env={composeModal.env}
           onClose={() => setComposeModal(null)}
@@ -1899,7 +1910,7 @@ export default function WorkspacePage() {
         />
       )}
       {termModal && (
-        <TerminalModal wsName={name} envName={termModal.env} initialService={termModal.service}
+        <TerminalModal workspace={workspace} wsName={name} envName={termModal.env} initialService={termModal.service}
           onClose={() => setTermModal(null)} />
       )}
       {logModal && (

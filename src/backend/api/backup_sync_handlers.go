@@ -14,6 +14,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/backupsync"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // POST /api/settings/backup-targets/{id}/test
@@ -49,15 +50,17 @@ func (h *Handler) TestBackupTarget(w http.ResponseWriter, r *http.Request) {
 // remote backup target. Body may override {"target_id": N}; otherwise the
 // target from config.json's backup block is used.
 func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	if name == "" || env == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace and env are required"})
+	if ws == "" || name == "" || env == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, project and env are required"})
 		return
 	}
+	pkey := ws + "_" + name
 
 	// Remote-host envs keep their snapshots on the remote box — not yet synced.
-	if host, _ := settings.HostForEnv(h.db, name, env); host != nil {
+	if host, _ := settings.HostForEnv(h.db, pkey, env); host != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error": "backup sync is not yet supported for environments running on a remote host",
 		})
@@ -73,7 +76,7 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 
 	targetID := body.TargetID
 	if targetID == nil {
-		targetID = h.firstScheduleTarget(name, env)
+		targetID = h.firstScheduleTarget(ws, name, env)
 	}
 	if targetID == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -89,7 +92,7 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Locate the snapshot directory.
-	envBackups := filepath.Join(h.workspacesDir, name, "backups", env)
+	envBackups := wspath.EnvBackupsDir(h.workspacesDir, ws, name, env)
 	date := body.Date
 	if date == "" {
 		date, err = latestSnapshotDate(envBackups)
@@ -106,7 +109,7 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
 	defer cancel()
-	res, syncErr := h.uploadSnapshot(ctx, name, env, target, date)
+	res, syncErr := h.uploadSnapshot(ctx, ws, name, env, target, date)
 	if syncErr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": syncErr.Error()})
 		return
@@ -118,25 +121,26 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 
 // uploadSnapshot mirrors one env snapshot dir to a target and records the
 // outcome in backup_syncs. Shared by SyncEnvBackup and the scheduler.
-func (h *Handler) uploadSnapshot(ctx context.Context, ws, env string, target *settings.BackupTarget, date string) (backupsync.Result, error) {
+func (h *Handler) uploadSnapshot(ctx context.Context, ws, name, env string, target *settings.BackupTarget, date string) (backupsync.Result, error) {
 	syncer, err := backupsync.New(*target)
 	if err != nil {
 		return backupsync.Result{}, err
 	}
-	snapDir := filepath.Join(h.workspacesDir, ws, "backups", env, date)
-	res, syncErr := syncer.UploadDir(ctx, snapDir, path.Join(ws, env, date))
+	pkey := ws + "_" + name
+	snapDir := filepath.Join(wspath.EnvBackupsDir(h.workspacesDir, ws, name, env), date)
+	res, syncErr := syncer.UploadDir(ctx, snapDir, path.Join(pkey, env, date))
 	status, msg := "ok", ""
 	if syncErr != nil {
 		status, msg = "fail", syncErr.Error()
 	}
-	h.recordBackupSync(ws, env, date, target, status, msg, res)
+	h.recordBackupSync(pkey, env, date, target, status, msg, res)
 	return res, syncErr
 }
 
 // readEnvSchedules returns the per-env backup schedules for one environment
 // (Phase 11 per-env redesign). nil if none / unreadable.
-func (h *Handler) readEnvSchedules(name, env string) []workspace.BackupSchedule {
-	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
+func (h *Handler) readEnvSchedules(ws, name, env string) []workspace.BackupSchedule {
+	raw, err := os.ReadFile(h.projectConfigPath(ws, name))
 	if err != nil {
 		return nil
 	}
@@ -151,11 +155,21 @@ func (h *Handler) readEnvSchedules(name, env string) []workspace.BackupSchedule 
 	return cfg.Environments[env].BackupSchedules
 }
 
+// projectConfigPath resolves a project's config.json. With a workspace tier it's
+// the nested path; ws=="" falls back to the legacy flat layout (used only by the
+// peripheral .rwb archive sync, which knows only the project name).
+func (h *Handler) projectConfigPath(ws, name string) string {
+	if ws == "" {
+		return filepath.Join(h.workspacesDir, name, "config.json")
+	}
+	return wspath.ConfigPath(h.workspacesDir, ws, name)
+}
+
 // firstScheduleTarget returns the target of the first enabled schedule that has
 // one — within env, or across all envs when env=="". Used as the default target
 // for manual snapshot/archive syncs. nil = no remote target configured.
-func (h *Handler) firstScheduleTarget(name, env string) *int64 {
-	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
+func (h *Handler) firstScheduleTarget(ws, name, env string) *int64 {
+	raw, err := os.ReadFile(h.projectConfigPath(ws, name))
 	if err != nil {
 		return nil
 	}
@@ -184,9 +198,10 @@ func (h *Handler) firstScheduleTarget(name, env string) *int64 {
 // Per-env snapshot count, total size, oldest/newest dates, and a summary of the
 // env's backup schedules (Phase 11 per-env redesign).
 func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	dir := filepath.Join(h.workspacesDir, name, "backups", env)
+	dir := wspath.EnvBackupsDir(h.workspacesDir, ws, name, env)
 
 	type stats struct {
 		Count          int    `json:"count"`
@@ -216,7 +231,7 @@ func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	for _, s := range h.readEnvSchedules(name, env) {
+	for _, s := range h.readEnvSchedules(ws, name, env) {
 		st.Schedules++
 		if s.Enabled {
 			st.ActiveSchedule++
@@ -321,7 +336,8 @@ func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
 	_ = readJSON(r, &body)
 	targetID := body.TargetID
 	if targetID == nil {
-		targetID = h.firstScheduleTarget(wsNameFromArchive(filename), "")
+		// .rwb archives know only the project name (flat fallback in firstScheduleTarget).
+		targetID = h.firstScheduleTarget("", wsNameFromArchive(filename), "")
 	}
 	if targetID == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no remote backup target configured for this workspace"})
@@ -350,6 +366,7 @@ func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		Workspace  string     `json:"workspace"`
+		Project    string     `json:"project"`
 		Env        string     `json:"env"`
 		Enabled    bool       `json:"enabled"`   // any schedule enabled
 		Schedules  int        `json:"schedules"` // total schedules defined
@@ -363,62 +380,73 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 
 	syncStates := h.backupSyncStates()
 	var rows []row
-	entries, _ := os.ReadDir(h.workspacesDir)
-	for _, e := range entries {
-		if !e.IsDir() {
+	wsEntries, _ := os.ReadDir(h.workspacesDir)
+	for _, we := range wsEntries {
+		if !we.IsDir() {
 			continue
 		}
-		ws := e.Name()
-		raw, err := os.ReadFile(filepath.Join(h.workspacesDir, ws, "config.json"))
-		if err != nil {
+		ws := we.Name()
+		projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, ws))
+		if perr != nil {
 			continue
 		}
-		for env := range configEnvNames(raw) {
-			rw := row{Workspace: ws, Env: env, AgeHours: -1}
-
-			minInterval := 0
-			seen := map[string]bool{}
-			var freqs []string
-			for _, s := range h.readEnvSchedules(ws, env) {
-				rw.Schedules++
-				if !s.Enabled {
-					continue
-				}
-				rw.Enabled = true
-				if minInterval == 0 || s.IntervalHours < minInterval {
-					minInterval = s.IntervalHours
-				}
-				if lbl := intervalLabel(s.IntervalHours); !seen[lbl] {
-					seen[lbl] = true
-					freqs = append(freqs, lbl)
-				}
+		for _, pe := range projEntries {
+			if !pe.IsDir() {
+				continue
 			}
-			rw.Summary = strings.Join(freqs, " · ")
+			name := pe.Name()
+			pkey := ws + "_" + name
+			raw, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, ws, name))
+			if err != nil {
+				continue
+			}
+			for env := range configEnvNames(raw) {
+				rw := row{Workspace: ws, Project: name, Env: env, AgeHours: -1}
 
-			envDir := filepath.Join(h.workspacesDir, ws, "backups", env)
-			newest := ""
-			if ents, err := os.ReadDir(envDir); err == nil {
-				for _, s := range ents {
-					if s.IsDir() {
-						rw.Count++
-						if s.Name() > newest {
-							newest = s.Name()
+				minInterval := 0
+				seen := map[string]bool{}
+				var freqs []string
+				for _, s := range h.readEnvSchedules(ws, name, env) {
+					rw.Schedules++
+					if !s.Enabled {
+						continue
+					}
+					rw.Enabled = true
+					if minInterval == 0 || s.IntervalHours < minInterval {
+						minInterval = s.IntervalHours
+					}
+					if lbl := intervalLabel(s.IntervalHours); !seen[lbl] {
+						seen[lbl] = true
+						freqs = append(freqs, lbl)
+					}
+				}
+				rw.Summary = strings.Join(freqs, " · ")
+
+				envDir := wspath.EnvBackupsDir(h.workspacesDir, ws, name, env)
+				newest := ""
+				if ents, err := os.ReadDir(envDir); err == nil {
+					for _, s := range ents {
+						if s.IsDir() {
+							rw.Count++
+							if s.Name() > newest {
+								newest = s.Name()
+							}
 						}
 					}
 				}
-			}
-			if newest != "" {
-				rw.LastBackup = newest
-				if fi, err := os.Stat(filepath.Join(envDir, newest)); err == nil {
-					rw.AgeHours = time.Since(fi.ModTime()).Hours()
+				if newest != "" {
+					rw.LastBackup = newest
+					if fi, err := os.Stat(filepath.Join(envDir, newest)); err == nil {
+						rw.AgeHours = time.Since(fi.ModTime()).Hours()
+					}
+					if st, ok := syncStates[pkey+"\x00"+env+"\x00"+newest]; ok {
+						s := st
+						rw.Sync = &s
+					}
 				}
-				if st, ok := syncStates[ws+"\x00"+env+"\x00"+newest]; ok {
-					s := st
-					rw.Sync = &s
-				}
+				rw.Health = backupHealth(rw.Enabled, minInterval, newest != "", rw.AgeHours)
+				rows = append(rows, rw)
 			}
-			rw.Health = backupHealth(rw.Enabled, minInterval, newest != "", rw.AgeHours)
-			rows = append(rows, rw)
 		}
 	}
 	if rows == nil {

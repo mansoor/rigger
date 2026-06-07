@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // backupServiceInfo is a candidate data-bearing service for the backup pickers.
@@ -21,11 +23,12 @@ type backupServiceInfo struct {
 // each would be captured (SQL dump for recognised DB images, else volumes). The
 // user decides — we never assume which service is "the database".
 func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
+	raw, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, ws, name))
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 	var cfg struct {

@@ -272,7 +272,7 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 		// Auto-upload to the workspace's first configured remote target (11a). The
 		// outcome (ok/fail) is recorded in archive_syncs for the UI badge; we
 		// only log on failure for operability.
-		if tid := h.firstScheduleTarget(body.Workspace, ""); tid != nil {
+		if tid := h.firstScheduleTarget("", body.Workspace, ""); tid != nil {
 			if target, err := settings.GetBackupTarget(h.db, *tid); err == nil && target != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 				if _, ae := h.uploadArchive(ctx, archiveName, target); ae != nil {

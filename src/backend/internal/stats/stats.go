@@ -56,12 +56,14 @@ type WorkspaceSummary struct {
 }
 
 type WorkspaceInfo struct {
-	Name              string   `json:"name"`
+	Name              string   `json:"name"`               // project name (unique within a workspace)
+	Workspace         string   `json:"workspace"`          // parent-tier workspace name
+	ResourcePrefix    string   `json:"resource_prefix"`    // Docker prefix ({workspace}_{project})
 	Type              string   `json:"type"`
 	Envs              []string `json:"envs"`
 	ImageCount        int      `json:"image_count"`
 	RunningContainers int      `json:"running_containers"`
-	DiskMB            float64  `json:"disk_mb"`   // workspace directory size
+	DiskMB            float64  `json:"disk_mb"`   // project directory size
 	MemMB             float64  `json:"mem_mb"`    // sum of container RSS across all envs
 }
 
@@ -663,70 +665,92 @@ func collectWorkspaces(workspacesDir string, projectContainers map[string]int, p
 		Workspaces: []WorkspaceInfo{},
 	}
 
-	entries, err := os.ReadDir(workspacesDir)
+	wsEntries, err := os.ReadDir(workspacesDir)
 	if err != nil {
 		return summary
 	}
 
-	for _, e := range entries {
-		if !e.IsDir() {
+	// Workspace → Project → Environment: iterate each workspace's projects/ dir.
+	for _, we := range wsEntries {
+		if !we.IsDir() {
 			continue
 		}
-		wsName := e.Name()
-		cfgPath := filepath.Join(workspacesDir, wsName, "config.json")
-		data, err := os.ReadFile(cfgPath)
-		if err != nil {
-			continue
+		wsName := we.Name()
+		projEntries, perr := os.ReadDir(filepath.Join(workspacesDir, wsName, "projects"))
+		if perr != nil {
+			continue // not a workspace dir (no projects/) — skip
 		}
 
-		var cfg struct {
-			Project      struct{ Type string }      `json:"project"`
-			Images       []json.RawMessage           `json:"images"`
-			Environments map[string]json.RawMessage  `json:"environments"`
-		}
-		if json.Unmarshal(data, &cfg) != nil {
-			continue
-		}
+		for _, pe := range projEntries {
+			if !pe.IsDir() {
+				continue
+			}
+			projName := pe.Name()
+			cfgPath := filepath.Join(workspacesDir, wsName, "projects", projName, "config.json")
+			data, err := os.ReadFile(cfgPath)
+			if err != nil {
+				continue
+			}
 
-		wsType := cfg.Project.Type
-		if wsType == "" {
-			wsType = "custom"
-		}
+			var cfg struct {
+				Project struct {
+					Type           string `json:"type"`
+					ResourcePrefix string `json:"resource_prefix"`
+				} `json:"project"`
+				Images       []json.RawMessage          `json:"images"`
+				Environments map[string]json.RawMessage `json:"environments"`
+			}
+			if json.Unmarshal(data, &cfg) != nil {
+				continue
+			}
 
-		envNames := make([]string, 0, len(cfg.Environments))
-		for k := range cfg.Environments {
-			envNames = append(envNames, k)
-		}
+			wsType := cfg.Project.Type
+			if wsType == "" {
+				wsType = "custom"
+			}
+			prefix := cfg.Project.ResourcePrefix
+			if prefix == "" {
+				prefix = wsName + "_" + projName
+			}
 
-		// Aggregate per-env metrics across all environments
-		runningTotal := 0
-		memTotal     := 0.0
-		for _, env := range envNames {
-			project := wsName + "_" + env
-			runningTotal += projectContainers[project]
-			memTotal     += projectMemory[project]
-		}
+			envNames := make([]string, 0, len(cfg.Environments))
+			for k := range cfg.Environments {
+				envNames = append(envNames, k)
+			}
 
-		// Disk size: prefer the caller-supplied (cached) value; fall back to a
-		// synchronous du only when no map was provided (nil = standalone Collect).
-		var diskVal float64
-		if diskMB != nil {
-			diskVal = diskMB[wsName]
-		} else {
-			diskVal = WorkspaceDiskMB(filepath.Join(workspacesDir, wsName))
-		}
+			// Aggregate per-env metrics across all environments. The compose
+			// project label is "{resource_prefix}_{env}".
+			runningTotal := 0
+			memTotal := 0.0
+			for _, env := range envNames {
+				key := prefix + "_" + env
+				runningTotal += projectContainers[key]
+				memTotal += projectMemory[key]
+			}
 
-		summary.Total++
-		summary.ByType[wsType]++
-		summary.Workspaces = append(summary.Workspaces, WorkspaceInfo{
-			Name:              wsName,
-			Type:              wsType,
-			Envs:              envNames,
-			ImageCount:        len(cfg.Images),
-			RunningContainers: runningTotal,
-			DiskMB:            diskVal,
-			MemMB:             memTotal,
-		})
+			// Disk size: prefer the caller-supplied (cached) value; fall back to a
+			// synchronous du only when no map was provided (nil = standalone Collect).
+			var diskVal float64
+			if diskMB != nil {
+				diskVal = diskMB[wsName+"/"+projName]
+			} else {
+				diskVal = WorkspaceDiskMB(filepath.Join(workspacesDir, wsName, "projects", projName))
+			}
+
+			summary.Total++
+			summary.ByType[wsType]++
+			summary.Workspaces = append(summary.Workspaces, WorkspaceInfo{
+				Name:              projName,
+				Workspace:         wsName,
+				ResourcePrefix:    prefix,
+				Type:              wsType,
+				Envs:              envNames,
+				ImageCount:        len(cfg.Images),
+				RunningContainers: runningTotal,
+				DiskMB:            diskVal,
+				MemMB:             memTotal,
+			})
+		}
 	}
 	return summary
 }

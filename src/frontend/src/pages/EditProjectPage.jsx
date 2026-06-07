@@ -752,6 +752,7 @@ function NewEnvVarsEditor({ cfg, onChange }) {
 // ── Inline env vars editor (used inside EnvEditor) ────────────────────────────
 
 function EnvVarsInline({ workspaceName, envName }) {
+  const { workspace } = useParams()
   const [open, setOpen]       = useState(false)
   const [reveal, setReveal]   = useState(false)
   const [edits, setEdits]     = useState({})
@@ -761,16 +762,16 @@ function EnvVarsInline({ workspaceName, envName }) {
   const qc = useQueryClient()
 
   const { data: vars, isLoading } = useQuery({
-    queryKey: ['envvars', workspaceName, envName, reveal],
-    queryFn:  () => fetchEnvVars(workspaceName, envName, reveal),
+    queryKey: ['envvars', workspace, workspaceName, envName, reveal],
+    queryFn:  () => fetchEnvVars(workspace, workspaceName, envName, reveal),
     enabled:  open,
   })
 
   const saveMut = useMutation({
-    mutationFn: ({ updates, dels }) => updateEnvVars(workspaceName, envName, updates, dels),
+    mutationFn: ({ updates, dels }) => updateEnvVars(workspace, workspaceName, envName, updates, dels),
     onSuccess: () => {
       setEdits({}); setDeletes(new Set()); setNewKey(''); setNewVal('')
-      qc.invalidateQueries({ queryKey: ['envvars', workspaceName, envName] })
+      qc.invalidateQueries({ queryKey: ['envvars', workspace, workspaceName, envName] })
     },
   })
 
@@ -887,17 +888,17 @@ function serializeConfig(project, envs, images, rawConfig) {
   return JSON.stringify(updated)
 }
 
-export default function EditWorkspacePage() {
-  const { name } = useParams()
+export default function EditProjectPage() {
+  const { workspace, name } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
 
   const { data: rawConfig, isLoading, error } = useQuery({
-    queryKey: ['config', name],
-    queryFn: () => fetchConfig(name),
+    queryKey: ['config', workspace, name],
+    queryFn: () => fetchConfig(workspace, name),
   })
-  // Workspace (for env→host bindings) — used by the host-aware port check.
-  const { data: ws } = useQuery({ queryKey: ['workspace', name], queryFn: () => fetchWorkspace(name) })
+  // Project (for env→host bindings) — used by the host-aware port check.
+  const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -923,7 +924,7 @@ export default function EditWorkspacePage() {
       // Pre-load vars from first env for use when adding new environments
       const firstEnvName = Object.keys(rawConfig.environments || {})[0]
       if (firstEnvName) {
-        fetchEnvVars(name, firstEnvName, true) // reveal=true so values are editable in new env
+        fetchEnvVars(workspace, name, firstEnvName, true) // reveal=true so values are editable in new env
           .then(vars => setFirstEnvVars(vars || {}))
           .catch(() => {})
       }
@@ -945,7 +946,7 @@ export default function EditWorkspacePage() {
         environments: cleanEnvs,
         ...(project?.type === 'image' && { images }),
       }
-      await putConfig(name, JSON.stringify(updated, null, 2))
+      await putConfig(workspace, name, JSON.stringify(updated, null, 2))
 
       // Write initial env vars for new environments.
       // UpdateEnvVars now creates the .env file if it doesn't exist.
@@ -953,14 +954,14 @@ export default function EditWorkspacePage() {
       for (const envName of newEnvNames) {
         const initialVars = envs[envName]?._initial_vars || {}
         if (Object.keys(initialVars).length > 0) {
-          try { await updateEnvVars(name, envName, initialVars) } catch { /* non-fatal */ }
+          try { await updateEnvVars(workspace, name, envName, initialVars) } catch { /* non-fatal */ }
         }
       }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workspace', name] })
-      qc.invalidateQueries({ queryKey: ['config', name] })
-      navigate(`/workspaces/${name}`)
+      qc.invalidateQueries({ queryKey: ['workspace', workspace, name] })
+      qc.invalidateQueries({ queryKey: ['config', workspace, name] })
+      navigate(`/workspaces/${workspace}/projects/${name}`)
     },
     onError: (err) => setSaveError(err.response?.data?.error || err.message),
   })
@@ -1023,7 +1024,7 @@ export default function EditWorkspacePage() {
   const dirty = baseline !== null && envs !== null && project !== null &&
     serializeConfig(project, envs, images, rawConfig) !== baseline
 
-  function leave() { navigate(`/workspaces/${name}`) }
+  function leave() { navigate(`/workspaces/${workspace}/projects/${name}`) }
   function handleCancel() { if (dirty) setConfirmCancel(true); else leave() }
 
   // Host-aware port conflicts (C+D): each env's target host × each image's host
@@ -1039,7 +1040,7 @@ export default function EditWorkspacePage() {
       }
     }
   }
-  const hostWarnings = usePortConflicts(hostChecks, name)
+  const hostWarnings = usePortConflicts(hostChecks, `${workspace}_${name}`)
 
   if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
   if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">{error.message}</div></Layout>
@@ -1050,7 +1051,7 @@ export default function EditWorkspacePage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Edit workspace</p>
+            <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Edit project · {workspace}</p>
             <div className="flex items-center gap-2.5 mt-0.5">
               <h1 className="text-2xl font-bold text-content-strong">{name}</h1>
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -1089,19 +1090,13 @@ export default function EditWorkspacePage() {
             <div className={`grid gap-4 ${project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <div>
                 <Label>Project name</Label>
-                {/* Read-only: project.name is the Docker resource prefix (stack /
-                    container / named-volume / network names) and the workspace
-                    folder is never renamed, so changing it would orphan the stack. */}
-                <div
-                  title="Fixed after creation — it's the Docker resource prefix"
-                  className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm cursor-not-allowed select-none truncate"
-                >
-                  {project?.name}
-                </div>
-                <p className="text-xs text-content-subtle mt-1">Fixed after creation — used as the Docker stack, container and volume name prefix.</p>
+                {/* Editable display label — reusable across workspaces. The Docker
+                    resource prefix (shown below) is the immutable identity. */}
+                <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
+                <p className="text-xs text-content-subtle mt-1">A display label — can be changed and may repeat across workspaces.</p>
               </div>
               {/* Registry only applies to custom (build) stacks — image stacks pull
-                  images directly, so hide it (matches the New Workspace wizard). */}
+                  images directly, so hide it (matches the New Project wizard). */}
               {project?.type !== 'image' && (
                 <div>
                   <Label>Registry</Label>
@@ -1110,10 +1105,22 @@ export default function EditWorkspacePage() {
               )}
             </div>
 
+            {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
+            <div>
+              <Label>Resource prefix</Label>
+              <div
+                title="Fixed after creation — the Docker stack / container / volume / network name prefix"
+                className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
+              >
+                {project?.resource_prefix || `${workspace}_${project?.name || ''}`}
+              </div>
+              <p className="text-xs text-content-subtle mt-1">Fixed after creation — the Docker stack, container, volume and network name prefix.</p>
+            </div>
+
             {/* Workspace folder — read-only. Prefer the host-side path (the bind-
                 mount source); fall back to the in-container path if unresolved. */}
             <div>
-              <Label>Workspace folder</Label>
+              <Label>Project folder</Label>
               <div
                 title={ws?.host_path || ws?.path || ''}
                 className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
@@ -1288,9 +1295,10 @@ function MigrationProgress({ jobId, onDone }) {
 // EnvHostsSection shows each environment's host and lets you change it. Changing
 // a deployed env's host migrates its data; an undeployed env just repoints.
 function EnvHostsSection({ name }) {
+  const { workspace } = useParams()
   const qc = useQueryClient()
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
-  const { data: ws } = useQuery({ queryKey: ['workspace', name], queryFn: () => fetchWorkspace(name) })
+  const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
 
   const [target, setTarget] = useState({})   // env -> selected target id (string)
   const [pending, setPending] = useState(null) // { env, targetId } awaiting confirmation
@@ -1312,7 +1320,7 @@ function EnvHostsSection({ name }) {
     const { env, targetId } = pending
     setPending(null); setRunning(true); setErr(''); setJobId(null)
     try {
-      const job = await setEnvHost(name, env, targetId)
+      const job = await setEnvHost(workspace, name, env, targetId)
       setJobId(job.id)
     } catch (e) {
       setErr(e.response?.data?.error || e.message || 'failed to start')
@@ -1322,8 +1330,8 @@ function EnvHostsSection({ name }) {
 
   function onJobDone() {
     setRunning(false)
-    qc.invalidateQueries({ queryKey: ['workspace', name] })
-    qc.invalidateQueries({ queryKey: ['workspaces'] })
+    qc.invalidateQueries({ queryKey: ['workspace', workspace, name] })
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
   }
 
   // Check the pending move's resolved host ports against the destination host
@@ -1405,9 +1413,10 @@ function EnvHostsSection({ name }) {
 // MigrateSection moves the whole workspace to another host (or back to local),
 // streaming progress. Only available when every environment is on the same host.
 function MigrateSection({ name }) {
+  const { workspace } = useParams()
   const qc = useQueryClient()
   const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
-  const { data: ws } = useQuery({ queryKey: ['workspace', name], queryFn: () => fetchWorkspace(name) })
+  const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
 
   const envs = ws?.envs || []
   const envHosts = ws?.env_hosts || {}
@@ -1430,7 +1439,7 @@ function MigrateSection({ name }) {
     setConfirming(false)
     setRunning(true); setErr(''); setJobId(null)
     try {
-      const job = await migrateWorkspace(name, Number(target))
+      const job = await migrateWorkspace(workspace, name, Number(target))
       setJobId(job.id)
     } catch (e) {
       setErr(e.response?.data?.error || e.message || 'failed to start')
@@ -1440,8 +1449,8 @@ function MigrateSection({ name }) {
 
   function onJobDone() {
     setRunning(false)
-    qc.invalidateQueries({ queryKey: ['workspaces'] })
-    qc.invalidateQueries({ queryKey: ['workspace', name] })
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
+    qc.invalidateQueries({ queryKey: ['workspace', workspace, name] })
   }
 
   const currentLabel = currentHostId === 0
@@ -1503,9 +1512,10 @@ function MigrateSection({ name }) {
 // EnvBackupSchedules wraps the reusable editor for one env, fetching that env's
 // data-bearing services so the picker can guide the user.
 function EnvBackupSchedules({ workspaceName, env, cfg, updateEnv, targets }) {
+  const { workspace } = useParams()
   const { data: services = [] } = useQuery({
-    queryKey: ['backup-services', workspaceName, env],
-    queryFn: () => fetchBackupServices(workspaceName, env),
+    queryKey: ['backup-services', workspace, workspaceName, env],
+    queryFn: () => fetchBackupServices(workspace, workspaceName, env),
     retry: false,
   })
   return (
@@ -1545,6 +1555,7 @@ function BackupSection({ workspaceName, envs, updateEnv }) {
 }
 
 function DangerZone({ name }) {
+  const { workspace } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [open, setOpen]       = useState(false)
@@ -1552,9 +1563,9 @@ function DangerZone({ name }) {
   const [error, setError]     = useState('')
 
   const mutation = useMutation({
-    mutationFn: () => deleteWorkspace(name),
+    mutationFn: () => deleteWorkspace(workspace, name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workspaces'] })
+      qc.invalidateQueries({ queryKey: ['projects', workspace] })
       navigate('/', { replace: true })
     },
     onError: (e) => setError(e.response?.data?.error || 'Delete failed'),

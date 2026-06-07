@@ -1,15 +1,16 @@
 import { useEffect } from 'react'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
-import { fetchWorkspaces } from '../lib/api'
 
 /**
  * Opens a single SSE connection to /api/events and invalidates React Query
  * status caches whenever a Docker container event arrives.
  *
- * Matching logic: Docker Compose sets com.docker.compose.project to the
- * compose project name, which compose-gen.sh sets to "{workspace}_{env}".
- * We look that up in the known workspace list to target the right query key.
+ * With the Workspace→Project tier the compose project name is
+ * "{workspace}_{project}_{env}", which is ambiguous to parse back (names may
+ * contain underscores). Since SSE is only a real-time nudge over the slow
+ * polling fallback, we invalidate the status/container caches by key prefix —
+ * React Query only refetches the queries that are currently mounted.
  *
  * Should be mounted once at the app root level (e.g. inside Layout).
  */
@@ -17,52 +18,20 @@ export function useDockerEvents() {
   const qc     = useQueryClient()
   const token  = useAuthStore(s => s.token)
 
-  // We need the workspace list to map project names → (workspace, env) pairs
-  const { data: workspaces } = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: fetchWorkspaces,
-    staleTime: 60_000,
-  })
-
   useEffect(() => {
     if (!token) return
-
-    // Build a lookup map for both project name formats:
-    //   "{workspace}_{env}" — explicit -p flag (deploy.sh after fix)
-    //   "{env}"             — directory-derived name (older deployments)
-    // We store all known (workspace, env) combos and match on either format.
-    const projectMap = {}
-    for (const ws of (workspaces || [])) {
-      for (const env of (ws.envs || [])) {
-        projectMap[`${ws.name}_${env}`] = { name: ws.name, env }  // new explicit name
-        // For env-only keys, prefer the first workspace match to avoid collisions
-        if (!projectMap[env]) {
-          projectMap[env] = { name: ws.name, env }
-        }
-      }
-    }
 
     const url = `/api/events?token=${encodeURIComponent(token)}`
     const es = new EventSource(url)
 
-    es.addEventListener('container', (e) => {
-      try {
-        const { project } = JSON.parse(e.data)
-
-        const match = projectMap[project]
-        if (match) {
-          // Invalidate the specific env's status AND container list.
-          // Both are polled on a slow fallback interval — SSE gives us the
-          // real-time invalidation so the UI reacts within seconds.
-          qc.invalidateQueries({ queryKey: ['envstatus',  match.name, match.env] })
-          qc.invalidateQueries({ queryKey: ['containers', match.name, match.env] })
-        }
-        // Dashboard live-stats table reacts to any container lifecycle change.
-        qc.invalidateQueries({ queryKey: ['liveStats'] })
-        // Container not from a known workspace (e.g. rigger itself) — ignore
-      } catch {
-        // Malformed event — ignore
-      }
+    es.addEventListener('container', () => {
+      // Invalidate every env-status and container-list query (any
+      // workspace/project/env). Only mounted queries actually refetch, so the
+      // visible UI reacts within seconds; everything else stays lazy.
+      qc.invalidateQueries({ queryKey: ['envstatus'] })
+      qc.invalidateQueries({ queryKey: ['containers'] })
+      // Dashboard live-stats table reacts to any container lifecycle change.
+      qc.invalidateQueries({ queryKey: ['liveStats'] })
     })
 
     // Phase 6: alert events pushed by the rule evaluator (fired/resolved/dismissed).
@@ -89,5 +58,5 @@ export function useDockerEvents() {
     }
 
     return () => es.close()
-  }, [token, workspaces, qc])
+  }, [token, qc])
 }

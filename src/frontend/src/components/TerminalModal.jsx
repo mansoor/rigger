@@ -8,7 +8,7 @@ import { useTheme } from '../theme/ThemeProvider'
 import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
 
-export default function TerminalModal({ wsName, envName, initialService, onClose }) {
+export default function TerminalModal({ workspace, wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
   const { prefs, resolvedTheme } = useTheme()
   const termRef       = useRef(null)   // xterm instance
@@ -25,8 +25,8 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
   const [error, setError]         = useState('')
 
   const { data: containers, isLoading } = useQuery({
-    queryKey: ['containers', wsName, envName],
-    queryFn:  () => fetchContainers(wsName, envName),
+    queryKey: ['containers', workspace, wsName, envName],
+    queryFn:  () => fetchContainers(workspace, wsName, envName),
     retry: false,
   })
 
@@ -105,7 +105,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
 
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(
-      `${proto}://${window.location.host}/api/workspaces/${wsName}/envs/${envName}/terminal`
+      `${proto}://${window.location.host}/api/workspaces/${workspace}/projects/${wsName}/envs/${envName}/terminal`
     )
     wsRef.current = ws
 
@@ -151,7 +151,7 @@ export default function TerminalModal({ wsName, envName, initialService, onClose
       setConnected(false)
       setConnecting(false)
     })
-  }, [service, token, wsName, envName, disconnect])
+  }, [service, token, workspace, wsName, envName, disconnect])
 
   // When opened from a per-container Terminal button, connect straight away
   // (once) instead of waiting for the user to click Connect.

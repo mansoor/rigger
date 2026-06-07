@@ -595,22 +595,30 @@ func newDiskUsageCache(ttl time.Duration) *diskUsageCache {
 	}
 }
 
-// snapshot returns a copy of the cached sizes (MB) for every workspace under
-// workspacesDir, refreshing stale/missing entries asynchronously.
+// snapshot returns a copy of the cached sizes (MB) for every project under
+// workspacesDir, refreshing stale/missing entries asynchronously. Keys are
+// "{workspace}/{project}" so each nested project gets its own (non-blocking) du.
 func (c *diskUsageCache) snapshot(workspacesDir string) map[string]float64 {
-	entries, _ := os.ReadDir(workspacesDir)
+	wsEntries, _ := os.ReadDir(workspacesDir)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make(map[string]float64, len(entries))
-	for _, e := range entries {
-		if !e.IsDir() {
+	out := make(map[string]float64)
+	for _, we := range wsEntries {
+		if !we.IsDir() {
 			continue
 		}
-		name := e.Name()
-		out[name] = c.sizes[name] // 0 until first computed
-		if !c.busy[name] && time.Since(c.at[name]) > c.ttl {
-			c.busy[name] = true
-			go c.refresh(name, filepath.Join(workspacesDir, name))
+		wsName := we.Name()
+		projEntries, _ := os.ReadDir(wspath.ProjectsDir(workspacesDir, wsName))
+		for _, pe := range projEntries {
+			if !pe.IsDir() {
+				continue
+			}
+			key := wsName + "/" + pe.Name()
+			out[key] = c.sizes[key] // 0 until first computed
+			if !c.busy[key] && time.Since(c.at[key]) > c.ttl {
+				c.busy[key] = true
+				go c.refresh(key, wspath.ProjectDir(workspacesDir, wsName, pe.Name()))
+			}
 		}
 	}
 	return out

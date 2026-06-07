@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/settings"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // publishedPortRe captures the host port from a `docker ps` Ports field entry,
@@ -106,20 +106,35 @@ func (h *Handler) portsInUseForHost(hostID int64, excludeWs string) map[int]stri
 		}
 	}
 
-	// C — host ports declared by other workspaces' configs targeting this host.
-	if entries, err := os.ReadDir(h.workspacesDir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() || e.Name() == excludeWs {
+	// C — host ports declared by other projects' configs targeting this host.
+	// Iterate the nested Workspace→Project layout; key host bindings by the
+	// project's resource prefix ({workspace}_{project}), which excludeWs matches.
+	if wsEntries, err := os.ReadDir(h.workspacesDir); err == nil {
+		for _, we := range wsEntries {
+			if !we.IsDir() {
 				continue
 			}
-			ws := e.Name()
-			cfg, err := readWsPortConfig(filepath.Join(h.workspacesDir, ws, "config.json"))
-			if err != nil || !cfg.targetsHost(h.db, ws, hostID) {
+			wsName := we.Name()
+			projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, wsName))
+			if perr != nil {
 				continue
 			}
-			for _, p := range cfg.hostPorts() {
-				if _, ok := inUse[p]; !ok {
-					inUse[p] = "configured in " + ws
+			for _, pe := range projEntries {
+				if !pe.IsDir() {
+					continue
+				}
+				pkey := wsName + "_" + pe.Name()
+				if pkey == excludeWs {
+					continue // the edited project's own ports don't count
+				}
+				cfg, err := readWsPortConfig(wspath.ConfigPath(h.workspacesDir, wsName, pe.Name()))
+				if err != nil || !cfg.targetsHost(h.db, pkey, hostID) {
+					continue
+				}
+				for _, p := range cfg.hostPorts() {
+					if _, ok := inUse[p]; !ok {
+						inUse[p] = "configured in " + pkey
+					}
 				}
 			}
 		}

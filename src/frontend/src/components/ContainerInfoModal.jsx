@@ -291,13 +291,13 @@ function RawJson({ data }) {
 }
 
 // ── modal ─────────────────────────────────────────────────────────────────────
-export default function ContainerInfoModal({ wsName, env, service, short, onClose }) {
+export default function ContainerInfoModal({ workspace, wsName, env, service, short, onClose }) {
   const [tab, setTab] = useState('Overview')
   const [statsHist, setStatsHist] = useState([])
 
   const insp = useQuery({
-    queryKey: ['cinspect', wsName, env, service],
-    queryFn: () => fetchContainerInspect(wsName, env, service),
+    queryKey: ['cinspect', workspace, wsName, env, service],
+    queryFn: () => fetchContainerInspect(workspace, wsName, env, service),
     retry: false,
   })
   const c = Array.isArray(insp.data) ? insp.data[0] : null
@@ -306,8 +306,8 @@ export default function ContainerInfoModal({ wsName, env, service, short, onClos
   // Overview sparklines are true per-container live metrics (built up in-memory).
   const liveTab = tab === 'Overview' || tab === 'Resources'
   const stats = useQuery({
-    queryKey: ['cstats', wsName, env, service],
-    queryFn: () => fetchContainerStats(wsName, env, service),
+    queryKey: ['cstats', workspace, wsName, env, service],
+    queryFn: () => fetchContainerStats(workspace, wsName, env, service),
     enabled: liveTab, retry: false,
     refetchInterval: liveTab ? 2500 : false,
   })
@@ -337,13 +337,13 @@ export default function ContainerInfoModal({ wsName, env, service, short, onClos
     { label: 'Network',  value: fmtRate(netRate[netRate.length - 1]), series: netRate,                   stroke: '#fbbf24' },
   ] : []
   const top = useQuery({
-    queryKey: ['ctop', wsName, env, service],
-    queryFn: () => fetchContainerTop(wsName, env, service),
+    queryKey: ['ctop', workspace, wsName, env, service],
+    queryFn: () => fetchContainerTop(workspace, wsName, env, service),
     enabled: tab === 'Processes', retry: false,
   })
   const hist = useQuery({
-    queryKey: ['chist', wsName, env, service],
-    queryFn: () => fetchContainerHistory(wsName, env, service),
+    queryKey: ['chist', workspace, wsName, env, service],
+    queryFn: () => fetchContainerHistory(workspace, wsName, env, service),
     enabled: tab === 'Layers', retry: false,
   })
 

@@ -32,10 +32,10 @@ function writeClipboard(text) {
 // Editing it directly is not supported — use Edit Workspace to modify
 // config.json, then Refresh (Deploy ▾ → Refresh) to regenerate.
 
-export default function ComposeEditor({ name, env, onClose, onRefresh }) {
+export default function ComposeEditor({ workspace, name, env, onClose, onRefresh }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['compose', name, env],
-    queryFn:  () => fetchCompose(name, env),
+    queryKey: ['compose', workspace, name, env],
+    queryFn:  () => fetchCompose(workspace, name, env),
   })
 
   const content      = data?.content ?? ''

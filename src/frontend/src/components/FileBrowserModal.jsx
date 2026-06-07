@@ -99,7 +99,7 @@ function ToolBtn({ title, onClick, disabled, children }) {
   )
 }
 
-export default function FileBrowserModal({ wsName, env, service, short, onClose }) {
+export default function FileBrowserModal({ workspace, wsName, env, service, short, onClose }) {
   const [cwd, setCwd]           = useState('/')
   const [view, setView]         = useState(null)   // { path, content, truncated, binary, size } | null
   const [editing, setEditing]   = useState(false)
@@ -111,8 +111,8 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
   const fileInputRef = useRef(null)
 
   const { data, isLoading, isError, error: listErr, refetch } = useQuery({
-    queryKey: ['cfiles', wsName, env, service, cwd],
-    queryFn:  () => fetchContainerFiles(wsName, env, service, cwd),
+    queryKey: ['cfiles', workspace, wsName, env, service, cwd],
+    queryFn:  () => fetchContainerFiles(workspace, wsName, env, service, cwd),
     retry: false,
   })
 
@@ -136,55 +136,55 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
     if (e.type === 'dir') { setView(null); setCwd(target); return }
     setBusy(true)
     try {
-      const v = await fetchContainerFile(wsName, env, service, target)
+      const v = await fetchContainerFile(workspace, wsName, env, service, target)
       setView(v); setEditing(false); setDraft(v.content || '')
     } catch (err) { setError(errMsg(err)) } finally { setBusy(false) }
   }
 
   function onSave() {
     runAct(
-      () => saveContainerFile(wsName, env, service, view.path, draft),
+      () => saveContainerFile(workspace, wsName, env, service, view.path, draft),
       () => { setView({ ...view, content: draft, size: draft.length, truncated: false }); setEditing(false) },
     )
   }
   function onDelete(e) {
     const target = joinPath(cwd, e.name)
     runAct(
-      () => deleteContainerFile(wsName, env, service, target),
+      () => deleteContainerFile(workspace, wsName, env, service, target),
       () => { if (view?.path === target) setView(null); setConfirmDel(null) },
     )
   }
   function onDownload(e) {
-    runAct(() => downloadContainerFile(wsName, env, service, joinPath(cwd, e.name)))
+    runAct(() => downloadContainerFile(workspace, wsName, env, service, joinPath(cwd, e.name)))
   }
   function onUpload(ev) {
     const file = ev.target.files?.[0]
     ev.target.value = ''
     if (!file) return
-    runAct(() => uploadContainerFile(wsName, env, service, cwd, file))
+    runAct(() => uploadContainerFile(workspace, wsName, env, service, cwd, file))
   }
 
   // Prompt-driven mutations.
   const onNewFile = () => setPrompt({
     title: 'New file', label: 'File name', placeholder: 'example.txt', confirmLabel: 'Create',
-    onSubmit: (n) => { setPrompt(null); runAct(() => newContainerFile(wsName, env, service, joinPath(cwd, n))) },
+    onSubmit: (n) => { setPrompt(null); runAct(() => newContainerFile(workspace, wsName, env, service, joinPath(cwd, n))) },
   })
   const onNewFolder = () => setPrompt({
     title: 'New folder', label: 'Folder name', placeholder: 'newdir', confirmLabel: 'Create',
-    onSubmit: (n) => { setPrompt(null); runAct(() => mkdirContainerDir(wsName, env, service, joinPath(cwd, n))) },
+    onSubmit: (n) => { setPrompt(null); runAct(() => mkdirContainerDir(workspace, wsName, env, service, joinPath(cwd, n))) },
   })
   const onRename = (e) => setPrompt({
     title: `Rename "${e.name}"`, label: 'New name', initial: e.name, confirmLabel: 'Rename',
     onSubmit: (n) => {
       setPrompt(null)
       const from = joinPath(cwd, e.name), to = joinPath(cwd, n)
-      runAct(() => renameContainerFile(wsName, env, service, from, to), () => { if (view?.path === from) setView(null) })
+      runAct(() => renameContainerFile(workspace, wsName, env, service, from, to), () => { if (view?.path === from) setView(null) })
     },
   })
   const onChmod = (e) => setPrompt({
     title: `Permissions for "${e.name}"`, label: 'Octal mode (e.g. 644)', initial: permsToOctal(e.mode),
     placeholder: '644', confirmLabel: 'Apply',
-    onSubmit: (m) => { setPrompt(null); runAct(() => chmodContainerFile(wsName, env, service, joinPath(cwd, e.name), m)) },
+    onSubmit: (m) => { setPrompt(null); runAct(() => chmodContainerFile(workspace, wsName, env, service, joinPath(cwd, e.name), m)) },
   })
 
   const crumbs = cwd === '/' ? [] : cwd.split('/').filter(Boolean)
@@ -235,7 +235,7 @@ export default function FileBrowserModal({ wsName, env, service, short, onClose 
               view={view} editing={editing} draft={draft} setDraft={setDraft}
               onEdit={() => setEditing(true)} onCancel={() => { setEditing(false); setDraft(view.content || '') }}
               onSave={onSave} onBack={() => setView(null)} busy={busy}
-              onDownloadPath={() => downloadContainerFile(wsName, env, service, view.path).catch(err => setError(errMsg(err)))}
+              onDownloadPath={() => downloadContainerFile(workspace, wsName, env, service, view.path).catch(err => setError(errMsg(err)))}
             />
           ) : (
             <table className="w-full text-xs">

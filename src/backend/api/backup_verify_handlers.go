@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // POST /api/workspaces/{name}/envs/{env}/restore-verify  body {date}
@@ -14,14 +16,15 @@ import (
 // restorable — every archive file is present, non-empty, and gzip-intact. Does
 // not touch the running environment.
 func (h *Handler) VerifyRestore(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 	var body struct {
 		Date string `json:"date"`
 	}
 	_ = readJSON(r, &body)
-	if name == "" || env == "" || body.Date == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, env and date are required"})
+	if ws == "" || name == "" || env == "" || body.Date == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, project, env and date are required"})
 		return
 	}
 	if strings.Contains(body.Date, "/") || strings.Contains(body.Date, "..") {
@@ -29,7 +32,7 @@ func (h *Handler) VerifyRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapDir := filepath.Join(h.workspacesDir, name, "backups", env, body.Date)
+	snapDir := filepath.Join(wspath.EnvBackupsDir(h.workspacesDir, ws, name, env), body.Date)
 	if fi, err := os.Stat(snapDir); err != nil || !fi.IsDir() {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "snapshot not found"})
 		return

@@ -7,10 +7,11 @@ import {
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, fetchManagedHostKey,
   fetchGeneralSettings, updateGeneralSettings,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
-  fetchWorkspaces,
+  fetchProjects,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
 } from '../lib/api'
+import { useWorkspaceStore } from '../store/workspace'
 import { useTheme } from '../theme/ThemeProvider'
 import {
   THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS,
@@ -1109,11 +1110,13 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
   const isHost    = cond.scope === 'host'
   const isNumeric = !!cond.numeric
 
-  const wsObj = workspaces.find(w => w.name === workspace)
+  // Alert targets key by the project's resource prefix ({workspace}_{project}).
+  const wsPrefix = (w) => w.resource_prefix || `${w.workspace}_${w.name}`
+  const wsObj = workspaces.find(w => wsPrefix(w) === workspace)
   const envOptions = [{ value: '', label: 'All environments' },
     ...((wsObj?.envs || []).map(e => ({ value: e, label: e })))]
-  const wsOptions = [{ value: '', label: 'All workspaces' },
-    ...workspaces.map(w => ({ value: w.name, label: w.name }))]
+  const wsOptions = [{ value: '', label: 'All projects' },
+    ...workspaces.map(w => ({ value: wsPrefix(w), label: w.name }))]
 
   function changeWorkspace(v) {
     setWorkspace(v)
@@ -1239,7 +1242,10 @@ function RulesTab() {
   const qc = useQueryClient()
   const { data: rules = [], isLoading } = useQuery({ queryKey: ['alert-rules'], queryFn: fetchAlertRules })
   const { data: meta }       = useQuery({ queryKey: ['alert-meta'], queryFn: fetchAlertMeta })
-  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const currentWs = useWorkspaceStore(s => s.current)
+  const { data: workspaces = [] } = useQuery({
+    queryKey: ['projects', currentWs], queryFn: () => fetchProjects(currentWs), enabled: !!currentWs,
+  })
   const { data: channels = [] } = useQuery({ queryKey: ['notification-channels'], queryFn: fetchNotificationChannels })
   const [modal, setModal]       = useState(null) // null | 'new' | { editing: rule }
   const [deleting, setDeleting] = useState(null)

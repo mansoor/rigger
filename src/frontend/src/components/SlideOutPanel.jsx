@@ -133,14 +133,14 @@ function RestoreModal({ snap, onClose }) {
   const scrollRef           = useRef(null)
 
   useEffect(() => {
-    const ws = openActionSocket(snap.workspace, 'restore', snap.env, [snap.date])
+    const ws = openActionSocket(snap.workspace, snap.project, 'restore', snap.env, [snap.date])
 
     ws.addEventListener('message', e => {
       setLines(prev => [...prev, e.data])
       if (e.data.includes('Restore Complete') || e.data.includes('restored successfully')) {
         setDone(true)
-        qc.invalidateQueries({ queryKey: ['workspaces'] })
-        qc.invalidateQueries({ queryKey: ['envstatus', snap.workspace] })
+        qc.invalidateQueries({ queryKey: ['projects'] })
+        qc.invalidateQueries({ queryKey: ['envstatus', snap.workspace, snap.project] })
       }
     })
     ws.addEventListener('error', () => {
@@ -170,7 +170,7 @@ function RestoreModal({ snap, onClose }) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <div>
             <h3 className="font-semibold text-content-strong text-sm">
-              Restoring {snap.workspace} / {snap.env}
+              Restoring {snap.workspace} / {snap.project} / {snap.env}
             </h3>
             <p className="text-xs text-content-subtle mt-0.5 font-mono">{formatDate(snap.date)}</p>
           </div>
@@ -245,7 +245,7 @@ function RestoreConfirmModal({ snap, onConfirm, onClose }) {
             <h3 className="font-semibold text-content-strong">Restore from backup?</h3>
             <p className="text-sm text-content-muted mt-1">
               This will <span className="text-content-strong font-medium">stop</span> the{' '}
-              <span className="text-content-strong font-medium">{snap.workspace}/{snap.env}</span> stack,
+              <span className="text-content-strong font-medium">{snap.workspace}/{snap.project}/{snap.env}</span> stack,
               overwrite all database and volume data with the snapshot from{' '}
               <span className="font-mono text-warning-fg text-xs">{formatDate(snap.date)}</span>,
               then restart the stack.
@@ -290,7 +290,7 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
   const [deleteConfirm, setDeleteConfirm] = useState(null) // snap to delete
 
   const deleteMut = useMutation({
-    mutationFn: (snap) => deleteBackup(snap.workspace, snap.env, snap.date),
+    mutationFn: (snap) => deleteBackup(snap.workspace, snap.project, snap.env, snap.date),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['backups'] })
       setDeleteConfirm(null)
@@ -299,18 +299,18 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
 
   const [syncErr, setSyncErr] = useState('') // "key: message" of the last failed sync
   const syncMut = useMutation({
-    mutationFn: (snap) => syncEnvBackup(snap.workspace, snap.env, { date: snap.date }),
+    mutationFn: (snap) => syncEnvBackup(snap.workspace, snap.project, snap.env, { date: snap.date }),
     onSuccess: () => { setSyncErr(''); qc.invalidateQueries({ queryKey: ['backups'] }) },
-    onError: (e, snap) => setSyncErr(`${snap.workspace}-${snap.env}-${snap.date}: ${e.response?.data?.error || 'Sync failed'}`),
+    onError: (e, snap) => setSyncErr(`${snap.workspace}/${snap.project}-${snap.env}-${snap.date}: ${e.response?.data?.error || 'Sync failed'}`),
   })
-  const syncingKey = (s) => `${s.workspace}-${s.env}-${s.date}`
+  const syncingKey = (s) => `${s.workspace}/${s.project}-${s.env}-${s.date}`
 
   // 11c: restore dry-run verify — result keyed by snapshot, shown inline.
   const [verify, setVerify] = useState(null) // { key, data?, error? }
   const verifyMut = useMutation({
-    mutationFn: (snap) => verifyRestore(snap.workspace, snap.env, snap.date),
-    onSuccess: (data, snap) => setVerify({ key: `${snap.workspace}-${snap.env}-${snap.date}`, data }),
-    onError: (e, snap) => setVerify({ key: `${snap.workspace}-${snap.env}-${snap.date}`, error: e.response?.data?.error || 'Verify failed' }),
+    mutationFn: (snap) => verifyRestore(snap.workspace, snap.project, snap.env, snap.date),
+    onSuccess: (data, snap) => setVerify({ key: `${snap.workspace}/${snap.project}-${snap.env}-${snap.date}`, data }),
+    onError: (e, snap) => setVerify({ key: `${snap.workspace}/${snap.project}-${snap.env}-${snap.date}`, error: e.response?.data?.error || 'Verify failed' }),
   })
 
   const items = (data || []).filter(b => {
@@ -334,7 +334,7 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
       )}
       <div className="divide-y divide-border">
         {items.map((snap, i) => {
-          const key = `${snap.workspace}-${snap.env}-${snap.date}`
+          const key = `${snap.workspace}/${snap.project}-${snap.env}-${snap.date}`
           const isOpen = expanded === key
           return (
             <div key={i}>
@@ -348,7 +348,9 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                     {snap.env}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-content-strong font-medium truncate">{snap.workspace}</p>
+                    <p className="text-sm text-content-strong font-medium truncate">
+                      <span className="text-content-subtle">{snap.workspace} / </span>{snap.project}
+                    </p>
                     <p className="text-xs text-content-subtle font-mono">{formatDate(snap.date)}</p>
                     {(snap.trigger || snap.services) && (
                       <p className="text-[11px] text-content-faint truncate">
@@ -382,17 +384,17 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                 {/* Verify (restore dry-run) button */}
                 <button
                   onClick={e => { e.stopPropagation(); setVerify({ key }); verifyMut.mutate(snap) }}
-                  disabled={verifyMut.isPending && `${verifyMut.variables?.workspace}-${verifyMut.variables?.env}-${verifyMut.variables?.date}` === key}
+                  disabled={verifyMut.isPending && syncingKey(verifyMut.variables || {}) === key}
                   className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
                   title="Dry-run: check this snapshot is complete and restorable"
                 >
-                  {verifyMut.isPending && `${verifyMut.variables?.workspace}-${verifyMut.variables?.env}-${verifyMut.variables?.date}` === key ? '…' : 'Verify'}
+                  {verifyMut.isPending && syncingKey(verifyMut.variables || {}) === key ? '…' : 'Verify'}
                 </button>
                 {/* Restore button */}
                 <button
                   onClick={e => { e.stopPropagation(); setConfirmSnap(snap) }}
                   className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg bg-warning-subtle/50 hover:bg-warning/20 text-warning-fg border border-warning-border/50 transition-colors"
-                  title={`Restore ${snap.workspace}/${snap.env} from ${snap.date}`}
+                  title={`Restore ${snap.workspace}/${snap.project}/${snap.env} from ${snap.date}`}
                 >
                   Restore
                 </button>
@@ -470,7 +472,7 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-sm p-6 shadow-2xl">
             <h3 className="font-semibold text-content-strong mb-2">Delete backup?</h3>
             <p className="text-sm text-content-muted mb-1">
-              <span className="text-content font-medium">{deleteConfirm.workspace}</span> / {deleteConfirm.env}
+              <span className="text-content font-medium">{deleteConfirm.workspace} / {deleteConfirm.project}</span> / {deleteConfirm.env}
             </p>
             <p className="text-xs text-content-subtle font-mono mb-4">{formatDate(deleteConfirm.date)}</p>
             <p className="text-sm text-danger-fg mb-5">
