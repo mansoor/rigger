@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchAllActivity, fetchBackups, fetchWorkspaces, openActionSocket, deleteBackup,
-  syncEnvBackup, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
+  syncEnvBackup, verifyRestore, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -305,6 +305,14 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
   })
   const syncingKey = (s) => `${s.workspace}-${s.env}-${s.date}`
 
+  // 11c: restore dry-run verify — result keyed by snapshot, shown inline.
+  const [verify, setVerify] = useState(null) // { key, data?, error? }
+  const verifyMut = useMutation({
+    mutationFn: (snap) => verifyRestore(snap.workspace, snap.env, snap.date),
+    onSuccess: (data, snap) => setVerify({ key: `${snap.workspace}-${snap.env}-${snap.date}`, data }),
+    onError: (e, snap) => setVerify({ key: `${snap.workspace}-${snap.env}-${snap.date}`, error: e.response?.data?.error || 'Verify failed' }),
+  })
+
   const items = (data || []).filter(b => {
     if (workspaceFilter && !b.workspace?.toLowerCase().includes(workspaceFilter.toLowerCase())) return false
     if (typeFilter !== 'all') {
@@ -365,6 +373,15 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                 >
                   {syncMut.isPending && syncingKey(syncMut.variables || {}) === key ? '…' : 'Sync'}
                 </button>
+                {/* Verify (restore dry-run) button */}
+                <button
+                  onClick={e => { e.stopPropagation(); setVerify({ key }); verifyMut.mutate(snap) }}
+                  disabled={verifyMut.isPending && `${verifyMut.variables?.workspace}-${verifyMut.variables?.env}-${verifyMut.variables?.date}` === key}
+                  className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+                  title="Dry-run: check this snapshot is complete and restorable"
+                >
+                  {verifyMut.isPending && `${verifyMut.variables?.workspace}-${verifyMut.variables?.env}-${verifyMut.variables?.date}` === key ? '…' : 'Verify'}
+                </button>
                 {/* Restore button */}
                 <button
                   onClick={e => { e.stopPropagation(); setConfirmSnap(snap) }}
@@ -382,6 +399,31 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                   ✕
                 </button>
               </div>
+
+              {/* Restore-verify report (11c) */}
+              {verify?.key === key && (
+                <div className="mx-5 mb-3 -mt-1 text-xs">
+                  {verify.error ? (
+                    <p className="text-danger-fg rounded-lg border border-danger-border/60 bg-danger-subtle/40 px-3 py-2">Verify failed: {verify.error}</p>
+                  ) : !verify.data ? (
+                    <p className="text-content-subtle rounded-lg border border-border bg-surface-raised/40 px-3 py-2">Verifying…</p>
+                  ) : (
+                    <div className={`rounded-lg border px-3 py-2 ${verify.data.ok ? 'border-success-border/60 bg-success-subtle/40' : 'border-danger-border/60 bg-danger-subtle/40'}`}>
+                      <p className={`font-medium ${verify.data.ok ? 'text-success-fg' : 'text-danger-fg'}`}>
+                        {verify.data.ok ? '✓ Restorable' : '✗ Problems found'} · {verify.data.files.length} file{verify.data.files.length !== 1 ? 's' : ''} · {formatBytes(verify.data.total_bytes)}
+                      </p>
+                      <div className="mt-1 space-y-0.5">
+                        {verify.data.files.map((f, fi) => (
+                          <div key={fi} className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-content-muted truncate">{f.ok ? '✓' : '✗'} {f.name}</span>
+                            <span className={f.ok ? 'text-content-faint' : 'text-danger-fg'}>{f.ok ? formatBytes(f.size) : f.issue}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Expanded file list */}
               {isOpen && (

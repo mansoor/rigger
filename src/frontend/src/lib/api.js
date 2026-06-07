@@ -207,6 +207,10 @@ export const testBackupTarget     = (id)        => api.post(`/settings/backup-ta
 export const syncEnvBackup        = (name, env, body = {}) =>
   api.post(`/workspaces/${name}/envs/${env}/backup-sync`, body).then(r => r.data)
 
+// 11c: non-destructive dry-run check that a snapshot is complete + restorable.
+export const verifyRestore        = (name, env, date) =>
+  api.post(`/workspaces/${name}/envs/${env}/restore-verify`, { date }).then(r => r.data)
+
 // 11e: per-env snapshot stats (count, total size, oldest/newest, retention).
 export const fetchBackupStats     = (name, env) =>
   api.get(`/workspaces/${name}/envs/${env}/backup-stats`).then(r => r.data)

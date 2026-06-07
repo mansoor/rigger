@@ -273,6 +273,11 @@ func main() {
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
 			handler.SyncEnvBackup(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/restore-verify"):
+			// /api/workspaces/{name}/envs/{env}/restore-verify — dry-run restore check (11c)
+			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			handler.VerifyRestore(w, r)
 		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/"):
 			name := pathSegment(r.URL.Path, 2)
 			sub := pathSegment(r.URL.Path, 3)
