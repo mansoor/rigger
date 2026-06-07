@@ -176,17 +176,7 @@ func (s *swarmRunner) logs() error {
 	// No service → swarm has no `docker stack logs`, so fan out `service logs -f`
 	// for every service in the stack, merged into one stream (lines are prefixed
 	// with the task name so the source is clear).
-	out, err := s.dockerOutput("stack", "services", s.stack, "--format", "{{.Name}}")
-	if err != nil {
-		return err
-	}
-	var names []string
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		if n := strings.TrimSpace(sc.Text()); n != "" {
-			names = append(names, n)
-		}
-	}
+	names := s.serviceNames()
 	if len(names) == 0 {
 		return fmt.Errorf("no services in stack %s — deploy it first", s.stack)
 	}
@@ -236,16 +226,7 @@ func (s *swarmRunner) restart() error {
 		return nil
 	}
 	s.info("Restarting all services in '%s'", s.stack)
-	out, err := s.dockerOutput("stack", "services", s.stack, "--format", "{{.Name}}")
-	if err != nil {
-		return err
-	}
-	sc := bufio.NewScanner(bytes.NewReader(out))
-	for sc.Scan() {
-		name := strings.TrimSpace(sc.Text())
-		if name == "" {
-			continue
-		}
+	for _, name := range s.serviceNames() {
 		if err := s.docker("service", "update", "--force", name); err != nil {
 			return err
 		}
@@ -273,7 +254,34 @@ func (s *swarmRunner) refresh() error {
 	return s.deploy()
 }
 
+// serviceNames lists the actual deployed swarm service names for this stack.
+func (s *swarmRunner) serviceNames() []string {
+	out, err := s.dockerOutput("stack", "services", s.stack, "--format", "{{.Name}}")
+	if err != nil {
+		return nil
+	}
+	var names []string
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		if n := strings.TrimSpace(sc.Text()); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// resolveSvc maps a service identifier from the UI (short name like "app", the
+// compose key "test_prod_app", or the full swarm name) to the actual swarm
+// service name. Swarm names are <stack>_<composeKey> and the compose key is
+// itself <project>_<env>_<short>, so the stack prefix appears twice — string
+// prefixing alone is unreliable. Match against the real service list by exact
+// name or "_<svc>" suffix, falling back to a best-effort prefix.
 func (s *swarmRunner) resolveSvc(svc string) string {
+	for _, n := range s.serviceNames() {
+		if n == svc || strings.HasSuffix(n, "_"+svc) {
+			return n
+		}
+	}
 	if strings.HasPrefix(svc, s.stack+"_") {
 		return svc
 	}
