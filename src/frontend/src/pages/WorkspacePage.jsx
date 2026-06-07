@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -277,6 +277,31 @@ function useMetricsInterval() {
   return data?.collect_interval_seconds || 30
 }
 
+// BackupStatsLine — compact per-env backup summary (Phase 11e): snapshot count,
+// total size on disk, and the configured retention limit. Hidden when there are
+// no local snapshots.
+function BackupStatsLine({ name, envName }) {
+  const { data } = useQuery({
+    queryKey: ['backup-stats', name, envName],
+    queryFn: () => fetchBackupStats(name, envName),
+    refetchInterval: 120_000,
+    retry: false,
+  })
+  if (!data || data.count === 0) return null
+  return (
+    <div className="border-t border-border/60 pt-3 flex items-center gap-1.5 text-[11px] text-content-faint">
+      <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 text-content-subtle" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" />
+      </svg>
+      <span className="text-content-muted font-medium">{data.count}</span>
+      <span>backup{data.count !== 1 ? 's' : ''}</span>
+      <span>·</span>
+      <span>{fmtBytes(data.total_bytes)}</span>
+      {data.retention > 0 && <><span>·</span><span>keep {data.retention}</span></>}
+    </div>
+  )
+}
+
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   // Use server-resolved domain (${VAR} already substituted) for display
@@ -542,6 +567,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           </div>
         </div>
       )}
+
+                {/* Backup summary (Phase 11e) — count, total size, retention. */}
+                <BackupStatsLine name={name} envName={envName} />
 
                 {/* Container health panel — has its own inner toggle for the list. */}
                 {serviceRows.length > 0 && (

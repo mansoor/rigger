@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-	"time"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
 )
@@ -221,27 +221,36 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 	}
 }
 
-// pruneOldBackups removes snapshot dirs older than 30 days.
+// pruneOldBackups keeps the newest N snapshot dirs per env, where N is the
+// workspace's configured backup.retention. Snapshot dirs are named
+// YYYY-MM-DD_HH-MM-SS, so a reverse lexicographic sort is chronological.
+// Retention <= 0 (unset / legacy config) means "don't prune" — never delete
+// data the user hasn't opted into pruning.
 func (c *ctx) pruneOldBackups(backupRoot string) {
-	c.info("Pruning backups older than 30 days...")
+	retention := c.cfg.Backup.Retention
+	if retention <= 0 {
+		c.info("Retention not set — skipping prune")
+		return
+	}
 	entries, err := os.ReadDir(backupRoot)
 	if err != nil {
 		return
 	}
-	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	var snaps []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		fi, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if fi.ModTime().Before(cutoff) {
-			os.RemoveAll(filepath.Join(backupRoot, e.Name()))
+		if e.IsDir() {
+			snaps = append(snaps, e.Name())
 		}
 	}
-	c.success("Pruning complete")
+	if len(snaps) <= retention {
+		return
+	}
+	c.info("Pruning to the %d most recent backups (have %d)...", retention, len(snaps))
+	sort.Sort(sort.Reverse(sort.StringSlice(snaps)))
+	for _, name := range snaps[retention:] {
+		os.RemoveAll(filepath.Join(backupRoot, name))
+	}
+	c.success("Pruned %d old backup(s)", len(snaps)-retention)
 }
 
 // humanSize renders a byte count as a short human string.

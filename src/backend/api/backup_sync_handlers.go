@@ -137,19 +137,73 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 
 // configBackupTarget reads backup.target_id from a workspace's config.json.
 func (h *Handler) configBackupTarget(name string) (*int64, error) {
+	cfg, err := h.readBackupCfg(name)
+	if err != nil {
+		return nil, err
+	}
+	return cfg.TargetID, nil
+}
+
+type wsBackupCfg struct {
+	Enabled   bool   `json:"enabled"`
+	TargetID  *int64 `json:"target_id"`
+	Schedule  string `json:"schedule"`
+	Retention int    `json:"retention"`
+}
+
+func (h *Handler) readBackupCfg(name string) (*wsBackupCfg, error) {
 	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
 	if err != nil {
 		return nil, fmt.Errorf("workspace not found")
 	}
 	var cfg struct {
-		Backup struct {
-			TargetID *int64 `json:"target_id"`
-		} `json:"backup"`
+		Backup wsBackupCfg `json:"backup"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("invalid config.json")
 	}
-	return cfg.Backup.TargetID, nil
+	return &cfg.Backup, nil
+}
+
+// GET /api/workspaces/{name}/envs/{env}/backup-stats
+// Per-env snapshot count, total size, oldest/newest dates, and the configured
+// retention limit (11e).
+func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	env := r.PathValue("env")
+	dir := filepath.Join(h.workspacesDir, name, "backups", env)
+
+	type stats struct {
+		Count      int    `json:"count"`
+		TotalBytes int64  `json:"total_bytes"`
+		Oldest     string `json:"oldest"`
+		Newest     string `json:"newest"`
+		Retention  int    `json:"retention"`
+	}
+	st := stats{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		st.Count++
+		if st.Oldest == "" || e.Name() < st.Oldest {
+			st.Oldest = e.Name()
+		}
+		if e.Name() > st.Newest {
+			st.Newest = e.Name()
+		}
+		files, _ := os.ReadDir(filepath.Join(dir, e.Name()))
+		for _, f := range files {
+			if info, err := f.Info(); err == nil {
+				st.TotalBytes += info.Size()
+			}
+		}
+	}
+	if cfg, err := h.readBackupCfg(name); err == nil {
+		st.Retention = cfg.Retention
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 // latestSnapshotDate returns the newest snapshot dir name (they sort

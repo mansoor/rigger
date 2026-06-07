@@ -77,6 +77,9 @@ type wsConfig struct {
 		Database      string `json:"database"`
 		GarageEnabled bool   `json:"garage_enabled"`
 	} `json:"environments"`
+	Backup struct {
+		Retention int `json:"retention"` // number of snapshots to keep per env (0 = unset → no prune)
+	} `json:"backup"`
 }
 
 func loadConfig(workspacesDir, workspace string) (*wsConfig, error) {

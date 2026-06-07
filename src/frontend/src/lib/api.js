@@ -206,6 +206,10 @@ export const testBackupTarget     = (id)        => api.post(`/settings/backup-ta
 export const syncEnvBackup        = (name, env, body = {}) =>
   api.post(`/workspaces/${name}/envs/${env}/backup-sync`, body).then(r => r.data)
 
+// 11e: per-env snapshot stats (count, total size, oldest/newest, retention).
+export const fetchBackupStats     = (name, env) =>
+  api.get(`/workspaces/${name}/envs/${env}/backup-stats`).then(r => r.data)
+
 // ── Settings: Docker Registries ───────────────────────────────────────────────
 
 export const fetchRegistries      = ()          => api.get('/settings/registries').then(r => r.data)

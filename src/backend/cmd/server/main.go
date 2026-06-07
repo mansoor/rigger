@@ -223,6 +223,8 @@ func main() {
 				}
 			case sub == "envs" && subsub == "metrics":
 				handler.GetEnvMetrics(w, r)
+			case sub == "envs" && subsub == "backup-stats":
+				handler.GetBackupStats(w, r)
 			default:
 				handler.GetWorkspace(w, r)
 			}
