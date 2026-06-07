@@ -326,6 +326,8 @@ Give admins visibility and control over active sessions.
 
 ## Phase 11 — Backup Verification & Scheduling
 
+> **Status: COMPLETE (11a–11e).** Background scheduler (03:00 UTC, daily/weekly per workspace); count-based retention per `config.backup.retention`; remote sync to S3 (minio-go) + SFTP (pkg/sftp) for per-env snapshots AND full `.rwb` archives (manual + auto-on-create), with a target connectivity Test; backup config is editable in both the wizard and Edit Workspace; a Dashboard "Backup coverage" health panel plus `backup_failed`/`backup_stale` alert conditions; and a non-destructive restore dry-run (file presence + gzip integrity). Local test backends live in `src/docker-compose.backup-test.yml` (MinIO + SFTP). Remote-host (Phase 7) snapshot sync is deferred — snapshots on remote hosts aren't pushed from the control plane yet.
+
 **Goal:** Close the loop on backups — automated, verified, and visible across all workspaces.
 
 ### 11a — Automated Backup Scheduling
