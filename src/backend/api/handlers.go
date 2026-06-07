@@ -701,6 +701,25 @@ func configEnvNames(data []byte) map[string]bool {
 	return out
 }
 
+// configEnvDeployments maps each env to its deployment mode (empty → "compose").
+func configEnvDeployments(data []byte) map[string]string {
+	var c struct {
+		Environments map[string]struct {
+			Deployment string `json:"deployment"`
+		} `json:"environments"`
+	}
+	json.Unmarshal(data, &c) //nolint:errcheck
+	out := make(map[string]string, len(c.Environments))
+	for k, v := range c.Environments {
+		dep := v.Deployment
+		if dep == "" {
+			dep = "compose"
+		}
+		out[k] = dep
+	}
+	return out
+}
+
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -724,6 +743,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	// is never renamed — so changing it would orphan the running stack and its
 	// volume data on the next deploy. The folder name is the stable identity.
 	oldEnvs := map[string]bool{}
+	oldDeployments := map[string]string{}
 	if existing, rerr := os.ReadFile(path); rerr == nil {
 		var was, now struct {
 			Project struct {
@@ -739,6 +759,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		oldEnvs = configEnvNames(existing)
+		oldDeployments = configEnvDeployments(existing)
 	}
 
 	// Environments removed in this edit must be fully cleaned up — otherwise their
@@ -754,6 +775,26 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		var out bytes.Buffer
 		if derr := h.bridge.Run(shell.RunOptions{Workspace: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
 			fmt.Fprintf(os.Stderr, "PutConfig: tear down removed env %s/%s: %v\n%s", name, env, derr, out.String())
+		}
+	}
+
+	// Deployment-mode changes (compose↔swarm) must tear down the OLD deployment
+	// first — its containers/networks (e.g. a bridge network) otherwise collide
+	// with the new mode's deploy (swarm wants the same name as an overlay). Run
+	// `down` while the OLD config.json is still on disk so it resolves the old
+	// mode; the user then redeploys cleanly under the new mode.
+	newDeployments := configEnvDeployments([]byte(body.Content))
+	for env, oldDep := range oldDeployments {
+		if !newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
+			continue // removed envs handled above
+		}
+		if nd := newDeployments[env]; nd == "" || nd == oldDep {
+			continue
+		}
+		var out bytes.Buffer
+		if derr := h.bridge.Run(shell.RunOptions{Workspace: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
+			fmt.Fprintf(os.Stderr, "PutConfig: tear down for mode change %s/%s (%s→%s): %v\n%s",
+				name, env, oldDep, newDeployments[env], derr, out.String())
 		}
 	}
 
@@ -893,7 +934,12 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "unknown"})
 		return
 	}
-	var cfg struct{ Project struct{ Name string } `json:"project"` }
+	var cfg struct {
+		Project      struct{ Name string } `json:"project"`
+		Environments map[string]struct {
+			Deployment string `json:"deployment"`
+		} `json:"environments"`
+	}
 	json.Unmarshal(cfgData, &cfg) //nolint:errcheck
 
 	project := cfg.Project.Name + "_" + env
@@ -903,6 +949,15 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 	ex, err := h.bridge.ExecForEnv(name, env)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "unknown"})
+		return
+	}
+
+	// Swarm envs run as a stack, not compose containers — query stack services.
+	if cfg.Environments[env].Deployment == "swarm" {
+		out, runErr := ex.DockerOutput(executor.Spec{
+			Args: []string{"stack", "services", project, "--format", "json"},
+		})
+		writeJSON(w, http.StatusOK, map[string]string{"status": parseStackServicesJSON(out, runErr)})
 		return
 	}
 
@@ -916,6 +971,53 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 
 	status := parseComposePsJSON(out, runErr)
 	writeJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+// parseStackServicesJSON parses `docker stack services <stack> --format json`
+// (NDJSON). Each service's Replicas is "running/desired"; the env is "running"
+// when every service is fully replicated, "partial" when some are, else
+// "stopped". An errored/empty result for a non-existent stack is "unknown".
+func parseStackServicesJSON(out []byte, runErr error) string {
+	if runErr != nil && len(bytes.TrimSpace(out)) == 0 {
+		return "unknown"
+	}
+	total, running := 0, 0
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var s struct {
+			Replicas string `json:"Replicas"`
+		}
+		if json.Unmarshal([]byte(line), &s) != nil {
+			continue
+		}
+		total++
+		// Replicas like "1/1" (possibly with a trailing note). Compare run vs desired.
+		if slash := strings.IndexByte(s.Replicas, '/'); slash > 0 {
+			run := strings.TrimSpace(s.Replicas[:slash])
+			rest := s.Replicas[slash+1:]
+			j := 0
+			for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+				j++
+			}
+			desired := rest[:j]
+			if desired != "" && desired != "0" && run == desired {
+				running++
+			}
+		}
+	}
+	switch {
+	case total == 0:
+		return "stopped"
+	case running == total:
+		return "running"
+	case running > 0:
+		return "partial"
+	default:
+		return "stopped"
+	}
 }
 
 // parseComposePsJSON parses docker compose ps --format json (NDJSON) output.
