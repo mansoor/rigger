@@ -88,12 +88,53 @@ func archivesDir(dataDir string) string {
 	return filepath.Join(dataDir, "workspace-archives")
 }
 
-// shouldExclude returns true for paths inside envs/<env>/backup/
-func shouldExclude(rel string) bool {
-	// rel looks like: envs/prod/backup/... or envs/prod/backup
+// newestSnapshotPerEnv maps each env to its most-recent snapshot dir name under
+// wsDir/backups (dirs sort chronologically by name).
+func newestSnapshotPerEnv(wsDir string) map[string]string {
+	out := map[string]string{}
+	envs, err := os.ReadDir(filepath.Join(wsDir, "backups"))
+	if err != nil {
+		return out
+	}
+	for _, env := range envs {
+		if !env.IsDir() {
+			continue
+		}
+		snaps, err := os.ReadDir(filepath.Join(wsDir, "backups", env.Name()))
+		if err != nil {
+			continue
+		}
+		newest := ""
+		for _, s := range snaps {
+			if s.IsDir() && s.Name() > newest {
+				newest = s.Name()
+			}
+		}
+		if newest != "" {
+			out[env.Name()] = newest
+		}
+	}
+	return out
+}
+
+// archiveExcluded reports whether a workspace-relative path is left out of a full
+// archive. A .rwb carries the workspace definition (config, env/compose files)
+// plus the *latest* per-env backup snapshot for restorability — but NOT the
+// older snapshot history (that would grow the archive without bound), nor the
+// legacy envs/<env>/backup path. `keep` is env → newest snapshot dir name.
+func archiveExcluded(rel string, keep map[string]string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-	// parts[0]=="envs", parts[1]==<env>, parts[2]=="backup"
-	return len(parts) >= 3 && parts[0] == "envs" && parts[2] == "backup"
+	// Legacy per-env backup directory.
+	if len(parts) >= 3 && parts[0] == "envs" && parts[2] == "backup" {
+		return true
+	}
+	// Per-env backup snapshots: keep only the newest dir per env.
+	if len(parts) >= 3 && parts[0] == "backups" {
+		if keep[parts[1]] != parts[2] {
+			return true
+		}
+	}
+	return false
 }
 
 func createArchive(wsDir, wsName, destPath string) (int64, error) {
@@ -109,6 +150,8 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 	gw := gzip.NewWriter(f)
 	tw := tar.NewWriter(gw)
 
+	keep := newestSnapshotPerEnv(wsDir)
+
 	err = filepath.Walk(wsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable files silently
@@ -117,7 +160,7 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 		if rel == "." {
 			return nil
 		}
-		if shouldExclude(rel) {
+		if archiveExcluded(rel, keep) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

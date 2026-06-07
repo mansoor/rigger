@@ -1195,7 +1195,7 @@ function WorkspaceBackup() {
         Pick a workspace, then take a lightweight <strong className="text-content">configuration snapshot</strong>{' '}
         (<code className="font-mono text-xs">.rws</code> — <code className="font-mono text-xs">config.json</code> + each{' '}
         <code className="font-mono text-xs">.env</code>, no data) or a <strong className="text-content">full backup</strong>{' '}
-        (<code className="font-mono text-xs">.rwb</code> — config plus all volume data). Both can be downloaded, uploaded
+        (<code className="font-mono text-xs">.rwb</code> — config, env files, and the latest backup snapshot per env). Both can be downloaded, uploaded
         and restored on the server.
       </div>
 
@@ -1286,8 +1286,8 @@ function WorkspaceBackup() {
           <div>
             <h3 className="text-base font-semibold text-content-strong">Full backup <span className="text-xs font-normal text-content-faint">.rwb</span></h3>
             <p className="text-sm text-content-subtle mt-1">
-              Config plus <strong className="text-content-muted">all volume data</strong> (per-env backup folders excluded).
-              Larger and slower; restoring re-creates the whole workspace.
+              Config + env files + the <strong className="text-content-muted">most recent backup snapshot per env</strong> (older snapshots excluded).
+              Larger than a config snapshot; restoring re-creates the whole workspace.
             </p>
           </div>
 
