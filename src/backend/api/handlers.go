@@ -973,6 +973,23 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
+// parseReplicas parses a swarm "running/desired" replicas string (tolerating a
+// trailing note like "1/1 (max 1 per node)").
+func parseReplicas(s string) (run, desired int) {
+	slash := strings.IndexByte(s, '/')
+	if slash < 0 {
+		return 0, 0
+	}
+	run, _ = strconv.Atoi(strings.TrimSpace(s[:slash]))
+	rest := s[slash+1:]
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	desired, _ = strconv.Atoi(rest[:j])
+	return run, desired
+}
+
 // parseStackServicesJSON parses `docker stack services <stack> --format json`
 // (NDJSON). Each service's Replicas is "running/desired"; the env is "running"
 // when every service is fully replicated, "partial" when some are, else
@@ -994,18 +1011,8 @@ func parseStackServicesJSON(out []byte, runErr error) string {
 			continue
 		}
 		total++
-		// Replicas like "1/1" (possibly with a trailing note). Compare run vs desired.
-		if slash := strings.IndexByte(s.Replicas, '/'); slash > 0 {
-			run := strings.TrimSpace(s.Replicas[:slash])
-			rest := s.Replicas[slash+1:]
-			j := 0
-			for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
-				j++
-			}
-			desired := rest[:j]
-			if desired != "" && desired != "0" && run == desired {
-				running++
-			}
+		if run, desired := parseReplicas(s.Replicas); desired > 0 && run == desired {
+			running++
 		}
 	}
 	switch {
@@ -1560,7 +1567,10 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg struct {
-		Project struct{ Name string } `json:"project"`
+		Project      struct{ Name string } `json:"project"`
+		Environments map[string]struct {
+			Deployment string `json:"deployment"`
+		} `json:"environments"`
 	}
 	json.Unmarshal(data, &cfg) //nolint:errcheck
 	project := cfg.Project.Name + "_" + env
@@ -1573,11 +1583,6 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 		return
 	}
-	// --all: include exited/stopped containers so the health panel shows their actual state
-	out, err := ex.DockerOutput(executor.Spec{
-		Args: []string{"compose", "-p", project, "-f", "docker-compose.yml", "ps", "--all", "--format", "json"},
-		Dir:  envDir,
-	})
 
 	type Container struct {
 		Name    string `json:"Name"`
@@ -1586,6 +1591,44 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 		Status  string `json:"Status"`
 		Health  string `json:"Health"` // healthy | unhealthy | starting | "" (no healthcheck)
 	}
+
+	// Swarm envs run as a stack — map `docker stack services` to the same shape.
+	if cfg.Environments[env].Deployment == "swarm" {
+		out, _ := ex.DockerOutput(executor.Spec{
+			Args: []string{"stack", "services", project, "--format", "json"},
+		})
+		var containers []Container
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line == "" || line[0] != '{' {
+				continue
+			}
+			var s struct{ Name, Replicas string }
+			if json.Unmarshal([]byte(line), &s) != nil {
+				continue
+			}
+			state := "exited"
+			if run, desired := parseReplicas(s.Replicas); desired > 0 && run == desired {
+				state = "running"
+			}
+			containers = append(containers, Container{
+				Name:    s.Name,
+				Service: strings.TrimPrefix(s.Name, project+"_"),
+				State:   state,
+				Status:  "replicas " + s.Replicas,
+			})
+		}
+		if containers == nil {
+			containers = []Container{}
+		}
+		writeJSON(w, http.StatusOK, containers)
+		return
+	}
+
+	// --all: include exited/stopped containers so the health panel shows their actual state
+	out, err := ex.DockerOutput(executor.Spec{
+		Args: []string{"compose", "-p", project, "-f", "docker-compose.yml", "ps", "--all", "--format", "json"},
+		Dir:  envDir,
+	})
 
 	var containers []Container
 	if err == nil {

@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/executor"
@@ -85,11 +88,65 @@ func (s *swarmRunner) success(format string, a ...any) {
 
 func (s *swarmRunner) deploy() error {
 	s.info("Deploying '%s' (swarm)", s.stack)
-	if err := s.docker("stack", "deploy", "--compose-file", "docker-compose.yml", "--with-registry-auth", s.stack); err != nil {
+	if err := s.ensureSynced(); err != nil {
+		return err
+	}
+	// `docker stack deploy` does NOT read the env's .env for ${VAR} interpolation
+	// the way `docker compose` does — so the environment:/ports: ${VAR}
+	// placeholders would resolve to empty (breaking DB creds, ports, etc.).
+	// Inject the .env into the deploy process so interpolation works.
+	err := executor.Default(s.opts.Exec).Docker(executor.Spec{
+		Args:   []string{"stack", "deploy", "--compose-file", "docker-compose.yml", "--with-registry-auth", s.stack},
+		Dir:    s.envDir,
+		Env:    s.deployEnv(),
+		Stdout: s.opts.Stdout,
+		Stderr: s.opts.Stderr,
+	})
+	if err != nil {
 		return err
 	}
 	s.success("Stack '%s' is up", s.stack)
 	return nil
+}
+
+// deployEnv merges the shell environment with the env's .env file so
+// `docker stack deploy` can interpolate ${VAR} placeholders (it doesn't read
+// .env itself, unlike `docker compose`).
+func (s *swarmRunner) deployEnv() []string {
+	env := append([]string{}, s.opts.EnvVars...)
+	for k, v := range parseDotEnv(filepath.Join(s.envDir, ".env")) {
+		env = append(env, k+"="+v)
+	}
+	return env
+}
+
+// parseDotEnv reads KEY=VALUE pairs from a .env file (best-effort; ignores
+// comments/blanks, strips surrounding quotes and an `export ` prefix).
+func parseDotEnv(path string) map[string]string {
+	out := map[string]string{}
+	f, err := os.Open(path)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			continue
+		}
+		k := strings.TrimSpace(line[:eq])
+		v := strings.Trim(strings.TrimSpace(line[eq+1:]), `"'`)
+		if k != "" {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // remove backs both stop and down — swarm has no "stop without remove".
@@ -113,11 +170,60 @@ func (s *swarmRunner) ps() error {
 }
 
 func (s *swarmRunner) logs() error {
-	svc := s.firstExtra()
-	if svc == "" {
-		return fmt.Errorf("swarm logs require a service: logs %s <service>", s.opts.Env)
+	if svc := s.firstExtra(); svc != "" {
+		return s.docker("service", "logs", "-f", "--tail", "200", s.resolveSvc(svc))
 	}
-	return s.docker("service", "logs", "-f", s.resolveSvc(svc))
+	// No service → swarm has no `docker stack logs`, so fan out `service logs -f`
+	// for every service in the stack, merged into one stream (lines are prefixed
+	// with the task name so the source is clear).
+	out, err := s.dockerOutput("stack", "services", s.stack, "--format", "{{.Name}}")
+	if err != nil {
+		return err
+	}
+	var names []string
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	for sc.Scan() {
+		if n := strings.TrimSpace(sc.Text()); n != "" {
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("no services in stack %s — deploy it first", s.stack)
+	}
+	if err := s.ensureSynced(); err != nil {
+		return err
+	}
+	// Serialize writes so concurrent service streams don't interleave mid-line.
+	mw := &mutexWriter{w: s.opts.Stdout}
+	var wg sync.WaitGroup
+	for _, n := range names {
+		n := n
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			executor.Default(s.opts.Exec).Docker(executor.Spec{ //nolint:errcheck
+				Args:   []string{"service", "logs", "-f", "--tail", "200", n},
+				Dir:    s.envDir,
+				Env:    s.opts.EnvVars,
+				Stdout: mw,
+				Stderr: mw,
+			})
+		}()
+	}
+	wg.Wait()
+	return nil
+}
+
+// mutexWriter serializes concurrent writes to an underlying writer.
+type mutexWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (m *mutexWriter) Write(p []byte) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.w.Write(p)
 }
 
 func (s *swarmRunner) restart() error {
