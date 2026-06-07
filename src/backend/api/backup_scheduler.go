@@ -3,45 +3,38 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
+	"github.com/mansoor/rigger/ui/internal/workspace"
 )
 
-// StartBackupScheduler runs enabled workspace backups once a day at hourUTC
-// (Phase 11a). Mirrors StartHousekeepingScheduler: sleep until the next
-// hour:00, run, repeat. Per-workspace schedule: daily = every day, weekly =
-// Sundays, manual/unset = never.
-func (h *Handler) StartBackupScheduler(hourUTC int) {
+const schedulerTick = 30 * time.Minute
+
+// StartBackupScheduler runs per-env backup schedules on an interval (Phase 11
+// per-env redesign). It ticks every 30 min; each schedule runs when at least
+// its interval_hours have elapsed since its last run (tracked in
+// backup_schedule_runs, so it survives restarts).
+func (h *Handler) StartBackupScheduler() {
 	go func() {
-		for {
-			now := time.Now().UTC()
-			next := time.Date(now.Year(), now.Month(), now.Day(), hourUTC, 0, 0, 0, time.UTC)
-			if now.After(next) {
-				next = next.Add(24 * time.Hour)
-			}
-			time.Sleep(time.Until(next))
-			h.runScheduledBackups(time.Now().UTC())
+		time.Sleep(60 * time.Second) // let the app settle after startup
+		h.runDueBackups(time.Now().UTC())
+		ticker := time.NewTicker(schedulerTick)
+		defer ticker.Stop()
+		for range ticker.C {
+			h.runDueBackups(time.Now().UTC())
 		}
 	}()
 }
 
-func backupScheduleDue(schedule string, now time.Time) bool {
-	switch schedule {
-	case "daily":
-		return true
-	case "weekly":
-		return now.Weekday() == time.Sunday
-	default: // "manual" or unset
-		return false
-	}
-}
-
-func (h *Handler) runScheduledBackups(now time.Time) {
+func (h *Handler) runDueBackups(now time.Time) {
 	entries, err := os.ReadDir(h.workspacesDir)
 	if err != nil {
 		return
@@ -55,49 +48,187 @@ func (h *Handler) runScheduledBackups(now time.Time) {
 		if err != nil {
 			continue
 		}
-		cfg, err := h.readBackupCfg(ws)
-		if err != nil || !cfg.Enabled || !backupScheduleDue(cfg.Schedule, now) {
-			continue
-		}
 		for env := range configEnvNames(raw) {
-			h.runScheduledBackupEnv(ws, env, cfg.TargetID)
+			for _, s := range h.readEnvSchedules(ws, env) {
+				if !s.Enabled || s.IntervalHours <= 0 {
+					continue
+				}
+				last := h.scheduleLastRun(ws, env, s.ID)
+				interval := time.Duration(s.IntervalHours) * time.Hour
+				// Small slack so a slightly-early tick still fires on schedule.
+				if !last.IsZero() && now.Sub(last) < interval-time.Minute {
+					continue
+				}
+				h.runScheduledBackup(ws, env, s)
+			}
 		}
 	}
 }
 
-// runScheduledBackupEnv runs one env backup, records the outcome, and pushes the
-// resulting snapshot to the configured remote target (local-control-plane envs
-// only — remote-host snapshots live on the host and aren't synced from here).
-func (h *Handler) runScheduledBackupEnv(ws, env string, targetID *int64) {
+// runScheduledBackup executes one schedule: records the run up front (so an
+// overlapping tick can't double-fire), backs up the schedule's services, logs,
+// syncs to the target, and prunes to the schedule's retention.
+func (h *Handler) runScheduledBackup(ws, env string, s workspace.BackupSchedule) {
+	h.recordScheduleRun(ws, env, s.ID)
+
 	var out bytes.Buffer
 	runErr := h.bridge.Run(shell.RunOptions{
 		Workspace: ws, Command: "backup", Env: env, Extra: []string{"all"},
+		Services: s.Services, ScheduleID: s.ID, ScheduleName: s.Name, Trigger: "scheduled",
 		Stdout: &out, Stderr: &out,
 	})
 
-	logStatus, msg := "ok", ""
-	hkStatus := "ok"
+	logStatus, msg, hkStatus := "ok", "", "ok"
 	if runErr != nil {
 		logStatus, msg, hkStatus = "error", runErr.Error(), "fail"
 	}
-	alerts.LogBackup(h.db, ws, env, logStatus, msg, 0)                              //nolint:errcheck
-	h.logHousekeeping("backup:"+ws+":"+env, "scheduled", hkStatus, out.String(), 0, 0)
+	alerts.LogBackup(h.db, ws, env, logStatus, msg, 0) //nolint:errcheck
+	label := s.Name
+	if label == "" {
+		label = s.ID
+	}
+	h.logHousekeeping("backup:"+ws+":"+env+":"+label, "scheduled", hkStatus, out.String(), 0, 0)
+	if runErr != nil {
+		return
+	}
 
-	if runErr != nil || targetID == nil {
+	// Sync the new snapshot to this schedule's target (local-control-plane only).
+	if s.TargetID != nil {
+		if host, _ := settings.HostForEnv(h.db, ws, env); host == nil {
+			if target, err := settings.GetBackupTarget(h.db, *s.TargetID); err == nil && target != nil {
+				if date, err := latestSnapshotDate(filepath.Join(h.workspacesDir, ws, "backups", env)); err == nil {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+					h.uploadSnapshot(ctx, ws, env, target, date) //nolint:errcheck
+					cancel()
+				}
+			}
+		}
+	}
+
+	h.pruneScheduleSnapshots(ws, env, s.ID, s.Retention)
+}
+
+// pruneScheduleSnapshots keeps the newest `retention` snapshots that belong to a
+// schedule (matched via the snapshot manifest). retention<=0 = keep all.
+func (h *Handler) pruneScheduleSnapshots(ws, env, scheduleID string, retention int) {
+	if retention <= 0 {
 		return
 	}
-	if host, _ := settings.HostForEnv(h.db, ws, env); host != nil {
-		return // remote-host snapshot — not synced from the control plane
-	}
-	target, err := settings.GetBackupTarget(h.db, *targetID)
-	if err != nil || target == nil {
-		return
-	}
-	date, err := latestSnapshotDate(filepath.Join(h.workspacesDir, ws, "backups", env))
+	envDir := filepath.Join(h.workspacesDir, ws, "backups", env)
+	ents, err := os.ReadDir(envDir)
 	if err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	h.uploadSnapshot(ctx, ws, env, target, date) //nolint:errcheck
+	var dates []string
+	for _, e := range ents {
+		if !e.IsDir() {
+			continue
+		}
+		if m := readSnapshotManifest(filepath.Join(envDir, e.Name())); m != nil && m.ScheduleID == scheduleID {
+			dates = append(dates, e.Name())
+		}
+	}
+	if len(dates) <= retention {
+		return
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
+	for _, d := range dates[retention:] {
+		os.RemoveAll(filepath.Join(envDir, d)) //nolint:errcheck
+	}
+}
+
+func (h *Handler) scheduleLastRun(ws, env, id string) time.Time {
+	var ts string
+	h.db.QueryRow(`SELECT last_run_at FROM backup_schedule_runs WHERE workspace=? AND env=? AND schedule_id=?`,
+		ws, env, id).Scan(&ts) //nolint:errcheck
+	if ts == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", ts); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
+}
+
+func (h *Handler) recordScheduleRun(ws, env, id string) {
+	h.db.Exec(`
+		INSERT INTO backup_schedule_runs (workspace, env, schedule_id, last_run_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(workspace, env, schedule_id) DO UPDATE SET last_run_at=CURRENT_TIMESTAMP`,
+		ws, env, id) //nolint:errcheck
+}
+
+// MigrateBackupConfig is a one-time migration (Phase 11 per-env redesign) that
+// converts a legacy workspace-level config.backup into an equivalent per-env
+// backup schedule, then removes the old key. Guarded by an app_settings flag so
+// it runs once.
+func (h *Handler) MigrateBackupConfig() {
+	var done string
+	h.db.QueryRow(`SELECT value FROM app_settings WHERE key='backup_migrated_v2'`).Scan(&done) //nolint:errcheck
+	if done == "1" {
+		return
+	}
+	entries, err := os.ReadDir(h.workspacesDir)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				migrateWorkspaceBackup(filepath.Join(h.workspacesDir, e.Name(), "config.json"))
+			}
+		}
+	}
+	h.db.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES ('backup_migrated_v2','1',CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value='1', updated_at=CURRENT_TIMESTAMP`) //nolint:errcheck
+}
+
+func migrateWorkspaceBackup(path string) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var cfg map[string]any
+	if json.Unmarshal(raw, &cfg) != nil {
+		return
+	}
+	bk, ok := cfg["backup"].(map[string]any)
+	if !ok {
+		return // nothing legacy to migrate
+	}
+	enabled, _ := bk["enabled"].(bool)
+	schedule, _ := bk["schedule"].(string)
+	interval := 24
+	if schedule == "weekly" {
+		interval = 168
+	}
+	envs, _ := cfg["environments"].(map[string]any)
+
+	// Only synthesize schedules when the old config was an active daily/weekly one.
+	if enabled && schedule != "manual" && envs != nil {
+		i := 0
+		for envName, ev := range envs {
+			em, _ := ev.(map[string]any)
+			if em == nil {
+				continue
+			}
+			if _, has := em["backup_schedules"]; has {
+				continue
+			}
+			sched := map[string]any{
+				"id":             fmt.Sprintf("bk_mig_%d", i),
+				"name":           "Migrated backup",
+				"services":       []any{}, // all
+				"interval_hours": interval,
+				"target_id":      bk["target_id"],
+				"retention":      bk["retention"],
+				"enabled":        true,
+			}
+			em["backup_schedules"] = []any{sched}
+			envs[envName] = em
+			i++
+		}
+	}
+
+	delete(cfg, "backup")
+	if out, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+		os.WriteFile(path, out, 0o644) //nolint:errcheck
+	}
 }

@@ -211,9 +211,13 @@ export const syncEnvBackup        = (name, env, body = {}) =>
 export const verifyRestore        = (name, env, date) =>
   api.post(`/workspaces/${name}/envs/${env}/restore-verify`, { date }).then(r => r.data)
 
-// 11e: per-env snapshot stats (count, total size, oldest/newest, retention).
+// 11e: per-env snapshot stats (count, total size, oldest/newest, schedules).
 export const fetchBackupStats     = (name, env) =>
   api.get(`/workspaces/${name}/envs/${env}/backup-stats`).then(r => r.data)
+
+// Per-env data-bearing services for the backup pickers (Phase 11 per-env).
+export const fetchBackupServices  = (name, env) =>
+  api.get(`/workspaces/${name}/envs/${env}/backup-services`).then(r => r.data)
 
 // 11a: push a full .rwb workspace archive to a remote target.
 export const syncWorkspaceArchive = (filename, body = {}) =>
@@ -299,13 +303,13 @@ export function openCreateSocket(workspace) {
   return ws
 }
 
-export function openActionSocket(name, command, env, extra = []) {
+export function openActionSocket(name, command, env, extra = [], services = []) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${proto}://${window.location.host}/api/workspaces/${name}/action`)
 
   ws.addEventListener('open', () => {
     const token = useAuthStore.getState().token
-    ws.send(JSON.stringify({ command, env, extra, token }))
+    ws.send(JSON.stringify({ command, env, extra, services, token }))
   })
 
   return ws

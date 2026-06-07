@@ -178,6 +178,17 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (workspace, env, date)
 		);
 
+		-- Per-env backup schedule run-tracking (Phase 11 per-env redesign): last
+		-- time each schedule executed, so the interval-based scheduler knows when
+		-- the next run is due. Keyed by (workspace, env, schedule_id).
+		CREATE TABLE IF NOT EXISTS backup_schedule_runs (
+			workspace   TEXT NOT NULL,
+			env         TEXT NOT NULL,
+			schedule_id TEXT NOT NULL,
+			last_run_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (workspace, env, schedule_id)
+		);
+
 		-- 11a: remote-sync state for full workspace archives (.rwb), keyed by the
 		-- archive filename. ListWorkspaceArchives joins this for a synced badge.
 		CREATE TABLE IF NOT EXISTS archive_syncs (

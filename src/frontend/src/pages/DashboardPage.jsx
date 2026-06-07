@@ -259,7 +259,7 @@ function BackupCoverage() {
               <th className="px-5 py-2 font-medium">Workspace / Env</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Last backup</th>
-              <th className="px-3 py-2 font-medium">Schedule</th>
+              <th className="px-3 py-2 font-medium">Schedules</th>
               <th className="px-3 py-2 font-medium">Snapshots</th>
               <th className="px-5 py-2 font-medium">Remote</th>
             </tr>
@@ -278,11 +278,9 @@ function BackupCoverage() {
                   </td>
                   <td className="px-3 py-2 text-content-muted">{fmtBackupAge(r.age_hours)}</td>
                   <td className="px-3 py-2 text-content-muted">
-                    {r.enabled && r.schedule !== 'manual' ? r.schedule : <span className="text-content-faint">manual</span>}
+                    {r.summary ? r.summary : <span className="text-content-faint">{r.schedules > 0 ? 'disabled' : 'none'}</span>}
                   </td>
-                  <td className="px-3 py-2 text-content-muted">
-                    {r.count}{r.retention > 0 && <span className="text-content-faint"> / {r.retention}</span>}
-                  </td>
+                  <td className="px-3 py-2 text-content-muted">{r.count}</td>
                   <td className="px-5 py-2">
                     {r.sync?.status === 'ok'
                       ? <span className="text-success-fg text-xs" title={`Synced to ${r.sync.target}`}>↑ {r.sync.target}</span>

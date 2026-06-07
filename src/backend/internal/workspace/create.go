@@ -81,6 +81,7 @@ type EnvRequest struct {
 	Vars       map[string]string `json:"vars"`               // per-environment initial env vars
 	SecretKeys []string          `json:"secret_keys,omitempty"` // env-var names flagged as secrets (Phase 8)
 	HostID     int64             `json:"host_id,omitempty"`  // per-env remote host (0 = local); bound after create
+	BackupSchedules []BackupSchedule `json:"backup_schedules,omitempty"` // per-env backup schedules (Phase 11)
 }
 
 // defaultVersions are the fallback image tags for custom stacks.
@@ -241,6 +242,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		if len(e.SecretKeys) > 0 {
 			envBlock["secret_keys"] = e.SecretKeys
 		}
+		if len(e.BackupSchedules) > 0 {
+			envBlock["backup_schedules"] = e.BackupSchedules
+		}
 
 		environments[envName] = envBlock
 	}
@@ -273,33 +277,8 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		cfg["named_volumes"] = req.NamedVolumes
 	}
 
-	// Backup configuration
-	if req.Backup != nil {
-		retention := req.Backup.Retention
-		if retention <= 0 {
-			retention = 7
-		}
-		schedule := req.Backup.Schedule
-		if schedule == "" {
-			schedule = "daily"
-		}
-		cfg["backup"] = map[string]any{
-			"enabled":     req.Backup.Enabled,
-			"target_id":   req.Backup.TargetID,
-			"target_name": req.Backup.TargetName,
-			"schedule":    schedule,
-			"retention":   retention,
-		}
-	} else {
-		// Always write a default backup config so scripts can rely on it
-		cfg["backup"] = map[string]any{
-			"enabled":     true,
-			"target_id":   nil,
-			"target_name": "local",
-			"schedule":    "daily",
-			"retention":   7,
-		}
-	}
+	// Backup schedules are per-environment (Phase 11) — written into each
+	// envBlock above. No workspace-level backup config.
 
 	return cfg, nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/backupsync"
 	"github.com/mansoor/rigger/ui/internal/settings"
+	"github.com/mansoor/rigger/ui/internal/workspace"
 )
 
 // POST /api/settings/backup-targets/{id}/test
@@ -72,12 +73,7 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 
 	targetID := body.TargetID
 	if targetID == nil {
-		cfgTarget, err := h.configBackupTarget(name)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		targetID = cfgTarget
+		targetID = h.firstScheduleTarget(name, env)
 	}
 	if targetID == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -137,52 +133,68 @@ func (h *Handler) uploadSnapshot(ctx context.Context, ws, env string, target *se
 	return res, syncErr
 }
 
-// configBackupTarget reads backup.target_id from a workspace's config.json.
-func (h *Handler) configBackupTarget(name string) (*int64, error) {
-	cfg, err := h.readBackupCfg(name)
-	if err != nil {
-		return nil, err
-	}
-	return cfg.TargetID, nil
-}
-
-type wsBackupCfg struct {
-	Enabled   bool   `json:"enabled"`
-	TargetID  *int64 `json:"target_id"`
-	Schedule  string `json:"schedule"`
-	Retention int    `json:"retention"`
-}
-
-func (h *Handler) readBackupCfg(name string) (*wsBackupCfg, error) {
+// readEnvSchedules returns the per-env backup schedules for one environment
+// (Phase 11 per-env redesign). nil if none / unreadable.
+func (h *Handler) readEnvSchedules(name, env string) []workspace.BackupSchedule {
 	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
 	if err != nil {
-		return nil, fmt.Errorf("workspace not found")
+		return nil
 	}
 	var cfg struct {
-		Backup wsBackupCfg `json:"backup"`
+		Environments map[string]struct {
+			BackupSchedules []workspace.BackupSchedule `json:"backup_schedules"`
+		} `json:"environments"`
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("invalid config.json")
+	if json.Unmarshal(raw, &cfg) != nil {
+		return nil
 	}
-	return &cfg.Backup, nil
+	return cfg.Environments[env].BackupSchedules
+}
+
+// firstScheduleTarget returns the target of the first enabled schedule that has
+// one — within env, or across all envs when env=="". Used as the default target
+// for manual snapshot/archive syncs. nil = no remote target configured.
+func (h *Handler) firstScheduleTarget(name, env string) *int64 {
+	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Environments map[string]struct {
+			BackupSchedules []workspace.BackupSchedule `json:"backup_schedules"`
+		} `json:"environments"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return nil
+	}
+	for envName, e := range cfg.Environments {
+		if env != "" && envName != env {
+			continue
+		}
+		for _, s := range e.BackupSchedules {
+			if s.Enabled && s.TargetID != nil {
+				return s.TargetID
+			}
+		}
+	}
+	return nil
 }
 
 // GET /api/workspaces/{name}/envs/{env}/backup-stats
-// Per-env snapshot count, total size, oldest/newest dates, and the configured
-// retention limit (11e).
+// Per-env snapshot count, total size, oldest/newest dates, and a summary of the
+// env's backup schedules (Phase 11 per-env redesign).
 func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 	dir := filepath.Join(h.workspacesDir, name, "backups", env)
 
 	type stats struct {
-		Count      int    `json:"count"`
-		TotalBytes int64  `json:"total_bytes"`
-		Oldest     string `json:"oldest"`
-		Newest     string `json:"newest"`
-		Retention  int    `json:"retention"`
-		Schedule   string `json:"schedule"`
-		Enabled    bool   `json:"enabled"`
+		Count          int    `json:"count"`
+		TotalBytes     int64  `json:"total_bytes"`
+		Oldest         string `json:"oldest"`
+		Newest         string `json:"newest"`
+		Schedules      int    `json:"schedules"`       // total schedules defined
+		ActiveSchedule int    `json:"active_schedules"` // enabled schedules
 	}
 	st := stats{}
 	entries, _ := os.ReadDir(dir)
@@ -204,10 +216,11 @@ func (h *Handler) GetBackupStats(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if cfg, err := h.readBackupCfg(name); err == nil {
-		st.Retention = cfg.Retention
-		st.Schedule = cfg.Schedule
-		st.Enabled = cfg.Enabled
+	for _, s := range h.readEnvSchedules(name, env) {
+		st.Schedules++
+		if s.Enabled {
+			st.ActiveSchedule++
+		}
 	}
 	writeJSON(w, http.StatusOK, st)
 }
@@ -308,9 +321,7 @@ func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
 	_ = readJSON(r, &body)
 	targetID := body.TargetID
 	if targetID == nil {
-		if t, err := h.configBackupTarget(wsNameFromArchive(filename)); err == nil {
-			targetID = t
-		}
+		targetID = h.firstScheduleTarget(wsNameFromArchive(filename), "")
 	}
 	if targetID == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no remote backup target configured for this workspace"})
@@ -340,9 +351,9 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		Workspace  string     `json:"workspace"`
 		Env        string     `json:"env"`
-		Enabled    bool       `json:"enabled"`
-		Schedule   string     `json:"schedule"`
-		Retention  int        `json:"retention"`
+		Enabled    bool       `json:"enabled"`   // any schedule enabled
+		Schedules  int        `json:"schedules"` // total schedules defined
+		Summary    string     `json:"summary"`   // enabled frequencies, e.g. "every 4h · daily"
 		Count      int        `json:"count"`
 		LastBackup string     `json:"last_backup"`
 		AgeHours   float64    `json:"age_hours"` // -1 = never
@@ -362,12 +373,28 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		cfg, _ := h.readBackupCfg(ws)
 		for env := range configEnvNames(raw) {
 			rw := row{Workspace: ws, Env: env, AgeHours: -1}
-			if cfg != nil {
-				rw.Enabled, rw.Schedule, rw.Retention = cfg.Enabled, cfg.Schedule, cfg.Retention
+
+			minInterval := 0
+			seen := map[string]bool{}
+			var freqs []string
+			for _, s := range h.readEnvSchedules(ws, env) {
+				rw.Schedules++
+				if !s.Enabled {
+					continue
+				}
+				rw.Enabled = true
+				if minInterval == 0 || s.IntervalHours < minInterval {
+					minInterval = s.IntervalHours
+				}
+				if lbl := intervalLabel(s.IntervalHours); !seen[lbl] {
+					seen[lbl] = true
+					freqs = append(freqs, lbl)
+				}
 			}
+			rw.Summary = strings.Join(freqs, " · ")
+
 			envDir := filepath.Join(h.workspacesDir, ws, "backups", env)
 			newest := ""
 			if ents, err := os.ReadDir(envDir); err == nil {
@@ -390,7 +417,7 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 					rw.Sync = &s
 				}
 			}
-			rw.Health = backupHealth(rw.Enabled, rw.Schedule, newest != "", rw.AgeHours)
+			rw.Health = backupHealth(rw.Enabled, minInterval, newest != "", rw.AgeHours)
 			rows = append(rows, rw)
 		}
 	}
@@ -400,20 +427,29 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rows)
 }
 
-// backupHealth classifies coverage. "disabled" = no schedule expectation;
-// otherwise current / stale (overdue past 1.5× the interval) / never.
-func backupHealth(enabled bool, schedule string, hasBackup bool, ageH float64) string {
-	if !enabled || schedule == "" || schedule == "manual" {
+// intervalLabel renders an interval in hours as a short label.
+func intervalLabel(h int) string {
+	switch h {
+	case 24:
+		return "daily"
+	case 168:
+		return "weekly"
+	default:
+		return fmt.Sprintf("every %dh", h)
+	}
+}
+
+// backupHealth classifies coverage from the env's shortest enabled interval.
+// "disabled" = no enabled schedule; else current / stale (overdue past 1.5× the
+// interval) / never.
+func backupHealth(enabled bool, minIntervalH int, hasBackup bool, ageH float64) string {
+	if !enabled || minIntervalH <= 0 {
 		return "disabled"
 	}
 	if !hasBackup {
 		return "never"
 	}
-	interval := 24.0
-	if schedule == "weekly" {
-		interval = 168.0
-	}
-	if ageH > interval*1.5 {
+	if ageH > float64(minIntervalH)*1.5 {
 		return "stale"
 	}
 	return "current"

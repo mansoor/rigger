@@ -78,6 +78,21 @@ type EnvConfig struct {
 	// SecretVersions tracks the current Docker-secret version per secret key
 	// (swarm secrets are immutable, so rotation bumps the version). Absent ⇒ v1.
 	SecretVersions map[string]int `json:"secret_versions,omitempty"`
+	// BackupSchedules are per-environment automated backup definitions (Phase 11
+	// per-env redesign). Each picks which services' data to back up, how often,
+	// where to store it, and how many copies to keep.
+	BackupSchedules []BackupSchedule `json:"backup_schedules,omitempty"`
+}
+
+// BackupSchedule is one automated backup definition for an environment.
+type BackupSchedule struct {
+	ID            string   `json:"id"`             // stable id (client-generated)
+	Name          string   `json:"name"`           // user label
+	Services      []string `json:"services"`       // service names to back up; empty = all data services
+	IntervalHours int      `json:"interval_hours"` // 2,4,6,12,24,168
+	TargetID      *int64   `json:"target_id"`      // nil = local filesystem
+	Retention     int      `json:"retention"`      // snapshots to keep for this schedule
+	Enabled       bool     `json:"enabled"`
 }
 
 type Config struct {

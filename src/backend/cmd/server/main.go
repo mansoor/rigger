@@ -85,7 +85,8 @@ func main() {
 
 	// Start daily automated housekeeping (networks + dangling images) at 03:00 UTC
 	handler.StartHousekeepingScheduler(3)
-	handler.StartBackupScheduler(3) // Phase 11a — scheduled workspace backups at 03:00 UTC
+	handler.MigrateBackupConfig()  // one-time: legacy config.backup → per-env schedules
+	handler.StartBackupScheduler() // Phase 11 — per-env interval-based backup schedules
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -231,6 +232,8 @@ func main() {
 				handler.GetEnvMetrics(w, r)
 			case sub == "envs" && subsub == "backup-stats":
 				handler.GetBackupStats(w, r)
+			case sub == "envs" && subsub == "backup-services":
+				handler.GetBackupServices(w, r)
 			default:
 				handler.GetWorkspace(w, r)
 			}

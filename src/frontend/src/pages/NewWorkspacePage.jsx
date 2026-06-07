@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css'
 import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchWorkspaces, fetchHosts } from '../lib/api'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
+import { BackupScheduleEditor } from '../components/BackupSchedules'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 
@@ -617,7 +618,7 @@ function Step2({ data, onChange, errors }) {
 
 // ── Environments (wizard step 4 — Step3 component) ────────────────────────────
 
-const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {}, secret_keys: [] }
+const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {}, secret_keys: [], backup_schedules: [] }
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
 function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0 }) {
@@ -1208,111 +1209,66 @@ const RETENTION_OPTIONS = [
   { value: 30, label: '30 backups' },
 ]
 
-function Step5({ data, onChange }) {
-  const { data: targets = [], isLoading } = useQuery({
-    queryKey: ['backup-targets'],
-    queryFn: fetchBackupTargets,
-  })
-
-  const backup = data.backup
-  function upd(key, val) { onChange('backup', { ...backup, [key]: val }) }
-
-  // When a target is selected, store both id and name
-  function handleTargetChange(val) {
-    if (val === 'local') {
-      upd('targetId', null)
-      onChange('backup', { ...backup, targetId: null, targetName: 'local' })
-    } else {
-      const t = targets.find(t => String(t.id) === val)
-      onChange('backup', { ...backup, targetId: t?.id ?? null, targetName: t?.name ?? val })
-    }
+// wizardServices derives the data-bearing services from the in-progress wizard
+// state (the env isn't created yet, so we can't ask the backend).
+function wizardServices(data) {
+  if (data.type === 'image') {
+    return (data.images || []).map(img => {
+      const low = String(img.image || '').toLowerCase()
+      let kind = 'service', hint = 'Container volumes (if any)'
+      if (low.includes('postgres')) { kind = 'database'; hint = 'PostgreSQL — SQL dump' }
+      else if (low.includes('mariadb')) { kind = 'database'; hint = 'MariaDB — SQL dump' }
+      else if (low.includes('mysql')) { kind = 'database'; hint = 'MySQL — SQL dump' }
+      return { id: img.name, label: img.name, kind, hint }
+    })
   }
+  const out = []
+  if (data.database && data.database !== 'none') {
+    out.push({ id: 'database', label: 'Database', kind: 'database', hint: data.database + ' — SQL dump' })
+  }
+  out.push({ id: 'uploads', label: 'App uploads', kind: 'volume', hint: 'Uploads volume' })
+  if (data.garage) out.push({ id: 'garage', label: 'Garage S3 data', kind: 'volume', hint: 'Garage volumes' })
+  return out
+}
 
-  const selectedTargetVal = backup.targetId ? String(backup.targetId) : 'local'
+function Step5({ data, onChange }) {
+  const { data: targets = [] } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
+  const services = wizardServices(data)
+  const namedEnvs = data.environments.filter(e => e.name)
+
+  const setSchedules = (env, list) =>
+    onChange('environments', data.environments.map(e => (e === env ? { ...e, backup_schedules: list } : e)))
 
   return (
-    <div className="space-y-6">
-      <StepHeader step={5} title="Backup Configuration" subtitle="Configure where and how often this workspace is backed up." />
+    <div className="space-y-5">
+      <StepHeader step={5} title="Backups (optional)" subtitle="Set automatic backups per environment — or skip and configure later." />
 
-      {/* Enable toggle */}
-      <Toggle
-        label="Enable backups"
-        hint="Backup all environment databases and volumes"
-        checked={backup.enabled}
-        onChange={v => upd('enabled', v)}
-      />
+      <div className="px-4 py-3 bg-surface-raised/50 border border-border-strong/60 rounded-lg text-sm text-content-muted leading-relaxed">
+        Add schedules to an environment to choose <strong className="text-content">which services' data</strong> to back up,
+        <strong className="text-content"> how often</strong>, <strong className="text-content">where</strong> to store it, and
+        <strong className="text-content"> how many copies</strong> to keep — e.g. back up prod's database hourly and everything daily,
+        while stage runs once a day. Leave any environment empty to skip; you can always add schedules later from Edit Workspace.
+      </div>
 
-      {backup.enabled && (
-        <div className="space-y-5 pt-2">
-          {/* Backup destination */}
-          <div>
-            <Label required>Backup destination</Label>
-            {isLoading ? (
-              <p className="text-sm text-content-subtle">Loading targets…</p>
-            ) : (
-              <>
-                <select
-                  value={selectedTargetVal}
-                  onChange={e => handleTargetChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
-                >
-                  <option value="local">Local filesystem (default)</option>
-                  {targets.map(t => (
-                    <option key={t.id} value={String(t.id)}>
-                      {t.name} ({t.type.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-                {targets.length === 0 && (
-                  <p className="text-xs text-content-subtle mt-1.5">
-                    Only local backups available.{' '}
-                    <a href="/settings" target="_blank" rel="noreferrer"
-                      className="text-brand-400 hover:text-brand-300 underline underline-offset-2">
-                      Add an S3 or SFTP target in Settings
-                    </a>{' '}
-                    to enable remote backups.
-                  </p>
-                )}
-                {selectedTargetVal === 'local' && (
-                  <p className="text-xs text-content-subtle mt-1.5">
-                    Stored in <code className="font-mono text-xs">workspaces/{data.name || '<name>'}/backups/</code>
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Schedule */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Schedule</Label>
-              <Select
-                value={backup.schedule}
-                onChange={v => upd('schedule', v)}
-                options={SCHEDULE_OPTIONS}
-              />
-            </div>
-            <div>
-              <Label>Retention</Label>
-              <Select
-                value={backup.retention}
-                onChange={v => upd('retention', parseInt(v))}
-                options={RETENTION_OPTIONS}
-              />
-              <p className="text-xs text-content-subtle mt-1">Older backups are pruned automatically.</p>
-            </div>
-          </div>
-        </div>
+      {namedEnvs.length === 0 && (
+        <p className="text-sm text-content-subtle">Name your environments first (Step 4) to configure their backups.</p>
       )}
 
-      {!backup.enabled && (
-        <div className="px-4 py-3 bg-surface-raised/60 border border-border-strong/60 rounded-lg">
-          <p className="text-sm text-content-muted">Backups disabled — you can enable them later from the workspace settings.</p>
+      {namedEnvs.map(env => (
+        <div key={env.name} className="bg-surface border border-border rounded-xl p-4">
+          <h3 className="text-sm font-semibold text-content-strong mb-2">{env.name}</h3>
+          <BackupScheduleEditor
+            schedules={env.backup_schedules || []}
+            onChange={list => setSchedules(env, list)}
+            services={services}
+            targets={targets}
+          />
         </div>
-      )}
+      ))}
     </div>
   )
 }
+
 
 // ── Step 6: Review ────────────────────────────────────────────────────────────
 
@@ -1366,10 +1322,10 @@ function Step6({ data }) {
         {data.volumes.filter(v => v.name).length > 0 && (
           <ReviewRow label="Named volumes" value={data.volumes.filter(v => v.name).map(v => v.name).join(', ')} />
         )}
-        <ReviewRow label="Backup" value={
-          !data.backup.enabled ? 'Disabled' :
-          `${data.backup.targetName === 'local' ? 'Local' : data.backup.targetName} · ${data.backup.schedule} · keep ${data.backup.retention}`
-        } />
+        {(() => {
+          const total = data.environments.reduce((n, e) => n + (e.backup_schedules?.length || 0), 0)
+          return <ReviewRow label="Backups" value={total === 0 ? 'No schedules (configure later)' : `${total} schedule${total !== 1 ? 's' : ''} across environments`} />
+        })()}
       </div>
 
       <PortWarnings warnings={[...dupWarnings, ...hostWarnings]} />
@@ -1539,7 +1495,6 @@ const DEFAULT_DATA = {
   environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
   templateVolumes: [], // read-only display list populated from selected prebuilt template
-  backup: { enabled: true, targetId: null, targetName: 'local', schedule: 'daily', retention: 7 },
 }
 
 export default function NewWorkspacePage() {
@@ -1618,13 +1573,6 @@ export default function NewWorkspacePage() {
       custom_env_vars: data.stackType === 'image' ? data.customEnvVars : {},
       initial_env_vars: {}, // vars now per-environment via environments[].vars
       named_volumes: data.volumes.filter(v => v.name && v.mountPath),
-      backup: {
-        enabled: data.backup.enabled,
-        target_id: data.backup.targetId,
-        target_name: data.backup.targetName,
-        schedule: data.backup.schedule,
-        retention: data.backup.retention,
-      },
       backend: isImage ? '' : data.backend,
       frontend: isImage ? 'none' : data.frontend,
       database: isImage ? 'none' : data.database,

@@ -777,6 +777,13 @@ type RunOptions struct {
 	Extra     []string // additional args (e.g. "db" for backup, "minor" for version bump)
 	Stdout    io.Writer
 	Stderr    io.Writer
+
+	// Backup-only (Phase 11 per-env schedules): which services to back up
+	// (empty = all) and the schedule metadata recorded in the snapshot manifest.
+	Services     []string
+	ScheduleID   string
+	ScheduleName string
+	Trigger      string // "scheduled" | "manual"
 }
 
 // shellEnv builds the environment for child processes.
@@ -982,6 +989,10 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			Timestamp:     time.Now().UTC().Format("2006-01-02_15-04-05"),
+			Services:      opts.Services,
+			ScheduleID:    opts.ScheduleID,
+			ScheduleName:  opts.ScheduleName,
+			Trigger:       opts.Trigger,
 		}
 		if rt != nil {
 			bopts.Exec = rt.exec

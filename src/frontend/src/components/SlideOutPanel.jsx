@@ -350,6 +350,12 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-content-strong font-medium truncate">{snap.workspace}</p>
                     <p className="text-xs text-content-subtle font-mono">{formatDate(snap.date)}</p>
+                    {(snap.trigger || snap.services) && (
+                      <p className="text-[11px] text-content-faint truncate">
+                        {(snap.services && snap.services.length > 0) ? snap.services.join(', ') : 'all data'}
+                        {' · '}{snap.schedule || (snap.trigger === 'manual' ? 'manual' : snap.trigger || 'backup')}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {snap.sync?.status === 'ok' && (

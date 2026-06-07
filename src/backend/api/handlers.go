@@ -1276,9 +1276,10 @@ var upgrader = websocket.Upgrader{
 }
 
 type actionRequest struct {
-	Command string   `json:"command"`
-	Env     string   `json:"env"`
-	Extra   []string `json:"extra"`
+	Command  string   `json:"command"`
+	Env      string   `json:"env"`
+	Extra    []string `json:"extra"`
+	Services []string `json:"services"` // manual backup: services to include (empty = all)
 }
 
 // WS /api/workspaces/{name}/action
@@ -1341,14 +1342,21 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	runErr := h.bridge.Run(shell.RunOptions{
+	runOpts := shell.RunOptions{
 		Workspace: name,
 		Command:   req.Command,
 		Env:       req.Env,
 		Extra:     req.Extra,
 		Stdout:    pw,
 		Stderr:    pw, // merged: errors appear inline with output, not silently dropped
-	})
+	}
+	if req.Command == "backup" {
+		runOpts.Services = req.Services
+		runOpts.ScheduleID = "manual"
+		runOpts.ScheduleName = "Manual backup"
+		runOpts.Trigger = "manual"
+	}
+	runErr := h.bridge.Run(runOpts)
 	pw.Close()
 	<-done // ensure all streamed output is captured before recording
 
@@ -1687,7 +1695,10 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 		Date      string       `json:"date"`
 		SizeBytes int64        `json:"size_bytes"`
 		Files     []BackupFile `json:"files"`
-		Sync      *syncState   `json:"sync,omitempty"` // 11d: remote-sync state, if any
+		Sync      *syncState   `json:"sync,omitempty"`     // 11d: remote-sync state, if any
+		Services  []string     `json:"services,omitempty"` // from manifest (empty = all)
+		Trigger   string       `json:"trigger,omitempty"`  // scheduled | manual
+		Schedule  string       `json:"schedule,omitempty"` // schedule name
 	}
 
 	var results []BackupSnapshot
@@ -1731,8 +1742,8 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 				var bfiles []BackupFile
 				var totalSize int64
 				for _, f := range files {
-					if f.IsDir() {
-						continue
+					if f.IsDir() || f.Name() == snapshotManifestFile {
+						continue // manifest is metadata, not a backup artifact
 					}
 					info, _ := f.Info()
 					size := int64(0)
@@ -1748,6 +1759,11 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 					Date:      snap.Name(),
 					SizeBytes: totalSize,
 					Files:     bfiles,
+				}
+				if m := readSnapshotManifest(snapDir); m != nil {
+					snapshot.Services = m.Services
+					snapshot.Trigger = m.Trigger
+					snapshot.Schedule = m.ScheduleName
 				}
 				if st, ok := syncStates[wsName+"\x00"+envName+"\x00"+snap.Name()]; ok {
 					s := st

@@ -41,6 +41,15 @@ type Options struct {
 	// instead of reading the local .env. The bridge sets it from the remote
 	// host-authoritative .env for cross-host backup/restore (Phase 7).
 	DotEnv map[string]string
+
+	// Services restricts the backup to these service names (image-stack image
+	// names, or "database"/"uploads"/"garage" for custom stacks). Empty = all.
+	Services []string
+	// Schedule metadata recorded in the snapshot manifest (Phase 11 per-env
+	// schedules). Trigger is "scheduled" | "manual".
+	ScheduleID   string
+	ScheduleName string
+	Trigger      string
 }
 
 // Run dispatches backup/restore. Returns (handled, err); handled=false lets the
@@ -107,6 +116,18 @@ type ctx struct {
 	prefix  string // {project}_{env} — compose project + service prefix
 	envDir  string
 	envVars map[string]string // parsed .env (DB credentials etc.)
+	// services is the set of service names to back up (nil = all). Built from
+	// Options.Services.
+	services map[string]bool
+}
+
+// wants reports whether a service should be backed up given the filter
+// (empty filter = back up everything).
+func (c *ctx) wants(service string) bool {
+	if len(c.services) == 0 {
+		return true
+	}
+	return c.services[service]
 }
 
 func newCtx(opts Options, cfg *wsConfig) *ctx {
@@ -115,15 +136,23 @@ func newCtx(opts Options, cfg *wsConfig) *ctx {
 	if envVars == nil {
 		envVars = readDotEnv(filepath.Join(envDir, ".env"))
 	}
+	var services map[string]bool
+	if len(opts.Services) > 0 {
+		services = make(map[string]bool, len(opts.Services))
+		for _, s := range opts.Services {
+			services[s] = true
+		}
+	}
 	return &ctx{
-		opts:    opts,
-		cfg:     cfg,
-		runner:  executor.Default(opts.Exec),
-		project: cfg.Project.Name,
-		env:     opts.Env,
-		prefix:  cfg.Project.Name + "_" + opts.Env,
-		envDir:  envDir,
-		envVars: envVars,
+		opts:     opts,
+		cfg:      cfg,
+		runner:   executor.Default(opts.Exec),
+		project:  cfg.Project.Name,
+		env:      opts.Env,
+		prefix:   cfg.Project.Name + "_" + opts.Env,
+		envDir:   envDir,
+		envVars:  envVars,
+		services: services,
 	}
 }
 

@@ -2,10 +2,10 @@ package backup
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
@@ -28,7 +28,11 @@ func runBackup(opts Options, cfg *wsConfig) error {
 		return err
 	}
 
-	c.info("Backup: %s → %s", opts.Env, backupDir)
+	if len(c.services) > 0 {
+		c.info("Backup: %s → %s (services: %s)", opts.Env, backupDir, strings.Join(opts.Services, ", "))
+	} else {
+		c.info("Backup: %s → %s (all services)", opts.Env, backupDir)
+	}
 
 	switch target {
 	case "db":
@@ -38,10 +42,11 @@ func runBackup(opts Options, cfg *wsConfig) error {
 	case "all":
 		c.backupDB(dateDir, backupDir)
 		c.backupFiles(dateDir, backupDir)
-		c.pruneOldBackups(backupRoot)
 	default:
 		return fmt.Errorf("unknown backup target %q (use: db | files | all)", target)
 	}
+
+	c.writeManifest(backupDir)
 
 	c.success("Backup complete — %s", backupDir)
 	if entries, err := os.ReadDir(backupDir); err == nil {
@@ -54,12 +59,35 @@ func runBackup(opts Options, cfg *wsConfig) error {
 	return nil
 }
 
+// manifestFile is the per-snapshot metadata file name.
+const manifestFile = "backup-manifest.json"
+
+// writeManifest records what this snapshot contains (schedule, services, trigger)
+// so the UI can show it and the scheduler can apply per-schedule retention.
+func (c *ctx) writeManifest(backupDir string) {
+	m := map[string]any{
+		"schedule_id":   c.opts.ScheduleID,
+		"schedule_name": c.opts.ScheduleName,
+		"services":      c.opts.Services, // empty = all
+		"trigger":       c.opts.Trigger,
+		"created_at":    c.opts.Timestamp,
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(backupDir, manifestFile), data, 0o644)
+}
+
 // ── DB backup ────────────────────────────────────────────────────────────────────
 
 func (c *ctx) backupDB(dateDir, backupDir string) {
 	if c.cfg.Project.Type == "image" {
 		foundDB := false
 		for idx, img := range c.cfg.Images {
+			if !c.wants(img.Name) {
+				continue
+			}
 			name := strings.ToLower(img.Image)
 			var dbType string
 			switch {
@@ -84,6 +112,9 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 	}
 
 	// Custom stack — driven by the environment's database field.
+	if !c.wants("database") {
+		return
+	}
 	database := c.cfg.Environments[c.env].Database
 	switch database {
 	case "postgres":
@@ -173,6 +204,9 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 		seen := map[string]bool{}
 		backed := 0
 		for _, img := range c.cfg.Images {
+			if !c.wants(img.Name) {
+				continue
+			}
 			container := c.prefix + "_" + img.Name
 			for _, m := range c.inspectMounts(container) {
 				if seen[m.Destination] {
@@ -198,15 +232,17 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 	}
 
 	// Custom stack: uploads volume (+ garage if enabled).
-	c.info("Archiving upload volume...")
-	uploadFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_uploads_%s.tar.gz", c.project, c.env, dateDir))
-	if c.archiveNamedVolumes(uploadFile, "/data", map[string]string{c.prefix + "_uploads": "/data"}, ".") {
-		c.success("Uploads archive: %s", filepath.Base(uploadFile))
-	} else {
-		c.warn("Could not archive uploads volume")
+	if c.wants("uploads") {
+		c.info("Archiving upload volume...")
+		uploadFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_uploads_%s.tar.gz", c.project, c.env, dateDir))
+		if c.archiveNamedVolumes(uploadFile, "/data", map[string]string{c.prefix + "_uploads": "/data"}, ".") {
+			c.success("Uploads archive: %s", filepath.Base(uploadFile))
+		} else {
+			c.warn("Could not archive uploads volume")
+		}
 	}
 
-	if c.cfg.Environments[c.env].GarageEnabled {
+	if c.wants("garage") && c.cfg.Environments[c.env].GarageEnabled {
 		c.info("Archiving Garage S3 data...")
 		garageFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_garage_%s.tar.gz", c.project, c.env, dateDir))
 		mounts := map[string]string{
@@ -221,37 +257,9 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 	}
 }
 
-// pruneOldBackups keeps the newest N snapshot dirs per env, where N is the
-// workspace's configured backup.retention. Snapshot dirs are named
-// YYYY-MM-DD_HH-MM-SS, so a reverse lexicographic sort is chronological.
-// Retention <= 0 (unset / legacy config) means "don't prune" — never delete
-// data the user hasn't opted into pruning.
-func (c *ctx) pruneOldBackups(backupRoot string) {
-	retention := c.cfg.Backup.Retention
-	if retention <= 0 {
-		c.info("Retention not set — skipping prune")
-		return
-	}
-	entries, err := os.ReadDir(backupRoot)
-	if err != nil {
-		return
-	}
-	var snaps []string
-	for _, e := range entries {
-		if e.IsDir() {
-			snaps = append(snaps, e.Name())
-		}
-	}
-	if len(snaps) <= retention {
-		return
-	}
-	c.info("Pruning to the %d most recent backups (have %d)...", retention, len(snaps))
-	sort.Sort(sort.Reverse(sort.StringSlice(snaps)))
-	for _, name := range snaps[retention:] {
-		os.RemoveAll(filepath.Join(backupRoot, name))
-	}
-	c.success("Pruned %d old backup(s)", len(snaps)-retention)
-}
+// Per-schedule retention is applied by the scheduler (api package) after each
+// scheduled run, reading snapshot manifests — not here, since a single env now
+// has multiple independent schedules.
 
 // humanSize renders a byte count as a short human string.
 func humanSize(b int64) string {

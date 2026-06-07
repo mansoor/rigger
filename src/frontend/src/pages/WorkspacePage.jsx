@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -297,9 +297,8 @@ function BackupStatsLine({ name, envName }) {
       <span>backup{data.count !== 1 ? 's' : ''}</span>
       <span>·</span>
       <span>{fmtBytes(data.total_bytes)}</span>
-      {data.retention > 0 && <><span>·</span><span>keep {data.retention}</span></>}
-      {data.enabled && data.schedule && data.schedule !== 'manual' && (
-        <><span>·</span><span title="Scheduled backups run at 03:00 UTC">auto {data.schedule}</span></>
+      {data.active_schedules > 0 && (
+        <><span>·</span><span title="Active backup schedules for this environment">{data.active_schedules} schedule{data.active_schedules !== 1 ? 's' : ''}</span></>
       )}
     </div>
   )
@@ -404,7 +403,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     else if (port && url) accessUrls.push({ label: `:${port}`, href: url })
   }
 
-  function handleAction(cmd, extra = []) {
+  function handleAction(cmd, extra = [], services = []) {
     onAction(cmd, envName, () => {
       // Refresh env status, container details, image-update and metric state
       // after any action (deploy/refresh/etc.) so the card reflects reality.
@@ -412,6 +411,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         refetchStatus()
         qc.invalidateQueries({ queryKey: ['containers', name, envName] })
         qc.invalidateQueries({ queryKey: ['metrics', name, envName] })
+        qc.invalidateQueries({ queryKey: ['backup-stats', name, envName] })
         if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', name, envName] })
       }, 2000)
       // After update: backend invalidates its cache and runs a fresh check (~3-5s).
@@ -421,8 +421,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           qc.invalidateQueries({ queryKey: ['imageupdates', name, envName] })
         }, 8000)
       }
-    }, extra)
+    }, extra, services)
   }
+
+  const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
@@ -536,7 +538,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
             onClick={() => onTerminal()} className="text-content-subtle hover:text-emerald-400" />
           <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
-            onClick={() => handleAction('backup')} className="text-content-subtle hover:text-indigo-400" />
+            onClick={() => setBackupModal(true)} className="text-content-subtle hover:text-indigo-400" />
         </div>
       </div>
 
@@ -710,6 +712,74 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           onClose={() => setFilesFor(null)} />
       )}
 
+      {/* Manual backup — pick which services' data to include */}
+      {backupModal && (
+        <ManualBackupModal
+          name={name} envName={envName}
+          onClose={() => setBackupModal(false)}
+          onRun={(services) => { setBackupModal(false); handleAction('backup', [], services) }}
+        />
+      )}
+
+    </div>
+  )
+}
+
+// ManualBackupModal — choose which services' data to include in a one-off backup.
+function ManualBackupModal({ name, envName, onClose, onRun }) {
+  const { data: services = [], isLoading } = useQuery({
+    queryKey: ['backup-services', name, envName],
+    queryFn: () => fetchBackupServices(name, envName),
+    retry: false,
+  })
+  const [selected, setSelected] = useState(null) // null = not yet initialized
+  // Default: all services selected.
+  const sel = selected ?? services.map(s => s.id)
+  const toggle = (id) => {
+    const cur = selected ?? services.map(s => s.id)
+    setSelected(cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id])
+  }
+  // Sending all services == empty filter (back up everything).
+  const servicesArg = sel.length === services.length ? [] : sel
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-semibold text-content-strong">Back up {envName}</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl leading-none">×</button>
+        </div>
+        <p className="text-xs text-content-subtle mb-3">Choose which services' data to include.</p>
+
+        {isLoading ? (
+          <p className="text-sm text-content-subtle py-4">Loading services…</p>
+        ) : services.length === 0 ? (
+          <p className="text-sm text-content-subtle py-4">No data-bearing services detected. A backup will capture any volumes found.</p>
+        ) : (
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {services.map(s => (
+              <label key={s.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface-raised/60 cursor-pointer">
+                <input type="checkbox" checked={sel.includes(s.id)} onChange={() => toggle(s.id)} className="accent-brand-500" />
+                <span className="flex-1 min-w-0">
+                  <span className="text-sm text-content">{s.label}{s.kind === 'database' ? ' 🗄' : ''}</span>
+                  {s.hint && <span className="block text-[11px] text-content-faint">{s.hint}</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content-muted hover:text-content">Cancel</button>
+          <button
+            onClick={() => onRun(servicesArg)}
+            disabled={!isLoading && services.length > 0 && sel.length === 0}
+            className="px-4 py-1.5 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium"
+          >
+            Back up
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1724,8 +1794,8 @@ export default function WorkspacePage() {
     queryFn: () => fetchWorkspace(name),
   })
 
-  function runAction(cmd, env, onComplete, extra = []) {
-    const socket = openActionSocket(name, cmd, env, extra)
+  function runAction(cmd, env, onComplete, extra = [], services = []) {
+    const socket = openActionSocket(name, cmd, env, extra, services)
     if (onComplete) socket.addEventListener('close', onComplete)
     setActionMeta({ cmd, env, extra, user: username, ts: Date.now() })
     setActionWs(socket)
