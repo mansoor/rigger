@@ -19,7 +19,7 @@ import (
 func TestIntegrationLifecycle(t *testing.T) {
 	base := t.TempDir()
 	const ws, env, stack = "itest", "dev", "itest_dev"
-	envDir := filepath.Join(base, ws, "envs", env)
+	envDir := filepath.Join(base, "tw", "projects", ws, "envs", env)
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 		"images": [{"name":"web","image":"nginx","tag":"alpine","port":80}],
 		"environments": {"dev": {"deployment":"compose"}}
 	}`
-	mustWrite(t, filepath.Join(base, ws, "config.json"), cfg)
+	mustWrite(t, filepath.Join(base, "tw", "projects", ws, "config.json"), cfg)
 	content, err := composegen.Generate([]byte(cfg), env)
 	if err != nil {
 		t.Fatalf("compose gen: %v", err)
@@ -39,7 +39,7 @@ func TestIntegrationLifecycle(t *testing.T) {
 
 	opts := func(cmd string, extra ...string) Options {
 		return Options{
-			WorkspacesDir: base, Workspace: ws, Command: cmd, Env: env, Extra: extra,
+			WorkspacesDir: base, Workspace: "tw", Project: ws, Command: cmd, Env: env, Extra: extra,
 			EnvVars: os.Environ(), Stdout: os.Stdout, Stderr: os.Stderr,
 		}
 	}

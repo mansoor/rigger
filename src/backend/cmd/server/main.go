@@ -168,22 +168,29 @@ func main() {
 		case r.Method == "GET" && r.URL.Path == "/api/backups":
 			handler.ListBackups(w, r)
 		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/backups/"):
-			// /api/backups/{workspace}/{env}/{date}
+			// /api/backups/{workspace}/{project}/{env}/{date}
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 3))
-			r.SetPathValue("date", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 3))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("date", pathSegment(r.URL.Path, 5))
 			handler.DeleteBackup(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/workspaces":
-			handler.ListWorkspaces(w, r)
+			handler.ListWorkspaces(w, r) // list parent-tier workspaces
+		case r.Method == "POST" && r.URL.Path == "/api/workspaces":
+			handler.CreateWorkspaceTier(w, r) // create a parent-tier workspace
 		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/workspaces/") && !hasSuffix(r.URL.Path, "/action"):
-			// parts[2]=name, parts[3]=sub (activity|envs), parts[4]=env, parts[5]=subsub (status|vars)
-			name := pathSegment(r.URL.Path, 2)
-			sub := pathSegment(r.URL.Path, 3)  // activity | envs | config
-			env := pathSegment(r.URL.Path, 4)  // env name (when sub=envs)
-			subsub := pathSegment(r.URL.Path, 5) // vars | status | compose
+			// /api/workspaces/{ws}/projects/{name}/{sub}/{env}/{subsub}/{service}/{caction}
+			ws := pathSegment(r.URL.Path, 2)
+			name := pathSegment(r.URL.Path, 4)   // project
+			sub := pathSegment(r.URL.Path, 5)    // activity | action-runs | config | envs
+			env := pathSegment(r.URL.Path, 6)    // env name (when sub=envs)
+			subsub := pathSegment(r.URL.Path, 7) // vars | status | compose | containers ...
+			r.SetPathValue("workspace", ws)
 			r.SetPathValue("name", name)
 			r.SetPathValue("env", env)
 			switch {
+			case name == "":
+				handler.ListProjects(w, r) // GET /api/workspaces/{ws}/projects
 			case sub == "activity":
 				handler.GetActivity(w, r)
 			case sub == "action-runs":
@@ -191,7 +198,6 @@ func main() {
 			case sub == "config":
 				handler.GetConfig(w, r)
 			case sub == "template-draft":
-				// Generate a prebuilt-template JSON draft for the Template Manager.
 				handler.GenerateTemplateDraft(w, r)
 			case sub == "envs" && subsub == "status":
 				handler.GetEnvStatus(w, r)
@@ -204,10 +210,10 @@ func main() {
 			case sub == "envs" && subsub == "image-updates":
 				handler.GetImageUpdates(w, r)
 			case sub == "envs" && subsub == "containers":
-				// .../containers            → list; .../containers/{service}/{action} → per-container
-				if svc := pathSegment(r.URL.Path, 6); svc != "" {
+				// .../containers → list; .../containers/{service}/{action} → per-container
+				if svc := pathSegment(r.URL.Path, 8); svc != "" {
 					r.SetPathValue("service", svc)
-					switch pathSegment(r.URL.Path, 7) {
+					switch pathSegment(r.URL.Path, 9) {
 					case "inspect":
 						handler.ContainerInspect(w, r)
 					case "stats":
@@ -238,17 +244,18 @@ func main() {
 				handler.GetWorkspace(w, r)
 			}
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/action"):
-			// REST streaming action for the `rigger` CLI (6.5d):
-			// /api/workspaces/{name}/envs/{env}/action
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			// /api/workspaces/{ws}/projects/{name}/envs/{env}/action
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.ActionHTTP(w, r)
-		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 5) == "containers":
-			// /api/workspaces/{name}/envs/{env}/containers/{service}/{action}
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
-			r.SetPathValue("service", pathSegment(r.URL.Path, 6))
-			switch pathSegment(r.URL.Path, 7) {
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 7) == "containers":
+			// /api/workspaces/{ws}/projects/{name}/envs/{env}/containers/{service}/{action}
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
+			r.SetPathValue("service", pathSegment(r.URL.Path, 8))
+			switch pathSegment(r.URL.Path, 9) {
 			case "files-upload":
 				handler.FileUpload(w, r)
 			case "file-rename":
@@ -263,30 +270,32 @@ func main() {
 				http.NotFound(w, r)
 			}
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/migrate"):
-			// /api/workspaces/{name}/migrate — move a workspace to another host (Phase 7)
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			// /api/workspaces/{ws}/projects/{name}/migrate — move a project to another host
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
 			handler.MigrateWorkspace(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/rotate"):
-			// /api/workspaces/{name}/envs/{env}/rotate — rotate a secret value (Phase 8c)
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			// /api/workspaces/{ws}/projects/{name}/envs/{env}/rotate
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.RotateSecret(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/backup-sync"):
-			// /api/workspaces/{name}/envs/{env}/backup-sync — push latest snapshot to remote target (11d)
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.SyncEnvBackup(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/restore-verify"):
-			// /api/workspaces/{name}/envs/{env}/restore-verify — dry-run restore check (11c)
-			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.VerifyRestore(w, r)
 		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/"):
-			name := pathSegment(r.URL.Path, 2)
-			sub := pathSegment(r.URL.Path, 3)
-			env := pathSegment(r.URL.Path, 4)
-			subsub := pathSegment(r.URL.Path, 5)
-			r.SetPathValue("name", name)
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			sub := pathSegment(r.URL.Path, 5)
+			env := pathSegment(r.URL.Path, 6)
+			subsub := pathSegment(r.URL.Path, 7)
 			r.SetPathValue("env", env)
 			switch {
 			case sub == "config":
@@ -295,31 +304,36 @@ func main() {
 				handler.PutCompose(w, r)
 			case sub == "envs" && subsub == "host":
 				handler.SetEnvHost(w, r)
-			case sub == "envs" && subsub == "containers" && pathSegment(r.URL.Path, 7) == "file":
-				r.SetPathValue("service", pathSegment(r.URL.Path, 6))
+			case sub == "envs" && subsub == "containers" && pathSegment(r.URL.Path, 9) == "file":
+				r.SetPathValue("service", pathSegment(r.URL.Path, 8))
 				handler.FileSave(w, r)
 			default:
 				http.NotFound(w, r)
 			}
 		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/workspaces/"):
-			if pathSegment(r.URL.Path, 5) == "containers" && pathSegment(r.URL.Path, 7) == "file" {
-				// /api/workspaces/{name}/envs/{env}/containers/{service}/file?path=…
-				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
-				r.SetPathValue("env", pathSegment(r.URL.Path, 4))
-				r.SetPathValue("service", pathSegment(r.URL.Path, 6))
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			switch {
+			case pathSegment(r.URL.Path, 7) == "containers" && pathSegment(r.URL.Path, 9) == "file":
+				// /api/workspaces/{ws}/projects/{name}/envs/{env}/containers/{service}/file
+				r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+				r.SetPathValue("env", pathSegment(r.URL.Path, 6))
+				r.SetPathValue("service", pathSegment(r.URL.Path, 8))
 				handler.FileDelete(w, r)
-			} else if pathSegment(r.URL.Path, 3) == "action-runs" {
-				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			case pathSegment(r.URL.Path, 5) == "action-runs":
+				r.SetPathValue("name", pathSegment(r.URL.Path, 4))
 				handler.ClearActionRuns(w, r)
-			} else {
-				r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			case pathSegment(r.URL.Path, 4) != "":
+				// DELETE /api/workspaces/{ws}/projects/{name} — delete a project
+				r.SetPathValue("name", pathSegment(r.URL.Path, 4))
 				handler.DeleteWorkspace(w, r)
+			default:
+				// DELETE /api/workspaces/{ws} — delete a whole workspace tier
+				handler.DeleteWorkspaceTier(w, r)
 			}
 		case r.Method == "PATCH" && matchPrefix(r.URL.Path, "/api/workspaces/"):
-			name := pathSegment(r.URL.Path, 2)
-			env := pathSegment(r.URL.Path, 4)
-			r.SetPathValue("name", name)
-			r.SetPathValue("env", env)
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.UpdateEnvVars(w, r)
 		default:
 			http.NotFound(w, r)
@@ -533,14 +547,12 @@ func main() {
 	})))
 
 	// WebSocket action endpoint — auth via token in first WS message
-	mux.HandleFunc("/api/workspaces/{name}/action", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/action", func(w http.ResponseWriter, r *http.Request) {
 		handler.RunAction(w, r)
 	})
 
 	// WebSocket terminal — interactive shell into a container
-	mux.HandleFunc("/api/workspaces/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {
-		r.SetPathValue("name", r.PathValue("name"))
-		r.SetPathValue("env", pathSegment(r.URL.Path, 4))
+	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {
 		handler.Terminal(w, r)
 	})
 

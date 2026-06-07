@@ -50,8 +50,10 @@ func (fw *flushWriter) Write(p []byte) (int, error) {
 //
 // POST /api/workspaces/{name}/envs/{env}/action   body: {"command":"start","extra":[]}
 func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
+	pkey := wsName + "_" + name // resource-prefix key for project-scoped DB rows
 
 	var body struct {
 		Command string   `json:"command"`
@@ -67,7 +69,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 		body.Command != "logs" && body.Command != "ps" {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
-			claims.UserID, claims.Username, name, body.Command, env, h.envHostName(name, env),
+			claims.UserID, claims.Username, pkey, body.Command, env, h.envHostName(pkey, env),
 		)
 	}
 
@@ -82,7 +84,8 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	out := io.MultiWriter(fw, &cappedWriter{buf: &outBuf, cap: 128 * 1024})
 
 	runErr := h.bridge.Run(shell.RunOptions{
-		Workspace: name,
+		Workspace: wsName,
+		Project:   name,
 		Command:   body.Command,
 		Env:       env,
 		Extra:     body.Extra,
@@ -96,10 +99,10 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		marker = fmt.Sprintf("\n\033[32m✓ %s %s completed successfully.\033[0m\n", body.Command, env)
 		if body.Command == "update" && env != "" {
-			h.imgCache.Invalidate(name, env)
+			h.imgCache.Invalidate(wsName, name, env)
 			go func() {
-				if res := imagecheck.Check(h.workspacesDir, name, env); res != nil {
-					h.imgCache.Set(name, env, res)
+				if res := imagecheck.Check(h.workspacesDir, wsName, name, env); res != nil {
+					h.imgCache.Set(wsName, name, env, res)
 				}
 			}()
 		}
@@ -118,7 +121,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 			uname = claims.Username
 		}
 		actionruns.Record(h.db, actionruns.Run{ //nolint:errcheck
-			Workspace: name, Env: env, Command: body.Command,
+			Workspace: pkey, Env: env, Command: body.Command,
 			Extra:     strings.Join(body.Extra, " "), Username: uname,
 			Status:    status, Output: outBuf.String(),
 			StartedAt: startedAt.UnixMilli(), FinishedAt: time.Now().UnixMilli(),
@@ -131,7 +134,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 		if runErr != nil {
 			status, msg = "error", runErr.Error()
 		}
-		alerts.LogBackup(h.db, name, env, status, msg, 0) //nolint:errcheck
+		alerts.LogBackup(h.db, pkey, env, status, msg, 0) //nolint:errcheck
 	}
 }
 
@@ -141,7 +144,9 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 //
 // POST /api/workspaces/{name}/migrate   body: {"target_host_id": 3}
 func (h *Handler) MigrateWorkspace(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
+	pkey := wsName + "_" + name
 	var body struct {
 		TargetHostID int64 `json:"target_host_id"`
 	}
@@ -153,13 +158,13 @@ func (h *Handler) MigrateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
-			claims.UserID, claims.Username, name, "migrate", "", h.envHostName(name, ""),
+			claims.UserID, claims.Username, pkey, "migrate", "", h.envHostName(pkey, ""),
 		)
 	}
 
 	target := body.TargetHostID
 	job := h.migJobs.create("workspace", name, "", h.targetLabel(target))
-	go h.runMigration(job, func(out io.Writer) error { return h.bridge.Migrate(name, target, out) })
+	go h.runMigration(job, func(out io.Writer) error { return h.bridge.Migrate(wsName, name, target, out) })
 	writeJSON(w, http.StatusAccepted, job)
 }
 
@@ -169,8 +174,10 @@ func (h *Handler) MigrateWorkspace(w http.ResponseWriter, r *http.Request) {
 //
 // PUT /api/workspaces/{name}/envs/{env}/host   body: {"host_id": 3}
 func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
+	pkey := wsName + "_" + name
 	var body struct {
 		TargetHostID int64 `json:"host_id"`
 	}
@@ -182,12 +189,12 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env, host) VALUES (?,?,?,?,?,?)",
-			claims.UserID, claims.Username, name, "set-host", env, h.envHostName(name, env),
+			claims.UserID, claims.Username, pkey, "set-host", env, h.envHostName(pkey, env),
 		)
 	}
 
 	target := body.TargetHostID
 	job := h.migJobs.create("env", name, env, h.targetLabel(target))
-	go h.runMigration(job, func(out io.Writer) error { return h.bridge.MigrateEnv(name, env, target, out) })
+	go h.runMigration(job, func(out io.Writer) error { return h.bridge.MigrateEnv(wsName, name, env, target, out) })
 	writeJSON(w, http.StatusAccepted, job)
 }

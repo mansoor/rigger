@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // safeContainerName guards the service/container path segment: docker container
@@ -21,6 +21,7 @@ var safeContainerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 // bound remote host — and validates the container name from the path. It writes
 // an error response and returns ok=false on failure.
 func (h *Handler) containerExec(w http.ResponseWriter, r *http.Request) (ex executor.Executor, name string, ok bool) {
+	wsName := r.PathValue("workspace")
 	ws := r.PathValue("name")
 	env := r.PathValue("env")
 	svc := r.PathValue("service")
@@ -28,7 +29,7 @@ func (h *Handler) containerExec(w http.ResponseWriter, r *http.Request) (ex exec
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid container name"})
 		return nil, "", false
 	}
-	exec, err := h.bridge.ExecForEnv(ws, env)
+	exec, err := h.bridge.ExecForEnv(wsName, ws, env)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return nil, "", false
@@ -36,7 +37,7 @@ func (h *Handler) containerExec(w http.ResponseWriter, r *http.Request) (ex exec
 	// Resolve to an actual container reference. Compose: the container_name
 	// (svc as-is). Swarm: the running task's container ID (svc is a service name,
 	// not a container) — see resolveContainerRef.
-	ref, rerr := h.resolveContainerRef(exec, ws, env, svc)
+	ref, rerr := h.resolveContainerRef(exec, wsName, ws, env, svc)
 	if rerr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": rerr.Error()})
 		return nil, "", false
@@ -49,8 +50,8 @@ func (h *Handler) containerExec(w http.ResponseWriter, r *http.Request) (ex exec
 // value as passed). For swarm there is no fixed container name — the service
 // runs as a task (e.g. test_prod_test_prod_app.1.<id>) — so we look up the
 // running task's container ID on the env's node via the swarm service label.
-func (h *Handler) resolveContainerRef(ex executor.Executor, ws, env, svc string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, ws, "config.json"))
+func (h *Handler) resolveContainerRef(ex executor.Executor, wsName, ws, env, svc string) (string, error) {
+	raw, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, ws))
 	if err != nil {
 		return svc, nil // best-effort: fall back to the given name
 	}

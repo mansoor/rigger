@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // runBackup is the entry point for the "backup" command. target is Extra[0]
@@ -22,7 +23,7 @@ func runBackup(opts Options, cfg *wsConfig) error {
 	}
 
 	dateDir := opts.Timestamp
-	backupRoot := filepath.Join(opts.WorkspacesDir, opts.Workspace, "backups", opts.Env)
+	backupRoot := wspath.EnvBackupsDir(opts.WorkspacesDir, opts.Workspace, opts.Project, opts.Env)
 	backupDir := filepath.Join(backupRoot, dateDir)
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		return err

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // envOrder ranks environment names by their conventional deployment-pipeline
@@ -142,8 +144,12 @@ type ImageAccessInfo struct {
 	LinkPorts []string `json:"link_ports"` // resolved link_ports (may be empty)
 }
 
+// Workspace is the runtime aggregate for ONE project (the type keeps its legacy
+// name pending the final Go-type rename). WorkspaceName is the parent tier it
+// lives under; Name is the project name (unique only within that workspace).
 type Workspace struct {
-	Name      string                    `json:"name"`
+	WorkspaceName string                 `json:"workspace"` // parent tier
+	Name      string                    `json:"name"`      // project name
 	Path      string                    `json:"path"`      // path inside the control-plane container
 	HostPath  string                    `json:"host_path,omitempty"` // bind-mount source on the host (filled by the API layer)
 	Config    Config                    `json:"config"`
@@ -165,35 +171,89 @@ type EnvHostRef struct {
 	Address  string `json:"host_address"` // for building direct host:port URLs
 }
 
-// List discovers all workspaces under the given root directory.
-func List(workspacesDir string) ([]Workspace, error) {
+// WorkspaceInfo is one parent-tier workspace (a folder containing projects/).
+type WorkspaceInfo struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// ListWorkspaces discovers the parent-tier workspaces (dirs carrying a
+// workspace.json marker, or — leniently — any dir with a projects/ subdir).
+func ListWorkspaces(workspacesDir string) ([]WorkspaceInfo, error) {
 	entries, err := os.ReadDir(workspacesDir)
 	if err != nil {
-		return []Workspace{}, fmt.Errorf("read workspaces dir: %w", err)
+		return []WorkspaceInfo{}, fmt.Errorf("read workspaces dir: %w", err)
 	}
-
-	workspaces := []Workspace{} // never nil — encodes as [] not null
+	out := []WorkspaceInfo{}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		ws, err := load(workspacesDir, e.Name())
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "workspace: skipping %q: %v\n", e.Name(), err)
+		dir := filepath.Join(workspacesDir, e.Name())
+		if !isWorkspaceDir(dir) {
 			continue
 		}
-		workspaces = append(workspaces, ws)
+		out = append(out, WorkspaceInfo{Name: e.Name(), Path: dir})
 	}
-	return workspaces, nil
+	return out, nil
 }
 
-// Get returns a single workspace by name.
-func Get(workspacesDir, name string) (Workspace, error) {
-	return load(workspacesDir, name)
+// isWorkspaceDir reports whether dir is a parent-tier workspace.
+func isWorkspaceDir(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "workspace.json")); err == nil {
+		return true
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "projects")); err == nil && fi.IsDir() {
+		return true
+	}
+	return false
 }
 
-func load(workspacesDir, name string) (Workspace, error) {
-	wsPath := filepath.Join(workspacesDir, name)
+// ListProjects returns the projects within one workspace.
+func ListProjects(workspacesDir, workspaceName string) ([]Workspace, error) {
+	projDir := filepath.Join(workspacesDir, workspaceName, "projects")
+	entries, err := os.ReadDir(projDir)
+	if err != nil {
+		return []Workspace{}, nil // no projects/ yet ⇒ empty
+	}
+	out := []Workspace{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		ws, err := load(workspacesDir, workspaceName, e.Name())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "workspace: skipping %s/%s: %v\n", workspaceName, e.Name(), err)
+			continue
+		}
+		out = append(out, ws)
+	}
+	return out, nil
+}
+
+// List discovers every project across every workspace (flattened). Each
+// returned item carries its parent WorkspaceName, so collectors that iterate all
+// projects keep working.
+func List(workspacesDir string) ([]Workspace, error) {
+	wss, err := ListWorkspaces(workspacesDir)
+	if err != nil {
+		return []Workspace{}, err
+	}
+	projects := []Workspace{} // never nil — encodes as [] not null
+	for _, w := range wss {
+		ps, _ := ListProjects(workspacesDir, w.Name)
+		projects = append(projects, ps...)
+	}
+	return projects, nil
+}
+
+// Get returns a single project within a workspace.
+func Get(workspacesDir, workspaceName, project string) (Workspace, error) {
+	return load(workspacesDir, workspaceName, project)
+}
+
+func load(workspacesDir, workspaceName, name string) (Workspace, error) {
+	wsPath := filepath.Join(workspacesDir, workspaceName, "projects", name)
 	cfgPath := filepath.Join(wsPath, "config.json")
 
 	data, err := os.ReadFile(cfgPath)
@@ -265,11 +325,12 @@ func load(workspacesDir, name string) (Workspace, error) {
 	}
 
 	return Workspace{
-		Name:      name,
-		Path:      wsPath,
-		Config:    cfg,
-		Envs:      envs,
-		EnvAccess: envAccess,
+		WorkspaceName: workspaceName,
+		Name:          name,
+		Path:          wsPath,
+		Config:        cfg,
+		Envs:          envs,
+		EnvAccess:     envAccess,
 	}, nil
 }
 
@@ -325,14 +386,14 @@ const secretMask = "••••••••"
 // values are masked unless reveal is true. Keys flagged as secret but absent
 // from .env (swarm secrets live in the Docker secret store, write-only) are
 // still listed, always masked. Deployment mode comes from config.json.
-func EnvVars(workspacesDir, name, env string, reveal bool) (map[string]EnvVar, error) {
-	envFile := filepath.Join(workspacesDir, name, "envs", env, ".env")
+func EnvVars(workspacesDir, workspaceName, name, env string, reveal bool) (map[string]EnvVar, error) {
+	envFile := wspath.DotEnv(workspacesDir, workspaceName, name, env)
 	data, err := os.ReadFile(envFile)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read .env: %w", err)
 	}
 
-	secret := secretKeySet(workspacesDir, name, env)
+	secret := secretKeySet(workspacesDir, workspaceName, name, env)
 	result := make(map[string]EnvVar)
 	for _, line := range splitLines(string(data)) {
 		if len(line) == 0 || line[0] == '#' {
@@ -359,9 +420,9 @@ func EnvVars(workspacesDir, name, env string, reveal bool) (map[string]EnvVar, e
 }
 
 // secretKeySet returns the set of secret-flagged keys for one environment.
-func secretKeySet(workspacesDir, name, env string) map[string]bool {
+func secretKeySet(workspacesDir, workspaceName, name, env string) map[string]bool {
 	set := map[string]bool{}
-	cfg, err := loadConfig(workspacesDir, name)
+	cfg, err := loadConfig(workspacesDir, workspaceName, name)
 	if err != nil {
 		return set
 	}
@@ -372,8 +433,8 @@ func secretKeySet(workspacesDir, name, env string) map[string]bool {
 }
 
 // loadConfig reads and parses a workspace's config.json.
-func loadConfig(workspacesDir, name string) (*Config, error) {
-	data, err := os.ReadFile(filepath.Join(workspacesDir, name, "config.json"))
+func loadConfig(workspacesDir, workspaceName, name string) (*Config, error) {
+	data, err := os.ReadFile(wspath.ConfigPath(workspacesDir, workspaceName, name))
 	if err != nil {
 		return nil, err
 	}
@@ -388,8 +449,8 @@ func loadConfig(workspacesDir, name string) (*Config, error) {
 // into config.json, preserving every other field of the file (it operates on
 // generic JSON so unknown env fields like replicas/redis_enabled are never
 // dropped). Used by the env-vars and rotation handlers.
-func SetSecretMeta(workspacesDir, name, env string, secretKeys []string, versions map[string]int) error {
-	path := filepath.Join(workspacesDir, name, "config.json")
+func SetSecretMeta(workspacesDir, workspaceName, name, env string, secretKeys []string, versions map[string]int) error {
+	path := wspath.ConfigPath(workspacesDir, workspaceName, name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -438,8 +499,8 @@ func SetSecretMeta(workspacesDir, name, env string, secretKeys []string, version
 // any keys listed in deletes. Other lines are preserved unchanged. Keys in
 // skipEnvFile are not written to .env (their values live elsewhere — e.g. a
 // Docker Swarm secret) and any existing line for them is dropped.
-func UpdateEnvVars(workspacesDir, name, env string, updates map[string]string, deletes []string, skipEnvFile map[string]bool) error {
-	envFile := filepath.Join(workspacesDir, name, "envs", env, ".env")
+func UpdateEnvVars(workspacesDir, workspaceName, name, env string, updates map[string]string, deletes []string, skipEnvFile map[string]bool) error {
+	envFile := wspath.DotEnv(workspacesDir, workspaceName, name, env)
 	data, err := os.ReadFile(envFile)
 	if err != nil {
 		if !os.IsNotExist(err) {

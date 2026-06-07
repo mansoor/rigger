@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // command set this package owns (routed from the shell bridge).
@@ -26,7 +27,8 @@ func Handles(cmd string) bool { return ownedCommands[cmd] }
 // Options configures a backup or restore run.
 type Options struct {
 	WorkspacesDir string
-	Workspace     string
+	Workspace     string // parent tier
+	Project       string // project name
 	Command       string // "backup" | "restore"
 	Env           string
 	Extra         []string // backup: [target]; restore: [snapshot]
@@ -58,7 +60,7 @@ func Run(opts Options) (bool, error) {
 	if !ownedCommands[opts.Command] {
 		return false, nil
 	}
-	cfg, err := loadConfig(opts.WorkspacesDir, opts.Workspace)
+	cfg, err := loadConfig(opts.WorkspacesDir, opts.Workspace, opts.Project)
 	if err != nil {
 		return false, nil // let bash try
 	}
@@ -92,8 +94,8 @@ type wsConfig struct {
 	} `json:"backup"`
 }
 
-func loadConfig(workspacesDir, workspace string) (*wsConfig, error) {
-	data, err := os.ReadFile(filepath.Join(workspacesDir, workspace, "config.json"))
+func loadConfig(workspacesDir, workspace, project string) (*wsConfig, error) {
+	data, err := os.ReadFile(wspath.ConfigPath(workspacesDir, workspace, project))
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +134,7 @@ func (c *ctx) wants(service string) bool {
 }
 
 func newCtx(opts Options, cfg *wsConfig) *ctx {
-	envDir := filepath.Join(opts.WorkspacesDir, opts.Workspace, "envs", opts.Env)
+	envDir := wspath.EnvDir(opts.WorkspacesDir, opts.Workspace, opts.Project, opts.Env)
 	envVars := opts.DotEnv // remote host-authoritative .env (Phase 7)
 	if envVars == nil {
 		envVars = readDotEnv(filepath.Join(envDir, ".env"))

@@ -22,7 +22,7 @@ const cfgBody = `{
 func setup(t *testing.T) string {
 	t.Helper()
 	wsDir := t.TempDir()
-	wsRoot := filepath.Join(wsDir, "app")
+	wsRoot := filepath.Join(wsDir, "ws", "projects", "app")
 	beCtx := filepath.Join(wsRoot, "envs", "prod", "backend")
 	if err := os.MkdirAll(beCtx, 0o755); err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestBuildBackendWithPushAndBump(t *testing.T) {
 	var out strings.Builder
 
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "build", Env: "prod",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
 		Extra: []string{"backend", "--push", "--bump", "minor"},
 		Stdout: &out, Exec: rec,
 	}
@@ -68,7 +68,7 @@ func TestBuildBackendWithPushAndBump(t *testing.T) {
 	}
 
 	// Version bumped 1.2.3-build.4 → minor → 1.3.0-build.0 on disk.
-	data, _ := os.ReadFile(filepath.Join(wsDir, "app", "config.json"))
+	data, _ := os.ReadFile(filepath.Join(wsDir, "ws", "projects", "app", "config.json"))
 	if !strings.Contains(string(data), `"minor": 3`) || !strings.Contains(string(data), `"build": 0`) {
 		t.Errorf("version not bumped to 1.3.0-build.0:\n%s", data)
 	}
@@ -103,7 +103,7 @@ func TestBuildRunsInContextDir(t *testing.T) {
 	wsDir := setup(t)
 	rec := &recorder{}
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "build", Env: "prod",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
 		Extra: []string{"backend"}, Stdout: &strings.Builder{}, Exec: rec,
 	}
 	if _, err := o.Run(); err != nil {
@@ -116,7 +116,7 @@ func TestBuildRunsInContextDir(t *testing.T) {
 	if !strings.Contains(build, "-f Dockerfile") || !strings.HasSuffix(build, " .") {
 		t.Errorf("build should use relative -f Dockerfile and context '.': %s", build)
 	}
-	wantDir := filepath.Join(wsDir, "app", "envs", "prod", "backend")
+	wantDir := filepath.Join(wsDir, "ws", "projects", "app", "envs", "prod", "backend")
 	if rec.dirs[0] != wantDir {
 		t.Errorf("build Dir = %q, want %q", rec.dirs[0], wantDir)
 	}
@@ -126,7 +126,7 @@ func TestBuildAllSkipsDisabledFrontend(t *testing.T) {
 	wsDir := setup(t)
 	rec := &recorder{}
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "build", Env: "prod",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
 		Extra: []string{"all"}, Stdout: &strings.Builder{}, Exec: rec,
 	}
 	if _, err := o.Run(); err != nil {
@@ -143,7 +143,7 @@ func TestBuildAllSkipsDisabledFrontend(t *testing.T) {
 func TestBuildFrontendDisabledErrors(t *testing.T) {
 	wsDir := setup(t)
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "build", Env: "prod",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
 		Extra: []string{"frontend"}, Stdout: &strings.Builder{}, Exec: &recorder{},
 	}
 	if _, err := o.Run(); err == nil {
@@ -156,7 +156,7 @@ func TestPromoteDryRun(t *testing.T) {
 	rec := &recorder{}
 	var out strings.Builder
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "promote", Env: "stage",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "promote", Env: "stage",
 		Extra: []string{"prod", "--dry-run"}, Stdout: &out, Exec: rec,
 		deploy: func(string) error { t.Fatal("deploy must not run in dry-run"); return nil },
 	}
@@ -183,7 +183,7 @@ func TestPromoteRealRetagsAndDeploys(t *testing.T) {
 	rec := &recorder{}
 	deployed := ""
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "promote", Env: "stage",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "promote", Env: "stage",
 		Extra: []string{"prod"}, Stdout: &strings.Builder{}, Exec: rec,
 		deploy: func(env string) error { deployed = env; return nil },
 	}
@@ -211,7 +211,7 @@ func TestPromoteRealRetagsAndDeploys(t *testing.T) {
 func TestPromoteSameEnvErrors(t *testing.T) {
 	wsDir := setup(t)
 	o := Options{
-		WorkspacesDir: wsDir, Workspace: "app", Command: "promote", Env: "prod",
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "promote", Env: "prod",
 		Extra: []string{"prod"}, Stdout: &strings.Builder{},
 		Exec: &recorder{}, deploy: func(string) error { return nil },
 	}

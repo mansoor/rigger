@@ -164,7 +164,7 @@ func (s *swarmRunner) ps() error {
 		return err
 	}
 	if s.projectType == "image" {
-		printImageUpdates(s.opts.Stdout, s.opts.WorkspacesDir, s.opts.Workspace, s.opts.Env)
+		printImageUpdates(s.opts.Stdout, s.opts.WorkspacesDir, s.opts.Workspace, s.opts.Project, s.opts.Env)
 	}
 	return nil
 }
@@ -298,8 +298,8 @@ func (s *swarmRunner) firstExtra() string {
 // printImageUpdates checks image-stack updates and prints a summary (report
 // only — the `update` command performs the actual pull). Shared by compose and
 // swarm `ps`; replaces scripts/image-check.sh in the ps path.
-func printImageUpdates(w io.Writer, workspacesDir, ws, env string) {
-	results := imagecheck.Check(workspacesDir, ws, env)
+func printImageUpdates(w io.Writer, workspacesDir, ws, proj, env string) {
+	results := imagecheck.Check(workspacesDir, ws, proj, env)
 	if len(results) == 0 {
 		return
 	}

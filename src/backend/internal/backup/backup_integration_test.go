@@ -21,7 +21,7 @@ func TestIntegrationDBRoundtrip(t *testing.T) {
 	base := t.TempDir()
 	const ws, env = "bkit", "dev"
 	prefix := "bkit_dev"
-	envDir := filepath.Join(base, ws, "envs", env)
+	envDir := filepath.Join(base, "tw", "projects", ws, "envs", env)
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestIntegrationDBRoundtrip(t *testing.T) {
 			"volumes":["pgdata:/var/lib/postgresql/data"]}],
 		"environments": {"dev": {"deployment":"compose"}}
 	}`
-	mustWrite(t, filepath.Join(base, ws, "config.json"), cfg)
+	mustWrite(t, filepath.Join(base, "tw", "projects", ws, "config.json"), cfg)
 	content, err := composegen.Generate([]byte(cfg), env)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestIntegrationDBRoundtrip(t *testing.T) {
 
 	opts := func(cmd string, extra ...string) Options {
 		return Options{
-			WorkspacesDir: base, Workspace: ws, Command: cmd, Env: env, Extra: extra,
+			WorkspacesDir: base, Workspace: "tw", Project: ws, Command: cmd, Env: env, Extra: extra,
 			EnvVars: os.Environ(), Stdout: os.Stdout, Stderr: os.Stderr,
 			Timestamp: "2026-01-02_03-04-05",
 		}
@@ -71,7 +71,7 @@ func TestIntegrationDBRoundtrip(t *testing.T) {
 	if handled, err := Run(opts("backup", "db")); !handled || err != nil {
 		t.Fatalf("backup: handled=%v err=%v", handled, err)
 	}
-	dump := filepath.Join(base, ws, "backups", env, "2026-01-02_03-04-05", "bkit_dev_db_2026-01-02_03-04-05.sql.gz")
+	dump := filepath.Join(base, "tw", "projects", ws, "backups", env, "2026-01-02_03-04-05", "bkit_dev_db_2026-01-02_03-04-05.sql.gz")
 	if fi, err := os.Stat(dump); err != nil || fi.Size() == 0 {
 		t.Fatalf("expected non-empty dump at %s (err=%v)", dump, err)
 	}
@@ -99,7 +99,7 @@ func TestIntegrationVolumeArchive(t *testing.T) {
 	base := t.TempDir()
 	const ws, env = "vkit", "dev"
 	prefix := "vkit_dev"
-	envDir := filepath.Join(base, ws, "envs", env)
+	envDir := filepath.Join(base, "tw", "projects", ws, "envs", env)
 	if err := os.MkdirAll(envDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestIntegrationVolumeArchive(t *testing.T) {
 			"volumes":["data:/data"]}],
 		"environments": {"dev": {"deployment":"compose"}}
 	}`
-	mustWrite(t, filepath.Join(base, ws, "config.json"), cfg)
+	mustWrite(t, filepath.Join(base, "tw", "projects", ws, "config.json"), cfg)
 	content, err := composegen.Generate([]byte(cfg), env)
 	if err != nil {
 		t.Fatal(err)
@@ -131,14 +131,14 @@ func TestIntegrationVolumeArchive(t *testing.T) {
 	}
 
 	opts := Options{
-		WorkspacesDir: base, Workspace: ws, Command: "backup", Env: env, Extra: []string{"files"},
+		WorkspacesDir: base, Workspace: "tw", Project: ws, Command: "backup", Env: env, Extra: []string{"files"},
 		EnvVars: os.Environ(), Stdout: os.Stdout, Stderr: os.Stderr, Timestamp: "2026-01-02_03-04-05",
 	}
 	if handled, err := Run(opts); !handled || err != nil {
 		t.Fatalf("backup files: handled=%v err=%v", handled, err)
 	}
 
-	archive := filepath.Join(base, ws, "backups", env, "2026-01-02_03-04-05", "vkit_dev_store_data_2026-01-02_03-04-05.tar.gz")
+	archive := filepath.Join(base, "tw", "projects", ws, "backups", env, "2026-01-02_03-04-05", "vkit_dev_store_data_2026-01-02_03-04-05.tar.gz")
 	if _, err := os.Stat(archive); err != nil {
 		t.Fatalf("expected volume archive at %s: %v", archive, err)
 	}

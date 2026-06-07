@@ -13,6 +13,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/notify"
 	"github.com/mansoor/rigger/ui/internal/stats"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // evalInterval is how often the evaluator re-checks every enabled rule.
@@ -50,9 +51,10 @@ func (e *Evaluator) Run() {
 
 // target is one concrete thing a rule is evaluated against.
 type target struct {
-	ws          string // workspace (display) name — "" for host-global checks
+	workspace   string // parent tier
+	ws          string // project name — "" for host-global checks
 	env         string
-	project     string // compose project name: {project}_{env}
+	project     string // compose project name: {resource_prefix}_{env}
 	composePath string
 }
 
@@ -109,10 +111,11 @@ func (e *Evaluator) expandTargets(rule Rule, wss []workspace.Workspace) []target
 				continue
 			}
 			out = append(out, target{
+				workspace:   w.WorkspaceName,
 				ws:          w.Name,
 				env:         env,
 				project:     proj + "_" + env,
-				composePath: filepath.Join(e.workspacesDir, w.Name, "envs", env, "docker-compose.yml"),
+				composePath: filepath.Join(wspath.EnvDir(e.workspacesDir, w.WorkspaceName, w.Name, env), "docker-compose.yml"),
 			})
 		}
 	}
@@ -194,7 +197,7 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		if threshold <= 0 {
 			threshold = 36 // hours
 		}
-		ageH, has := newestBackupAgeHours(e.workspacesDir, t.ws, t.env)
+		ageH, has := newestBackupAgeHours(e.workspacesDir, t.workspace, t.ws, t.env)
 		if has && ageH < threshold {
 			return false, ageH, ""
 		}
@@ -204,7 +207,7 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		return true, ageH, fmt.Sprintf("%s/%s: last backup %.0fh ago (threshold %gh)", t.ws, t.env, ageH, threshold)
 
 	case CondImageUpdate:
-		entry, ok := e.imgCache.Get(t.ws, t.env)
+		entry, ok := e.imgCache.Get(t.workspace, t.ws, t.env)
 		if !ok {
 			return false, 0, ""
 		}
@@ -221,7 +224,7 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 			t.ws, t.env, len(names), joinUpTo(names, 4))
 
 	case CondImageVersionAvailable:
-		entry, ok := e.imgCache.Get(t.ws, t.env)
+		entry, ok := e.imgCache.Get(t.workspace, t.ws, t.env)
 		if !ok {
 			return false, 0, ""
 		}
@@ -350,8 +353,8 @@ func BuildAlertSSE(action string, ev *Event, unread int) []byte {
 // newestBackupAgeHours returns the age (hours) of the most recent snapshot for a
 // workspace/env, and whether any snapshot exists. Snapshot dirs sort
 // chronologically by name; age is taken from the dir's mtime (timezone-safe).
-func newestBackupAgeHours(workspacesDir, ws, env string) (float64, bool) {
-	dir := filepath.Join(workspacesDir, ws, "backups", env)
+func newestBackupAgeHours(workspacesDir, workspace, project, env string) (float64, bool) {
+	dir := wspath.EnvBackupsDir(workspacesDir, workspace, project, env)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, false

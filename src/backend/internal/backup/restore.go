@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // runRestore is the entry point for the "restore" command. The snapshot date is
@@ -21,7 +22,7 @@ func runRestore(opts Options, cfg *wsConfig) error {
 		return fmt.Errorf("restore requires a snapshot date")
 	}
 	snapshot := opts.Extra[0]
-	backupDir := filepath.Join(opts.WorkspacesDir, opts.Workspace, "backups", opts.Env, snapshot)
+	backupDir := filepath.Join(wspath.EnvBackupsDir(opts.WorkspacesDir, opts.Workspace, opts.Project, opts.Env), snapshot)
 	if fi, err := os.Stat(backupDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("backup snapshot not found: %s", backupDir)
 	}

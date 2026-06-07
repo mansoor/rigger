@@ -23,6 +23,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Allowlisted run.sh commands. Nothing outside this list can be executed.
@@ -86,11 +87,24 @@ type remoteTarget struct {
 
 // resolveRemote returns the remote target for one environment, or (nil, nil) when
 // that environment is local. Local-only bridges (nil db/pool) always return nil.
-func (b *Bridge) resolveRemote(workspaceName, env string) (*remoteTarget, error) {
+// resourcePrefix returns the immutable Docker resource prefix ({workspace}_{project})
+// for a project, used as the globally-unique key for host bindings and migration
+// leftovers. Falls back to the project name if config can't be read.
+func (b *Bridge) resourcePrefix(workspaceName, project string) string {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err == nil {
+		if p := cfg.Project.Prefix(); p != "" {
+			return p
+		}
+	}
+	return project
+}
+
+func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarget, error) {
 	if b.db == nil || b.pool == nil {
 		return nil, nil
 	}
-	host, err := settings.HostForEnv(b.db, workspaceName, env)
+	host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env)
 	if err != nil || host == nil {
 		return nil, err
 	}
@@ -127,15 +141,15 @@ func (b *Bridge) hostBase(host *settings.Host) string {
 // sanctioned override, run only on an explicit user edit so the change actually
 // reaches the host. It returns (pushed, hostName, error): pushed is false for a
 // local env, where the local .env is already authoritative and nothing is shipped.
-func (b *Bridge) PushEnvFile(workspaceName, env string) (bool, string, error) {
-	rt, err := b.resolveRemote(workspaceName, env)
+func (b *Bridge) PushEnvFile(workspaceName, project, env string) (bool, string, error) {
+	rt, err := b.resolveRemote(workspaceName, project, env)
 	if err != nil {
 		return false, "", err
 	}
 	if rt == nil {
 		return false, "", nil // local env — .env is already authoritative
 	}
-	localEnv := filepath.Join(b.workspacesDir, workspaceName, "envs", env, ".env")
+	localEnv := wspath.DotEnv(b.workspacesDir, workspaceName, project, env)
 	data, err := os.ReadFile(localEnv)
 	if err != nil {
 		return false, rt.hostName, fmt.Errorf("read local .env: %w", err)
@@ -149,18 +163,18 @@ func (b *Bridge) PushEnvFile(workspaceName, env string) (bool, string, error) {
 // Migrate moves a whole workspace to targetHostID (0 = local control plane). It
 // is only permitted when every environment currently shares one host; mixed
 // setups must be moved per environment. It simply migrates each env in turn.
-func (b *Bridge) Migrate(workspaceName string, targetHostID int64, out io.Writer) error {
+func (b *Bridge) Migrate(workspaceName, project string, targetHostID int64, out io.Writer) error {
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("migration requires multi-host support")
 	}
-	ws, err := workspace.Get(b.workspacesDir, workspaceName)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
 	if err != nil {
-		return fmt.Errorf("load workspace: %w", err)
+		return fmt.Errorf("load project: %w", err)
 	}
 	if len(ws.Envs) == 0 {
-		return fmt.Errorf("workspace %q has no environments to migrate", workspaceName)
+		return fmt.Errorf("project %q has no environments to migrate", project)
 	}
-	common, mixed, err := b.commonHost(workspaceName, ws.Envs)
+	common, mixed, err := b.commonHost(workspaceName, project, ws.Envs)
 	if err != nil {
 		return err
 	}
@@ -168,14 +182,14 @@ func (b *Bridge) Migrate(workspaceName string, targetHostID int64, out io.Writer
 		return fmt.Errorf("environments are on different hosts — move them individually instead")
 	}
 	if common == targetHostID {
-		return fmt.Errorf("workspace is already on %s", hostLabel(targetHostID))
+		return fmt.Errorf("project is already on %s", hostLabel(targetHostID))
 	}
 	for _, env := range ws.Envs {
-		if err := b.MigrateEnv(workspaceName, env, targetHostID, out); err != nil {
+		if err := b.MigrateEnv(workspaceName, project, env, targetHostID, out); err != nil {
 			return fmt.Errorf("%s: %w", env, err)
 		}
 	}
-	fmt.Fprintf(out, "✓ Migration complete: %s is now on %s\n", workspaceName, hostLabel(targetHostID))
+	fmt.Fprintf(out, "✓ Migration complete: %s is now on %s\n", project, hostLabel(targetHostID))
 	return nil
 }
 
@@ -184,7 +198,7 @@ func (b *Bridge) Migrate(workspaceName string, targetHostID int64, out io.Writer
 // If it is deployed, its data is moved: back up + stop on the source, ship files
 // to the target, repoint, then start + restore on the target. The source copy is
 // stopped but its data is left intact. Streams progress to out.
-func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out io.Writer) error {
+func (b *Bridge) MigrateEnv(workspaceName, project, env string, targetHostID int64, out io.Writer) error {
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("multi-host support is not configured")
 	}
@@ -193,7 +207,8 @@ func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out i
 			return fmt.Errorf("target host %d not found", targetHostID)
 		}
 	}
-	srcHost, err := settings.HostForEnv(b.db, workspaceName, env)
+	prefix := b.resourcePrefix(workspaceName, project)
+	srcHost, err := settings.HostForEnv(b.db, prefix, env)
 	if err != nil {
 		return err
 	}
@@ -205,12 +220,12 @@ func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out i
 		return fmt.Errorf("environment %q is already on %s", env, hostLabel(targetHostID))
 	}
 
-	srcRT, err := b.resolveRemote(workspaceName, env) // still points at the source
+	srcRT, err := b.resolveRemote(workspaceName, project, env) // still points at the source
 	if err != nil {
 		return fmt.Errorf("connect to source: %w", err)
 	}
 
-	cfg, err := wsconfig.Load(filepath.Join(b.workspacesDir, workspaceName, "config.json"))
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -222,44 +237,44 @@ func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out i
 	}
 
 	if !deployed {
-		if err := settings.SetEnvHost(b.db, workspaceName, env, targetHostID); err != nil {
+		if err := settings.SetEnvHost(b.db, prefix, env, targetHostID); err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "✓ %s/%s repointed to %s (not deployed — provisions on next deploy)\n",
-			workspaceName, env, hostLabel(targetHostID))
+			project, env, hostLabel(targetHostID))
 		return nil
 	}
 
-	fmt.Fprintf(out, "▶ Backing up %s/%s on %s…\n", workspaceName, env, hostLabel(srcID))
-	if err := b.Run(RunOptions{Workspace: workspaceName, Command: "backup", Env: env, Extra: []string{"all"}, Stdout: out, Stderr: out}); err != nil {
+	fmt.Fprintf(out, "▶ Backing up %s/%s on %s…\n", project, env, hostLabel(srcID))
+	if err := b.Run(RunOptions{Workspace: workspaceName, Project: project, Command: "backup", Env: env, Extra: []string{"all"}, Stdout: out, Stderr: out}); err != nil {
 		return fmt.Errorf("backup source: %w", err)
 	}
-	snap, err := b.latestSnapshot(workspaceName, env)
+	snap, err := b.latestSnapshot(workspaceName, project, env)
 	if err != nil {
 		return fmt.Errorf("locate snapshot: %w", err)
 	}
 
 	// Stop the source stack before repointing (containers down, volumes kept) so
 	// two copies never run at once.
-	fmt.Fprintf(out, "▶ Stopping %s/%s on %s (data kept)…\n", workspaceName, env, hostLabel(srcID))
-	if err := b.Run(RunOptions{Workspace: workspaceName, Command: "stop", Env: env, Stdout: out, Stderr: out}); err != nil {
+	fmt.Fprintf(out, "▶ Stopping %s/%s on %s (data kept)…\n", project, env, hostLabel(srcID))
+	if err := b.Run(RunOptions{Workspace: workspaceName, Project: project, Command: "stop", Env: env, Stdout: out, Stderr: out}); err != nil {
 		return fmt.Errorf("stop source: %w", err)
 	}
 
 	// Bring compose + .env to the control plane if the source is remote.
-	localDir := b.localEnvDir(workspaceName, env)
+	localDir := b.localEnvDir(workspaceName, project, env)
 	if srcRT != nil {
 		if err := srcRT.client.PullDir(srcRT.exec.RemoteDir(localDir), localDir); err != nil {
 			return fmt.Errorf("pull files from source: %w", err)
 		}
 	}
 
-	if err := settings.SetEnvHost(b.db, workspaceName, env, targetHostID); err != nil {
+	if err := settings.SetEnvHost(b.db, prefix, env, targetHostID); err != nil {
 		return fmt.Errorf("repoint: %w", err)
 	}
-	fmt.Fprintf(out, "▶ Repointed %s/%s to %s\n", workspaceName, env, hostLabel(targetHostID))
+	fmt.Fprintf(out, "▶ Repointed %s/%s to %s\n", project, env, hostLabel(targetHostID))
 
-	tgtRT, err := b.resolveRemote(workspaceName, env) // now points at the target
+	tgtRT, err := b.resolveRemote(workspaceName, project, env) // now points at the target
 	if err != nil {
 		return fmt.Errorf("connect to target: %w", err)
 	}
@@ -269,13 +284,13 @@ func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out i
 		}
 	}
 
-	fmt.Fprintf(out, "▶ Starting %s/%s on %s…\n", workspaceName, env, hostLabel(targetHostID))
-	if err := b.Run(RunOptions{Workspace: workspaceName, Command: "start", Env: env, Stdout: out, Stderr: out}); err != nil {
+	fmt.Fprintf(out, "▶ Starting %s/%s on %s…\n", project, env, hostLabel(targetHostID))
+	if err := b.Run(RunOptions{Workspace: workspaceName, Project: project, Command: "start", Env: env, Stdout: out, Stderr: out}); err != nil {
 		return fmt.Errorf("start target: %w", err)
 	}
 	if snap != "" {
 		fmt.Fprintf(out, "▶ Restoring snapshot %s on %s…\n", snap, hostLabel(targetHostID))
-		if err := b.Run(RunOptions{Workspace: workspaceName, Command: "restore", Env: env, Extra: []string{snap}, Stdout: out, Stderr: out}); err != nil {
+		if err := b.Run(RunOptions{Workspace: workspaceName, Project: project, Command: "restore", Env: env, Extra: []string{snap}, Stdout: out, Stderr: out}); err != nil {
 			return fmt.Errorf("restore target: %w", err)
 		}
 	}
@@ -285,7 +300,7 @@ func (b *Bridge) MigrateEnv(workspaceName, env string, targetHostID int64, out i
 	if srcHost != nil {
 		srcName = srcHost.Name
 	}
-	b.recordLeftover(srcID, srcName, workspaceName, env, stack)
+	b.recordLeftover(srcID, srcName, prefix, env, stack)
 
 	fmt.Fprintf(out, "✓ %s/%s now on %s (old copy stopped, data kept on %s — wipe it in Housekeeping if decommissioning)\n",
 		workspaceName, env, hostLabel(targetHostID), srcName)
@@ -311,10 +326,11 @@ func (b *Bridge) envDeployed(stack string, rt *remoteTarget) (bool, error) {
 
 // commonHost returns the host id shared by every env (0 = local), or mixed=true
 // when they are not all on the same host.
-func (b *Bridge) commonHost(workspaceName string, envs []string) (hostID int64, mixed bool, err error) {
+func (b *Bridge) commonHost(workspaceName, project string, envs []string) (hostID int64, mixed bool, err error) {
+	prefix := b.resourcePrefix(workspaceName, project)
 	first := int64(-1)
 	for _, env := range envs {
-		h, err := settings.HostForEnv(b.db, workspaceName, env)
+		h, err := settings.HostForEnv(b.db, prefix, env)
 		if err != nil {
 			return 0, false, err
 		}
@@ -457,7 +473,9 @@ func (b *Bridge) CleanLeftover(id int64, out io.Writer) error {
 		}
 	}
 	// 3. Remove the env dir (compose, .env secrets, bind-mount data).
-	localDir := b.localEnvDir(l.Workspace, l.Env)
+	// l.Workspace holds the resource prefix ({workspace}_{project}); split it back.
+	lws, lproj := splitPrefix(l.Workspace)
+	localDir := b.localEnvDir(lws, lproj, l.Env)
 	if client == nil {
 		fmt.Fprintf(out, "▶ Removing files %s…\n", localDir)
 		_ = os.RemoveAll(localDir)
@@ -609,8 +627,8 @@ func (c *diskUsageCache) refresh(name, path string) {
 
 // latestSnapshot returns the most recent snapshot dir name under a workspace
 // env's backups dir (timestamps sort lexicographically).
-func (b *Bridge) latestSnapshot(workspaceName, env string) (string, error) {
-	dir := filepath.Join(b.workspacesDir, workspaceName, "backups", env)
+func (b *Bridge) latestSnapshot(workspaceName, project, env string) (string, error) {
+	dir := wspath.EnvBackupsDir(b.workspacesDir, workspaceName, project, env)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
@@ -644,16 +662,25 @@ func (b *Bridge) EvictHost(id int64) {
 }
 
 // localEnvDir is the control-plane path to a workspace env directory.
-func (b *Bridge) localEnvDir(workspaceName, env string) string {
-	return filepath.Join(b.workspacesDir, workspaceName, "envs", env)
+func (b *Bridge) localEnvDir(workspaceName, project, env string) string {
+	return wspath.EnvDir(b.workspacesDir, workspaceName, project, env)
+}
+
+// splitPrefix splits a resource prefix "{workspace}_{project}" back into its
+// parts (names never contain "_", so the first separator is authoritative).
+func splitPrefix(prefix string) (workspace, project string) {
+	if i := strings.IndexByte(prefix, '_'); i >= 0 {
+		return prefix[:i], prefix[i+1:]
+	}
+	return prefix, prefix
 }
 
 // ExecForEnv returns the docker executor for one environment: Local for a local
 // env, a remote SSH executor when the env is bound to a host. Read-only
 // observability handlers (status, container list) use it so they query the right
 // daemon. An error means the env's host could not be reached.
-func (b *Bridge) ExecForEnv(workspaceName, env string) (executor.Executor, error) {
-	rt, err := b.resolveRemote(workspaceName, env)
+func (b *Bridge) ExecForEnv(workspaceName, project, env string) (executor.Executor, error) {
+	rt, err := b.resolveRemote(workspaceName, project, env)
 	if err != nil {
 		return nil, err
 	}
@@ -668,12 +695,12 @@ func (b *Bridge) ExecForEnv(workspaceName, env string) (executor.Executor, error
 // secret name. The value is never persisted by Rigger — Swarm holds it
 // encrypted at rest in its Raft store. Idempotent (a no-op if it already
 // exists, since Swarm secrets are immutable).
-func (b *Bridge) EnsureSwarmSecret(workspaceName, env, key, value string, version int) (string, error) {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName)
+func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value string, version int) (string, error) {
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
 	if err != nil {
 		return "", err
 	}
-	ex, err := b.ExecForEnv(workspaceName, env)
+	ex, err := b.ExecForEnv(workspaceName, project, env)
 	if err != nil {
 		return "", err
 	}
@@ -686,12 +713,12 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, env, key, value string, versio
 
 // RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
 // fails if the secret is still referenced by a running service).
-func (b *Bridge) RemoveSwarmSecret(workspaceName, env, key string, version int) error {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName)
+func (b *Bridge) RemoveSwarmSecret(workspaceName, project, env, key string, version int) error {
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
 	if err != nil {
 		return err
 	}
-	ex, err := b.ExecForEnv(workspaceName, env)
+	ex, err := b.ExecForEnv(workspaceName, project, env)
 	if err != nil {
 		return err
 	}
@@ -713,8 +740,8 @@ type TermSession interface {
 // `docker exec -it` over an SSH-allocated PTY for a remote host (Wave C —
 // cross-host terminal). service is the container name (in Rigger the compose
 // service name is the prefixed container name); the caller validates it.
-func (b *Bridge) OpenTerminal(workspaceName, env, service string, cols, rows int) (TermSession, error) {
-	rt, err := b.resolveRemote(workspaceName, env)
+func (b *Bridge) OpenTerminal(workspaceName, project, env, service string, cols, rows int) (TermSession, error) {
+	rt, err := b.resolveRemote(workspaceName, project, env)
 	if err != nil {
 		return nil, err
 	}
@@ -729,8 +756,8 @@ func (b *Bridge) OpenTerminal(workspaceName, env, service string, cols, rows int
 // remoteDotEnv reads the host-authoritative .env for a remote workspace env and
 // parses it into a map (DB credentials for backup/restore). Best-effort: a read
 // failure yields an empty map.
-func (b *Bridge) remoteDotEnv(rt *remoteTarget, workspaceName, env string) map[string]string {
-	remoteEnvDir := rt.exec.RemoteDir(b.localEnvDir(workspaceName, env))
+func (b *Bridge) remoteDotEnv(rt *remoteTarget, workspaceName, project, env string) map[string]string {
+	remoteEnvDir := rt.exec.RemoteDir(b.localEnvDir(workspaceName, project, env))
 	data, err := rt.client.ReadFile(remoteEnvDir + "/.env")
 	out := map[string]string{}
 	if err != nil {
@@ -760,18 +787,19 @@ func (b *Bridge) remoteDotEnv(rt *remoteTarget, workspaceName, env string) map[s
 // replaces scripts/bootstrap.sh). Used during workspace creation and by the
 // `init` command. stdout/stderr are the same stream in practice; progress is
 // written to stdout.
-func (b *Bridge) Bootstrap(workspaceName, env string, stdout, stderr io.Writer) error {
-	return b.bootstrap(workspaceName, env, false, stdout)
+func (b *Bridge) Bootstrap(workspaceName, project, env string, stdout, stderr io.Writer) error {
+	return b.bootstrap(workspaceName, project, env, false, stdout)
 }
 
-func (b *Bridge) bootstrap(workspaceName, env string, regenEnv bool, out io.Writer) error {
+func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, out io.Writer) error {
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
-	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, env, regenEnv, out)
+	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, out)
 }
 
 // RunOptions configures a command execution.
 type RunOptions struct {
-	Workspace string
+	Workspace string // parent tier
+	Project   string // project name
 	Command   string
 	Env       string
 	Extra     []string // additional args (e.g. "db" for backup, "minor" for version bump)
@@ -878,7 +906,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 	}
 
 	// Phase 7: resolve whether this environment lives on a remote host.
-	rt, err := b.resolveRemote(opts.Workspace, opts.Env)
+	rt, err := b.resolveRemote(opts.Workspace, opts.Project, opts.Env)
 	if err != nil {
 		return err
 	}
@@ -886,13 +914,13 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// Phase 6.5 finish: init re-bootstraps an environment natively in Go.
 	// run.sh passed EXTRA to bootstrap.sh; --regen-env forces .env regeneration.
 	if opts.Command == "init" || opts.Command == "bootstrap" {
-		if err := b.bootstrap(opts.Workspace, opts.Env, contains(opts.Extra, "--regen-env"), opts.Stdout); err != nil {
+		if err := b.bootstrap(opts.Workspace, opts.Project, opts.Env, contains(opts.Extra, "--regen-env"), opts.Stdout); err != nil {
 			return err
 		}
 		if rt != nil {
 			// Ship the freshly-scaffolded env dir to the host, preserving its
 			// authoritative .env.
-			localDir := b.localEnvDir(opts.Workspace, opts.Env)
+			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
 			return rt.client.PushDir(localDir, rt.exec.RemoteDir(localDir), ".env")
 		}
 		return nil
@@ -904,6 +932,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 		_, err := version.Run(version.Options{
 			WorkspacesDir: b.workspacesDir,
 			Workspace:     opts.Workspace,
+			Project:       opts.Project,
 			Subcommand:    opts.Env,
 			Arg:           first(opts.Extra),
 			Stdout:        opts.Stdout,
@@ -917,6 +946,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 		bopts := builder.Options{
 			WorkspacesDir: b.workspacesDir,
 			Workspace:     opts.Workspace,
+			Project:       opts.Project,
 			Command:       opts.Command,
 			Env:           opts.Env,
 			Extra:         opts.Extra,
@@ -934,10 +964,10 @@ func (b *Bridge) Run(opts RunOptions) error {
 			bopts.Exec = rt.exec
 			bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 			bopts.SetDeploy(func(env string) error {
-				return b.Run(RunOptions{Workspace: opts.Workspace, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
+				return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
 			})
 			if opts.Command == "build" {
-				localDir := b.localEnvDir(opts.Workspace, opts.Env)
+				localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
 				if err := rt.client.PushDir(localDir, rt.exec.RemoteDir(localDir), ".env"); err != nil {
 					return fmt.Errorf("push build context to %s: %w", rt.hostName, err)
 				}
@@ -951,6 +981,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 		dopts := dockerops.Options{
 			WorkspacesDir: b.workspacesDir,
 			Workspace:     opts.Workspace,
+			Project:       opts.Project,
 			Command:       opts.Command,
 			Env:           opts.Env,
 			Extra:         opts.Extra,
@@ -959,7 +990,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stderr:        opts.Stderr,
 		}
 		if rt != nil {
-			localDir := b.localEnvDir(opts.Workspace, opts.Env)
+			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
 			dopts.Exec = rt.exec
 			dopts.Remote = true
 			dopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
@@ -982,6 +1013,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 		bopts := backup.Options{
 			WorkspacesDir: b.workspacesDir,
 			Workspace:     opts.Workspace,
+			Project:       opts.Project,
 			Command:       opts.Command,
 			Env:           opts.Env,
 			Extra:         opts.Extra,
@@ -996,7 +1028,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 		}
 		if rt != nil {
 			bopts.Exec = rt.exec
-			bopts.DotEnv = b.remoteDotEnv(rt, opts.Workspace, opts.Env)
+			bopts.DotEnv = b.remoteDotEnv(rt, opts.Workspace, opts.Project, opts.Env)
 		}
 		handled, err := backup.Run(bopts)
 		if handled {

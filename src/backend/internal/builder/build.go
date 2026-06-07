@@ -7,6 +7,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // build ports scripts/build.sh: build (and optionally push) backend/frontend
@@ -72,7 +73,7 @@ func (o Options) build() error {
 }
 
 func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) error {
-	ctxDir := filepath.Join(o.WorkspacesDir, o.Workspace, "envs", o.Env, service)
+	ctxDir := filepath.Join(wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env), service)
 	if fi, err := os.Stat(ctxDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("build context not found: %s (run init %s first)", ctxDir, o.Env)
 	}

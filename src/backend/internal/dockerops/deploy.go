@@ -16,6 +16,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // deployCommands are the lifecycle commands dockerops owns (compose and swarm).
@@ -37,7 +38,8 @@ func Handles(cmd string) bool { return deployCommands[cmd] }
 // Options configures a deployment operation.
 type Options struct {
 	WorkspacesDir string
-	Workspace     string
+	Workspace     string // parent tier
+	Project       string // project name
 	Command       string
 	Env           string
 	Extra         []string
@@ -88,7 +90,7 @@ func Run(opts Options) (bool, error) {
 		return false, nil
 	}
 
-	cfgBytes, err := os.ReadFile(filepath.Join(opts.WorkspacesDir, opts.Workspace, "config.json"))
+	cfgBytes, err := os.ReadFile(wspath.ConfigPath(opts.WorkspacesDir, opts.Workspace, opts.Project))
 	if err != nil {
 		return false, nil // can't read config — let bash try
 	}
@@ -101,7 +103,7 @@ func Run(opts Options) (bool, error) {
 		return true, fmt.Errorf("unknown environment %q", opts.Env)
 	}
 
-	envDir := filepath.Join(opts.WorkspacesDir, opts.Workspace, "envs", opts.Env)
+	envDir := wspath.EnvDir(opts.WorkspacesDir, opts.Workspace, opts.Project, opts.Env)
 	composePath := filepath.Join(envDir, "docker-compose.yml")
 
 	if opts.Remote {
@@ -328,7 +330,7 @@ func (r *runner) ps() error {
 		return err
 	}
 	if r.projectType == "image" {
-		printImageUpdates(r.opts.Stdout, r.opts.WorkspacesDir, r.opts.Workspace, r.opts.Env)
+		printImageUpdates(r.opts.Stdout, r.opts.WorkspacesDir, r.opts.Workspace, r.opts.Project, r.opts.Env)
 	}
 	return nil
 }

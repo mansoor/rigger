@@ -6,12 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,62}$`)
 
 // CreateRequest is the payload sent from the wizard.
 type CreateRequest struct {
+	Workspace    string            `json:"workspace"` // parent tier the project is created under
 	Name         string            `json:"name"`
 	Registry     string            `json:"registry"`
 	Type         string            `json:"type"`         // "image" or "custom"
@@ -100,17 +103,25 @@ var defaultVersions = map[string]string{
 // Create validates the request, writes the workspace directory, config.json,
 // and run.sh. It does NOT run bootstrap — the caller does that to stream output.
 func Create(workspacesDir string, req CreateRequest) error {
+	if !validName.MatchString(req.Workspace) {
+		return fmt.Errorf("invalid workspace name %q: use lowercase letters, numbers, hyphens only", req.Workspace)
+	}
 	if !validName.MatchString(req.Name) {
-		return fmt.Errorf("invalid workspace name %q: use lowercase letters, numbers, hyphens only", req.Name)
+		return fmt.Errorf("invalid project name %q: use lowercase letters, numbers, hyphens only", req.Name)
 	}
 
-	wsPath := filepath.Join(workspacesDir, req.Name)
+	// Ensure the parent workspace exists (create it + its marker on first use).
+	if err := EnsureWorkspace(workspacesDir, req.Workspace); err != nil {
+		return err
+	}
+
+	wsPath := wspath.ProjectDir(workspacesDir, req.Workspace, req.Name)
 	if _, err := os.Stat(wsPath); err == nil {
-		return fmt.Errorf("workspace %q already exists", req.Name)
+		return fmt.Errorf("project %q already exists in workspace %q", req.Name, req.Workspace)
 	}
 
 	if err := os.MkdirAll(wsPath, 0755); err != nil {
-		return fmt.Errorf("create workspace dir: %w", err)
+		return fmt.Errorf("create project dir: %w", err)
 	}
 
 	cfg, err := buildConfig(req)
@@ -133,6 +144,34 @@ func Create(workspacesDir string, req CreateRequest) error {
 	// Phase 6.5 finish: no run.sh is generated — all commands run natively in Go
 	// via the shell bridge (dockerops/backup/builder/version/bootstrap).
 	return nil
+}
+
+// EnsureWorkspace creates the parent-tier workspace directory (and its projects/
+// subdir + workspace.json marker) if it does not yet exist. Idempotent.
+func EnsureWorkspace(workspacesDir, name string) error {
+	if !validName.MatchString(name) {
+		return fmt.Errorf("invalid workspace name %q: use lowercase letters, numbers, hyphens only", name)
+	}
+	if err := os.MkdirAll(wspath.ProjectsDir(workspacesDir, name), 0755); err != nil {
+		return fmt.Errorf("create workspace dir: %w", err)
+	}
+	marker := wspath.WorkspaceMeta(workspacesDir, name)
+	if _, err := os.Stat(marker); os.IsNotExist(err) {
+		meta, _ := json.MarshalIndent(map[string]any{"name": name}, "", "  ")
+		if err := os.WriteFile(marker, meta, 0644); err != nil {
+			return fmt.Errorf("write workspace.json: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteWorkspace removes an entire parent-tier workspace directory (all its
+// projects). Caller is responsible for tearing down running stacks first.
+func DeleteWorkspace(workspacesDir, name string) error {
+	if !validName.MatchString(name) {
+		return fmt.Errorf("invalid workspace name %q", name)
+	}
+	return os.RemoveAll(wspath.WorkspaceDir(workspacesDir, name))
 }
 
 func buildConfig(req CreateRequest) (map[string]any, error) {
@@ -253,6 +292,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		"name":     req.Name,
 		"type":     req.Type,
 		"registry": req.Registry,
+		// Immutable Docker resource prefix = {workspace}_{project}; globally unique
+		// even when project display names repeat across workspaces.
+		"resource_prefix": req.Workspace + "_" + req.Name,
 		"version": map[string]any{
 			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},

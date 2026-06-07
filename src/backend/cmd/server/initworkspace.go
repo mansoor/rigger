@@ -10,6 +10,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/config"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // runInitWorkspace is the host-side `rigger init-workspace` subcommand — the Go
@@ -25,7 +26,8 @@ import (
 //	cat config.json | rigger init-workspace -name myapp -config -
 func runInitWorkspace(args []string) int {
 	fs := flag.NewFlagSet("init-workspace", flag.ContinueOnError)
-	name := fs.String("name", "", "workspace name (lowercase, digits, hyphens)")
+	workspaceName := fs.String("workspace", "default", "parent workspace name (lowercase, digits, hyphens)")
+	name := fs.String("name", "", "project name (lowercase, digits, hyphens)")
 	cfgPath := fs.String("config", "", "path to a config.json ('-' for stdin)")
 	wsDir := fs.String("workspaces", "", "workspaces directory (default: from WORKSPACES_DIR/TOOLKIT_ROOT)")
 	tmplDir := fs.String("templates", "", "templates directory (default: from TEMPLATES_DIR/TOOLKIT_ROOT)")
@@ -33,7 +35,7 @@ func runInitWorkspace(args []string) int {
 		return 2
 	}
 	if *name == "" || *cfgPath == "" {
-		fmt.Fprintln(os.Stderr, "usage: rigger init-workspace -name <name> -config <config.json|->")
+		fmt.Fprintln(os.Stderr, "usage: rigger init-workspace -workspace <ws> -name <project> -config <config.json|->")
 		return 2
 	}
 
@@ -72,13 +74,17 @@ func runInitWorkspace(args []string) int {
 		return 1
 	}
 
-	wsRoot := filepath.Join(workspacesDir, *name)
+	if err := workspace.EnsureWorkspace(workspacesDir, *workspaceName); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	wsRoot := wspath.ProjectDir(workspacesDir, *workspaceName, *name)
 	if _, statErr := os.Stat(wsRoot); statErr == nil {
-		fmt.Fprintf(os.Stderr, "workspace %q already exists at %s\n", *name, wsRoot)
+		fmt.Fprintf(os.Stderr, "project %q already exists at %s\n", *name, wsRoot)
 		return 1
 	}
 	if err := os.MkdirAll(wsRoot, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "create workspace dir: %v\n", err)
+		fmt.Fprintf(os.Stderr, "create project dir: %v\n", err)
 		return 1
 	}
 	if err := os.WriteFile(filepath.Join(wsRoot, "config.json"), data, 0o644); err != nil {
@@ -91,7 +97,7 @@ func runInitWorkspace(args []string) int {
 	failed := false
 	for _, env := range envs {
 		fmt.Printf("\nBootstrapping environment: %s\n", env)
-		if err := workspace.Bootstrap(workspacesDir, templatesDir, *name, env, false, os.Stdout); err != nil {
+		if err := workspace.Bootstrap(workspacesDir, templatesDir, *workspaceName, *name, env, false, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "✗ bootstrap %s: %v\n", env, err)
 			failed = true
 		}

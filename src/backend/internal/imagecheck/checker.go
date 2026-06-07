@@ -10,11 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // ServiceUpdate describes the update status of one service image.
@@ -45,24 +46,26 @@ func NewCache() *Cache {
 	return &Cache{entries: make(map[string]*CacheEntry)}
 }
 
-func (c *Cache) Get(ws, env string) (*CacheEntry, bool) {
+func cacheKey(ws, proj, env string) string { return ws + "/" + proj + "/" + env }
+
+func (c *Cache) Get(ws, proj, env string) (*CacheEntry, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	e, ok := c.entries[ws+"/"+env]
+	e, ok := c.entries[cacheKey(ws, proj, env)]
 	return e, ok
 }
 
-func (c *Cache) Set(ws, env string, results []ServiceUpdate) {
+func (c *Cache) Set(ws, proj, env string, results []ServiceUpdate) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[ws+"/"+env] = &CacheEntry{Results: results, CheckedAt: time.Now()}
+	c.entries[cacheKey(ws, proj, env)] = &CacheEntry{Results: results, CheckedAt: time.Now()}
 }
 
 // Invalidate removes a cache entry so the next request triggers a fresh check.
-func (c *Cache) Invalidate(ws, env string) {
+func (c *Cache) Invalidate(ws, proj, env string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.entries, ws+"/"+env)
+	delete(c.entries, cacheKey(ws, proj, env))
 }
 
 // ── Docker Hub API helpers ─────────────────────────────────────────────────────
@@ -217,8 +220,8 @@ func versionNewerAtPrecision(cur, cand []int) bool {
 // ── Main check function ────────────────────────────────────────────────────────
 
 // Check reads config.json for the workspace and checks each image for updates.
-func Check(workspacesDir, wsName, env string) []ServiceUpdate {
-	cfgPath := filepath.Join(workspacesDir, wsName, "config.json")
+func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
+	cfgPath := wspath.ConfigPath(workspacesDir, wsName, project)
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return nil
@@ -315,31 +318,40 @@ func versionLess(a, b []int) bool {
 }
 
 func checkAll(cache *Cache, workspacesDir string) {
-	entries, err := os.ReadDir(workspacesDir)
+	wsEntries, err := os.ReadDir(workspacesDir)
 	if err != nil {
 		return
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, we := range wsEntries {
+		if !we.IsDir() {
 			continue
 		}
-		wsName := e.Name()
-		cfgPath := filepath.Join(workspacesDir, wsName, "config.json")
-		data, err := os.ReadFile(cfgPath)
+		wsName := we.Name()
+		projEntries, err := os.ReadDir(wspath.ProjectsDir(workspacesDir, wsName))
 		if err != nil {
 			continue
 		}
-		var cfg struct {
-			Project      struct{ Type string }      `json:"project"`
-			Environments map[string]json.RawMessage `json:"environments"`
-		}
-		if json.Unmarshal(data, &cfg) != nil || cfg.Project.Type != "image" {
-			continue
-		}
-		for envName := range cfg.Environments {
-			results := Check(workspacesDir, wsName, envName)
-			if results != nil {
-				cache.Set(wsName, envName, results)
+		for _, pe := range projEntries {
+			if !pe.IsDir() {
+				continue
+			}
+			projName := pe.Name()
+			data, err := os.ReadFile(wspath.ConfigPath(workspacesDir, wsName, projName))
+			if err != nil {
+				continue
+			}
+			var cfg struct {
+				Project      struct{ Type string }      `json:"project"`
+				Environments map[string]json.RawMessage `json:"environments"`
+			}
+			if json.Unmarshal(data, &cfg) != nil || cfg.Project.Type != "image" {
+				continue
+			}
+			for envName := range cfg.Environments {
+				results := Check(workspacesDir, wsName, projName, envName)
+				if results != nil {
+					cache.Set(wsName, projName, envName, results)
+				}
 			}
 		}
 	}

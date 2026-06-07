@@ -10,6 +10,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Bootstrap scaffolds (or re-scaffolds) a single environment inside a workspace,
@@ -22,12 +23,12 @@ import (
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
-func Bootstrap(workspacesDir, templatesDir, name, env string, regenEnv bool, out io.Writer) error {
+func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
-	wsRoot := filepath.Join(workspacesDir, name)
-	cfgPath := filepath.Join(wsRoot, "config.json")
+	wsRoot := wspath.ProjectDir(workspacesDir, workspaceName, name)
+	cfgPath := wspath.ConfigPath(workspacesDir, workspaceName, name)
 
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {

@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Handles reports whether this package owns the given run command.
@@ -23,7 +23,8 @@ func Handles(cmd string) bool { return cmd == "version" || cmd == "ver" }
 // (run.sh.template: `version.sh "${ENV:-current}" "${EXTRA[@]}"`).
 type Options struct {
 	WorkspacesDir string
-	Workspace     string
+	Workspace     string // parent tier
+	Project       string // project name
 	Subcommand    string // current | bump | set  (default current)
 	Arg           string // bump part, or the version string for set
 	Stdout        io.Writer
@@ -35,7 +36,7 @@ var setRe = regexp.MustCompile(`^([0-9]+)\.([0-9]+)\.([0-9]+)-build\.([0-9]+)$`)
 // command is a version command (so the bridge never falls back to bash), with
 // err carrying any failure.
 func Run(opts Options) (bool, error) {
-	cfgPath := filepath.Join(opts.WorkspacesDir, opts.Workspace, "config.json")
+	cfgPath := wspath.ConfigPath(opts.WorkspacesDir, opts.Workspace, opts.Project)
 	out := opts.Stdout
 	if out == nil {
 		out = io.Discard

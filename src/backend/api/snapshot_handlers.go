@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Workspace configuration snapshots (.rws = Rigger Workspace Snapshot).
@@ -33,12 +35,14 @@ const snapshotExt = ".rws"
 type SnapshotInfo struct {
 	Filename  string    `json:"filename"`
 	Workspace string    `json:"workspace"`
+	Project   string    `json:"project"`
 	CreatedAt time.Time `json:"created_at"`
 	SizeBytes int64     `json:"size_bytes"`
 }
 
 type snapshotMeta struct {
 	Workspace string    `json:"workspace"`
+	Project   string    `json:"project"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -61,21 +65,22 @@ func sanitizeSnapshotName(name string) string {
 func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Workspace string `json:"workspace"`
+		Project   string `json:"project"`
 		Name      string `json:"name"`
 	}
-	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Workspace) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace is required"})
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Workspace) == "" || strings.TrimSpace(body.Project) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace and project are required"})
 		return
 	}
-	wsDir := filepath.Join(h.workspacesDir, body.Workspace)
+	wsDir := wspath.ProjectDir(h.workspacesDir, body.Workspace, body.Project)
 	if _, err := os.Stat(filepath.Join(wsDir, "config.json")); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
 	filename := sanitizeSnapshotName(body.Name)
 	if filename == "" {
-		filename = fmt.Sprintf("%s_%s%s", body.Workspace, time.Now().Format("20060102-150405"), snapshotExt)
+		filename = fmt.Sprintf("%s_%s_%s%s", body.Workspace, body.Project, time.Now().Format("20060102-150405"), snapshotExt)
 	}
 
 	destPath := filepath.Join(snapshotsDir(h.dataDir), filename)
@@ -84,7 +89,7 @@ func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	size, err := createConfigSnapshot(wsDir, body.Workspace, destPath)
+	size, err := createConfigSnapshot(wsDir, body.Workspace, body.Project, destPath)
 	if err != nil {
 		os.Remove(destPath) //nolint:errcheck
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create snapshot: " + err.Error()})
@@ -94,6 +99,7 @@ func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, SnapshotInfo{
 		Filename:  filename,
 		Workspace: body.Workspace,
+		Project:   body.Project,
 		CreatedAt: time.Now(),
 		SizeBytes: size,
 	})
@@ -101,7 +107,7 @@ func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 
 // createConfigSnapshot writes a .rws (tar.gz) containing meta.json, config.json
 // and every envs/<env>/.env file. Returns the file size.
-func createConfigSnapshot(wsDir, wsName, destPath string) (int64, error) {
+func createConfigSnapshot(wsDir, wsName, project, destPath string) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return 0, err
 	}
@@ -121,7 +127,7 @@ func createConfigSnapshot(wsDir, wsName, destPath string) (int64, error) {
 	}
 
 	// meta.json
-	meta, _ := json.Marshal(snapshotMeta{Workspace: wsName, CreatedAt: time.Now()})
+	meta, _ := json.Marshal(snapshotMeta{Workspace: wsName, Project: project, CreatedAt: time.Now()})
 	if err := writeBytes("meta.json", meta, time.Now()); err != nil {
 		f.Close()
 		return 0, err
@@ -390,9 +396,9 @@ func (h *Handler) RollbackWorkspaceSnapshot(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "snapshot is missing its workspace metadata"})
 		return
 	}
-	wsDir := filepath.Join(h.workspacesDir, meta.Workspace)
+	wsDir := wspath.ProjectDir(h.workspacesDir, meta.Workspace, meta.Project)
 	if _, err := os.Stat(wsDir); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("workspace %q no longer exists", meta.Workspace)})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("project %q/%q no longer exists", meta.Workspace, meta.Project)})
 		return
 	}
 
@@ -404,7 +410,7 @@ func (h *Handler) RollbackWorkspaceSnapshot(w http.ResponseWriter, r *http.Reque
 
 	// Regenerate compose from the restored config (best-effort, non-fatal).
 	if cfgBytes, err := os.ReadFile(filepath.Join(wsDir, "config.json")); err == nil {
-		go h.regenCompose(meta.Workspace, string(cfgBytes))
+		go h.regenCompose(meta.Workspace, meta.Project, string(cfgBytes))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

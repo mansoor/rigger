@@ -7,11 +7,11 @@ package builder
 import (
 	"fmt"
 	"io"
-	"path/filepath"
 
 	"github.com/mansoor/rigger/ui/internal/dockerops"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Handles reports whether this package owns the given run command.
@@ -23,7 +23,8 @@ func Handles(cmd string) bool { return cmd == "build" || cmd == "promote" }
 //	promote: Env = source environment, Extra = [dst_env] [--dry-run]
 type Options struct {
 	WorkspacesDir string
-	Workspace     string
+	Workspace     string // parent tier
+	Project       string // project name
 	Command       string
 	Env           string
 	Extra         []string
@@ -63,7 +64,7 @@ func (o Options) out() io.Writer {
 }
 
 func (o Options) configPath() string {
-	return filepath.Join(o.WorkspacesDir, o.Workspace, "config.json")
+	return wspath.ConfigPath(o.WorkspacesDir, o.Workspace, o.Project)
 }
 
 // dockerRun runs a docker command, streaming to the configured writers.
@@ -96,6 +97,7 @@ func (o Options) runDeploy(env string) error {
 	_, err := dockerops.Run(dockerops.Options{
 		WorkspacesDir: o.WorkspacesDir,
 		Workspace:     o.Workspace,
+		Project:       o.Project,
 		Command:       "start",
 		Env:           env,
 		EnvVars:       o.EnvVars,

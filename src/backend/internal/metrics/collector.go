@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/stats"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 const (
@@ -120,11 +120,13 @@ func (c *Collector) collect() {
 		for _, env := range w.Envs {
 			ps := projStats[base+"_"+env]
 			memBytes := int64(ps.MemMB * 1024 * 1024)
-			diskBytes := dirSizeBytes(filepath.Join(c.workspacesDir, w.Name, "envs", env))
+			diskBytes := dirSizeBytes(wspath.EnvDir(c.workspacesDir, w.WorkspaceName, w.Name, env))
+			// Key by the resource prefix (globally unique) so same-named projects in
+			// different workspaces don't collide.
 			if _, err := c.db.Exec(
 				`INSERT INTO metrics_snapshots (project, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
 				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				w.Name, env, ps.CPUPct, memBytes, diskBytes, int64(ps.NetRxBytes), int64(ps.NetTxBytes),
+				base, env, ps.CPUPct, memBytes, diskBytes, int64(ps.NetRxBytes), int64(ps.NetTxBytes),
 			); err != nil {
 				log.Printf("metrics: insert %s/%s: %v", w.Name, env, err)
 			}

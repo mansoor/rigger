@@ -27,6 +27,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 	"github.com/gorilla/websocket"
 )
 
@@ -323,7 +324,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	send := func(s string) { conn.WriteMessage(websocket.TextMessage, []byte(s)) } //nolint:errcheck
 
-	send("Creating workspace " + msg.Workspace.Name + "...\n")
+	wsName := msg.Workspace.Workspace
+	pkey := wsName + "_" + msg.Workspace.Name
+	send("Creating project " + msg.Workspace.Name + " in workspace " + wsName + "...\n")
 
 	// For pre-built templates, load images + default env vars and apply smart
 	// secret generation BEFORE writing config.json. The generated values are
@@ -354,7 +357,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// workspace lives without a runtime docker inspect (persisted in config as
 	// project.project_root_dir).
 	if hwd := h.hostBindSourceDir(); hwd != "" {
-		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + msg.Workspace.Name
+		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + msg.Workspace.Name
 	}
 
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
@@ -386,7 +389,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		send("\n\033[2mBootstrapping environment: " + env.Name + "\033[0m\n")
-		if err := h.bridge.Bootstrap(msg.Workspace.Name, env.Name, pw, pw); err != nil {
+		if err := h.bridge.Bootstrap(wsName, msg.Workspace.Name, env.Name, pw, pw); err != nil {
 			send("\033[31m✗ Bootstrap failed for " + env.Name + ": " + err.Error() + "\033[0m\n")
 			allOk = false
 		} else {
@@ -394,7 +397,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			// Write per-environment initial env vars (Phase 8 secret-aware: swarm
 			// secrets become Docker secrets, kept out of .env).
 			if len(env.Vars) > 0 || len(env.SecretKeys) > 0 {
-				if err2 := h.seedEnvVars(msg.Workspace.Name, env, auth.ClaimsFromContext(r.Context()), clientIP(r)); err2 != nil {
+				if err2 := h.seedEnvVars(wsName, msg.Workspace.Name, env, auth.ClaimsFromContext(r.Context()), clientIP(r)); err2 != nil {
 					send("\033[33m⚠ env vars for " + env.Name + ": " + err2.Error() + "\033[0m\n")
 				} else {
 					send("\033[32m✓ " + env.Name + " env vars written\033[0m\n")
@@ -411,7 +414,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if env.Name == "" || env.HostID == 0 {
 			continue
 		}
-		if err := settings.SetEnvHost(h.db, msg.Workspace.Name, env.Name, env.HostID); err != nil {
+		if err := settings.SetEnvHost(h.db, pkey, env.Name, env.HostID); err != nil {
 			send("\033[33m⚠ host binding for " + env.Name + ": " + err.Error() + "\033[0m\n")
 		} else {
 			send("\033[32m✓ " + env.Name + " bound to remote host\033[0m\n")
@@ -425,10 +428,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Audit log
 	h.db.Exec( //nolint:errcheck
 		"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
-		claims.UserID, claims.Username, msg.Workspace.Name, "create", "",
+		claims.UserID, claims.Username, pkey, "create", "",
 	)
 
-	send("\n\033[32m✓ Workspace " + msg.Workspace.Name + " is ready!\033[0m\n")
+	send("\n\033[32m✓ Project " + msg.Workspace.Name + " is ready!\033[0m\n")
 }
 
 // GET /api/events — SSE stream of Docker container events (auth via ?token= query param
@@ -574,15 +577,61 @@ func (h *Handler) DebugPaths(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/workspaces
+// GET /api/workspaces — list the parent-tier workspaces.
 func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
-	workspaces, err := workspace.List(h.workspacesDir)
+	wss, err := workspace.ListWorkspaces(h.workspacesDir)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.annotateHosts(workspaces)
-	writeJSON(w, http.StatusOK, workspaces)
+	writeJSON(w, http.StatusOK, wss)
+}
+
+// GET /api/workspaces/{workspace}/projects — list the projects within a workspace.
+func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
+	projects, err := workspace.ListProjects(h.workspacesDir, wsName)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.annotateHosts(projects)
+	writeJSON(w, http.StatusOK, projects)
+}
+
+// POST /api/workspaces — create a parent-tier workspace. Body: {"name": "..."}.
+func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if err := workspace.EnsureWorkspace(h.workspacesDir, body.Name); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
+			claims.UserID, claims.Username, body.Name, "create-workspace", "")
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "name": body.Name})
+}
+
+// DELETE /api/workspaces/{workspace} — delete a whole workspace tier (all projects).
+// Caller is expected to have torn down running stacks first.
+func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
+	if err := workspace.DeleteWorkspace(h.workspacesDir, wsName); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
+			claims.UserID, claims.Username, wsName, "delete-workspace", "")
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // annotateHosts fills each workspace's per-env host map (EnvHosts) from the
@@ -592,7 +641,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 // mixed or local layout leaves them zero.
 func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 	for i := range wss {
-		bindings, err := settings.EnvHosts(h.db, wss[i].Name)
+		bindings, err := settings.EnvHosts(h.db, wss[i].WorkspaceName+"_"+wss[i].Name)
 		if err != nil || len(bindings) == 0 {
 			continue
 		}
@@ -638,9 +687,10 @@ func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 
 // GET /api/workspaces/{name}/envs/{env}/compose  — returns docker-compose.yml content
 func (h *Handler) GetCompose(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	path := filepath.Join(h.workspacesDir, name, "envs", env, "docker-compose.yml")
+	path := filepath.Join(wspath.EnvDir(h.workspacesDir, wsName, name, env), "docker-compose.yml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "docker-compose.yml not found for env " + env})
@@ -651,6 +701,7 @@ func (h *Handler) GetCompose(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/workspaces/{name}/envs/{env}/compose  — writes docker-compose.yml
 func (h *Handler) PutCompose(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 	var body struct {
@@ -660,7 +711,7 @@ func (h *Handler) PutCompose(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content required"})
 		return
 	}
-	path := filepath.Join(h.workspacesDir, name, "envs", env, "docker-compose.yml")
+	path := filepath.Join(wspath.EnvDir(h.workspacesDir, wsName, name, env), "docker-compose.yml")
 	if err := os.WriteFile(path, []byte(body.Content), 0644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -668,15 +719,16 @@ func (h *Handler) PutCompose(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
-			claims.UserID, claims.Username, name, "edit-compose", env)
+			claims.UserID, claims.Username, wsName+"_"+name, "edit-compose", env)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // GET /api/workspaces/{name}/config  — returns full config.json
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	path := filepath.Join(h.workspacesDir, name, "config.json")
+	path := wspath.ConfigPath(h.workspacesDir, wsName, name)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "config.json not found"})
@@ -722,6 +774,7 @@ func configEnvDeployments(data []byte) map[string]string {
 
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	var body struct {
 		Content   string   `json:"content"`    // raw JSON string
@@ -737,7 +790,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	path := filepath.Join(h.workspacesDir, name, "config.json")
+	path := wspath.ConfigPath(h.workspacesDir, wsName, name)
 	// Reject changes to project.resource_prefix: it's the immutable Docker resource
 	// prefix (compose project, container, named-volume, network and secret names)
 	// — changing it would orphan the running stack and its volume data on the next
@@ -773,7 +826,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var out bytes.Buffer
-		if derr := h.bridge.Run(shell.RunOptions{Workspace: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
+		if derr := h.bridge.Run(shell.RunOptions{Workspace: wsName, Project: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
 			fmt.Fprintf(os.Stderr, "PutConfig: tear down removed env %s/%s: %v\n%s", name, env, derr, out.String())
 		}
 	}
@@ -792,7 +845,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var out bytes.Buffer
-		if derr := h.bridge.Run(shell.RunOptions{Workspace: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
+		if derr := h.bridge.Run(shell.RunOptions{Workspace: wsName, Project: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
 			fmt.Fprintf(os.Stderr, "PutConfig: tear down for mode change %s/%s (%s→%s): %v\n%s",
 				name, env, oldDep, newDeployments[env], derr, out.String())
 		}
@@ -808,25 +861,25 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		if newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
 			continue
 		}
-		os.RemoveAll(filepath.Join(h.workspacesDir, name, "envs", env)) //nolint:errcheck
+		os.RemoveAll(wspath.EnvDir(h.workspacesDir, wsName, name, env)) //nolint:errcheck
 	}
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
-			claims.UserID, claims.Username, name, "edit-config", "")
+			claims.UserID, claims.Username, wsName+"_"+name, "edit-config", "")
 	}
 
 	// Auto-regenerate docker-compose.yml for every environment in this workspace.
 	// compose-gen.sh is fast (<1s) so this is synchronous and non-blocking in practice.
 	// Errors are non-fatal — the config was saved successfully even if regen fails.
-	go h.regenCompose(name, body.Content)
+	go h.regenCompose(wsName, name, body.Content)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // regenCompose runs compose-gen.sh for every environment defined in configJSON.
 // Called as a goroutine after PutConfig writes config.json.
-func (h *Handler) regenCompose(workspaceName, configJSON string) {
+func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 	// Parse environment names from the saved config
 	var cfg struct {
 		Environments map[string]json.RawMessage `json:"environments"`
@@ -835,7 +888,7 @@ func (h *Handler) regenCompose(workspaceName, configJSON string) {
 		return
 	}
 
-	wsRoot := filepath.Join(h.workspacesDir, workspaceName)
+	wsRoot := wspath.ProjectDir(h.workspacesDir, workspaceName, project)
 
 	for envName := range cfg.Environments {
 		outPath := filepath.Join(wsRoot, "envs", envName, "docker-compose.yml")
@@ -925,11 +978,12 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 // Does NOT go through run.sh ps because that also invokes image-check.sh for image stacks,
 // whose output ("up to date", "healthy") falsely triggers the "running" detection logic.
 func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env  := r.PathValue("env")
 
 	// Resolve compose project name from config.json
-	cfgData, err := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json"))
+	cfgData, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name))
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "unknown"})
 		return
@@ -950,10 +1004,10 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 		project = cfg.Project.Name
 	}
 	project += "_" + env
-	envDir  := filepath.Join(h.workspacesDir, name, "envs", env)
+	envDir  := wspath.EnvDir(h.workspacesDir, wsName, name, env)
 
 	// Query the daemon the env actually runs on (local, or its remote host).
-	ex, err := h.bridge.ExecForEnv(name, env)
+	ex, err := h.bridge.ExecForEnv(wsName, name, env)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "unknown"})
 		return
@@ -1152,10 +1206,11 @@ func (h *Handler) hostBindSourceDir() string {
 }
 
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	ws, err := workspace.Get(h.workspacesDir, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 	wss := []workspace.Workspace{ws}
@@ -1168,7 +1223,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	if rd := strings.TrimSpace(out.Config.Project.ProjectRootDir); rd != "" {
 		out.HostPath = rd
 	} else if hwd := h.hostBindSourceDir(); hwd != "" {
-		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + name
+		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + name
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -1176,10 +1231,11 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 // GET /api/workspaces/{name}/envs/{env}/vars  — returns env vars with secret
 // flags (secret values masked by default, ?reveal=true for plaintext)
 func (h *Handler) GetEnvVars(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 	reveal := r.URL.Query().Get("reveal") == "true"
-	vars, err := workspace.EnvVars(h.workspacesDir, name, env, reveal)
+	vars, err := workspace.EnvVars(h.workspacesDir, wsName, name, env, reveal)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -1190,7 +1246,7 @@ func (h *Handler) GetEnvVars(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
 		for k, v := range vars {
 			if v.Secret {
-				h.recordSecretEvent(name, env, k, "read", claims, ip)
+				h.recordSecretEvent(wsName+"_"+name, env, k, "read", claims, ip)
 			}
 		}
 	}
@@ -1203,8 +1259,10 @@ func (h *Handler) GetEnvVars(w http.ResponseWriter, r *http.Request) {
 // stored as Docker Swarm secrets (encrypted at rest) and kept out of .env; for
 // compose they stay in .env and are only masked in the UI.
 func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
+	pkey := wsName + "_" + name
 	var body struct {
 		Updates    map[string]string `json:"updates"`
 		Deletes    []string          `json:"deletes"`
@@ -1218,7 +1276,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		body.Updates = map[string]string{}
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -1249,7 +1307,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	if swarm {
 		// Current plaintext values, so flagging an existing var as secret can move
 		// its value into a Docker secret without the user re-typing it.
-		current, _ := workspace.EnvVars(h.workspacesDir, name, env, true)
+		current, _ := workspace.EnvVars(h.workspacesDir, wsName, name, env, true)
 
 		for k := range newSecret {
 			val, provided := body.Updates[k]
@@ -1270,7 +1328,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 			if ver < 1 {
 				ver = 1
 			}
-			if _, serr := h.bridge.EnsureSwarmSecret(name, env, k, val, ver); serr != nil {
+			if _, serr := h.bridge.EnsureSwarmSecret(wsName, name, env, k, val, ver); serr != nil {
 				warn = serr.Error() // leave the value in .env as a fallback
 			} else {
 				versions[k] = ver
@@ -1282,7 +1340,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		for k := range prevSecret {
 			if !newSecret[k] {
 				if v := versions[k]; v > 0 {
-					h.bridge.RemoveSwarmSecret(name, env, k, v) //nolint:errcheck
+					h.bridge.RemoveSwarmSecret(wsName, name, env, k, v) //nolint:errcheck
 				}
 				delete(versions, k)
 			}
@@ -1291,26 +1349,26 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		for _, k := range body.Deletes {
 			if prevSecret[k] {
 				if v := versions[k]; v > 0 {
-					h.bridge.RemoveSwarmSecret(name, env, k, v) //nolint:errcheck
+					h.bridge.RemoveSwarmSecret(wsName, name, env, k, v) //nolint:errcheck
 				}
 				delete(versions, k)
 			}
 		}
 	}
 
-	if err := workspace.UpdateEnvVars(h.workspacesDir, name, env, body.Updates, body.Deletes, skipEnvFile); err != nil {
+	if err := workspace.UpdateEnvVars(h.workspacesDir, wsName, name, env, body.Updates, body.Deletes, skipEnvFile); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := workspace.SetSecretMeta(h.workspacesDir, name, env, body.SecretKeys, versions); err != nil {
+	if err := workspace.SetSecretMeta(h.workspacesDir, wsName, name, env, body.SecretKeys, versions); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved .env but failed to persist secret flags: " + err.Error()})
 		return
 	}
 	// Regenerate this env's compose so the secrets wiring (or its removal) is
 	// reflected immediately, without waiting for a Refresh.
-	if cfgData, rerr := os.ReadFile(filepath.Join(h.workspacesDir, name, "config.json")); rerr == nil {
+	if cfgData, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name)); rerr == nil {
 		if content, gerr := composegen.Generate(cfgData, env); gerr == nil {
-			outPath := filepath.Join(h.workspacesDir, name, "envs", env, "docker-compose.yml")
+			outPath := filepath.Join(wspath.EnvDir(h.workspacesDir, wsName, name, env), "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
 		}
 	}
@@ -1319,19 +1377,19 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	// compose and swarm. Key names only, never values.
 	for k := range newSecret {
 		if _, provided := body.Updates[k]; provided || !prevSecret[k] {
-			h.recordSecretEvent(name, env, k, "write", claims, ip)
+			h.recordSecretEvent(pkey, env, k, "write", claims, ip)
 		}
 	}
 	for _, k := range body.Deletes {
 		if prevSecret[k] {
-			h.recordSecretEvent(name, env, k, "delete", claims, ip)
+			h.recordSecretEvent(pkey, env, k, "delete", claims, ip)
 		}
 	}
 
 	// If this env runs on a remote host, push the updated .env to it — the local
 	// file is just a cache; the host's copy is what `docker compose` actually
 	// reads. This is the one explicit override of the host-authoritative .env.
-	pushed, hostName, err := h.bridge.PushEnvFile(name, env)
+	pushed, hostName, err := h.bridge.PushEnvFile(wsName, name, env)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error": "saved locally but could not push to host " + hostName + ": " + err.Error(),
@@ -1347,7 +1405,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
-			claims.UserID, claims.Username, name, "env-update", env,
+			claims.UserID, claims.Username, pkey, "env-update", env,
 		)
 	}
 	resp := map[string]string{"status": "ok", "pushed_to_host": pushedTo}
@@ -1357,22 +1415,23 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// DELETE /api/workspaces/{name} — permanently removes a workspace directory
+// DELETE /api/workspaces/{ws}/projects/{name} — permanently removes a project directory
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	if name == "" || strings.ContainsAny(name, "/\\..") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workspace name"})
+	if name == "" || strings.ContainsAny(name, "/\\..") || wsName == "" || strings.ContainsAny(wsName, "/\\..") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project name"})
 		return
 	}
 
-	wsPath := filepath.Join(h.workspacesDir, name)
+	wsPath := wspath.ProjectDir(h.workspacesDir, wsName, name)
 	if _, err := os.Stat(wsPath); os.IsNotExist(err) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
 	if err := os.RemoveAll(wsPath); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete workspace: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete project: " + err.Error()})
 		return
 	}
 
@@ -1380,7 +1439,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if claims != nil {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
-			claims.UserID, claims.Username, name, "delete", "",
+			claims.UserID, claims.Username, wsName+"_"+name, "delete", "",
 		)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
@@ -1400,7 +1459,9 @@ type actionRequest struct {
 
 // WS /api/workspaces/{name}/action
 func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
+	pkey := wsName + "_" + name
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1429,7 +1490,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	if req.Command != "logs" && req.Command != "ps" {
 		h.db.Exec( //nolint:errcheck
 			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
-			claims.UserID, claims.Username, name, req.Command, req.Env,
+			claims.UserID, claims.Username, pkey, req.Command, req.Env,
 		)
 	}
 
@@ -1459,7 +1520,8 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	runOpts := shell.RunOptions{
-		Workspace: name,
+		Workspace: wsName,
+		Project:   name,
 		Command:   req.Command,
 		Env:       req.Env,
 		Extra:     req.Extra,
@@ -1484,11 +1546,11 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		// After a successful update, invalidate the image-check cache so the next
 		// frontend poll triggers a fresh check against the newly pulled image digests.
 		if req.Command == "update" && req.Env != "" {
-			h.imgCache.Invalidate(name, req.Env)
+			h.imgCache.Invalidate(wsName, name, req.Env)
 			go func() {
-				results := imagecheck.Check(h.workspacesDir, name, req.Env)
+				results := imagecheck.Check(h.workspacesDir, wsName, name, req.Env)
 				if results != nil {
-					h.imgCache.Set(name, req.Env, results)
+					h.imgCache.Set(wsName, name, req.Env, results)
 				}
 			}()
 		}
@@ -1504,7 +1566,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 			status = "fail"
 		}
 		actionruns.Record(h.db, actionruns.Run{ //nolint:errcheck
-			Workspace: name, Env: req.Env, Command: req.Command,
+			Workspace: pkey, Env: req.Env, Command: req.Command,
 			Extra:     strings.Join(req.Extra, " "), Username: claims.Username,
 			Status:    status, Output: outBuf.String(),
 			StartedAt: startedAt.UnixMilli(), FinishedAt: time.Now().UnixMilli(),
@@ -1518,21 +1580,21 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		if runErr != nil {
 			status, msg = "error", runErr.Error()
 		}
-		alerts.LogBackup(h.db, name, req.Env, status, msg, 0) //nolint:errcheck
+		alerts.LogBackup(h.db, pkey, req.Env, status, msg, 0) //nolint:errcheck
 	}
 }
 
 // GET /api/workspaces/{name}/action-runs?limit=N — recorded Action-output
 // history for a workspace (newest first).
 func (h *Handler) GetActionRuns(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
+	pkey := r.PathValue("workspace") + "_" + r.PathValue("name")
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			limit = n
 		}
 	}
-	runs, err := actionruns.List(h.db, name, limit)
+	runs, err := actionruns.List(h.db, pkey, limit)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1542,8 +1604,8 @@ func (h *Handler) GetActionRuns(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/workspaces/{name}/action-runs — clear recorded history for a workspace.
 func (h *Handler) ClearActionRuns(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if err := actionruns.Clear(h.db, name); err != nil {
+	pkey := r.PathValue("workspace") + "_" + r.PathValue("name")
+	if err := actionruns.Clear(h.db, pkey); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1564,13 +1626,14 @@ func (h *Handler) GetLiveStats(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/workspaces/{name}/envs/{env}/containers — lists containers via docker compose ps
 func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env  := r.PathValue("env")
 
-	cfgPath := filepath.Join(h.workspacesDir, name, "config.json")
+	cfgPath := wspath.ConfigPath(h.workspacesDir, wsName, name)
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 	var cfg struct {
@@ -1589,10 +1652,10 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 	}
 	project += "_" + env
 
-	envDir := filepath.Join(h.workspacesDir, name, "envs", env)
+	envDir := wspath.EnvDir(h.workspacesDir, wsName, name, env)
 
 	// Query the daemon the env actually runs on (local, or its remote host).
-	ex, exErr := h.bridge.ExecForEnv(name, env)
+	ex, exErr := h.bridge.ExecForEnv(wsName, name, env)
 	if exErr != nil {
 		writeJSON(w, http.StatusOK, []any{})
 		return
@@ -1665,6 +1728,7 @@ func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/workspaces/{name}/envs/{env}/image-updates — returns cached image update check results
 func (h *Handler) GetImageUpdates(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
 
@@ -1674,13 +1738,13 @@ func (h *Handler) GetImageUpdates(w http.ResponseWriter, r *http.Request) {
 		Pending   bool                       `json:"pending"` // true if no cache entry yet
 	}
 
-	entry, ok := h.imgCache.Get(name, env)
+	entry, ok := h.imgCache.Get(wsName, name, env)
 	if !ok {
 		// Trigger an async check so the next poll will have results
 		go func() {
-			results := imagecheck.Check(h.workspacesDir, name, env)
+			results := imagecheck.Check(h.workspacesDir, wsName, name, env)
 			if results != nil {
-				h.imgCache.Set(name, env, results)
+				h.imgCache.Set(wsName, name, env, results)
 			}
 		}()
 		writeJSON(w, http.StatusOK, response{Pending: true})
@@ -1703,9 +1767,10 @@ func isSecretEnvKey(k string) bool {
 // for review, validation and save. Secret env-var values are masked here so
 // they never reach the browser.
 func (h *Handler) GenerateTemplateDraft(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 
-	cfgPath := filepath.Join(h.workspacesDir, name, "config.json")
+	cfgPath := wspath.ConfigPath(h.workspacesDir, wsName, name)
 	cfgData, err := os.ReadFile(cfgPath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
@@ -1738,7 +1803,7 @@ func (h *Handler) GenerateTemplateDraft(w http.ResponseWriter, r *http.Request) 
 	// image env_vars are only ${VAR} references). Secrets are masked to CHANGE_ME.
 	defaultEnvVars := map[string]string{}
 	if env != "" {
-		if vars, err := workspace.EnvVars(h.workspacesDir, name, env, true); err == nil {
+		if vars, err := workspace.EnvVars(h.workspacesDir, wsName, name, env, true); err == nil {
 			for k, v := range vars {
 				if v.Secret || isSecretEnvKey(k) {
 					defaultEnvVars[k] = "CHANGE_ME"
@@ -1850,6 +1915,7 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 	}
 	type BackupSnapshot struct {
 		Workspace string       `json:"workspace"`
+		Project   string       `json:"project"`
 		Env       string       `json:"env"`
 		Date      string       `json:"date"`
 		SizeBytes int64        `json:"size_bytes"`
@@ -1874,61 +1940,73 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		wsName := wsEntry.Name()
-		backupsRoot := filepath.Join(h.workspacesDir, wsName, "backups")
-
-		envEntries, err := os.ReadDir(backupsRoot)
-		if err != nil {
-			continue // no backups dir
+		projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, wsName))
+		if perr != nil {
+			continue
 		}
-
-		for _, envEntry := range envEntries {
-			if !envEntry.IsDir() {
+		for _, projEntry := range projEntries {
+			if !projEntry.IsDir() {
 				continue
 			}
-			envName := envEntry.Name()
-			snapshots, err := os.ReadDir(filepath.Join(backupsRoot, envName))
+			projName := projEntry.Name()
+			pkey := wsName + "_" + projName
+			backupsRoot := wspath.BackupsDir(h.workspacesDir, wsName, projName)
+
+			envEntries, err := os.ReadDir(backupsRoot)
 			if err != nil {
-				continue
+				continue // no backups dir
 			}
 
-			for _, snap := range snapshots {
-				if !snap.IsDir() {
+			for _, envEntry := range envEntries {
+				if !envEntry.IsDir() {
 					continue
 				}
-				snapDir := filepath.Join(backupsRoot, envName, snap.Name())
-				files, _ := os.ReadDir(snapDir)
+				envName := envEntry.Name()
+				snapshots, err := os.ReadDir(filepath.Join(backupsRoot, envName))
+				if err != nil {
+					continue
+				}
 
-				var bfiles []BackupFile
-				var totalSize int64
-				for _, f := range files {
-					if f.IsDir() || f.Name() == snapshotManifestFile {
-						continue // manifest is metadata, not a backup artifact
+				for _, snap := range snapshots {
+					if !snap.IsDir() {
+						continue
 					}
-					info, _ := f.Info()
-					size := int64(0)
-					if info != nil {
-						size = info.Size()
+					snapDir := filepath.Join(backupsRoot, envName, snap.Name())
+					files, _ := os.ReadDir(snapDir)
+
+					var bfiles []BackupFile
+					var totalSize int64
+					for _, f := range files {
+						if f.IsDir() || f.Name() == snapshotManifestFile {
+							continue // manifest is metadata, not a backup artifact
+						}
+						info, _ := f.Info()
+						size := int64(0)
+						if info != nil {
+							size = info.Size()
+						}
+						totalSize += size
+						bfiles = append(bfiles, BackupFile{Name: f.Name(), Size: size})
 					}
-					totalSize += size
-					bfiles = append(bfiles, BackupFile{Name: f.Name(), Size: size})
+					snapshot := BackupSnapshot{
+						Workspace: wsName,
+						Project:   projName,
+						Env:       envName,
+						Date:      snap.Name(),
+						SizeBytes: totalSize,
+						Files:     bfiles,
+					}
+					if m := readSnapshotManifest(snapDir); m != nil {
+						snapshot.Services = m.Services
+						snapshot.Trigger = m.Trigger
+						snapshot.Schedule = m.ScheduleName
+					}
+					if st, ok := syncStates[pkey+"\x00"+envName+"\x00"+snap.Name()]; ok {
+						s := st
+						snapshot.Sync = &s
+					}
+					results = append(results, snapshot)
 				}
-				snapshot := BackupSnapshot{
-					Workspace: wsName,
-					Env:       envName,
-					Date:      snap.Name(),
-					SizeBytes: totalSize,
-					Files:     bfiles,
-				}
-				if m := readSnapshotManifest(snapDir); m != nil {
-					snapshot.Services = m.Services
-					snapshot.Trigger = m.Trigger
-					snapshot.Schedule = m.ScheduleName
-				}
-				if st, ok := syncStates[wsName+"\x00"+envName+"\x00"+snap.Name()]; ok {
-					s := st
-					snapshot.Sync = &s
-				}
-				results = append(results, snapshot)
 			}
 		}
 	}
@@ -1943,12 +2021,13 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/backups/{workspace}/{env}/{date} — removes a single backup snapshot directory
 func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
-	workspace := r.PathValue("workspace")
-	env       := r.PathValue("env")
-	date      := r.PathValue("date")
+	wsName := r.PathValue("workspace")
+	project := r.PathValue("name")
+	env     := r.PathValue("env")
+	date    := r.PathValue("date")
 
-	if workspace == "" || env == "" || date == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, env and date are required"})
+	if wsName == "" || project == "" || env == "" || date == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, project, env and date are required"})
 		return
 	}
 
@@ -1958,10 +2037,8 @@ func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapDir := filepath.Join(h.workspacesDir, workspace, "backups", env, date)
-
-	// Verify it's inside the expected backups directory (belt-and-suspenders)
-	backupsRoot := filepath.Join(h.workspacesDir, workspace, "backups")
+	backupsRoot := wspath.BackupsDir(h.workspacesDir, wsName, project)
+	snapDir := filepath.Join(backupsRoot, env, date)
 	if !strings.HasPrefix(snapDir, backupsRoot+string(filepath.Separator)) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid snapshot path"})
 		return
@@ -1981,6 +2058,7 @@ func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 // "input device is not a TTY" error), or — for an env bound to a remote host —
 // via `docker exec -it` over an SSH-allocated PTY (Wave C, cross-host terminal).
 func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env  := r.PathValue("env")
 
@@ -2024,19 +2102,19 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	// Resolve the docker exec target. Compose: the service name doubles as the
 	// prefixed container_name. Swarm: there's no fixed container name, so resolve
 	// the running task's container ID (on the env's own daemon).
-	ex, err := h.bridge.ExecForEnv(name, env)
+	ex, err := h.bridge.ExecForEnv(wsName, name, env)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+err.Error()+"\r\n")) //nolint:errcheck
 		return
 	}
-	target, rerr := h.resolveContainerRef(ex, name, env, init.Service)
+	target, rerr := h.resolveContainerRef(ex, wsName, name, env, init.Service)
 	if rerr != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+rerr.Error()+"\r\n")) //nolint:errcheck
 		return
 	}
 
 	// Open the PTY on the env's own daemon (local socket or remote SSH).
-	de, err := h.bridge.OpenTerminal(name, env, target, cols, rows)
+	de, err := h.bridge.OpenTerminal(wsName, name, env, target, cols, rows)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
 			[]byte("\r\nerror: "+err.Error()+"\r\n"))
