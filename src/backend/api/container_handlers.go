@@ -1,7 +1,11 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -29,7 +33,73 @@ func (h *Handler) containerExec(w http.ResponseWriter, r *http.Request) (ex exec
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return nil, "", false
 	}
-	return exec, svc, true
+	// Resolve to an actual container reference. Compose: the container_name
+	// (svc as-is). Swarm: the running task's container ID (svc is a service name,
+	// not a container) — see resolveContainerRef.
+	ref, rerr := h.resolveContainerRef(exec, ws, env, svc)
+	if rerr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": rerr.Error()})
+		return nil, "", false
+	}
+	return exec, ref, true
+}
+
+// resolveContainerRef maps a UI service identifier to a docker container
+// reference usable by inspect/exec. For compose it's the container_name (the
+// value as passed). For swarm there is no fixed container name — the service
+// runs as a task (e.g. test_prod_test_prod_app.1.<id>) — so we look up the
+// running task's container ID on the env's node via the swarm service label.
+func (h *Handler) resolveContainerRef(ex executor.Executor, ws, env, svc string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(h.workspacesDir, ws, "config.json"))
+	if err != nil {
+		return svc, nil // best-effort: fall back to the given name
+	}
+	var cfg struct {
+		Project      struct{ Name string } `json:"project"`
+		Environments map[string]struct {
+			Deployment string `json:"deployment"`
+		} `json:"environments"`
+	}
+	json.Unmarshal(raw, &cfg) //nolint:errcheck
+	if cfg.Environments[env].Deployment != "swarm" {
+		return svc, nil // compose: svc is already the container_name
+	}
+
+	stack := cfg.Project.Name + "_" + env
+	full := resolveSwarmServiceName(ex, stack, svc)
+	out, err := ex.DockerOutput(executor.Spec{
+		Args: []string{"ps", "-q", "--filter", "label=com.docker.swarm.service.name=" + full},
+	})
+	if err != nil {
+		return "", fmt.Errorf("locate swarm task: %w", err)
+	}
+	id := strings.TrimSpace(string(out))
+	if nl := strings.IndexByte(id, '\n'); nl >= 0 {
+		id = id[:nl]
+	}
+	if id == "" {
+		return "", fmt.Errorf("no running container for service %q (service may be down)", svc)
+	}
+	return id, nil
+}
+
+// resolveSwarmServiceName maps a UI identifier (short name, compose key, or full
+// name) to the actual swarm service name by matching the deployed service list
+// (exact or "_<svc>" suffix), with a best-effort prefix fallback.
+func resolveSwarmServiceName(ex executor.Executor, stack, svc string) string {
+	out, err := ex.DockerOutput(executor.Spec{Args: []string{"stack", "services", stack, "--format", "{{.Name}}"}})
+	if err == nil {
+		for _, n := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			n = strings.TrimSpace(n)
+			if n != "" && (n == svc || strings.HasSuffix(n, "_"+svc)) {
+				return n
+			}
+		}
+	}
+	if strings.HasPrefix(svc, stack+"_") {
+		return svc
+	}
+	return stack + "_" + svc
 }
 
 // writeDockerJSON runs a docker command that already emits JSON and streams its

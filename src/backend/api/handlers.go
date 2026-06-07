@@ -2007,11 +2007,22 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	if cols <= 0 { cols = 220 }
 	if rows <= 0 { rows = 50 }
 
-	// Open the PTY on the env's own daemon (local socket or remote SSH). In Rigger
-	// the compose service name is the prefixed container name, so it doubles as
-	// the docker exec target — no compose lookup needed, and the same call works
-	// for both local and remote.
-	de, err := h.bridge.OpenTerminal(name, env, init.Service, cols, rows)
+	// Resolve the docker exec target. Compose: the service name doubles as the
+	// prefixed container_name. Swarm: there's no fixed container name, so resolve
+	// the running task's container ID (on the env's own daemon).
+	ex, err := h.bridge.ExecForEnv(name, env)
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+err.Error()+"\r\n")) //nolint:errcheck
+		return
+	}
+	target, rerr := h.resolveContainerRef(ex, name, env, init.Service)
+	if rerr != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+rerr.Error()+"\r\n")) //nolint:errcheck
+		return
+	}
+
+	// Open the PTY on the env's own daemon (local socket or remote SSH).
+	de, err := h.bridge.OpenTerminal(name, env, target, cols, rows)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
 			[]byte("\r\nerror: "+err.Error()+"\r\n"))
