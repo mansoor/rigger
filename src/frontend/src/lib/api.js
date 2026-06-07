@@ -105,6 +105,7 @@ export const fetchConfig       = (name)      => api.get(`/workspaces/${name}/con
 export const changePassword    = (current_password, new_password) =>
   api.post('/auth/password', { current_password, new_password }).then(r => r.data)
 export const fetchBackups      = ()          => api.get('/backups').then(r => r.data)
+export const fetchBackupCoverage = ()        => api.get('/backups/coverage').then(r => r.data) // 11b
 export const deleteBackup      = (workspace, env, date) => api.delete(`/backups/${workspace}/${env}/${date}`).then(r => r.data)
 export const fetchStats        = ()          => api.get('/stats').then(r => r.data)
 export const fetchLiveStats    = ()          => api.get('/live-stats').then(r => r.data)

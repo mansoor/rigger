@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -188,6 +189,20 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		}
 		return true, 1, fmt.Sprintf("%s/%s: last backup failed", t.ws, t.env)
 
+	case CondBackupStale:
+		threshold := rule.Threshold
+		if threshold <= 0 {
+			threshold = 36 // hours
+		}
+		ageH, has := newestBackupAgeHours(e.workspacesDir, t.ws, t.env)
+		if has && ageH < threshold {
+			return false, ageH, ""
+		}
+		if !has {
+			return true, threshold, fmt.Sprintf("%s/%s: no backups found (overdue, threshold %gh)", t.ws, t.env, threshold)
+		}
+		return true, ageH, fmt.Sprintf("%s/%s: last backup %.0fh ago (threshold %gh)", t.ws, t.env, ageH, threshold)
+
 	case CondImageUpdate:
 		entry, ok := e.imgCache.Get(t.ws, t.env)
 		if !ok {
@@ -330,6 +345,31 @@ func BuildAlertSSE(action string, ev *Event, unread int) []byte {
 		"unread_count": unread,
 	})
 	return payload
+}
+
+// newestBackupAgeHours returns the age (hours) of the most recent snapshot for a
+// workspace/env, and whether any snapshot exists. Snapshot dirs sort
+// chronologically by name; age is taken from the dir's mtime (timezone-safe).
+func newestBackupAgeHours(workspacesDir, ws, env string) (float64, bool) {
+	dir := filepath.Join(workspacesDir, ws, "backups", env)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, false
+	}
+	newest := ""
+	for _, e := range entries {
+		if e.IsDir() && e.Name() > newest {
+			newest = e.Name()
+		}
+	}
+	if newest == "" {
+		return 0, false
+	}
+	fi, err := os.Stat(filepath.Join(dir, newest))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(fi.ModTime()).Hours(), true
 }
 
 func joinUpTo(items []string, n int) string {

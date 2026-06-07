@@ -22,6 +22,7 @@ const (
 	CondRestartCount    = "restart_count"
 	CondDiskAbovePct    = "disk_above_pct"
 	CondBackupFailed    = "backup_failed"
+	CondBackupStale     = "backup_stale"
 	CondImageUpdate     = "image_update_available"
 	CondImageVersionAvailable = "image_version_available"
 	CondCPUAbovePct     = "cpu_above_pct"
@@ -38,11 +39,12 @@ var numericConditions = map[string]bool{
 	CondDiskAbovePct:   true,
 	CondCPUAbovePct:    true,
 	CondMemoryAbovePct: true,
+	CondBackupStale:    true,
 }
 
 var validConditions = map[string]bool{
 	CondContainerDown: true, CondRestartCount: true, CondDiskAbovePct: true,
-	CondBackupFailed: true, CondImageUpdate: true, CondImageVersionAvailable: true,
+	CondBackupFailed: true, CondBackupStale: true, CondImageUpdate: true, CondImageVersionAvailable: true,
 	CondCPUAbovePct: true, CondMemoryAbovePct: true,
 }
 

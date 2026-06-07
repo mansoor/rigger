@@ -165,6 +165,7 @@ func (h *Handler) AlertMeta(w http.ResponseWriter, r *http.Request) {
 			{"value": alerts.CondMemoryAbovePct, "label": "Memory usage above", "numeric": true, "scope": "stack", "unit": "%"},
 			{"value": alerts.CondDiskAbovePct, "label": "Host disk usage above", "numeric": true, "scope": "host", "unit": "%"},
 			{"value": alerts.CondBackupFailed, "label": "Backup failed", "numeric": false, "scope": "stack"},
+			{"value": alerts.CondBackupStale, "label": "Backup stale (hours since last)", "numeric": true, "scope": "stack", "unit": "h"},
 			{"value": alerts.CondImageUpdate, "label": "Image update available (new digest)", "numeric": false, "scope": "stack"},
 			{"value": alerts.CondImageVersionAvailable, "label": "Newer stable version available", "numeric": false, "scope": "stack"},
 		},

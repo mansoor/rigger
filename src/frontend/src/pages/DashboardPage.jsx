@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats } from '../lib/api'
+import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage } from '../lib/api'
 import Layout from '../components/Layout'
 
 // Aggregate the live per-project stats down to one workspace. Containers (running
@@ -221,6 +221,84 @@ function SkeletonDashboard() {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+// ── Backup coverage (Phase 11b) ───────────────────────────────────────────────
+
+const BACKUP_HEALTH = {
+  current:  { dot: 'bg-success',       label: 'Current', cls: 'text-success-fg' },
+  stale:    { dot: 'bg-warning',       label: 'Stale',   cls: 'text-warning-fg' },
+  never:    { dot: 'bg-danger',        label: 'Never',   cls: 'text-danger-fg' },
+  disabled: { dot: 'bg-content-faint', label: 'Off',     cls: 'text-content-faint' },
+}
+
+function fmtBackupAge(h) {
+  if (h == null || h < 0) return 'never'
+  if (h < 1) return '<1h ago'
+  if (h < 48) return `${Math.round(h)}h ago`
+  return `${Math.round(h / 24)}d ago`
+}
+
+function BackupCoverage() {
+  const { data: rows = [] } = useQuery({
+    queryKey: ['backup-coverage'],
+    queryFn: fetchBackupCoverage,
+    refetchInterval: 60_000,
+  })
+  if (!rows.length) return null
+
+  return (
+    <div className="bg-surface border border-border rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-content">Backup coverage</h2>
+        <span className="text-xs text-content-subtle">{rows.length} environment{rows.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-content-subtle border-b border-border">
+              <th className="px-5 py-2 font-medium">Workspace / Env</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Last backup</th>
+              <th className="px-3 py-2 font-medium">Schedule</th>
+              <th className="px-3 py-2 font-medium">Snapshots</th>
+              <th className="px-5 py-2 font-medium">Remote</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const h = BACKUP_HEALTH[r.health] || BACKUP_HEALTH.disabled
+              return (
+                <tr key={i} className="border-b border-border/50 last:border-0">
+                  <td className="px-5 py-2"><span className="text-content">{r.workspace}</span> <span className="text-content-faint">/ {r.env}</span></td>
+                  <td className="px-3 py-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${h.dot}`} />
+                      <span className={h.cls}>{h.label}</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-content-muted">{fmtBackupAge(r.age_hours)}</td>
+                  <td className="px-3 py-2 text-content-muted">
+                    {r.enabled && r.schedule !== 'manual' ? r.schedule : <span className="text-content-faint">manual</span>}
+                  </td>
+                  <td className="px-3 py-2 text-content-muted">
+                    {r.count}{r.retention > 0 && <span className="text-content-faint"> / {r.retention}</span>}
+                  </td>
+                  <td className="px-5 py-2">
+                    {r.sync?.status === 'ok'
+                      ? <span className="text-success-fg text-xs" title={`Synced to ${r.sync.target}`}>↑ {r.sync.target}</span>
+                      : r.sync?.status === 'fail'
+                        ? <span className="text-danger-fg text-xs">sync failed</span>
+                        : <span className="text-content-faint text-xs">—</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const { data: stats, isLoading } = useQuery({
@@ -478,6 +556,9 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
+
+        {/* ── Backup coverage (11b) ── */}
+        <BackupCoverage />
 
         {/* ── Bottom: Docker + Host system ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

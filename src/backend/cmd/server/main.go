@@ -162,6 +162,8 @@ func main() {
 			handler.GetAllActivity(w, r)
 		case r.Method == "POST" && r.URL.Path == "/api/port-check":
 			handler.PortCheck(w, r)
+		case r.Method == "GET" && r.URL.Path == "/api/backups/coverage":
+			handler.GetBackupCoverage(w, r)
 		case r.Method == "GET" && r.URL.Path == "/api/backups":
 			handler.ListBackups(w, r)
 		case r.Method == "DELETE" && matchPrefix(r.URL.Path, "/api/backups/"):

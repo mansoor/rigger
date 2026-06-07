@@ -331,6 +331,94 @@ func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "target": target.Name, "bytes": n})
 }
 
+// ── Backup health coverage (11b) ─────────────────────────────────────────────
+
+// GET /api/backups/coverage
+// Per workspace/env: schedule, last-backup age, snapshot count, remote-sync
+// state, and a health verdict (current | stale | never | disabled).
+func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
+	type row struct {
+		Workspace  string     `json:"workspace"`
+		Env        string     `json:"env"`
+		Enabled    bool       `json:"enabled"`
+		Schedule   string     `json:"schedule"`
+		Retention  int        `json:"retention"`
+		Count      int        `json:"count"`
+		LastBackup string     `json:"last_backup"`
+		AgeHours   float64    `json:"age_hours"` // -1 = never
+		Health     string     `json:"health"`
+		Sync       *syncState `json:"sync,omitempty"`
+	}
+
+	syncStates := h.backupSyncStates()
+	var rows []row
+	entries, _ := os.ReadDir(h.workspacesDir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		ws := e.Name()
+		raw, err := os.ReadFile(filepath.Join(h.workspacesDir, ws, "config.json"))
+		if err != nil {
+			continue
+		}
+		cfg, _ := h.readBackupCfg(ws)
+		for env := range configEnvNames(raw) {
+			rw := row{Workspace: ws, Env: env, AgeHours: -1}
+			if cfg != nil {
+				rw.Enabled, rw.Schedule, rw.Retention = cfg.Enabled, cfg.Schedule, cfg.Retention
+			}
+			envDir := filepath.Join(h.workspacesDir, ws, "backups", env)
+			newest := ""
+			if ents, err := os.ReadDir(envDir); err == nil {
+				for _, s := range ents {
+					if s.IsDir() {
+						rw.Count++
+						if s.Name() > newest {
+							newest = s.Name()
+						}
+					}
+				}
+			}
+			if newest != "" {
+				rw.LastBackup = newest
+				if fi, err := os.Stat(filepath.Join(envDir, newest)); err == nil {
+					rw.AgeHours = time.Since(fi.ModTime()).Hours()
+				}
+				if st, ok := syncStates[ws+"\x00"+env+"\x00"+newest]; ok {
+					s := st
+					rw.Sync = &s
+				}
+			}
+			rw.Health = backupHealth(rw.Enabled, rw.Schedule, newest != "", rw.AgeHours)
+			rows = append(rows, rw)
+		}
+	}
+	if rows == nil {
+		rows = []row{}
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+// backupHealth classifies coverage. "disabled" = no schedule expectation;
+// otherwise current / stale (overdue past 1.5× the interval) / never.
+func backupHealth(enabled bool, schedule string, hasBackup bool, ageH float64) string {
+	if !enabled || schedule == "" || schedule == "manual" {
+		return "disabled"
+	}
+	if !hasBackup {
+		return "never"
+	}
+	interval := 24.0
+	if schedule == "weekly" {
+		interval = 168.0
+	}
+	if ageH > interval*1.5 {
+		return "stale"
+	}
+	return "current"
+}
+
 // syncState is the per-snapshot sync info joined into ListBackups.
 type syncState struct {
 	Target   string `json:"target"`
