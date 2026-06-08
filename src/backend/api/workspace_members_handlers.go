@@ -39,6 +39,20 @@ func (h *Handler) ListWorkspaceMembers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, members)
 }
 
+// GET /api/workspaces/{ws}/members/candidates — active users addable as members.
+func (h *Handler) ListMemberCandidates(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	if h.requireWorkspaceAdmin(w, r, ws) == nil {
+		return
+	}
+	users, err := h.auth.MemberCandidates(ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
 // PUT /api/workspaces/{ws}/members/{id}  {role}
 func (h *Handler) SetWorkspaceMember(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("workspace")

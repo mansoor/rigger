@@ -162,6 +162,7 @@ type Workspace struct {
 	HostID   int64                 `json:"host_id,omitempty"`
 	HostName string                `json:"host_name,omitempty"`
 	EnvHosts map[string]EnvHostRef `json:"env_hosts,omitempty"` // env name → host
+	MyRole   string                `json:"my_role,omitempty"`   // caller's effective role (Phase 5.2b); set by the API layer
 }
 
 // EnvHostRef is the host an environment runs on (omitted ⇒ local).

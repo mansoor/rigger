@@ -14,7 +14,7 @@ import {
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
   fetchWorkspaceSettings, updateWorkspaceSettings,
-  fetchUsers, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
+  fetchMemberCandidates, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 
@@ -200,20 +200,19 @@ const OVERRIDE_ROLES = [
 function MembersSection({ workspace, projects, qc }) {
   const membersKey = ['ws-members', workspace]
   const { data: members = [], isLoading } = useQuery({ queryKey: membersKey, queryFn: () => fetchWorkspaceMembers(workspace), enabled: !!workspace })
-  const { data: allUsers = [] } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const { data: candidates = [] } = useQuery({ queryKey: ['member-candidates', workspace], queryFn: () => fetchMemberCandidates(workspace), enabled: !!workspace })
   const [expanded, setExpanded] = useState(null) // user_id with open overrides
   const [addUid, setAddUid] = useState('')
   const [addRole, setAddRole] = useState('viewer')
   const sel = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
-  const invalidate = () => qc.invalidateQueries({ queryKey: membersKey })
+  const invalidate = () => { qc.invalidateQueries({ queryKey: membersKey }); qc.invalidateQueries({ queryKey: ['member-candidates', workspace] }) }
 
   const setMut = useMutation({ mutationFn: ({ uid, role }) => setWorkspaceMember(workspace, uid, role), onSuccess: invalidate })
   const rmMut  = useMutation({ mutationFn: (uid) => removeWorkspaceMember(workspace, uid), onSuccess: invalidate })
   const ovSet  = useMutation({ mutationFn: ({ uid, proj, role }) => setProjectOverride(workspace, uid, proj, role), onSuccess: invalidate })
   const ovRm   = useMutation({ mutationFn: ({ uid, proj }) => removeProjectOverride(workspace, uid, proj), onSuccess: invalidate })
 
-  const memberIds = new Set(members.map(m => m.user_id))
-  const addable = allUsers.filter(u => !memberIds.has(u.id) && u.role !== 'admin') // global admins already have access everywhere
+  const addable = candidates // server already excludes existing members + global admins
 
   function addMember() {
     if (!addUid) return

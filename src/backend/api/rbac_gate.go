@@ -11,6 +11,23 @@ import (
 // request by the caller's effective role for that workspace (and project, when the
 // path is project-scoped). Global admins bypass; non-members are denied.
 
+// visibleWorkspaceSet returns the workspace keys a caller may see. all=true means
+// no filtering (global admin). For non-admins it's their membership set.
+func (h *Handler) visibleWorkspaceSet(r *http.Request) (set map[string]bool, all bool) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		return map[string]bool{}, false
+	}
+	if claims.Role == auth.RoleAdmin {
+		return nil, true
+	}
+	set, _ = h.auth.MemberWorkspaceKeys(claims.UserID)
+	if set == nil {
+		set = map[string]bool{}
+	}
+	return set, false
+}
+
 func seg(path string, i int) string {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if i < len(parts) {

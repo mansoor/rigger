@@ -313,6 +313,8 @@ func main() {
 			id := pathSegment(r.URL.Path, 4)
 			isProj := pathSegment(r.URL.Path, 5) == "projects"
 			switch {
+			case r.Method == "GET" && id == "candidates":
+				handler.ListMemberCandidates(w, r)
 			case r.Method == "GET" && id == "":
 				handler.ListWorkspaceMembers(w, r)
 			case r.Method == "PUT" && id != "" && isProj:

@@ -1338,6 +1338,10 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	} else if hwd := h.hostBindSourceDir(); hwd != "" {
 		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + name
 	}
+	// Caller's effective role for this project (Phase 5.2b) — drives UI gating.
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		out.MyRole = h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name)
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1730,14 +1734,38 @@ func (h *Handler) ClearActionRuns(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/stats — dashboard stats (docker info + host metrics + workspace summary)
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.bridge.Stats())
+	s := h.bridge.Stats()
+	// Phase 5.2b: non-admins only see their workspaces in the per-workspace summary.
+	if set, all := h.visibleWorkspaceSet(r); !all {
+		filtered := s.Workspaces.Workspaces[:0]
+		byType := map[string]int{}
+		for _, ws := range s.Workspaces.Workspaces {
+			if set[ws.Workspace] {
+				filtered = append(filtered, ws)
+				byType[ws.Type]++
+			}
+		}
+		s.Workspaces.Workspaces = filtered
+		s.Workspaces.Total = len(filtered)
+		s.Workspaces.ByType = byType
+	}
+	writeJSON(w, http.StatusOK, s)
 }
 
 // GET /api/live-stats — cheap per-project live stats (cpu/mem/net/running/services)
 // for the near-real-time dashboard table. No disk du / docker info, so it's safe
 // to poll every few seconds. Keyed by compose project name ({workspace}_{env}).
 func (h *Handler) GetLiveStats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.bridge.LiveStats())
+	live := h.bridge.LiveStats()
+	// Keyed by compose project name "{wsKey}_{projKey}_{env}"; drop other workspaces'.
+	if set, all := h.visibleWorkspaceSet(r); !all {
+		for k := range live {
+			if !set[strings.SplitN(k, "_", 2)[0]] {
+				delete(live, k)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, live)
 }
 
 // GET /api/workspaces/{name}/envs/{env}/containers — lists containers via docker compose ps

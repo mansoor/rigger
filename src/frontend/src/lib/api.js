@@ -292,6 +292,7 @@ export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${
 
 // Workspace membership + per-project overrides (Phase 5.2).
 export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)
+export const fetchMemberCandidates = (ws)              => api.get(`/workspaces/${ws}/members/candidates`).then(r => r.data)
 export const setWorkspaceMember    = (ws, uid, role)  => api.put(`/workspaces/${ws}/members/${uid}`, { role }).then(r => r.data)
 export const removeWorkspaceMember = (ws, uid)        => api.delete(`/workspaces/${ws}/members/${uid}`)
 export const setProjectOverride    = (ws, uid, proj, role) => api.put(`/workspaces/${ws}/members/${uid}/projects/${proj}`, { role }).then(r => r.data)

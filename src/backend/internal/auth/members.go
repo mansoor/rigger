@@ -77,6 +77,29 @@ func (s *Service) ListWorkspaceMembers(wsKey string) ([]Member, error) {
 	return out, orows.Err()
 }
 
+// MemberCandidates lists active users who can be added to a workspace: not global
+// admins (they already have access) and not already members. Lets a workspace admin
+// pick members without needing the admin-only user list.
+func (s *Service) MemberCandidates(wsKey string) ([]UserInfo, error) {
+	rows, err := s.db.Query(`SELECT `+userCols+` FROM users
+		WHERE status='active' AND role <> ?
+		  AND id NOT IN (SELECT user_id FROM workspace_members WHERE ws_key=?)
+		ORDER BY email, username`, RoleAdmin, wsKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UserInfo{}
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
 // SetWorkspaceMember adds or updates a member's workspace-tier role.
 func (s *Service) SetWorkspaceMember(wsKey string, userID int64, role string) error {
 	if !validMemberRole(role) {
