@@ -74,6 +74,7 @@ export default function ManageWorkspacePage() {
           <div className="space-y-8">
             <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
             <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
+            <WorkspaceDefaults workspace={workspace} qc={qc} />
           </div>
         )}
         {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
@@ -168,6 +169,80 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
             onClick={() => mut.mutate()} disabled={!ok || !dirty || mut.isPending}
             className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
           >
+            {mut.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// WorkspaceDefaults — defaults new projects in this workspace inherit (Phase 4).
+// Picked from the workspace's own resource pools; the New Project wizard prefills
+// them. Stored as ids in workspace settings.
+function WorkspaceDefaults({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({ queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
+  const { data: registries = [] } = useQuery({ queryKey: ['ws-registries', workspace], queryFn: () => fetchWorkspaceRegistries(workspace), enabled: !!workspace })
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
+  const { data: targets = [] } = useQuery({ queryKey: ['ws-backup-targets', workspace], queryFn: () => fetchWorkspaceBackupTargets(workspace), enabled: !!workspace })
+
+  const [reg, setReg]       = useState('')
+  const [host, setHost]     = useState('')
+  const [target, setTarget] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && saved) {
+    setReg(saved.default_registry_id || '')
+    setHost(saved.default_host_id || '')
+    setTarget(saved.default_backup_target_id || '')
+    setSeeded(true)
+  }
+
+  const mut = useMutation({
+    mutationFn: () => updateWorkspaceSettings(workspace, {
+      default_registry_id: reg, default_host_id: host, default_backup_target_id: target,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
+  })
+  const dirty = saved && (
+    reg !== (saved.default_registry_id || '') ||
+    host !== (saved.default_host_id || '') ||
+    target !== (saved.default_backup_target_id || '')
+  )
+  const sel = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-3">Defaults for new projects</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <p className="text-xs text-content-subtle">New projects created in this workspace start with these selections. They can be changed per project in the create wizard.</p>
+        <div>
+          <label className={lbl}>Default registry</label>
+          <select value={reg} onChange={e => setReg(e.target.value)} className={sel}>
+            <option value="">No default (choose per project)</option>
+            {registries.map(r => <option key={r.id} value={String(r.id)}>{r.name} ({r.url})</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Default deploy host</label>
+          <select value={host} onChange={e => setHost(e.target.value)} className={sel}>
+            <option value="">No default (Local)</option>
+            <option value="0">Local control plane</option>
+            {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Default backup target</label>
+          <select value={target} onChange={e => setTarget(e.target.value)} className={sel}>
+            <option value="">No default (Local filesystem)</option>
+            {targets.map(t => <option key={t.id} value={String(t.id)}>{t.name} ({String(t.type).toUpperCase()})</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
             {mut.isPending ? 'Saving…' : 'Save'}
           </button>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}

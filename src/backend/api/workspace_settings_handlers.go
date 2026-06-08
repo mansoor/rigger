@@ -15,6 +15,10 @@ import (
 var workspaceSettingKeys = map[string]bool{
 	"acme_email": true,
 	"domain":     true,
+	// Phase 4: defaults new projects inherit (ids stored as strings; "" = unset).
+	"default_registry_id":      true,
+	"default_host_id":          true,
+	"default_backup_target_id": true,
 }
 
 // GET /api/workspaces/{ws}/settings

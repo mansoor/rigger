@@ -22,7 +22,7 @@ export function freqLabel(h) {
 }
 
 const genId = () => 'bk_' + Math.random().toString(36).slice(2, 8)
-const emptySchedule = () => ({ id: genId(), name: '', services: [], interval_hours: 24, target_id: null, retention: 7, enabled: true })
+const emptySchedule = (defaultTargetId = null) => ({ id: genId(), name: '', services: [], interval_hours: 24, target_id: defaultTargetId, retention: 7, enabled: true })
 
 const inputCls = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
 const labelCls = 'block text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1'
@@ -109,7 +109,7 @@ function ScheduleForm({ initial, services, targets, onSave, onCancel }) {
   )
 }
 
-export function BackupScheduleEditor({ schedules = [], onChange, services = [], targets = [] }) {
+export function BackupScheduleEditor({ schedules = [], onChange, services = [], targets = [], defaultTargetId = null }) {
   const [editIdx, setEditIdx] = useState(null) // index | 'new' | null
 
   function save(sched) {
@@ -141,7 +141,7 @@ export function BackupScheduleEditor({ schedules = [], onChange, services = [], 
       ))}
 
       {editIdx === 'new' ? (
-        <ScheduleForm initial={emptySchedule()} services={services} targets={targets} onSave={save} onCancel={() => setEditIdx(null)} />
+        <ScheduleForm initial={emptySchedule(defaultTargetId)} services={services} targets={targets} onSave={save} onCancel={() => setEditIdx(null)} />
       ) : (
         <button type="button" onClick={() => setEditIdx('new')}
           className="w-full px-3 py-2 text-sm rounded-lg border border-dashed border-border-strong text-content-muted hover:text-content hover:border-brand-500 transition-colors">

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -83,7 +83,7 @@ function StepHeader({ step, title, subtitle }) {
 
 const CUSTOM_REGISTRY = '__custom__'
 
-function Step1({ data, onChange, errors, onConflict, workspace }) {
+function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId }) {
   // Remote hosts available to this workspace (Phase 3) — for the default-host selector.
   const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
 
@@ -129,6 +129,9 @@ function Step1({ data, onChange, errors, onConflict, workspace }) {
           <option value="0">Local control plane</option>
           {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} — {h.address}</option>)}
         </select>
+        {defaultHostId > 0 && data.default_host_id === defaultHostId && (
+          <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
+        )}
         <p className="text-xs text-content-subtle mt-1">
           Where environments run by default — override per environment on the next steps. Files are pushed
           and the stack starts on the host the first time you deploy that environment.
@@ -423,17 +426,19 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
 // custom (build-type) stacks: those tag & push built images to the registry so
 // remote hosts can pull them without rebuilding. Image/prebuilt stacks pull
 // their images directly (registry embedded in each image ref), so it's hidden.
-function RegistryField({ data, onChange, errors, workspace }) {
+function RegistryField({ data, onChange, errors, workspace, defaultRegistryId }) {
   const { data: registries = [], isLoading } = useQuery({
     queryKey: ['ws-registries', workspace],
     queryFn: () => fetchWorkspaceRegistries(workspace),
     enabled: !!workspace,
   })
 
-  // Default to the first saved registry once loaded (if none chosen yet).
+  // Default once loaded (if none chosen yet): the workspace's default registry if
+  // it set one, else the first in the pool.
+  const wsDefault = registries.find(r => String(r.id) === String(defaultRegistryId))
   useEffect(() => {
     if (!isLoading && registries.length > 0 && !data.registry) {
-      onChange('registry', registries[0].url)
+      onChange('registry', (wsDefault || registries[0]).url)
     }
   }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -475,6 +480,9 @@ function RegistryField({ data, onChange, errors, workspace }) {
           <option value={CUSTOM_REGISTRY}>Other (enter manually)…</option>
         </select>
       )}
+      {hasRegistries && wsDefault && data.registry === wsDefault.url && (
+        <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
+      )}
 
       {(!hasRegistries || isCustom || selectValue === CUSTOM_REGISTRY) && (
         <div className={hasRegistries ? 'mt-2' : ''}>
@@ -503,7 +511,7 @@ function RegistryField({ data, onChange, errors, workspace }) {
   )
 }
 
-function Step2({ data, onChange, errors, workspace }) {
+function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
   const { data: templates } = useQuery({ queryKey: ['templates'], queryFn: fetchTemplates })
 
   return (
@@ -529,7 +537,7 @@ function Step2({ data, onChange, errors, workspace }) {
 
       {/* Container registry — custom (build) stacks only; image/prebuilt pull directly */}
       {data.stackType === 'custom' && (
-        <RegistryField data={data} onChange={onChange} errors={errors} workspace={workspace} />
+        <RegistryField data={data} onChange={onChange} errors={errors} workspace={workspace} defaultRegistryId={defaultRegistryId} />
       )}
 
       {/* Image stack: custom image list + env vars */}
@@ -1237,10 +1245,11 @@ function wizardServices(data) {
   return out
 }
 
-function Step5({ data, onChange, workspace }) {
+function Step5({ data, onChange, workspace, defaultTargetId }) {
   const { data: targets = [] } = useQuery({ queryKey: ['ws-backup-targets', workspace], queryFn: () => fetchWorkspaceBackupTargets(workspace), enabled: !!workspace })
   const services = wizardServices(data)
   const namedEnvs = data.environments.filter(e => e.name)
+  const defaultTargetName = targets.find(t => t.id === defaultTargetId)?.name
 
   const setSchedules = (env, list) =>
     onChange('environments', data.environments.map(e => (e === env ? { ...e, backup_schedules: list } : e)))
@@ -1260,6 +1269,10 @@ function Step5({ data, onChange, workspace }) {
         <p className="text-sm text-content-subtle">Name your environments first (Step 4) to configure their backups.</p>
       )}
 
+      {defaultTargetName && (
+        <p className="text-xs text-content-faint">New schedules default to this workspace's backup target (<span className="text-content-muted">{defaultTargetName}</span>); change it per schedule.</p>
+      )}
+
       {namedEnvs.map(env => (
         <div key={env.name} className="bg-surface border border-border rounded-xl p-4">
           <h3 className="text-sm font-semibold text-content-strong mb-2">{env.name}</h3>
@@ -1268,6 +1281,7 @@ function Step5({ data, onChange, workspace }) {
             onChange={list => setSchedules(env, list)}
             services={services}
             targets={targets}
+            defaultTargetId={defaultTargetId}
           />
         </div>
       ))}
@@ -1518,6 +1532,23 @@ export default function NewProjectPage() {
   const [maxVisited, setMaxVisited]     = useState(1) // highest step reached — enables stepper navigation
   const [createResult, setCreateResult] = useState(null) // null | 'success' | 'failure'
 
+  // Phase 4: defaults this workspace set for new projects (registry/host/backup).
+  const { data: wsDefaults } = useQuery({
+    queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const [seededDefaults, setSeededDefaults] = useState(false)
+  useEffect(() => {
+    if (!wsDefaults || seededDefaults) return
+    setSeededDefaults(true)
+    const h = parseInt(wsDefaults.default_host_id, 10)
+    if (wsDefaults.default_host_id && !Number.isNaN(h)) {
+      setData(prev => ({ ...prev, default_host_id: h }))
+    }
+  }, [wsDefaults, seededDefaults])
+  const defaultRegistryId = wsDefaults?.default_registry_id || ''
+  const defaultTargetId = wsDefaults?.default_backup_target_id ? parseInt(wsDefaults.default_backup_target_id, 10) : null
+  const defaultHostId = wsDefaults?.default_host_id ? (parseInt(wsDefaults.default_host_id, 10) || 0) : 0
+
   function update(key, value) {
     if (key === '_distributeVars') {
       // Distribute template default vars to all current environments
@@ -1628,13 +1659,13 @@ export default function NewProjectPage() {
           <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} />
 
           <div className="bg-surface border border-border rounded-2xl p-8">
-            {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} />}
-            {step === 2 && <Step2 data={data} onChange={update} errors={errors} workspace={workspace} />}
+            {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} defaultHostId={defaultHostId} />}
+            {step === 2 && <Step2 data={data} onChange={update} errors={errors} workspace={workspace} defaultRegistryId={defaultRegistryId} />}
             {/* Services (3) then Environments (4) — define the stack shape before
                 its environments. Step4=Services component, Step3=Environments. */}
             {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
             {step === 4 && <Step3 data={data} onChange={update} workspace={workspace} />}
-            {step === 5 && <Step5 data={data} onChange={update} workspace={workspace} />}
+            {step === 5 && <Step5 data={data} onChange={update} workspace={workspace} defaultTargetId={defaultTargetId} />}
             {step === 6 && <Step6 data={data} />}
             {step === 7 && (
               <Step7
