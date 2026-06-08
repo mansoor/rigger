@@ -18,6 +18,24 @@ var (
 	ErrUserExists         = errors.New("username already exists")
 )
 
+// Built-in global roles (Phase 5 RBAC). Ordered by privilege.
+const (
+	RoleViewer   = "viewer"
+	RoleOperator = "operator"
+	RoleAdmin    = "admin"
+)
+
+var roleRank = map[string]int{RoleViewer: 1, RoleOperator: 2, RoleAdmin: 3}
+
+// ValidRole reports whether s is a known built-in role.
+func ValidRole(s string) bool { _, ok := roleRank[s]; return ok }
+
+// RankRole returns a role's privilege level (higher = more); 0 if unknown.
+func RankRole(s string) int { return roleRank[s] }
+
+// AtLeast reports whether have is at least as privileged as want.
+func AtLeast(have, want string) bool { return roleRank[have] >= roleRank[want] }
+
 type User struct {
 	ID       int64
 	Username string
@@ -97,6 +115,7 @@ func (s *Service) Login(username, password string) (string, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 		return "", ErrInvalidCredentials
 	}
+	s.touchLastLogin(id)
 	return s.issueToken(id, username, role)
 }
 
@@ -195,6 +214,7 @@ func (s *Service) Login2(username, password string) (accessToken, refreshToken s
 	if err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
 		return "", "", ErrInvalidCredentials
 	}
+	s.touchLastLogin(id)
 	accessToken, err = s.issueToken(id, username, role)
 	if err != nil {
 		return "", "", err
@@ -219,6 +239,22 @@ func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
 		return nil, errors.New("invalid token")
 	}
 	return claims, nil
+}
+
+// RequireRole returns middleware (to wrap inside Middleware, which populates the
+// claims) that allows the request only if the caller's global role is at least
+// minRole. Returns 403 otherwise. Used to gate global/admin-only surfaces.
+func (s *Service) RequireRole(minRole string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := ClaimsFromContext(r.Context())
+			if claims == nil || !AtLeast(claims.Role, minRole) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // Middleware extracts and validates Bearer token from Authorization header.

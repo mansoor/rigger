@@ -99,6 +99,32 @@ func main() {
 	mux.HandleFunc("POST /api/auth/refresh", handler.Refresh)
 	mux.Handle("POST /api/auth/password", authSvc.Middleware(http.HandlerFunc(handler.ChangePassword)))
 
+	// adminOnly gates a handler to global-admin callers (Phase 5 RBAC). Wrapped
+	// inside authSvc.Middleware so claims are present.
+	adminOnly := authSvc.RequireRole(auth.RoleAdmin)
+
+	// User management (Phase 5 / roadmap 10a) — admin only.
+	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			handler.ListUsers(w, r)
+		case "POST":
+			handler.CreateUser(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))))
+	mux.Handle("/api/users/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PUT":
+			handler.UpdateUser(w, r)
+		case "DELETE":
+			handler.DeleteUser(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))))
+
 	// Protected API routes (JWT middleware applied per-route group)
 	protected := authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -501,8 +527,8 @@ func main() {
 	mux.Handle("/api/templates/", protected)
 	mux.Handle("/api/tools/", protected)
 
-	// Settings (backup targets + docker registries) — all protected
-	mux.Handle("/api/settings/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Settings (backup targets + docker registries) — global, admin only
+	mux.Handle("/api/settings/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
 		// General settings (ACME email, Rigger domain)
@@ -546,10 +572,10 @@ func main() {
 		default:
 			http.NotFound(w, r)
 		}
-	})))
+	}))))
 
-	// Hosts (Phase 7: Multi-Host Support) — CRUD + SSH connectivity test
-	mux.Handle("/api/hosts", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Hosts (Phase 7: Multi-Host Support) — global host registry, admin only
+	mux.Handle("/api/hosts", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET":
 			handler.ListHosts(w, r)
@@ -558,8 +584,8 @@ func main() {
 		default:
 			http.NotFound(w, r)
 		}
-	})))
-	mux.Handle("/api/hosts/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	}))))
+	mux.Handle("/api/hosts/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
 		case r.Method == "GET" && path == "/api/hosts/managed-key":
@@ -579,7 +605,7 @@ func main() {
 		default:
 			http.NotFound(w, r)
 		}
-	})))
+	}))))
 
 	// Migration jobs (Phase 7) — poll async workspace/env host moves
 	mux.Handle("/api/migration-jobs/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -623,7 +649,7 @@ func main() {
 	})))
 
 	// Housekeeping — all JWT-protected
-	mux.Handle("/api/housekeeping/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api/housekeeping/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
 		case r.Method == "GET"  && path == "/api/housekeeping/status":
@@ -675,7 +701,7 @@ func main() {
 		default:
 			http.NotFound(w, r)
 		}
-	})))
+	}))))
 
 	// WebSocket action endpoint — auth via token in first WS message
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/action", func(w http.ResponseWriter, r *http.Request) {

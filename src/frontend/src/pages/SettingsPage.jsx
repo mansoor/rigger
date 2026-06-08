@@ -14,8 +14,10 @@ import {
   fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
+  fetchUsers, createUser, updateUser, deleteUser,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
+import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import {
   THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS,
@@ -1368,8 +1370,142 @@ function AppearanceTab() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── Users (Phase 5 RBAC) ──────────────────────────────────────────────────────
+
+const ROLE_OPTIONS = [
+  { value: 'viewer',   label: 'Viewer — read-only' },
+  { value: 'operator', label: 'Operator — deploy / operate' },
+  { value: 'admin',    label: 'Admin — full control' },
+]
+const ROLE_BADGE = {
+  admin:    'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
+  operator: 'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
+  viewer:   'bg-sky-100/70 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/40',
+}
+
+function UserForm({ initial, onSave, onCancel, saving }) {
+  const isEdit = !!initial?.id
+  const [username, setUsername] = useState(initial?.username || '')
+  const [role, setRole]         = useState(initial?.role || 'viewer')
+  const [password, setPassword] = useState('')
+  const [error, setError]       = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (!isEdit && !username.trim()) { setError('Username is required'); return }
+    if (!isEdit && !password) { setError('Password is required'); return }
+    try {
+      await onSave(isEdit ? { role, password } : { username: username.trim(), password, role })
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to save')
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <Label required={!isEdit}>Username</Label>
+        <Input value={username} onChange={setUsername} placeholder="jane" disabled={isEdit} />
+      </div>
+      <div>
+        <Label required>Role</Label>
+        <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
+      </div>
+      <div>
+        <Label required={!isEdit}>Password</Label>
+        <Input value={password} onChange={setPassword} type="password" placeholder={isEdit ? '(leave blank to keep)' : '••••••••'} />
+      </div>
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex gap-2 justify-end pt-2">
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add user'}</Btn>
+      </div>
+    </form>
+  )
+}
+
+function UsersTab() {
+  const qc = useQueryClient()
+  const me = useAuthStore(s => s.user)
+  const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const [modal, setModal]       = useState(null)
+  const [deleting, setDeleting] = useState(null)
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateUser(id, body) : createUser(body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteUser(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setDeleting(null) },
+  })
+
+  const fmtLast = (s) => s ? new Date(s).toLocaleString() : 'never'
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-base font-semibold text-content-strong">Users</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Accounts and global roles. Per-workspace access is managed on each workspace's Members tab.</p>
+        </div>
+        <Btn onClick={() => setModal('new')}>＋ Add user</Btn>
+      </div>
+
+      <div className="space-y-2">
+        {users.map(u => (
+          <div key={u.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(u.username[0] || '?').toUpperCase()}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-content-strong truncate">{u.username}</p>
+                {me?.uid === u.id && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">you</span>}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${ROLE_BADGE[u.role] || ROLE_BADGE.viewer}`}>{u.role}</span>
+              </div>
+              <p className="text-xs text-content-subtle mt-0.5">Last login: {fmtLast(u.last_login_at)}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: u })}>Edit</Btn>
+              <Btn variant="danger" size="sm" onClick={() => setDeleting(u)} disabled={me?.uid === u.id}>Delete</Btn>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add user' : `Edit "${modal.editing.username}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <UserForm
+              initial={modal === 'new' ? null : modal.editing}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <ConfirmDeleteModal
+          name={`user "${deleting.username}"`}
+          onConfirm={() => delMut.mutate(deleting.id)}
+          onClose={() => setDeleting(null)}
+          loading={delMut.isPending}
+        />
+      )}
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'general',        label: 'General' },
+  { id: 'users',          label: 'Users' },
   { id: 'appearance',     label: 'Appearance' },
   { id: 'alerts',         label: 'Alert Rules' },
   { id: 'notifications',  label: 'Notifications' },
@@ -1386,8 +1522,8 @@ export default function SettingsPage() {
       <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Page header */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-content-strong">Settings</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Configure SSL, integrations, and backup destinations.</p>
+          <h1 className="text-xl font-bold text-content-strong">Admin</h1>
+          <p className="text-sm text-content-subtle mt-0.5">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</p>
         </div>
 
         {/* Tab bar */}
@@ -1408,6 +1544,7 @@ export default function SettingsPage() {
 
         {/* Tab content */}
         {tab === 'general'        && <GeneralTab />}
+        {tab === 'users'          && <UsersTab />}
         {tab === 'appearance'     && <AppearanceTab />}
         {tab === 'alerts'         && <RulesTab />}
         {tab === 'notifications'  && <NotificationsTab />}

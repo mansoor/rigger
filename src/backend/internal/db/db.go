@@ -365,6 +365,7 @@ func (d *DB) migrate() error {
 	// Incremental column additions for tables that may predate a field.
 	// SQLite has no "ADD COLUMN IF NOT EXISTS", so we run the ALTER and ignore
 	// the duplicate-column error on databases that already have it.
+	d.addColumn("users", "last_login_at DATETIME")                              // Phase 5: track last login
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
 	d.addColumn("metrics_snapshots", "net_rx_bytes INTEGER NOT NULL DEFAULT 0")

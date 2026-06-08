@@ -206,6 +206,12 @@ export const cleanMigrationLeftover   = (id, onChunk) =>
 
 // ── Settings: General ────────────────────────────────────────────────────────
 
+// Users (Phase 5 RBAC, roadmap 10a) — admin only.
+export const fetchUsers  = ()         => api.get('/users').then(r => r.data)
+export const createUser  = (body)     => api.post('/users', body).then(r => r.data)
+export const updateUser  = (id, body) => api.put(`/users/${id}`, body).then(r => r.data)
+export const deleteUser  = (id)       => api.delete(`/users/${id}`)
+
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
 

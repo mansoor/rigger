@@ -312,6 +312,7 @@ function UserMenu({ user, onLogout }) {
 
 export default function Layout({ children }) {
   const user     = useAuthStore((s) => s.user)
+  const isAdmin  = user?.role === 'admin'
   const logout   = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
   const qc       = useQueryClient()
@@ -379,9 +380,9 @@ export default function Layout({ children }) {
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
-            <NavBtn to="/housekeeping" label="Housekeeping" />
+            {isAdmin && <NavBtn to="/housekeeping" label="Housekeeping" />}
             <NavBtn to="/tools" label="Tools" />
-            <NavBtn to="/settings" label="Settings" />
+            {isAdmin && <NavBtn to="/settings" label="Admin" />}
             <div className="w-px h-4 bg-surface-overlay mx-1" />
             <ThemeToggle />
             <AlertBell active={slidePanel === 'alerts'} onClick={() => setSlidePanel(p => p === 'alerts' ? null : 'alerts')} />
