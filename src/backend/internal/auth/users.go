@@ -293,6 +293,10 @@ func (s *Service) DeleteUser(id int64) error {
 			return ErrLastAdmin
 		}
 	}
+	// FK cascade isn't enforced (foreign_keys off), so sweep membership rows.
+	s.db.Exec(`DELETE FROM project_acl WHERE user_id=?`, id)        //nolint:errcheck
+	s.db.Exec(`DELETE FROM workspace_members WHERE user_id=?`, id)  //nolint:errcheck
+	s.db.Exec(`DELETE FROM user_tokens WHERE user_id=?`, id)        //nolint:errcheck
 	_, err = s.db.Exec(`DELETE FROM users WHERE id=?`, id)
 	return err
 }

@@ -290,6 +290,13 @@ export const updateWorkspaceRegistry  = (ws, id, body) => api.put(`/workspaces/$
 export const deleteWorkspaceRegistry  = (ws, id)     => api.delete(`/workspaces/${ws}/registries/${id}`)
 export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${ws}/registries/${id}/test`).then(r => r.data)
 
+// Workspace membership + per-project overrides (Phase 5.2).
+export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)
+export const setWorkspaceMember    = (ws, uid, role)  => api.put(`/workspaces/${ws}/members/${uid}`, { role }).then(r => r.data)
+export const removeWorkspaceMember = (ws, uid)        => api.delete(`/workspaces/${ws}/members/${uid}`)
+export const setProjectOverride    = (ws, uid, proj, role) => api.put(`/workspaces/${ws}/members/${uid}/projects/${proj}`, { role }).then(r => r.data)
+export const removeProjectOverride = (ws, uid, proj)  => api.delete(`/workspaces/${ws}/members/${uid}/projects/${proj}`)
+
 // Per-workspace general settings (Phase 3): acme_email, domain.
 export const fetchWorkspaceSettings = (ws)       => api.get(`/workspaces/${ws}/settings`).then(r => r.data)
 export const updateWorkspaceSettings = (ws, body) => api.put(`/workspaces/${ws}/settings`, body).then(r => r.data)

@@ -372,6 +372,23 @@ func (d *DB) migrate() error {
 	d.addColumn("users", "status TEXT NOT NULL DEFAULT 'active'")                 // Phase 5.1b: 'invited' | 'active'
 	// Unique email among accounts that have one (empty allowed for legacy/pre-email rows).
 	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`) //nolint:errcheck
+	// Phase 5.2: workspace membership (tier) + per-project role overrides. Roles are
+	// auth roles (viewer/operator/admin); project_acl may also be 'none' to revoke a
+	// single project. Membership-gated: a non-admin sees only workspaces listed here.
+	d.Exec(`CREATE TABLE IF NOT EXISTS workspace_members (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		ws_key  TEXT    NOT NULL,
+		role    TEXT    NOT NULL,
+		PRIMARY KEY (user_id, ws_key)
+	)`) //nolint:errcheck
+	d.Exec(`CREATE TABLE IF NOT EXISTS project_acl (
+		user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		ws_key   TEXT    NOT NULL,
+		proj_key TEXT    NOT NULL,
+		role     TEXT    NOT NULL,
+		PRIMARY KEY (user_id, ws_key, proj_key)
+	)`) //nolint:errcheck
+
 	// Invite / email-verify / password-reset / 2FA tokens (token_hash = sha256 of the
 	// random value handed out in links; the raw value is never stored).
 	d.Exec(`CREATE TABLE IF NOT EXISTS user_tokens (

@@ -704,6 +704,7 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = settings.DeleteWorkspaceSettings(h.db, wsName) //nolint:errcheck
+	h.auth.DeleteWorkspaceACL(wsName)                  // Phase 5.2: drop membership/overrides
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
 			claims.UserID, claims.Username, wsName, "delete-workspace", "")

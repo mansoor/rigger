@@ -14,11 +14,13 @@ import {
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
   fetchWorkspaceSettings, updateWorkspaceSettings,
+  fetchUsers, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 
 const TABS = [
   { id: 'general',        label: 'General' },
+  { id: 'members',        label: 'Members' },
   { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
@@ -77,6 +79,7 @@ export default function ManageWorkspacePage() {
             <WorkspaceDefaults workspace={workspace} qc={qc} />
           </div>
         )}
+        {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
         {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
         {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
         {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
@@ -175,6 +178,140 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
         </div>
       </div>
     </section>
+  )
+}
+
+const MEMBER_ROLES = [
+  { value: 'viewer',   label: 'Viewer' },
+  { value: 'operator', label: 'Operator' },
+  { value: 'admin',    label: 'Admin' },
+]
+const OVERRIDE_ROLES = [
+  { value: 'none',     label: 'No access' },
+  { value: 'viewer',   label: 'Viewer' },
+  { value: 'operator', label: 'Operator' },
+  { value: 'admin',    label: 'Admin' },
+]
+
+// MembersSection — workspace membership + per-project overrides (Phase 5.2a).
+// Non-admins see only workspaces they're a member of; per-project overrides
+// (incl. "No access") refine access within. Roles take effect once enforcement
+// (5.2b) lands.
+function MembersSection({ workspace, projects, qc }) {
+  const membersKey = ['ws-members', workspace]
+  const { data: members = [], isLoading } = useQuery({ queryKey: membersKey, queryFn: () => fetchWorkspaceMembers(workspace), enabled: !!workspace })
+  const { data: allUsers = [] } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const [expanded, setExpanded] = useState(null) // user_id with open overrides
+  const [addUid, setAddUid] = useState('')
+  const [addRole, setAddRole] = useState('viewer')
+  const sel = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const invalidate = () => qc.invalidateQueries({ queryKey: membersKey })
+
+  const setMut = useMutation({ mutationFn: ({ uid, role }) => setWorkspaceMember(workspace, uid, role), onSuccess: invalidate })
+  const rmMut  = useMutation({ mutationFn: (uid) => removeWorkspaceMember(workspace, uid), onSuccess: invalidate })
+  const ovSet  = useMutation({ mutationFn: ({ uid, proj, role }) => setProjectOverride(workspace, uid, proj, role), onSuccess: invalidate })
+  const ovRm   = useMutation({ mutationFn: ({ uid, proj }) => removeProjectOverride(workspace, uid, proj), onSuccess: invalidate })
+
+  const memberIds = new Set(members.map(m => m.user_id))
+  const addable = allUsers.filter(u => !memberIds.has(u.id) && u.role !== 'admin') // global admins already have access everywhere
+
+  function addMember() {
+    if (!addUid) return
+    setMut.mutate({ uid: Number(addUid), role: addRole })
+    setAddUid('')
+  }
+  const projLabel = (key) => projects.find(p => p.name === key)?.config?.project?.name || key
+
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <section>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold text-content">Members</h2>
+        <p className="text-xs text-content-subtle mt-0.5">Who can access this workspace and at what level. Global admins always have full access. Roles take effect once access control is enforced.</p>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl p-4 mb-4 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-content-muted">Add member:</span>
+        <select value={addUid} onChange={e => setAddUid(e.target.value)} className={sel}>
+          <option value="">Select a user…</option>
+          {addable.map(u => <option key={u.id} value={String(u.id)}>{u.email || u.username}</option>)}
+        </select>
+        <select value={addRole} onChange={e => setAddRole(e.target.value)} className={sel}>
+          {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+        <button onClick={addMember} disabled={!addUid || setMut.isPending}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Add</button>
+        {addable.length === 0 && <span className="text-xs text-content-faint">All users are already members or global admins. Invite more from Admin → Users.</span>}
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {members.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No members yet. Global admins can already access this workspace; add operators/viewers above.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {members.map(m => (
+              <div key={m.user_id} className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(m.email[0] || m.username[0] || '?').toUpperCase()}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-content-strong truncate">{m.email || m.username}</p>
+                    <p className="text-xs text-content-subtle mt-0.5">
+                      {m.overrides.length > 0 ? `${m.overrides.length} project override${m.overrides.length !== 1 ? 's' : ''}` : 'workspace-wide role'}
+                    </p>
+                  </div>
+                  <select value={m.role} onChange={e => setMut.mutate({ uid: m.user_id, role: e.target.value })} className={sel}>
+                    {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button onClick={() => setExpanded(x => x === m.user_id ? null : m.user_id)}
+                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Per-project</button>
+                  <button onClick={() => rmMut.mutate(m.user_id)}
+                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Remove</button>
+                </div>
+
+                {expanded === m.user_id && (
+                  <div className="mt-3 ml-11 border border-border-strong rounded-lg p-3 space-y-2">
+                    <p className="text-xs text-content-muted">Override this member's role on specific projects (defaults to their workspace role).</p>
+                    {m.overrides.map(o => (
+                      <div key={o.proj_key} className="flex items-center gap-2">
+                        <span className="text-sm text-content flex-1 truncate">{projLabel(o.proj_key)}</span>
+                        <select value={o.role} onChange={e => ovSet.mutate({ uid: m.user_id, proj: o.proj_key, role: e.target.value })} className={sel}>
+                          {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                        <button onClick={() => ovRm.mutate({ uid: m.user_id, proj: o.proj_key })}
+                          className="px-2 py-1 text-xs rounded-lg text-content-muted hover:text-danger-fg">✕</button>
+                      </div>
+                    ))}
+                    <AddOverride projects={projects.filter(p => !m.overrides.some(o => o.proj_key === p.name))}
+                      onAdd={(proj, role) => ovSet.mutate({ uid: m.user_id, proj, role })} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AddOverride({ projects, onAdd }) {
+  const [proj, setProj] = useState('')
+  const [role, setRole] = useState('viewer')
+  const sel = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  if (projects.length === 0) return <p className="text-xs text-content-faint">All projects have an override (or there are none).</p>
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <select value={proj} onChange={e => setProj(e.target.value)} className={sel}>
+        <option value="">Add project override…</option>
+        {projects.map(p => <option key={p.name} value={p.name}>{p.config?.project?.name || p.name}</option>)}
+      </select>
+      <select value={role} onChange={e => setRole(e.target.value)} className={sel}>
+        {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+      </select>
+      <button onClick={() => { if (proj) { onAdd(proj, role); setProj('') } }} disabled={!proj}
+        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-40">Add</button>
+    </div>
   )
 }
 

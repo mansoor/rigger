@@ -301,6 +301,27 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "members":
+			// Workspace membership (Phase 5.2). /api/workspaces/{ws}/members[/{id}[/projects/{proj}]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("memberid", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("projkey", pathSegment(r.URL.Path, 6))
+			id := pathSegment(r.URL.Path, 4)
+			isProj := pathSegment(r.URL.Path, 5) == "projects"
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceMembers(w, r)
+			case r.Method == "PUT" && id != "" && isProj:
+				handler.SetProjectOverride(w, r)
+			case r.Method == "DELETE" && id != "" && isProj:
+				handler.RemoveProjectOverride(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.SetWorkspaceMember(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.RemoveWorkspaceMember(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "alerts":
 			// Workspace-scoped Alert Rules (Phase 3).
 			// /api/workspaces/{ws}/alerts/rules[/{id}]
