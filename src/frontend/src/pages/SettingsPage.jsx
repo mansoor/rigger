@@ -5,6 +5,7 @@ import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
+import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -685,6 +686,7 @@ function GeneralTab() {
   })
   const [acmeEmail, setAcmeEmail] = useState('')
   const [riggerDomain, setRiggerDomain] = useState('')
+  const [appHost, setAppHost] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
@@ -693,6 +695,7 @@ function GeneralTab() {
     mutationFn: () => updateGeneralSettings({
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
+      app_host: appHost,
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
@@ -705,6 +708,7 @@ function GeneralTab() {
   if (!isLoading && !synced && cfg.acme_email !== undefined) {
     setAcmeEmail(cfg.acme_email || '')
     setRiggerDomain(cfg.rigger_domain || '')
+    setAppHost(cfg.app_host || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
@@ -770,6 +774,28 @@ function GeneralTab() {
           <p className="text-xs text-content-subtle mt-1">
             Leave blank to access Rigger UI on port {' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
+          </p>
+        </div>
+      </div>
+
+      {/* App host / IP for service links */}
+      <div>
+        <h2 className="text-base font-semibold text-content-strong mb-1">App host / IP for service links</h2>
+        <p className="text-sm text-content-subtle mb-4">
+          The address users reach published service ports at (the Docker host's IP or hostname).
+          Used to build the <strong>Open app</strong> links on env cards for locally-hosted
+          environments. Set this when you access Rigger through a proxy domain, so links point at
+          the host instead of the proxy. Remote-host envs always use their own host address.
+        </p>
+        <div className="p-4 bg-surface border border-border rounded-xl">
+          <Label>Host address</Label>
+          <Input
+            value={appHost}
+            onChange={setAppHost}
+            placeholder="192.168.1.50 or host.example.com"
+          />
+          <p className="text-xs text-content-subtle mt-1">
+            Leave blank to use the browser's current hostname (works when you reach Rigger directly by IP).
           </p>
         </div>
       </div>
@@ -1257,7 +1283,7 @@ function SettingsSection({ title, description, children }) {
   )
 }
 
-function AppearanceTab() {
+export function AppearanceTab() {
   const { prefs, setPrefs, resolvedTheme, resetPrefs } = useTheme()
   const opt = (list) => list.map(o => ({ value: o.id, label: o.label }))
 
@@ -1373,28 +1399,52 @@ function AppearanceTab() {
 
 // ── Users (Phase 5 RBAC) ──────────────────────────────────────────────────────
 
+// Global roles (Users tab). Workspace/project access is granted separately via
+// workspace membership — see the Members tab on each workspace.
 const ROLE_OPTIONS = [
-  { value: 'viewer',   label: 'Viewer — read-only' },
-  { value: 'operator', label: 'Operator — deploy / operate' },
-  { value: 'admin',    label: 'Admin — full control' },
+  { value: 'user',       label: 'User — access via workspace membership' },
+  { value: 'superadmin', label: 'Super-admin — full control' },
 ]
 const ROLE_BADGE = {
-  admin:    'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
-  operator: 'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
-  viewer:   'bg-sky-100/70 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/40',
+  superadmin: 'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
+  user:       'bg-slate-100/70 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700/40',
 }
+
+// Workspace-tier roles offered when granting access at invite time.
+const INVITE_WS_ROLES = [
+  { value: 'viewer',    label: 'Viewer — read-only' },
+  { value: 'developer', label: 'Developer — operate environments' },
+  { value: 'operator',  label: 'Operator — developer + edit project config' },
+  { value: 'admin',     label: 'Admin — manage the workspace' },
+]
 
 function InviteForm({ onSave, onCancel, saving }) {
   const [email, setEmail]       = useState('')
   const [username, setUsername] = useState('')
-  const [role, setRole]         = useState('viewer')
+  const [role, setRole]         = useState('user')
+  const [workspace, setWorkspace] = useState('')
+  const [project, setProject]     = useState('')
+  const [wsRole, setWsRole]       = useState('viewer')
   const [error, setError]       = useState('')
+
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects', workspace], queryFn: () => fetchProjects(workspace), enabled: !!workspace,
+  })
+
+  const grantsAccess = role === 'user' // super-admins already see everything
 
   async function submit(e) {
     e.preventDefault()
     setError('')
     if (!email.trim()) { setError('Email is required'); return }
-    try { await onSave({ email: email.trim(), username: username.trim(), role }) }
+    const body = { email: email.trim(), username: username.trim(), role }
+    if (grantsAccess && workspace) {
+      body.workspace = workspace
+      body.ws_role = wsRole
+      if (project) body.project = project
+    }
+    try { await onSave(body) }
     catch (err) { setError(err.response?.data?.error || 'Failed to invite') }
   }
 
@@ -1410,9 +1460,35 @@ function InviteForm({ onSave, onCancel, saving }) {
         <Input value={username} onChange={setUsername} placeholder="defaults to the part before @" />
       </div>
       <div>
-        <Label required>Role</Label>
+        <Label required>Global role</Label>
         <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
       </div>
+
+      {grantsAccess && (
+        <div className="rounded-xl border border-border bg-surface/40 p-3 space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Grant access <span className="font-normal normal-case">(optional)</span></p>
+          <div>
+            <Label>Workspace</Label>
+            <Select value={workspace} onChange={(v) => { setWorkspace(v); setProject('') }}
+              options={[{ value: '', label: '— no access yet —' }, ...workspaces.map(w => ({ value: w.key, label: w.name || w.key }))]} />
+          </div>
+          {workspace && (
+            <>
+              <div>
+                <Label>Limit to one project <span className="font-normal normal-case">(optional)</span></Label>
+                <Select value={project} onChange={setProject}
+                  options={[{ value: '', label: 'Whole workspace' }, ...projects.map(p => ({ value: p.name, label: p.config?.project?.name || p.name }))]} />
+              </div>
+              <div>
+                <Label required>Role in this {project ? 'project' : 'workspace'}</Label>
+                <Select value={wsRole} onChange={setWsRole} options={INVITE_WS_ROLES} />
+              </div>
+            </>
+          )}
+          {!workspace && <p className="text-xs text-content-faint">Leave empty to invite without access — they'll see a "request access" message until you add them to a workspace.</p>}
+        </div>
+      )}
+
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
@@ -1423,7 +1499,7 @@ function InviteForm({ onSave, onCancel, saving }) {
 }
 
 function EditUserForm({ initial, onSave, onCancel, saving }) {
-  const [role, setRole]         = useState(initial?.role || 'viewer')
+  const [role, setRole]         = useState(initial?.role || 'user')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
 
@@ -1610,16 +1686,19 @@ function SystemEmailTab() {
   )
 }
 
+// Tab order mirrors the Manage Workspace screen for the shared resource tabs
+// (Remote Hosts → Docker Registries → Backup Targets → Notifications → Alert
+// Rules) so the two settings surfaces feel consistent.
 const TABS = [
   { id: 'general',        label: 'General' },
   { id: 'users',          label: 'Users' },
+  { id: 'access-requests', label: 'Access Requests' },
   { id: 'system-email',   label: 'System Email' },
-  { id: 'appearance',     label: 'Appearance' },
-  { id: 'alerts',         label: 'Alert Rules' },
-  { id: 'notifications',  label: 'Notifications' },
+  { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
-  { id: 'hosts',          label: 'Remote Hosts' },
+  { id: 'notifications',  label: 'Notifications' },
+  { id: 'alerts',         label: 'Alert Rules' },
 ]
 
 export default function SettingsPage() {
@@ -1653,6 +1732,7 @@ export default function SettingsPage() {
         {/* Tab content */}
         {tab === 'general'        && <GeneralTab />}
         {tab === 'users'          && <UsersTab />}
+        {tab === 'access-requests' && <AccessRequestsInbox />}
         {tab === 'system-email'   && <SystemEmailTab />}
         {tab === 'appearance'     && <AppearanceTab />}
         {tab === 'alerts'         && <RulesTab />}

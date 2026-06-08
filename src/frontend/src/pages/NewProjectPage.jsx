@@ -1183,7 +1183,7 @@ function Step4({ data, onChange }) {
           <p className="text-sm text-content font-medium mb-1">Custom application stack</p>
           <p className="text-xs text-content-subtle">
             Port mappings, volumes and healthchecks for custom stacks are defined by the compose templates.
-            After creation, use <strong>Edit Workspace</strong> to adjust service configuration.
+            After creation, use <strong>Edit Project</strong> to adjust service configuration.
           </p>
         </div>
       )}
@@ -1262,7 +1262,7 @@ function Step5({ data, onChange, workspace, defaultTargetId }) {
         Add schedules to an environment to choose <strong className="text-content">which services' data</strong> to back up,
         <strong className="text-content"> how often</strong>, <strong className="text-content">where</strong> to store it, and
         <strong className="text-content"> how many copies</strong> to keep — e.g. back up prod's database hourly and everything daily,
-        while stage runs once a day. Leave any environment empty to skip; you can always add schedules later from Edit Workspace.
+        while stage runs once a day. Leave any environment empty to skip; you can always add schedules later from Edit Project.
       </div>
 
       {namedEnvs.length === 0 && (
@@ -1386,26 +1386,29 @@ function Step7({ payload, onDone, onResult, onGoBack }) {
       onResult(result)
     }
 
+    let sawError = false
     const ws = openCreateSocket(payload)
     ws.addEventListener('message', e => {
       term.write(e.data)
       const text = e.data
-      // Success markers written by bootstrap.sh
-      if (text.includes('is ready!') || text.includes('[OK]') && text.includes('workspace ready')) {
-        resolve('success')
-      }
-      // Failure markers
-      if (text.includes('[ERROR]') || text.includes('✗') || text.includes('failed')) {
+      // Failure markers first — every fatal path the server emits is prefixed with
+      // ✗ / [ERROR] / "Error:". Check before success so a denial isn't misread.
+      if (text.includes('[ERROR]') || text.includes('✗') || /error:/i.test(text) || text.includes('failed')) {
+        sawError = true
         resolve('failure')
+      } else if (text.includes('is ready!')) {
+        resolve('success')
       }
     })
     ws.addEventListener('error', () => {
       term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n')
+      sawError = true
       resolve('failure')
     })
     ws.addEventListener('close', () => {
-      // If closed without an explicit result, check terminal output for success
-      if (!resolved) resolve('success') // bootstrap finishing = success unless error was already flagged
+      // Closed without an explicit marker: failure if we saw any error line,
+      // otherwise treat a clean finish as success.
+      if (!resolved) resolve(sawError ? 'failure' : 'success')
     })
 
     return () => { term.dispose(); ws.close() }

@@ -682,8 +682,10 @@ const PANEL_CONFIG = {
   alerts:   { title: 'Alerts',           icon: '◔' },
 }
 
-export default function SlideOutPanel({ panel, onClose }) {
-  const [workspaceFilter, setWorkspaceFilter] = useState('')
+export default function SlideOutPanel({ panel, onClose, workspace }) {
+  // Default the view to the selected workspace (item 10) — entries are scoped to
+  // it on open; the user can clear the filter to see everything they can access.
+  const [workspaceFilter, setWorkspaceFilter] = useState(workspace || '')
   const [typeFilter, setTypeFilter]           = useState('all')
   const panelRef = useRef(null)
 
@@ -692,11 +694,11 @@ export default function SlideOutPanel({ panel, onClose }) {
   const wsTypes = {}
   ;(workspaces || []).forEach(ws => { wsTypes[ws.name] = ws.config?.project?.type || 'custom' })
 
-  // Reset filters when switching panels
+  // Reset filters when switching panels — re-scope to the selected workspace.
   useEffect(() => {
-    setWorkspaceFilter('')
+    setWorkspaceFilter(workspace || '')
     setTypeFilter('all')
-  }, [panel])
+  }, [panel, workspace])
 
   // Close on Escape
   useEffect(() => {

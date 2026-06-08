@@ -33,7 +33,7 @@ export default function SetupPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-content-strong">Rigger</h1>
-          <p className="text-content-muted mt-1">Rig once. Deploy anywhere</p>
+          <p className="text-content-muted mt-1">With Rigger — More Dev, Less Ops.</p>
         </div>
 
         <div className="bg-surface border border-border rounded-xl p-8">

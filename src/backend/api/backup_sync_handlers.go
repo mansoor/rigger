@@ -345,8 +345,12 @@ func (h *Handler) SyncWorkspaceArchive(w http.ResponseWriter, r *http.Request) {
 	_ = readJSON(r, &body)
 	targetID := body.TargetID
 	if targetID == nil {
-		// .rwb archives know only the project name (flat fallback in firstScheduleTarget).
-		targetID = h.firstScheduleTarget("", wsNameFromArchive(filename), "")
+		// Resolve the source project's configured target via the archive manifest.
+		if m, ok := readArchiveManifest(filepath.Join(archivesDir(h.dataDir), filename)); ok {
+			targetID = h.firstScheduleTarget(m.Workspace, m.Project, "")
+		} else {
+			targetID = h.firstScheduleTarget("", wsNameFromArchive(filename), "")
+		}
 	}
 	if targetID == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no remote backup target configured for this workspace"})

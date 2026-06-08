@@ -23,8 +23,12 @@ func (h *Handler) GetMetricsConfig(w http.ResponseWriter, r *http.Request) {
 // `minutes` selects the time window (default 60); `hours` is still accepted for
 // backward compatibility.
 func (h *Handler) GetEnvMetrics(w http.ResponseWriter, r *http.Request) {
+	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
+	// metrics_snapshots is keyed by the project's resource_prefix (what the
+	// collector writes), which is NOT the folder name and survives a transfer.
+	prefix := h.resourcePrefix(wsName, name)
 
 	const maxMinutes = 90 * 24 * 60 // matches the 90-day retention window
 	minutes := 60
@@ -52,7 +56,7 @@ func (h *Handler) GetEnvMetrics(w http.ResponseWriter, r *http.Request) {
 		 FROM metrics_snapshots
 		 WHERE project = ? AND env = ? AND recorded_at >= datetime('now', ?)
 		 ORDER BY recorded_at`,
-		name, env, fmt.Sprintf("-%d minutes", minutes),
+		prefix, env, fmt.Sprintf("-%d minutes", minutes),
 	)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

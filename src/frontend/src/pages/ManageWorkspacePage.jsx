@@ -6,6 +6,7 @@ import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
+import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -21,6 +22,7 @@ import { useWorkspaceStore } from '../store/workspace'
 const TABS = [
   { id: 'general',        label: 'General' },
   { id: 'members',        label: 'Members' },
+  { id: 'access-requests', label: 'Access Requests' },
   { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
@@ -77,9 +79,11 @@ export default function ManageWorkspacePage() {
             <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
             <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
             <WorkspaceDefaults workspace={workspace} qc={qc} />
+            <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
           </div>
         )}
         {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
+        {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
         {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
         {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
         {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
@@ -139,6 +143,57 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   )
 }
 
+// WorkspaceAppearanceDefault sets the workspace's default theme (W7). Members who
+// haven't set a personal appearance inherit this; a per-user choice overrides it.
+const WS_THEME_OPTIONS = [
+  { value: '',       label: 'No default — use the global default' },
+  { value: 'system', label: 'System' },
+  { value: 'light',  label: 'Light' },
+  { value: 'dark',   label: 'Dark' },
+]
+function WorkspaceAppearanceDefault({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({
+    queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const [theme, setTheme] = useState(null) // null = not yet seeded
+  if (theme === null && saved !== undefined) {
+    let t = ''
+    try { t = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
+    setTheme(t)
+  }
+  const mut = useMutation({
+    mutationFn: () => updateWorkspaceSettings(workspace, { appearance_prefs: theme ? JSON.stringify({ theme }) : '' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
+  })
+  let savedTheme = ''
+  try { savedTheme = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
+  const dirty = theme !== null && theme !== savedTheme
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-3">Default appearance</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Default theme</label>
+          <select value={theme ?? ''} onChange={e => setTheme(e.target.value)}
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+            {WS_THEME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <p className="text-xs text-content-subtle mt-1">Applied to members who haven't set their own appearance. A personal choice (Account → Appearance) always overrides this.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            {mut.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function GeneralSection({ workspace, ws, qc, setCurrent }) {
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
@@ -158,13 +213,23 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
     <section>
       <h2 className="text-sm font-semibold text-content mb-3">General</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
-          <input
-            value={name} onChange={e => setName(e.target.value)} maxLength={32}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
-          />
-          <p className="text-xs text-content-subtle mt-1">1–32 chars, letters/digits/space/dash/underscore. The key <code className="font-mono">{workspace}</code> is fixed.</p>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
+            <input
+              value={name} onChange={e => setName(e.target.value)} maxLength={32}
+              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
+            />
+            <p className="text-xs text-content-subtle mt-1">1–32 chars; editable anytime.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Key <span className="font-normal normal-case text-content-faint">(fixed)</span></label>
+            <input
+              value={workspace} readOnly disabled
+              className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed"
+            />
+            <p className="text-xs text-content-subtle mt-1">Folder / URL / Docker identity. Cannot change.</p>
+          </div>
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex items-center gap-3">
@@ -182,15 +247,17 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
 }
 
 const MEMBER_ROLES = [
-  { value: 'viewer',   label: 'Viewer' },
-  { value: 'operator', label: 'Operator' },
-  { value: 'admin',    label: 'Admin' },
+  { value: 'viewer',    label: 'Viewer — read-only' },
+  { value: 'developer', label: 'Developer — operate environments' },
+  { value: 'operator',  label: 'Operator — developer + edit project config' },
+  { value: 'admin',     label: 'Admin — manage the workspace' },
 ]
 const OVERRIDE_ROLES = [
-  { value: 'none',     label: 'No access' },
-  { value: 'viewer',   label: 'Viewer' },
-  { value: 'operator', label: 'Operator' },
-  { value: 'admin',    label: 'Admin' },
+  { value: 'none',      label: 'No access' },
+  { value: 'viewer',    label: 'Viewer' },
+  { value: 'developer', label: 'Developer' },
+  { value: 'operator',  label: 'Operator' },
+  { value: 'admin',     label: 'Admin' },
 ]
 
 // MembersSection — workspace membership + per-project overrides (Phase 5.2a).
@@ -1196,9 +1263,9 @@ function DangerZone({ workspace, ws, projects, others, qc, setCurrent, navigate 
           onDone={(target) => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(target); navigate('/') }} />
       )}
       {mode === 'delete' && (
-        <DeleteModal workspace={workspace} ws={ws} projects={projects}
+        <DeleteModal workspace={workspace} ws={ws} projects={projects} others={others}
           onClose={() => setMode(null)}
-          onDone={() => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(''); navigate('/') }} />
+          onDone={(target) => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(target || ''); navigate('/') }} />
       )}
     </section>
   )
@@ -1255,36 +1322,113 @@ function TransferModal({ workspace, projects, others, onClose, onDone }) {
   )
 }
 
-function DeleteModal({ workspace, ws, projects, onClose, onDone }) {
+// DeleteModal handles deleting a workspace. When it still holds projects, it
+// first asks how to proceed — Transfer the projects to another workspace, or
+// Destroy everything (item 7).
+function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) {
+  const hasProjects = projects.length > 0
+  const [step, setStep] = useState(hasProjects ? 'choose' : 'destroy')
+  const [target, setTarget] = useState(others[0]?.key || '')
   const [confirm, setConfirm] = useState('')
   const [err, setErr] = useState('')
-  const mut = useMutation({
+
+  const destroyMut = useMutation({
     mutationFn: () => deleteWorkspaceTier(workspace),
-    onSuccess: onDone,
+    onSuccess: () => onDone(''),
     onError: (e) => setErr(e.response?.data?.error || 'Delete failed'),
   })
-  return (
+  // Transferring ALL projects removes the now-empty source workspace server-side.
+  const transferMut = useMutation({
+    mutationFn: () => transferWorkspace(workspace, target, []),
+    onSuccess: () => onDone(target),
+    onError: (e) => setErr(e.response?.data?.error || 'Transfer failed'),
+  })
+
+  const wrap = (children) => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-danger-border/60 rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-content-strong">Delete workspace “{ws?.name || workspace}”?</h3>
-        <p className="text-sm text-content-muted">
-          This stops and removes <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span> and all their
-          environments, containers, networks and volumes — then deletes the workspace. <span className="text-danger-fg font-medium">This cannot be undone.</span>
-        </p>
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Type <code className="font-mono text-content">{workspace}</code> to confirm</label>
-          <input value={confirm} onChange={e => setConfirm(e.target.value)}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger" />
-        </div>
-        {err && <p className="text-sm text-danger-fg">{err}</p>}
-        <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={confirm !== workspace || mut.isPending}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
-            {mut.isPending ? 'Deleting…' : 'Delete workspace'}
-          </button>
-        </div>
-      </div>
+      <div className="bg-surface border border-danger-border/60 rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>{children}</div>
     </div>
   )
+
+  if (step === 'choose') {
+    return wrap(<>
+      <h3 className="font-semibold text-content-strong">There are active projects in this workspace</h3>
+      <p className="text-sm text-content-muted">
+        “{ws?.name || workspace}” still holds <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span>. How would you like to proceed?
+      </p>
+      <div className="space-y-2 pt-1">
+        <button onClick={() => { setErr(''); setStep('transfer') }}
+          className="w-full text-left p-4 rounded-xl border border-border-strong hover:border-brand-500 hover:bg-surface-raised transition-colors">
+          <p className="text-sm font-semibold text-content-strong">Transfer projects</p>
+          <p className="text-xs text-content-subtle mt-0.5">Move them to another workspace you administer (containers keep running), then delete this one.</p>
+        </button>
+        <button onClick={() => { setErr(''); setStep('destroy') }}
+          className="w-full text-left p-4 rounded-xl border border-danger-border/60 hover:bg-danger-subtle/30 transition-colors">
+          <p className="text-sm font-semibold text-danger-fg">Destroy everything</p>
+          <p className="text-xs text-content-subtle mt-0.5">Permanently stop and remove every project, environment, container, network and volume.</p>
+        </button>
+      </div>
+      <div className="flex justify-end pt-1">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+      </div>
+    </>)
+  }
+
+  if (step === 'transfer') {
+    if (others.length === 0) {
+      return wrap(<>
+        <h3 className="font-semibold text-content-strong">No other workspace available</h3>
+        <p className="text-sm text-content-muted">
+          You don't have access to any other workspace to transfer these projects to. Request access to another workspace
+          (via <span className="text-content">Request access</span> in your account menu) before deleting this one — or choose Destroy to remove everything.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        </div>
+      </>)
+    }
+    return wrap(<>
+      <h3 className="font-semibold text-content-strong">Transfer projects, then delete</h3>
+      <p className="text-sm text-content-muted">All {projects.length} project{projects.length !== 1 ? 's' : ''} move to the chosen workspace; this workspace is removed afterwards. Resource prefixes (and running containers) are unchanged.</p>
+      <div>
+        <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Target workspace</label>
+        <select value={target} onChange={e => setTarget(e.target.value)}
+          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+          {others.map(o => <option key={o.key} value={o.key}>{o.name} ({o.key})</option>)}
+        </select>
+      </div>
+      {err && <p className="text-sm text-danger-fg">{err}</p>}
+      <div className="flex gap-2 justify-end">
+        <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        <button onClick={() => transferMut.mutate()} disabled={!target || transferMut.isPending}
+          className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          {transferMut.isPending ? 'Transferring…' : 'Transfer & delete'}
+        </button>
+      </div>
+    </>)
+  }
+
+  // step === 'destroy'
+  return wrap(<>
+    <h3 className="font-semibold text-content-strong">Delete workspace “{ws?.name || workspace}”?</h3>
+    <p className="text-sm text-content-muted">
+      This stops and removes <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span> and all their
+      environments, containers, networks and volumes — then deletes the workspace. <span className="text-danger-fg font-medium">This cannot be undone.</span>
+    </p>
+    <div>
+      <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Type <code className="font-mono text-content">{workspace}</code> to confirm</label>
+      <input value={confirm} onChange={e => setConfirm(e.target.value)}
+        className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger" />
+    </div>
+    {err && <p className="text-sm text-danger-fg">{err}</p>}
+    <div className="flex gap-2 justify-end">
+      {hasProjects
+        ? <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        : <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>}
+      <button onClick={() => destroyMut.mutate()} disabled={confirm !== workspace || destroyMut.isPending}
+        className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+        {destroyMut.isPending ? 'Deleting…' : 'Delete workspace'}
+      </button>
+    </div>
+  </>)
 }

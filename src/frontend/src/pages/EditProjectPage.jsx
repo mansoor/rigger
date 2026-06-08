@@ -201,7 +201,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
             onClick={async () => {
               if (await confirm({
                 title: 'Remove service?',
-                message: `Remove "${img.name || `Service ${idx + 1}`}" from this workspace? It will be deleted when you save changes.`,
+                message: `Remove "${img.name || `Service ${idx + 1}`}" from this project? It will be deleted when you save changes.`,
                 confirmLabel: 'Remove',
               })) onRemove(idx)
             }}
@@ -486,7 +486,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           onClick={async () => {
             if (await confirm({
               title: 'Remove environment?',
-              message: `Remove the "${envName}" environment from this workspace? When you save, its containers are stopped and removed and its files are deleted. This can't be undone.`,
+              message: `Remove the "${envName}" environment from this project? When you save, its containers are stopped and removed and its files are deleted. This can't be undone.`,
               confirmLabel: 'Remove',
             })) onRemove()
           }}
@@ -1088,23 +1088,33 @@ export default function EditProjectPage() {
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-content mb-3">Project</h2>
           <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-            <div className={`grid gap-4 ${project?.type === 'image' ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <Label>Project name</Label>
-                {/* Editable display label — reusable across workspaces. The Docker
-                    resource prefix (shown below) is the immutable identity. */}
+                {/* Editable display label — reusable across workspaces. The key and
+                    resource prefix (below) are the immutable identity. */}
                 <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
-                <p className="text-xs text-content-subtle mt-1">A display label — can be changed and may repeat across workspaces.</p>
+                <p className="text-xs text-content-subtle mt-1">A display label — editable; may repeat across workspaces.</p>
               </div>
-              {/* Registry only applies to custom (build) stacks — image stacks pull
-                  images directly, so hide it (matches the New Project wizard). */}
-              {project?.type !== 'image' && (
-                <div>
-                  <Label>Registry</Label>
-                  <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+              <div>
+                <Label>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></Label>
+                <div
+                  title="Fixed after creation — the project's folder / URL identity"
+                  className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
+                >
+                  {name}
                 </div>
-              )}
+                <p className="text-xs text-content-subtle mt-1">Folder / URL identity. Cannot change.</p>
+              </div>
             </div>
+            {/* Registry only applies to custom (build) stacks — image stacks pull
+                images directly, so hide it (matches the New Project wizard). */}
+            {project?.type !== 'image' && (
+              <div className="sm:max-w-[50%]">
+                <Label>Registry</Label>
+                <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+              </div>
+            )}
 
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
             <div>
@@ -1188,7 +1198,7 @@ export default function EditProjectPage() {
         {/* After-save hint for new envs */}
         {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
           <div className="bg-warning-subtle/40 border border-warning-border/50 rounded-xl px-4 py-3 text-sm text-warning-fg">
-            After saving, go to the workspace and click <strong>Init</strong> for each new environment to generate its compose file and .env.
+            After saving, go to the project and click <strong>Init</strong> for each new environment to generate its compose file and .env.
           </div>
         )}
 
@@ -1462,7 +1472,7 @@ function MigrateSection({ name }) {
     <section className="mt-8">
       <div className="border border-border rounded-xl overflow-hidden">
         <div className="px-5 py-3 bg-surface/60 border-b border-border">
-          <h2 className="text-sm font-semibold text-content">Move the whole workspace</h2>
+          <h2 className="text-sm font-semibold text-content">Move the whole project</h2>
           <p className="text-xs text-content-subtle mt-0.5">
             {mixed
               ? 'Environments are on different hosts — move them individually above.'
@@ -1542,7 +1552,7 @@ function BackupSection({ workspaceName, envs, updateEnv }) {
         <p className="text-xs text-content-subtle mt-0.5">
           Each environment can have its own schedules — back up specific services more or less often,
           to local or remote storage. Snapshots run on the interval; older ones beyond a schedule's keep
-          count are pruned. Changes are saved with the workspace.
+          count are pruned. Changes are saved with the project.
         </p>
       </div>
       {envNames.map(env => (
@@ -1591,14 +1601,14 @@ function DangerZone({ name }) {
         </div>
         <div className="px-5 py-4 flex items-center justify-between">
           <div>
-            <p className="text-sm text-content">Delete this workspace</p>
+            <p className="text-sm text-content">Delete this project</p>
             <p className="text-xs text-content-subtle mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</p>
           </div>
           <button
             onClick={() => { setOpen(true); setConfirm(''); setError('') }}
             className="ml-6 shrink-0 px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors"
           >
-            Delete workspace
+            Delete project
           </button>
         </div>
       </div>
@@ -1612,7 +1622,7 @@ function DangerZone({ name }) {
               <h3 className="font-semibold text-content-strong">Delete <span className="text-danger-fg">{name}</span>?</h3>
             </div>
             <p className="text-sm text-content-muted">
-              This will permanently delete the workspace directory and all its contents including configs, environment files, and backups.
+              This will permanently delete the project directory and all its contents including configs, environment files, and backups.
               <strong className="text-content block mt-1">This cannot be undone.</strong>
             </p>
             {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}

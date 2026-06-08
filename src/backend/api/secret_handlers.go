@@ -40,7 +40,7 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 	var body struct {
 		Key      string `json:"key"`
 		NewValue string `json:"new_value"`
@@ -168,7 +168,7 @@ func shellRun(wsName, name, env, cmd string, out *bytes.Buffer) shell.RunOptions
 // workspace.Create. A failed Docker-secret creation is returned as a soft warning
 // and the value is left in .env as a fallback (never silently dropped).
 func (h *Handler) seedEnvVars(wsName, name string, env workspace.EnvRequest, claims *auth.Claims, ip string) error {
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 	skip := map[string]bool{}
 	versions := map[string]int{}
 	var warn error

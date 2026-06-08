@@ -106,10 +106,23 @@ func main() {
 	// Self-service (JWT) — resend own verification, update own profile.
 	mux.Handle("POST /api/auth/resend-verification", authSvc.Middleware(http.HandlerFunc(handler.ResendVerification)))
 	mux.Handle("PUT /api/auth/profile", authSvc.Middleware(http.HandlerFunc(handler.UpdateProfile)))
+	// Per-user appearance (W7) — resolves user ?? workspace ?? global default.
+	mux.Handle("GET /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.GetAppearance)))
+	mux.Handle("PUT /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.PutAppearance)))
 
-	// adminOnly gates a handler to global-admin callers (Phase 5 RBAC). Wrapped
-	// inside authSvc.Middleware so claims are present.
-	adminOnly := authSvc.RequireRole(auth.RoleAdmin)
+	// Access requests (roadmap 9): any signed-in user can request access; workspace
+	// admins / super-admins review. All behind auth middleware (claims present);
+	// per-action authorization is enforced inside the handlers.
+	mux.Handle("GET /api/access-requests/targets", authSvc.Middleware(http.HandlerFunc(handler.AccessRequestTargets)))
+	mux.Handle("GET /api/access-requests/mine", authSvc.Middleware(http.HandlerFunc(handler.ListMyAccessRequests)))
+	mux.Handle("GET /api/access-requests", authSvc.Middleware(http.HandlerFunc(handler.ListPendingAccessRequests)))
+	mux.Handle("POST /api/access-requests", authSvc.Middleware(http.HandlerFunc(handler.CreateAccessRequest)))
+	mux.Handle("POST /api/access-requests/{id}/approve", authSvc.Middleware(http.HandlerFunc(handler.DecideAccessRequest)))
+	mux.Handle("POST /api/access-requests/{id}/reject", authSvc.Middleware(http.HandlerFunc(handler.DecideAccessRequest)))
+
+	// adminOnly gates a handler to global super-admin callers (Phase 5 RBAC).
+	// Wrapped inside authSvc.Middleware so claims are present.
+	adminOnly := authSvc.RequireSuperadmin()
 
 	// User management (Phase 5 / roadmap 10a) — admin only.
 	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

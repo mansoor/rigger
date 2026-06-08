@@ -414,7 +414,7 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-content-strong">Select an image workspace</h3>
+          <h3 className="font-semibold text-content-strong">Select an image project</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
         <p className="text-sm text-content-subtle">
@@ -428,7 +428,7 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
         ) : (
           <>
             <div>
-              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Workspace</label>
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Project</label>
               <select value={ws} onChange={e => { setWs(e.target.value); setEnv('') }}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
                 {workspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
@@ -687,7 +687,7 @@ function ComposeToTemplate() {
       <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
         Create a reusable prebuilt template from one of three sources —{' '}
         <strong className="text-content">Convert Docker Compose</strong>, <strong className="text-content">Upload
-        template</strong>, or <strong className="text-content">Select image workspace</strong> — then edit the JSON,
+        template</strong>, or <strong className="text-content">Select image project</strong> — then edit the JSON,
         fill in name / label / description / tags, and <strong className="text-content">Validate</strong> (which also
         checks the name is unique) to unlock <strong className="text-content">Save as template</strong>.
       </div>
@@ -746,7 +746,7 @@ function ComposeToTemplate() {
                   Workspace picker (card title, blurb, tag chips and search). */}
               <div className="space-y-2 rounded-xl border border-border bg-surface/40 p-3">
                 <p className="text-xs font-semibold text-content-muted">
-                  Template details <span className="font-normal text-content-faint">— shown in the New Workspace picker</span>
+                  Template details <span className="font-normal text-content-faint">— shown in the New Project picker</span>
                 </p>
                 <input
                   type="text"
@@ -843,7 +843,7 @@ function ComposeToTemplate() {
               )}
               {saveState === 'saved' && parsed && (
                 <p className="text-xs text-success-fg/70">
-                  Saved to <code className="font-mono">{parsed.name}.json</code> — available immediately in the New Workspace wizard (no rebuild needed).
+                  Saved to <code className="font-mono">{parsed.name}.json</code> — available immediately in the New Project wizard (no rebuild needed).
                 </p>
               )}
         </div>
@@ -1006,11 +1006,12 @@ function WorkspaceBackup() {
   }
 
   async function startBackup() {
-    if (!selectedWs) return
+    if (!currentWs) { setBackupErr('Select a workspace (top-left) first'); return }
+    if (!selectedWs) { setBackupErr('Select a project first'); return }
     setBackupErr(null)
     setActiveJobId(null)
     try {
-      const job = await startWorkspaceBackup(selectedWs, bkpName.trim())
+      const job = await startWorkspaceBackup(currentWs, selectedWs, bkpName.trim())
       setActiveJobId(job.id)
       setBkpName('')
     } catch (e) {
@@ -1061,8 +1062,8 @@ function WorkspaceBackup() {
   // Restore directly from a backup already on the server (overwrites if it exists).
   async function restoreArchive(a) {
     const ok = await confirm({
-      title: `Restore ${a.workspace || 'workspace'}?`,
-      message: `This restores "${a.workspace || 'the workspace'}" from "${a.filename}", including all volume data. If a workspace named "${a.workspace}" already exists it will be REPLACED and its current data lost. Stop its containers first to avoid conflicts.`,
+      title: `Restore ${a.workspace || 'project'}?`,
+      message: `This restores "${a.workspace || 'the project'}" from "${a.filename}", including all volume data. If a project named "${a.workspace}" already exists it will be REPLACED and its current data lost. Stop its containers first to avoid conflicts.`,
       confirmLabel: 'Restore',
     })
     if (!ok) return
@@ -1114,10 +1115,11 @@ function WorkspaceBackup() {
 
   // ── Config snapshot handlers ──
   async function takeSnapshot() {
-    if (!selectedWs) return
+    if (!currentWs) { setSnapMsg({ ok: false, text: 'Select a workspace (top-left) first' }); return }
+    if (!selectedWs) { setSnapMsg({ ok: false, text: 'Select a project first' }); return }
     setSnapBusy(true); setSnapMsg(null)
     try {
-      const snap = await createWorkspaceSnapshot(selectedWs, snapName.trim())
+      const snap = await createWorkspaceSnapshot(currentWs, selectedWs, snapName.trim())
       setSnapMsg({ ok: true, text: `Saved ${snap.filename} (${fmtBytes(snap.size_bytes)}).` })
       setSnapName('')
       refetchSnapshots()
@@ -1130,7 +1132,7 @@ function WorkspaceBackup() {
 
   async function rollbackSnapshot(snap) {
     const ok = await confirm({
-      title: `Roll back ${snap.workspace || 'workspace'} configuration?`,
+      title: `Roll back ${snap.workspace || 'project'} configuration?`,
       message: `This OVERWRITES the current config.json and every .env file for "${snap.workspace}" with the snapshot "${snap.filename}". Any configuration changed since then is lost. If a DB password, API token or other key has changed since this snapshot was taken, you must update it to the new value afterwards and redeploy. Data volumes are NOT touched.`,
       confirmLabel: 'Roll back',
     })
@@ -1138,7 +1140,7 @@ function WorkspaceBackup() {
     setRollingBack(s => ({ ...s, [snap.filename]: true }))
     try {
       const res = await rollbackWorkspaceSnapshot(snap.filename)
-      setSnapMsg({ ok: true, text: `Rolled "${res.workspace}" back to ${snap.filename}. Review secrets in Edit Workspace, then redeploy.` })
+      setSnapMsg({ ok: true, text: `Rolled "${res.workspace}" back to ${snap.filename}. Review secrets in Edit Project, then redeploy.` })
       qc.invalidateQueries({ queryKey: ['workspace', res.workspace] })
     } catch (e) {
       setSnapMsg({ ok: false, text: e?.response?.data?.error || e.message })
@@ -1206,15 +1208,15 @@ function WorkspaceBackup() {
         and restored on the server.
       </div>
 
-      {/* Shared workspace selector */}
+      {/* Shared project selector */}
       <div className="bg-surface border border-border rounded-xl p-4">
-        <label className="block text-xs font-medium text-content-muted mb-1.5">Workspace</label>
+        <label className="block text-xs font-medium text-content-muted mb-1.5">Project</label>
         <select
           value={selectedWs}
           onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBkpMsg(null); setBackupErr(null); setActiveJobId(null) }}
           className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
         >
-          <option value="">— select workspace —</option>
+          <option value="">— select project —</option>
           {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
         </select>
         <p className="text-xs text-content-faint mt-2">Applies to both <strong className="text-content-subtle">Take snapshot</strong> and <strong className="text-content-subtle">Start backup</strong> below.</p>
@@ -1240,7 +1242,7 @@ function WorkspaceBackup() {
               <input
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
-                placeholder={selectedWs ? `${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<timestamp>.rws'}
+                placeholder={selectedWs ? `${selectedWs}_<timestamp>.rws` : 'auto: <project>_<timestamp>.rws'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1257,7 +1259,7 @@ function WorkspaceBackup() {
                 <div className="space-y-2">
                   {snapshots.map(s => (
                     <FileRow key={s.filename} title={s.filename}
-                      meta={<>{s.workspace ? <span className="text-content-subtle">{s.workspace}</span> : 'unknown workspace'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}</>}>
+                      meta={<>{s.workspace ? <span className="text-content-subtle">{s.workspace}{s.project ? ` / ${s.project}` : ''}</span> : 'unknown project'} · {fmtDate(s.created_at)} · {fmtBytes(s.size_bytes)}</>}>
                       <button onClick={() => rollbackSnapshot(s)} disabled={rollingBack[s.filename]} className={ROW_BTN_PRIMARY}>
                         {rollingBack[s.filename] ? '…' : 'Roll back'}
                       </button>
@@ -1280,7 +1282,7 @@ function WorkspaceBackup() {
           <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Rolling back configuration</p>
             <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
-              <li>Click <strong className="text-content-muted">Roll back</strong> on a snapshot to overwrite the workspace's <code className="font-mono text-content-muted">config.json</code> and every <code className="font-mono text-content-muted">.env</code></li>
+              <li>Click <strong className="text-content-muted">Roll back</strong> on a snapshot to overwrite the project's <code className="font-mono text-content-muted">config.json</code> and every <code className="font-mono text-content-muted">.env</code></li>
               <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-content-muted">.rws</code> above — it joins the list, then roll back to it</li>
               <li>If a secret (DB password, API key…) changed since the snapshot, update it afterward and redeploy</li>
               <li>Volume data is never touched — use a full backup for that</li>
@@ -1306,7 +1308,7 @@ function WorkspaceBackup() {
               <input
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
-                placeholder={selectedWs ? `${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>-<timestamp>.rwb'}
+                placeholder={selectedWs ? `${selectedWs}-<timestamp>.rwb` : 'auto: <project>-<timestamp>.rwb'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1358,7 +1360,7 @@ function WorkspaceBackup() {
                   {archives.map(a => (
                     <FileRow key={a.filename} title={a.filename}
                       meta={<>
-                        {a.workspace ? <span className="text-content-subtle">{a.workspace}</span> : 'unknown workspace'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}
+                        {a.workspace ? <span className="text-content-subtle">{a.workspace}{a.project ? ` / ${a.project}` : ''}</span> : 'unknown project'} · {fmtDate(a.created_at)} · {fmtBytes(a.size_bytes)}
                         {a.sync?.status === 'ok' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg border border-success-border/60" title={`Synced to ${a.sync.target}`}>↑ {a.sync.target}</span>}
                         {a.sync?.status === 'fail' && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-danger-subtle text-danger-fg border border-danger-border/60" title="Last sync failed">↑!</span>}
                       </>}>
@@ -1389,10 +1391,10 @@ function WorkspaceBackup() {
           <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Restoring a full backup</p>
             <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
-              <li>Stop the workspace's containers if it already exists</li>
+              <li>Stop the project's containers if it already exists</li>
               <li>To use a backup from elsewhere, drop the <code className="font-mono text-content-muted">.rwb</code> above — it joins the list</li>
-              <li>Click <strong className="text-content-muted">Restore</strong> on a backup row (an existing workspace is replaced)</li>
-              <li>The workspace appears in the sidebar immediately</li>
+              <li>Click <strong className="text-content-muted">Restore</strong> on a backup row (an existing project is replaced)</li>
+              <li>The project appears in the sidebar immediately</li>
               <li>Run <code className="font-mono text-content-muted">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>
             </ol>
           </div>
@@ -1407,8 +1409,8 @@ function WorkspaceBackup() {
 const TOOLS = [
   {
     id: 'workspace-backup',
-    label: 'Workspace Manager',
-    description: 'Snapshot or roll back workspace configuration, and create/restore full workspace backups (config + data).',
+    label: 'Project Tools',
+    description: 'Snapshot or roll back project configuration, and create/restore full project backups (config + data).',
     component: WorkspaceBackup,
   },
   {
@@ -1428,7 +1430,7 @@ export default function ToolsPage() {
       <div className="p-6 max-w-[1400px] mx-auto">
         <div className="mb-6">
           <h1 className="text-xl font-bold text-content-strong">Tools</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Utilities for working with Rigger workspaces and templates.</p>
+          <p className="text-sm text-content-subtle mt-0.5">Utilities for working with Rigger projects and templates.</p>
         </div>
 
         {/* Tool tabs */}

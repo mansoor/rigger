@@ -18,23 +18,56 @@ var (
 	ErrUserExists         = errors.New("username already exists")
 )
 
-// Built-in global roles (Phase 5 RBAC). Ordered by privilege.
+// Roles split into two independent systems (Phase 5 RBAC, reworked):
+//
+//   Global role (users.role, JWT claim) — superadmin | user.
+//     superadmin: full control everywhere, manages users + global settings.
+//     user:       a plain account whose access comes entirely from workspace
+//                 membership (workspace_members / project_acl).
+//
+//   Workspace-tier ladder (workspace_members.role, project_acl.role,
+//   EffectiveRole) — ordered by privilege:
+//     viewer    — read-only
+//     developer — Env Card actions (deploy/restart/stop/start, env vars, containers)
+//     operator  — developer + edit project config/compose
+//     admin      — operator + manage members, workspace settings, resources,
+//                  create/delete projects, rename/delete the workspace
 const (
-	RoleViewer   = "viewer"
-	RoleOperator = "operator"
-	RoleAdmin    = "admin"
+	// Global roles.
+	RoleSuperadmin = "superadmin"
+	RoleUser       = "user"
+
+	// Workspace-tier roles.
+	RoleViewer    = "viewer"
+	RoleDeveloper = "developer"
+	RoleOperator  = "operator"
+	RoleAdmin     = "admin"
 )
 
-var roleRank = map[string]int{RoleViewer: 1, RoleOperator: 2, RoleAdmin: 3}
+// roleRank ranks ONLY the workspace-tier ladder. Global roles are not ranked
+// here — superadmin is handled explicitly in AtLeast and IsSuperadmin.
+var roleRank = map[string]int{RoleViewer: 1, RoleDeveloper: 2, RoleOperator: 3, RoleAdmin: 4}
 
-// ValidRole reports whether s is a known built-in role.
+// ValidRole reports whether s is a known workspace-tier role.
 func ValidRole(s string) bool { _, ok := roleRank[s]; return ok }
+
+// ValidGlobalRole reports whether s is a known global role.
+func ValidGlobalRole(s string) bool { return s == RoleSuperadmin || s == RoleUser }
+
+// IsSuperadmin reports whether a global role is the super-admin.
+func IsSuperadmin(globalRole string) bool { return globalRole == RoleSuperadmin }
 
 // RankRole returns a role's privilege level (higher = more); 0 if unknown.
 func RankRole(s string) int { return roleRank[s] }
 
-// AtLeast reports whether have is at least as privileged as want.
-func AtLeast(have, want string) bool { return roleRank[have] >= roleRank[want] }
+// AtLeast reports whether have is at least as privileged as want on the
+// workspace ladder. A super-admin satisfies any requirement.
+func AtLeast(have, want string) bool {
+	if have == RoleSuperadmin {
+		return true
+	}
+	return roleRank[have] >= roleRank[want]
+}
 
 type User struct {
 	ID       int64
@@ -290,14 +323,15 @@ func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
 	return claims, nil
 }
 
-// RequireRole returns middleware (to wrap inside Middleware, which populates the
-// claims) that allows the request only if the caller's global role is at least
-// minRole. Returns 403 otherwise. Used to gate global/admin-only surfaces.
-func (s *Service) RequireRole(minRole string) func(http.Handler) http.Handler {
+// RequireSuperadmin returns middleware (to wrap inside Middleware, which
+// populates the claims) that allows the request only for a global super-admin.
+// Returns 403 otherwise. Used to gate global-only surfaces (users, global
+// settings, hosts pool, housekeeping).
+func (s *Service) RequireSuperadmin() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := ClaimsFromContext(r.Context())
-			if claims == nil || !AtLeast(claims.Role, minRole) {
+			if claims == nil || !IsSuperadmin(claims.Role) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

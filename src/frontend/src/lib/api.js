@@ -141,8 +141,8 @@ export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 
 // ── Workspace backup / restore ────────────────────────────────────────────────
-export const startWorkspaceBackup    = (workspace, name) =>
-  api.post('/tools/workspace-backup', { workspace, name }).then(r => r.data)
+export const startWorkspaceBackup    = (workspace, project, name) =>
+  api.post('/tools/workspace-backup', { workspace, project, name }).then(r => r.data)
 export const getBackupJob            = (id) =>
   api.get(`/tools/backup-jobs/${id}`).then(r => r.data)
 export const listWorkspaceArchives   = () =>
@@ -162,8 +162,8 @@ export const uploadWorkspaceArchive = (formData) =>
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data)
 // ── Workspace configuration snapshots (.rws — config only, no data) ──
-export const createWorkspaceSnapshot = (workspace, name) =>
-  api.post('/tools/workspace-snapshots', { workspace, name }).then(r => r.data)
+export const createWorkspaceSnapshot = (workspace, project, name) =>
+  api.post('/tools/workspace-snapshots', { workspace, project, name }).then(r => r.data)
 export const fetchWorkspaceSnapshots = () =>
   api.get('/tools/workspace-snapshots').then(r => r.data)
 export const deleteWorkspaceSnapshot = (filename) =>
@@ -214,6 +214,14 @@ export const updateUser   = (id, body) => api.put(`/users/${id}`, body).then(r =
 export const deleteUser   = (id)       => api.delete(`/users/${id}`)
 export const resendInvite = (id)       => api.post(`/users/${id}/resend-invite`).then(r => r.data)
 
+// Access requests (roadmap 9).
+export const fetchAccessTargets        = ()     => api.get('/access-requests/targets').then(r => r.data)
+export const createAccessRequest       = (body) => api.post('/access-requests', body).then(r => r.data)
+export const fetchMyAccessRequests     = ()     => api.get('/access-requests/mine').then(r => r.data)
+export const fetchPendingAccessRequests = ()    => api.get('/access-requests').then(r => r.data)
+export const approveAccessRequest      = (id)   => api.post(`/access-requests/${id}/approve`).then(r => r.data)
+export const rejectAccessRequest       = (id)   => api.post(`/access-requests/${id}/reject`).then(r => r.data)
+
 // Invite registration + email verification + profile (Phase 5.1b).
 export const fetchRegisterInfo   = (token)       => api.get('/register/info', { params: { token } }).then(r => r.data)
 export const completeRegistration = (body)       => api.post('/register/complete', body).then(r => r.data)
@@ -228,15 +236,22 @@ export const updateSystemEmail = (body) => api.put('/settings/system-email', bod
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
 
-// Appearance prefs are persisted as a JSON blob under the general-settings
-// `appearance_prefs` key (cross-device sync; localStorage is the local cache).
-export const fetchAppearancePrefs = () =>
-  api.get('/settings/general').then(r => {
+// Appearance prefs (W7): per-user, resolved server-side as
+// user-override ?? workspace-default ?? global-default. localStorage is the
+// local cache for instant/no-FOUC paint. `ws` scopes the workspace-default layer.
+export const fetchAppearancePrefs = (ws) =>
+  api.get('/auth/appearance', { params: ws ? { ws } : {} }).then(r => {
     try { return r.data?.appearance_prefs ? JSON.parse(r.data.appearance_prefs) : null }
     catch { return null }
   })
 export const saveAppearancePrefs = (prefs) =>
-  api.put('/settings/general', { appearance_prefs: JSON.stringify(prefs) }).then(r => r.data)
+  api.put('/auth/appearance', { appearance_prefs: JSON.stringify(prefs) }).then(r => r.data)
+// Workspace default appearance (admins) — stored in workspace settings.
+export const saveWorkspaceAppearance = (ws, prefs) =>
+  api.put(`/workspaces/${ws}/settings`, { appearance_prefs: prefs ? JSON.stringify(prefs) : '' }).then(r => r.data)
+// Global default appearance (super-admin) — stored in general settings.
+export const saveGlobalAppearance = (prefs) =>
+  api.put('/settings/general', { appearance_prefs: prefs ? JSON.stringify(prefs) : '' }).then(r => r.data)
 
 // ── Settings: Backup Targets ──────────────────────────────────────────────────
 

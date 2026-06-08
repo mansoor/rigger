@@ -30,9 +30,12 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Email    string `json:"email"`
-		Role     string `json:"role"`
-		Username string `json:"username"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`     // global role: user | superadmin
+		Username  string `json:"username"`
+		Workspace string `json:"workspace"` // optional: grant access to this workspace on invite
+		Project   string `json:"project"`   // optional: limit access to this one project
+		WsRole    string `json:"ws_role"`   // workspace-tier role for the grant (default viewer)
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -42,6 +45,27 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, userErrStatus(err), map[string]string{"error": err.Error()})
 		return
+	}
+	// Optionally grant workspace (and per-project) access immediately, so the user
+	// has somewhere to land the moment they finish registering. Super-admins don't
+	// need a grant (they see everything).
+	if body.Workspace != "" && !auth.IsSuperadmin(u.Role) {
+		wsRole := body.WsRole
+		if wsRole == "" {
+			wsRole = auth.RoleViewer
+		}
+		var grantErr error
+		if body.Project != "" {
+			// Project-scoped: a per-project grant only (the workspace becomes visible
+			// via that grant, but the other projects stay hidden).
+			grantErr = h.auth.SetProjectOverride(body.Workspace, body.Project, u.ID, wsRole)
+		} else {
+			grantErr = h.auth.SetWorkspaceMember(body.Workspace, u.ID, wsRole)
+		}
+		if grantErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invited, but failed to grant access: " + grantErr.Error()})
+			return
+		}
 	}
 	resp := map[string]any{"user": u}
 	link := h.baseURL(r) + "/register?token=" + raw

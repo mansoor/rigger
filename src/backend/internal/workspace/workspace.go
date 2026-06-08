@@ -163,6 +163,7 @@ type Workspace struct {
 	HostName string                `json:"host_name,omitempty"`
 	EnvHosts map[string]EnvHostRef `json:"env_hosts,omitempty"` // env name → host
 	MyRole   string                `json:"my_role,omitempty"`   // caller's effective role (Phase 5.2b); set by the API layer
+	AppHost  string                `json:"app_host,omitempty"`  // configured host/IP for direct service links (local envs); set by the API layer
 }
 
 // EnvHostRef is the host an environment runs on (omitted ⇒ local).
@@ -260,7 +261,8 @@ func List(workspacesDir string) ([]Workspace, error) {
 	}
 	projects := []Workspace{} // never nil — encodes as [] not null
 	for _, w := range wss {
-		ps, _ := ListProjects(workspacesDir, w.Name)
+		// Folder identity is the workspace KEY, not the (renameable) display name.
+		ps, _ := ListProjects(workspacesDir, w.Key)
 		projects = append(projects, ps...)
 	}
 	return projects, nil

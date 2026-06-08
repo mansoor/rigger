@@ -41,10 +41,10 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <img
             src="/rigger-logo.png"
-            alt="Rigger — Rig once. Deploy anywhere"
+            alt="With Rigger — More Dev, Less Ops."
             className="w-36 h-36 mx-auto drop-shadow-[0_0_24px_rgba(99,102,241,0.4)]"
           />
-          <p className="text-content-muted text-sm mt-5">Rig once. Deploy anywhere</p>
+          <p className="text-content-muted text-sm mt-5">With Rigger — More Dev, Less Ops.</p>
         </div>
 
         <div className="bg-surface border border-border rounded-xl p-8">

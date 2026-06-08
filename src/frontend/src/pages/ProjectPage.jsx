@@ -87,8 +87,10 @@ function StatusBadge({ label, color }) {
 // Uses ws.env_access (server-resolved values) so ${VAR} references are already substituted.
 function envAccess(cfg, ws, envName) {
   // For an env running on a remote host, direct host:port URLs must point at the
-  // remote host's address, not the control plane's.
-  const host    = ws?.env_hosts?.[envName]?.host_address || window.location.hostname
+  // remote host's address. For local envs, prefer the configured app host/IP
+  // (Admin → General) so links still work when the dashboard is reached via a
+  // proxy domain; only then fall back to the browser's hostname.
+  const host    = ws?.env_hosts?.[envName]?.host_address || ws?.app_host || window.location.hostname
   const traefik = !!cfg?.traefik_enabled
   const ssl     = !!cfg?.ssl_enabled
   const isImage = ws?.config?.project?.type === 'image'
@@ -313,8 +315,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const gitBranch  = cfg?.git?.branch || ''
   const deployment = cfg?.deployment || 'compose'
   const isImage    = ws?.config?.project?.type === 'image'
-  // Phase 5.2b: operators+ can run env actions; viewers get a read-only card.
-  const canOp      = ['admin', 'operator'].includes(ws?.my_role)
+  // Role gating: developers+ can run Env Card actions; viewers get a read-only card.
+  const canOp      = ['admin', 'operator', 'developer'].includes(ws?.my_role)
   const { url, port, links, viaTraefik, domainUrl } = envAccess(cfg, ws, envName)
 
   // Poll container status every 15 seconds, refresh immediately after actions
@@ -1816,9 +1818,10 @@ export default function ProjectPage() {
     queryKey: ['workspace', workspace, name],
     queryFn: () => fetchWorkspace(workspace, name),
   })
-  // Phase 5.2b role gating: operators+ run actions; admins also edit the project.
-  const canOp    = ['admin', 'operator'].includes(ws?.my_role)
-  const canAdmin = ws?.my_role === 'admin'
+  // Role gating: developers+ run Env Card actions; operators+ edit project config;
+  // admins manage the workspace.
+  const canOp    = ['admin', 'operator', 'developer'].includes(ws?.my_role)
+  const canEdit  = ['admin', 'operator'].includes(ws?.my_role)
 
   function runAction(cmd, env, onComplete, extra = [], services = []) {
     const socket = openActionSocket(workspace, name, cmd, env, extra, services)
@@ -1828,7 +1831,21 @@ export default function ProjectPage() {
   }
 
   if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
-  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load project: {error.message}</div></Layout>
+  if (error) {
+    const status = error.response?.status
+    if (status === 403) {
+      return <Layout>
+        <div className="h-full flex items-center justify-center p-8">
+          <div className="max-w-md text-center">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-surface-raised border border-border flex items-center justify-center text-2xl mb-4">🔒</div>
+            <h1 className="text-lg font-semibold text-content-strong">No access to this project</h1>
+            <p className="text-sm text-content-muted mt-2">You don't have permission to view <strong className="text-content">{name}</strong>. Contact a workspace admin if you need access.</p>
+          </div>
+        </div>
+      </Layout>
+    }
+    return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load project: {error.message}</div></Layout>
+  }
 
   const cfg = ws?.config
   const envs = ws?.envs || []
@@ -1869,7 +1886,7 @@ export default function ProjectPage() {
 
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {canAdmin && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
+            {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
             {canOp && type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
           </div>
         </div>

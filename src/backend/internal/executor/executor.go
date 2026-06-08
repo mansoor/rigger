@@ -6,18 +6,31 @@
 package executor
 
 import (
+	"context"
 	"io"
 	"os/exec"
+	"time"
 )
 
 // Spec describes one docker invocation. Args are the arguments after "docker".
 type Spec struct {
-	Args   []string
-	Dir    string // working directory (e.g. the env dir so `compose` reads ./.env)
-	Env    []string
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	Args    []string
+	Dir     string // working directory (e.g. the env dir so `compose` reads ./.env)
+	Env     []string
+	Stdin   io.Reader
+	Stdout  io.Writer
+	Stderr  io.Writer
+	Timeout time.Duration // when >0, the command is killed if it runs longer (e.g. a hung `docker stats`)
+}
+
+// newCmd builds the exec.Cmd, applying Spec.Timeout via a context when set. The
+// returned cancel must be called by the caller (deferred) to release resources.
+func newCmd(s Spec) (*exec.Cmd, context.CancelFunc) {
+	if s.Timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), s.Timeout)
+		return exec.CommandContext(ctx, "docker", s.Args...), cancel //nolint:gosec
+	}
+	return exec.Command("docker", s.Args...), func() {} //nolint:gosec
 }
 
 // Executor runs docker commands. Docker streams via Stdin/Stdout/Stderr;
@@ -32,7 +45,8 @@ type Executor interface {
 type Local struct{}
 
 func (Local) Docker(s Spec) error {
-	cmd := exec.Command("docker", s.Args...) //nolint:gosec // args built from allowlisted commands
+	cmd, cancel := newCmd(s)
+	defer cancel()
 	cmd.Dir = s.Dir
 	if s.Env != nil {
 		cmd.Env = s.Env
@@ -44,7 +58,8 @@ func (Local) Docker(s Spec) error {
 }
 
 func (Local) DockerOutput(s Spec) ([]byte, error) {
-	cmd := exec.Command("docker", s.Args...) //nolint:gosec
+	cmd, cancel := newCmd(s)
+	defer cancel()
 	cmd.Dir = s.Dir
 	if s.Env != nil {
 		cmd.Env = s.Env

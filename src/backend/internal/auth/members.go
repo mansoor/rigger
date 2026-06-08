@@ -14,7 +14,7 @@ const RoleNone = "none" // project-level override meaning "no access to this pro
 
 var ErrInvalidMemberRole = errors.New("invalid role")
 
-func validMemberRole(r string) bool { return ValidRole(r) }            // viewer/operator/admin
+func validMemberRole(r string) bool { return ValidRole(r) }            // viewer/developer/operator/admin
 func validOverrideRole(r string) bool { return ValidRole(r) || r == RoleNone }
 
 // ProjectOverride is one per-project role override for a member.
@@ -78,13 +78,13 @@ func (s *Service) ListWorkspaceMembers(wsKey string) ([]Member, error) {
 }
 
 // MemberCandidates lists active users who can be added to a workspace: not global
-// admins (they already have access) and not already members. Lets a workspace admin
-// pick members without needing the admin-only user list.
+// super-admins (they already have access) and not already members. Lets a
+// workspace admin pick members without needing the global user list.
 func (s *Service) MemberCandidates(wsKey string) ([]UserInfo, error) {
 	rows, err := s.db.Query(`SELECT `+userCols+` FROM users
 		WHERE status='active' AND role <> ?
 		  AND id NOT IN (SELECT user_id FROM workspace_members WHERE ws_key=?)
-		ORDER BY email, username`, RoleAdmin, wsKey)
+		ORDER BY email, username`, RoleSuperadmin, wsKey)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func (s *Service) RemoveProjectOverride(wsKey, projKey string, userID int64) err
 // EffectiveRole resolves a user's role for a workspace (and optional project).
 // Returns "" when the user has no access. Global admins are super-admins everywhere.
 func (s *Service) EffectiveRole(userID int64, globalRole, wsKey, projKey string) string {
-	if globalRole == RoleAdmin {
+	if IsSuperadmin(globalRole) {
 		return RoleAdmin
 	}
 	if projKey != "" {
@@ -161,6 +161,45 @@ func (s *Service) EffectiveRole(userID int64, globalRole, wsKey, projKey string)
 		return ""
 	}
 	return r
+}
+
+// WorkspaceVisible reports whether a user can see a workspace at all — either a
+// super-admin, a workspace member, or someone with at least one per-project grant
+// (override role other than 'none'). This lets a project-only grant surface the
+// parent workspace (with just that project visible) without making the user a
+// member of the whole workspace.
+func (s *Service) WorkspaceVisible(userID int64, globalRole, wsKey string) bool {
+	if IsSuperadmin(globalRole) {
+		return true
+	}
+	var n int
+	s.db.QueryRow(`SELECT COUNT(1) FROM workspace_members WHERE user_id=? AND ws_key=?`, userID, wsKey).Scan(&n) //nolint:errcheck
+	if n > 0 {
+		return true
+	}
+	s.db.QueryRow(`SELECT COUNT(1) FROM project_acl WHERE user_id=? AND ws_key=? AND role<>?`, userID, wsKey, RoleNone).Scan(&n) //nolint:errcheck
+	return n > 0
+}
+
+// VisibleWorkspaceKeys returns the workspace keys a user can see — membership
+// keys plus any keys where they hold a per-project grant.
+func (s *Service) VisibleWorkspaceKeys(userID int64) (map[string]bool, error) {
+	out, err := s.MemberWorkspaceKeys(userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT ws_key FROM project_acl WHERE user_id=? AND role<>?`, userID, RoleNone)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err == nil {
+			out[k] = true
+		}
+	}
+	return out, rows.Err()
 }
 
 // MemberWorkspaceKeys returns the workspace keys a user is a member of (for the

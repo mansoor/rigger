@@ -23,7 +23,7 @@ const (
 
 var (
 	ErrInvalidRole  = errors.New("invalid role")
-	ErrLastAdmin    = errors.New("cannot remove the last admin")
+	ErrLastAdmin    = errors.New("cannot remove the last super-admin")
 	ErrUserNotFound = errors.New("user not found")
 	ErrInvalidEmail = errors.New("a valid email address is required")
 	ErrEmailTaken   = errors.New("a user with that email already exists")
@@ -109,7 +109,7 @@ func (s *Service) SetupAdmin(email, username, password string) (int64, error) {
 	}
 	res, err := s.db.Exec(
 		`INSERT INTO users (username, email, password, role, status, email_verified) VALUES (?, ?, ?, ?, 'active', 0)`,
-		username, email, string(hash), RoleAdmin,
+		username, email, string(hash), RoleSuperadmin,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -122,13 +122,17 @@ func (s *Service) SetupAdmin(email, username, password string) (int64, error) {
 }
 
 // InviteUser creates an invited (password-less) account and returns the raw invite
-// token for the registration link.
+// token for the registration link. role is the GLOBAL role (superadmin|user);
+// empty defaults to a plain user whose access comes from workspace membership.
 func (s *Service) InviteUser(email, role, username string) (*UserInfo, string, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if !validEmail(email) {
 		return nil, "", ErrInvalidEmail
 	}
-	if !ValidRole(role) {
+	if role == "" {
+		role = RoleUser
+	}
+	if !ValidGlobalRole(role) {
 		return nil, "", ErrInvalidRole
 	}
 	if username == "" {
@@ -255,15 +259,15 @@ func (s *Service) UpdateProfile(id int64, email, phone, username string) (u *Use
 // UpdateUser changes a user's role and, if newPassword is non-empty, resets their
 // password (admin action). Demoting the last admin is rejected.
 func (s *Service) UpdateUser(id int64, role, newPassword string) (*UserInfo, error) {
-	if !ValidRole(role) {
+	if !ValidGlobalRole(role) {
 		return nil, ErrInvalidRole
 	}
 	cur, err := s.getUserByID(id)
 	if err != nil {
 		return nil, err
 	}
-	if cur.Role == RoleAdmin && role != RoleAdmin {
-		if n, _ := s.countAdmins(); n <= 1 {
+	if cur.Role == RoleSuperadmin && role != RoleSuperadmin {
+		if n, _ := s.countSuperadmins(); n <= 1 {
 			return nil, ErrLastAdmin
 		}
 	}
@@ -288,8 +292,8 @@ func (s *Service) DeleteUser(id int64) error {
 	if err != nil {
 		return err
 	}
-	if cur.Role == RoleAdmin {
-		if n, _ := s.countAdmins(); n <= 1 {
+	if cur.Role == RoleSuperadmin {
+		if n, _ := s.countSuperadmins(); n <= 1 {
 			return ErrLastAdmin
 		}
 	}
@@ -301,10 +305,27 @@ func (s *Service) DeleteUser(id int64) error {
 	return err
 }
 
-func (s *Service) countAdmins() (int, error) {
+func (s *Service) countSuperadmins() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(1) FROM users WHERE role=? AND status='active'`, RoleAdmin).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM users WHERE role=? AND status='active'`, RoleSuperadmin).Scan(&n)
 	return n, err
+}
+
+// GetAppearance returns a user's own appearance prefs JSON ("" = not set / inherit).
+func (s *Service) GetAppearance(id int64) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT appearance_prefs FROM users WHERE id=?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	return v, err
+}
+
+// SetAppearance stores a user's own appearance prefs ("" clears it, so they fall
+// back to the workspace/global default).
+func (s *Service) SetAppearance(id int64, prefs string) error {
+	_, err := s.db.Exec(`UPDATE users SET appearance_prefs=? WHERE id=?`, prefs, id)
+	return err
 }
 
 func (s *Service) touchLastLogin(id int64) {

@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -16,7 +17,20 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/settings"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
+
+// riggerBackupManifest is the file embedded at the root of a .rwb archive that
+// records the (workspace, project) identity so a restore can rebuild the nested
+// path workspaces/{workspace}/projects/{project}. Archives without it are
+// treated as legacy flat backups.
+const riggerBackupManifest = "rigger-backup.json"
+
+type archiveMeta struct {
+	Workspace string    `json:"workspace"`
+	Project   string    `json:"project"`
+	CreatedAt time.Time `json:"created_at"`
+}
 
 // archiveNameSanitizer maps any character outside the safe set to "-".
 var archiveNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -26,6 +40,7 @@ var archiveNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 type BackupJob struct {
 	ID        string     `json:"id"`
 	Workspace string     `json:"workspace"`
+	Project   string     `json:"project,omitempty"`
 	Status    string     `json:"status"` // running | completed | failed
 	Error     string     `json:"error,omitempty"`
 	Archive   string     `json:"archive,omitempty"` // basename of archive file when done
@@ -41,9 +56,9 @@ type JobStore struct {
 
 func newJobStore() *JobStore { return &JobStore{jobs: make(map[string]*BackupJob)} }
 
-func (s *JobStore) create(ws string) *BackupJob {
+func (s *JobStore) create(ws, project string) *BackupJob {
 	id := fmt.Sprintf("%d", time.Now().UnixNano())
-	job := &BackupJob{ID: id, Workspace: ws, Status: "running", StartedAt: time.Now()}
+	job := &BackupJob{ID: id, Workspace: ws, Project: project, Status: "running", StartedAt: time.Now()}
 	s.mu.Lock()
 	s.jobs[id] = job
 	s.mu.Unlock()
@@ -137,7 +152,11 @@ func archiveExcluded(rel string, keep map[string]string) bool {
 	return false
 }
 
-func createArchive(wsDir, wsName, destPath string) (int64, error) {
+// createArchive writes a .rwb for one project. projDir is the on-disk project
+// directory (workspaces/{ws}/projects/{proj}); ws/project identify it. Content is
+// tarred under "{ws}/projects/{proj}/…" and a rigger-backup.json manifest is
+// embedded at the root so a restore can rebuild the exact nested path.
+func createArchive(projDir, ws, project, destPath string) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return 0, err
 	}
@@ -150,13 +169,20 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 	gw := gzip.NewWriter(f)
 	tw := tar.NewWriter(gw)
 
-	keep := newestSnapshotPerEnv(wsDir)
+	// Manifest first so it's cheap to read back when listing/validating.
+	meta, _ := json.Marshal(archiveMeta{Workspace: ws, Project: project, CreatedAt: time.Now()})
+	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: riggerBackupManifest, Size: int64(len(meta)), Mode: 0o644, ModTime: time.Now()}); err == nil {
+		tw.Write(meta) //nolint:errcheck
+	}
 
-	err = filepath.Walk(wsDir, func(path string, info os.FileInfo, err error) error {
+	root := ws + "/projects/" + project
+	keep := newestSnapshotPerEnv(projDir)
+
+	err = filepath.Walk(projDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip unreadable files silently
 		}
-		rel, _ := filepath.Rel(wsDir, path)
+		rel, _ := filepath.Rel(projDir, path)
 		if rel == "." {
 			return nil
 		}
@@ -167,8 +193,8 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 			return nil
 		}
 
-		// Build tar header path: wsName/rel
-		tarPath := wsName + "/" + filepath.ToSlash(rel)
+		// Build tar header path: {ws}/projects/{proj}/rel
+		tarPath := root + "/" + filepath.ToSlash(rel)
 
 		if info.IsDir() {
 			return tw.WriteHeader(&tar.Header{
@@ -218,23 +244,24 @@ func createArchive(wsDir, wsName, destPath string) (int64, error) {
 func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Workspace string `json:"workspace"`
+		Project   string `json:"project"`
 		Name      string `json:"name"` // optional custom backup filename
 	}
-	if err := readJSON(r, &body); err != nil || body.Workspace == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace required"})
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Workspace) == "" || strings.TrimSpace(body.Project) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace and project are required"})
 		return
 	}
 
-	wsDir := filepath.Join(h.workspacesDir, body.Workspace)
-	if _, err := os.Stat(wsDir); os.IsNotExist(err) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+	projDir := wspath.ProjectDir(h.workspacesDir, body.Workspace, body.Project)
+	if _, err := os.Stat(filepath.Join(projDir, "config.json")); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
-	job := h.jobs.create(body.Workspace)
+	job := h.jobs.create(body.Workspace, body.Project)
 
 	// Resolve the archive filename: a custom name (sanitised, .rwb-suffixed,
-	// collision-safe) or the default "<workspace>-<timestamp>.rwb".
+	// collision-safe) or the default "<ws>_<proj>-<timestamp>.rwb".
 	dir := archivesDir(h.dataDir)
 	archiveName := strings.TrimSpace(body.Name)
 	if archiveName != "" {
@@ -245,14 +272,14 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 		archiveName = uniqueArchiveName(dir, archiveName)
 	} else {
 		ts := job.StartedAt.UTC().Format("20060102-150405")
-		archiveName = fmt.Sprintf("%s-%s%s", body.Workspace, ts, archiveExt)
+		archiveName = fmt.Sprintf("%s_%s-%s%s", body.Workspace, body.Project, ts, archiveExt)
 	}
 
 	// Run backup asynchronously
 	go func() {
 		destPath := filepath.Join(dir, archiveName)
 
-		size, err := createArchive(wsDir, body.Workspace, destPath)
+		size, err := createArchive(projDir, body.Workspace, body.Project, destPath)
 		now := time.Now()
 		if err != nil {
 			h.jobs.update(job.ID, func(j *BackupJob) {
@@ -272,7 +299,7 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 		// Auto-upload to the workspace's first configured remote target (11a). The
 		// outcome (ok/fail) is recorded in archive_syncs for the UI badge; we
 		// only log on failure for operability.
-		if tid := h.firstScheduleTarget("", body.Workspace, ""); tid != nil {
+		if tid := h.firstScheduleTarget(body.Workspace, body.Project, ""); tid != nil {
 			if target, err := settings.GetBackupTarget(h.db, *tid); err == nil && target != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 				if _, ae := h.uploadArchive(ctx, archiveName, target); ae != nil {
@@ -302,9 +329,38 @@ func (h *Handler) GetBackupJob(w http.ResponseWriter, r *http.Request) {
 type ArchiveInfo struct {
 	Filename  string     `json:"filename"`
 	Workspace string     `json:"workspace"`
+	Project   string     `json:"project,omitempty"`
 	CreatedAt time.Time  `json:"created_at"`
 	SizeBytes int64      `json:"size_bytes"`
 	Sync      *syncState `json:"sync,omitempty"` // 11a: remote-sync state, if any
+}
+
+// readArchiveManifest opens a .rwb and returns its embedded rigger-backup.json,
+// if present. ok=false means a legacy (flat, manifest-less) archive.
+func readArchiveManifest(path string) (m archiveMeta, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return m, false
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return m, false
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			return m, false
+		}
+		if filepath.ToSlash(filepath.Clean(hdr.Name)) == riggerBackupManifest {
+			if json.NewDecoder(tr).Decode(&m) == nil && m.Workspace != "" {
+				return m, true
+			}
+			return m, false
+		}
+	}
 }
 
 // GET /api/tools/workspace-archives
@@ -326,13 +382,18 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			continue
 		}
-		// Derive workspace name: everything before the last "-YYYYMMDD-HHMMSS.tar.gz"
-		ws := wsNameFromArchive(e.Name())
+		// Prefer the embedded manifest for the (workspace, project) identity;
+		// fall back to the filename heuristic for legacy archives.
 		ai := ArchiveInfo{
 			Filename:  e.Name(),
-			Workspace: ws,
 			CreatedAt: fi.ModTime(),
 			SizeBytes: fi.Size(),
+		}
+		if m, ok := readArchiveManifest(filepath.Join(dir, e.Name())); ok {
+			ai.Workspace = m.Workspace
+			ai.Project = m.Project
+		} else {
+			ai.Workspace = wsNameFromArchive(e.Name())
 		}
 		if st, ok := syncStates[e.Name()]; ok {
 			s := st
@@ -402,40 +463,51 @@ func (h *Handler) DeleteWorkspaceArchive(w http.ResponseWriter, r *http.Request)
 
 // ── Restore ───────────────────────────────────────────────────────────────────
 
-// restoreFromReader extracts an archive stream into the workspaces directory.
-// It returns the restored workspace name and an HTTP status code: 200 on
-// success, 409 when the workspace exists and force is false, 400 for a bad
-// archive, 500 for filesystem errors.
-func (h *Handler) restoreFromReader(rd io.Reader, force bool) (string, int, error) {
+// restoreFromReader extracts an archive stream and restores it to its nested
+// project directory (workspaces/{ws}/projects/{proj}). It returns the restored
+// workspace + project and an HTTP status code: 200 on success, 409 when the
+// project exists and force is false, 400 for a bad archive, 500 for fs errors.
+func (h *Handler) restoreFromReader(rd io.Reader, force bool) (ws, project string, code int, err error) {
 	tmpDir, err := os.MkdirTemp("", "rigger-restore-*")
 	if err != nil {
-		return "", http.StatusInternalServerError, fmt.Errorf("could not create temp dir: %w", err)
+		return "", "", http.StatusInternalServerError, fmt.Errorf("could not create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	wsName, err := extractArchive(rd, tmpDir)
+	ws, project, err = extractArchive(rd, tmpDir)
 	if err != nil {
-		return "", http.StatusBadRequest, fmt.Errorf("invalid archive: %w", err)
+		return "", "", http.StatusBadRequest, fmt.Errorf("invalid archive: %w", err)
 	}
 
-	destDir := filepath.Join(h.workspacesDir, wsName)
+	// Nested project restore (current format) vs legacy flat workspace.
+	var destDir, srcDir string
+	if project != "" {
+		destDir = wspath.ProjectDir(h.workspacesDir, ws, project)
+		srcDir = filepath.Join(tmpDir, ws, "projects", project)
+	} else {
+		destDir = filepath.Join(h.workspacesDir, ws)
+		srcDir = filepath.Join(tmpDir, ws)
+	}
+
 	if _, statErr := os.Stat(destDir); statErr == nil {
 		if !force {
-			return wsName, http.StatusConflict, fmt.Errorf("workspace already exists")
+			return ws, project, http.StatusConflict, fmt.Errorf("project already exists")
 		}
 		if err := os.RemoveAll(destDir); err != nil {
-			return wsName, http.StatusInternalServerError, fmt.Errorf("could not remove existing workspace: %w", err)
+			return ws, project, http.StatusInternalServerError, fmt.Errorf("could not remove existing project: %w", err)
 		}
 	}
+	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+		return ws, project, http.StatusInternalServerError, fmt.Errorf("failed to restore: %w", err)
+	}
 
-	srcDir := filepath.Join(tmpDir, wsName)
 	if err := os.Rename(srcDir, destDir); err != nil {
 		// Rename may fail across filesystems — fall back to copy
 		if err2 := copyDir(srcDir, destDir); err2 != nil {
-			return wsName, http.StatusInternalServerError, fmt.Errorf("failed to restore: %w", err2)
+			return ws, project, http.StatusInternalServerError, fmt.Errorf("failed to restore: %w", err2)
 		}
 	}
-	return wsName, http.StatusOK, nil
+	return ws, project, http.StatusOK, nil
 }
 
 // POST /api/tools/workspace-restore  (multipart: field "archive")
@@ -455,12 +527,12 @@ func (h *Handler) RestoreWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	wsName, code, err := h.restoreFromReader(file, force)
+	wsName, project, code, err := h.restoreFromReader(file, force)
 	if err != nil {
-		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName})
+		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName, "project": project})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName, "project": project})
 }
 
 // POST /api/tools/workspace-archives/{filename}/restore  (body: {force})
@@ -488,12 +560,12 @@ func (h *Handler) RestoreWorkspaceFromArchive(w http.ResponseWriter, r *http.Req
 	}
 	defer f.Close()
 
-	wsName, code, err := h.restoreFromReader(f, body.Force)
+	wsName, project, code, err := h.restoreFromReader(f, body.Force)
 	if err != nil {
-		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName})
+		writeJSON(w, code, map[string]string{"error": err.Error(), "workspace": wsName, "project": project})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored", "workspace": wsName, "project": project})
 }
 
 // POST /api/tools/workspace-archives/upload  (multipart: field "archive")
@@ -531,10 +603,10 @@ func (h *Handler) UploadWorkspaceArchive(w http.ResponseWriter, r *http.Request)
 	}
 	tmp.Close()
 
-	// Validate it's a real workspace backup and recover the workspace name.
-	wsName, err := validateArchiveFile(tmpPath)
+	// Validate it's a real project backup and recover the (workspace, project).
+	wsName, project, err := validateArchiveFile(tmpPath)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid workspace backup: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid project backup: " + err.Error()})
 		return
 	}
 
@@ -543,7 +615,11 @@ func (h *Handler) UploadWorkspaceArchive(w http.ResponseWriter, r *http.Request)
 	base := filepath.Base(hdr.Filename)
 	base = sanitizeArchiveName(base)
 	if base == "" || !hasArchiveSuffix(base) {
-		base = wsName + "-uploaded" + archiveExt
+		stem := wsName
+		if project != "" {
+			stem = wsName + "_" + project
+		}
+		base = stem + "-uploaded" + archiveExt
 	}
 	dest := uniqueArchiveName(dir, base)
 
@@ -560,6 +636,7 @@ func (h *Handler) UploadWorkspaceArchive(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, ArchiveInfo{
 		Filename:  dest,
 		Workspace: wsName,
+		Project:   project,
 		SizeBytes: size,
 	})
 }
@@ -571,23 +648,26 @@ func sanitizeArchiveName(name string) string {
 }
 
 // validateArchiveFile confirms the file at path is a gzip+tar workspace backup
-// (a single top-level directory containing config.json) and returns that
-// directory name (the workspace name).
-func validateArchiveFile(path string) (string, error) {
+// (config.json present under the recorded project path) and returns the
+// (workspace, project) identity. Manifest-less legacy archives return (ws, "").
+func validateArchiveFile(path string) (string, string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer f.Close()
 
 	gr, err := gzip.NewReader(f)
 	if err != nil {
-		return "", fmt.Errorf("not a gzip archive")
+		return "", "", fmt.Errorf("not a gzip archive")
 	}
 	defer gr.Close()
 
 	tr := tar.NewReader(gr)
-	wsName := ""
+	var meta archiveMeta
+	haveMeta := false
+	legacyWs := ""
+	wantConfig := ""        // the nested config path once the manifest is known
 	hasConfig := false
 	for {
 		hdr, err := tr.Next()
@@ -595,27 +675,42 @@ func validateArchiveFile(path string) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", fmt.Errorf("not a valid tar archive")
+			return "", "", fmt.Errorf("not a valid tar archive")
 		}
 		clean := filepath.ToSlash(filepath.Clean(hdr.Name))
 		if strings.HasPrefix(clean, "..") {
 			continue
 		}
-		parts := strings.SplitN(clean, "/", 2)
-		if wsName == "" && parts[0] != "" {
-			wsName = parts[0]
+		if clean == riggerBackupManifest {
+			if json.NewDecoder(tr).Decode(&meta) == nil && meta.Workspace != "" && meta.Project != "" {
+				haveMeta = true
+				wantConfig = meta.Workspace + "/projects/" + meta.Project + "/config.json"
+			}
+			continue
 		}
-		if len(parts) == 2 && parts[1] == "config.json" {
+		parts := strings.SplitN(clean, "/", 2)
+		if legacyWs == "" && parts[0] != "" {
+			legacyWs = parts[0]
+		}
+		if haveMeta && clean == wantConfig {
+			hasConfig = true
+		} else if !haveMeta && len(parts) == 2 && parts[1] == "config.json" {
 			hasConfig = true
 		}
 	}
-	if wsName == "" {
-		return "", fmt.Errorf("archive is empty")
+	if haveMeta {
+		if !hasConfig {
+			return "", "", fmt.Errorf("missing config.json for %s/%s", meta.Workspace, meta.Project)
+		}
+		return meta.Workspace, meta.Project, nil
+	}
+	if legacyWs == "" {
+		return "", "", fmt.Errorf("archive is empty")
 	}
 	if !hasConfig {
-		return "", fmt.Errorf("missing config.json (not a Rigger workspace)")
+		return "", "", fmt.Errorf("missing config.json (not a Rigger backup)")
 	}
-	return wsName, nil
+	return legacyWs, "", nil
 }
 
 // uniqueArchiveName returns base, or base with a -2/-3… suffix inserted before
@@ -641,17 +736,18 @@ func uniqueArchiveName(dir, base string) string {
 	return base
 }
 
-// extractArchive reads a .tar.gz from r, writes files under destDir,
-// and returns the top-level directory name (= workspace name).
-func extractArchive(r io.Reader, destDir string) (string, error) {
+// extractArchive reads a .rwb (.tar.gz) from r, writes files under destDir, and
+// returns the (workspace, project) recorded in the embedded manifest. A
+// manifest-less legacy archive returns (topDir, "").
+func extractArchive(r io.Reader, destDir string) (string, string, error) {
 	gr, err := gzip.NewReader(r)
 	if err != nil {
-		return "", fmt.Errorf("not a valid gzip archive: %w", err)
+		return "", "", fmt.Errorf("not a valid gzip archive: %w", err)
 	}
 	defer gr.Close()
 
 	tr := tar.NewReader(gr)
-	wsName := ""
+	topDir := ""
 
 	for {
 		hdr, err := tr.Next()
@@ -659,7 +755,7 @@ func extractArchive(r io.Reader, destDir string) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		// Sanitise path
@@ -668,10 +764,10 @@ func extractArchive(r io.Reader, destDir string) (string, error) {
 			continue // refuse path traversal
 		}
 
-		// Capture top-level directory name
+		// Capture top-level directory name (legacy fallback identity).
 		parts := strings.SplitN(filepath.ToSlash(clean), "/", 2)
-		if wsName == "" && parts[0] != "" {
-			wsName = parts[0]
+		if topDir == "" && len(parts) == 2 && parts[0] != "" {
+			topDir = parts[0]
 		}
 
 		target := filepath.Join(destDir, clean)
@@ -681,30 +777,39 @@ func extractArchive(r io.Reader, destDir string) (string, error) {
 			os.MkdirAll(target, 0755) //nolint:errcheck
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return "", err
+				return "", "", err
 			}
 			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
 			if err != nil {
-				return "", err
+				return "", "", err
 			}
 			if _, err := io.Copy(f, tr); err != nil {
 				f.Close()
-				return "", err
+				return "", "", err
 			}
 			f.Close()
 		}
 	}
 
-	if wsName == "" {
-		return "", fmt.Errorf("archive appears empty or has no top-level directory")
+	// Prefer the embedded manifest (current nested format).
+	if data, err := os.ReadFile(filepath.Join(destDir, riggerBackupManifest)); err == nil {
+		var m archiveMeta
+		if json.Unmarshal(data, &m) == nil && m.Workspace != "" && m.Project != "" {
+			if _, err := os.Stat(filepath.Join(destDir, m.Workspace, "projects", m.Project, "config.json")); err != nil {
+				return "", "", fmt.Errorf("archive missing config.json for %s/%s", m.Workspace, m.Project)
+			}
+			return m.Workspace, m.Project, nil
+		}
 	}
 
-	// Validate: config.json must exist
-	if _, err := os.Stat(filepath.Join(destDir, wsName, "config.json")); err != nil {
-		return "", fmt.Errorf("archive does not contain a valid Rigger workspace (missing config.json)")
+	// Legacy flat archive: single top-level dir containing config.json.
+	if topDir == "" {
+		return "", "", fmt.Errorf("archive appears empty or has no top-level directory")
 	}
-
-	return wsName, nil
+	if _, err := os.Stat(filepath.Join(destDir, topDir, "config.json")); err != nil {
+		return "", "", fmt.Errorf("archive does not contain a valid Rigger backup (missing config.json)")
+	}
+	return topDir, "", nil
 }
 
 // copyDir copies src directory tree to dst (fallback for cross-device rename)
