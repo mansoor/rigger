@@ -364,8 +364,10 @@ async function streamText(url, method, body, onChunk) {
 // fires an in-app alert + notification channels.
 export const migrateWorkspace = (ws, name, targetHostId) =>
   api.post(`${projBase(ws, name)}/migrate`, { target_host_id: targetHostId }).then(r => r.data)
-export const setEnvHost = (ws, name, env, hostId) =>
-  api.put(`${projBase(ws, name)}/envs/${env}/host`, { host_id: hostId }).then(r => r.data)
+// bindOnly=true records the binding without a migration job — for new, not-yet-
+// deployed environments (Edit Project). Otherwise it migrates a running env.
+export const setEnvHost = (ws, name, env, hostId, bindOnly = false) =>
+  api.put(`${projBase(ws, name)}/envs/${env}/host`, { host_id: hostId, bind_only: bindOnly }).then(r => r.data)
 export const getMigrationJob = (id) => api.get(`/migration-jobs/${id}`).then(r => r.data)
 
 // ── Settings: Notification Channels (Phase 6b) ────────────────────────────────

@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Edit Project — Prototype B (sub-tabs + add)</title>
+<style>
+  :root{
+    --canvas:#0a0e16; --surface:#0f172a; --raised:#1e293b; --overlay:#273449;
+    --border:#1f2937; --border2:#334155;
+    --txt:#cbd5e1; --strong:#f1f5f9; --muted:#94a3b8; --subtle:#64748b; --faint:#475569;
+    --brand:#6366f1; --brand2:#818cf8; --ok:#34d399; --warn:#fbbf24; --danger:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--txt);font:14px/1.5 'Inter',system-ui,Segoe UI,sans-serif;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  .nav{height:48px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:10px;padding:0 16px}
+  .logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#6366f1,#a855f7)}
+  .ws{display:flex;align-items:center;gap:8px;border:1px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:13px}
+  .ws .k{font-size:10px;color:var(--subtle);text-transform:uppercase;letter-spacing:.08em}
+  .nav .right{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--muted)}
+  .pill{padding:5px 10px;border:1px solid var(--border2);border-radius:8px;font-size:13px}
+  .wrap{max-width:980px;margin:0 auto;padding:28px 24px}
+  .crumb{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--subtle)}
+  h1{margin:2px 0 0;font-size:24px;color:var(--strong)}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .prefix{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--faint);background:var(--raised);border:1px solid var(--border2);border-radius:6px;padding:3px 7px}
+  /* primary tab bar with right-aligned add button */
+  .tabbar{display:flex;align-items:center;border-bottom:1px solid var(--border);margin:22px 0 20px}
+  .tabs{display:flex;gap:2px}
+  .tab{padding:10px 16px;font-size:14px;font-weight:500;color:var(--subtle);border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer;background:none;border-top:0;border-left:0;border-right:0;white-space:nowrap}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:var(--brand2);border-bottom-color:var(--brand)}
+  .tab.danger.active{color:var(--danger);border-bottom-color:var(--danger)}
+  .tab .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;font-size:11px;border-radius:9px;background:var(--raised);color:var(--muted)}
+  .tab.active .badge{background:var(--brand);color:#fff}
+  .addbtn{margin-left:auto;margin-bottom:6px;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;background:var(--brand);border:1px solid var(--brand);color:#fff;cursor:pointer}
+  /* sub-tabs (pill style, distinct from primary underline) */
+  .subtabs{display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+  .stab{display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:9px;font-size:13px;font-weight:500;color:var(--muted);background:var(--surface);border:1px solid var(--border);cursor:pointer}
+  .stab:hover{border-color:var(--border2);color:var(--txt)}
+  .stab.active{background:rgba(99,102,241,.14);border-color:var(--brand);color:var(--brand2)}
+  .stab .dot{width:7px;height:7px;border-radius:50%}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+  .card h2{margin:0 0 14px;font-size:14px;color:var(--strong);display:flex;align-items:center;gap:10px}
+  .row{display:grid;gap:16px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+  .span4{grid-column:span 4}.span1{grid-column:span 1}
+  label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px}
+  input,select{width:100%;padding:8px 11px;background:var(--raised);border:1px solid var(--border2);border-radius:8px;color:var(--strong);font-size:13px;font-family:inherit}
+  input.ro{background:rgba(30,41,59,.5);color:var(--muted);cursor:not-allowed}
+  .hint{font-size:11px;color:var(--subtle);margin-top:5px}
+  .btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid var(--border2);background:var(--raised);color:var(--txt);cursor:pointer}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.sm{padding:5px 10px;font-size:12px}
+  .btn.danger{background:#7f1d1d;border-color:#991b1b;color:#fff}
+  .btn.ghost-danger{background:none;border-color:rgba(248,113,113,.4);color:var(--danger)}
+  .save{display:flex;gap:10px;align-items:center;margin-top:6px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--raised);color:var(--muted);border:1px solid var(--border2)}
+  .tag.ok{background:rgba(52,211,153,.12);color:var(--ok);border-color:rgba(52,211,153,.3)}
+  .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}.kv:last-child{border-bottom:0}.kv .k{color:var(--muted)}
+  .note{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:10px;padding:12px 14px;font-size:12px;color:var(--muted);margin-bottom:16px}
+  .svc-ico{width:30px;height:30px;border-radius:8px;background:var(--raised);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .hide{display:none}
+  .dz{border:1px solid rgba(248,113,113,.35);border-radius:12px}
+  .dz .rowx{display:flex;justify-content:space-between;align-items:center;padding:18px 20px}
+  .banner{font-size:12px;color:var(--subtle);text-align:center;padding:10px;border-bottom:1px solid var(--border);background:#10182a}
+  .cardhdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+</style>
+</head>
+<body>
+  <div class="banner">PROTOTYPE B — sub-tabs for Services & Environments, with a contextual “+ Add” on the right of the primary tab bar (mockup)</div>
+  <div class="nav">
+    <div class="logo"></div>
+    <div class="ws"><span class="k">WS</span><b style="color:var(--strong)">Mindware Consulting</b> <span style="color:var(--faint)">▾</span></div>
+    <div class="right"><span class="pill">Dashboard</span><span class="pill">Tools</span><span class="pill">Admin</span><span class="pill">◑</span><span class="pill">🔔</span><span class="pill">M ▾</span></div>
+  </div>
+
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <div class="crumb">Edit project · mcl</div>
+        <h1>Company Website</h1>
+        <div class="sub">4 services · 4 environments · custom stack</div>
+      </div>
+      <span class="prefix">mcl_web</span>
+    </div>
+
+    <div class="tabbar">
+      <div class="tabs">
+        <button class="tab active" data-t="project">Project</button>
+        <button class="tab" data-t="services">Services <span class="badge">4</span></button>
+        <button class="tab" data-t="envs">Environments <span class="badge">4</span></button>
+        <button class="tab" data-t="host">Host</button>
+        <button class="tab" data-t="backup">Backup</button>
+        <button class="tab danger" data-t="danger">Danger Zone</button>
+      </div>
+      <button class="addbtn hide" id="addBtn">+ Add</button>
+    </div>
+
+    <!-- PROJECT -->
+    <section data-p="project">
+      <div class="card">
+        <h2>Project</h2>
+        <div class="row g5">
+          <div class="span4"><label>Project name</label><input value="Company Website"><div class="hint">A display label — editable; may repeat across workspaces.</div></div>
+          <div class="span1"><label>Key (fixed)</label><input class="ro mono" value="web" disabled><div class="hint">Folder / URL.</div></div>
+        </div>
+        <div class="row" style="margin-top:16px"><div style="max-width:50%"><label>Registry</label><input value="ghcr.io/mindware"></div></div>
+        <div style="margin-top:16px"><label>Resource prefix</label><input class="ro mono" value="mcl_web" disabled><div class="hint">Fixed after creation — Docker stack / container / volume / network prefix.</div></div>
+        <div class="save"><button class="btn primary">Save</button></div>
+      </div>
+    </section>
+
+    <!-- SERVICES -->
+    <section data-p="services" class="hide">
+      <div class="subtabs" id="svcTabs">
+        <button class="stab active" data-s="app">🌐 app</button>
+        <button class="stab" data-s="db">🛢️ db</button>
+        <button class="stab" data-s="cache">⚡ cache</button>
+        <button class="stab" data-s="adminer">🔧 adminer</button>
+      </div>
+      <div data-sv="app">
+        <div class="card">
+          <div class="cardhdr"><h2><span class="svc-ico">🌐</span> app <span class="tag ok">healthy</span></h2><button class="btn sm ghost-danger">Remove service</button></div>
+          <div class="row g3"><div><label>Image</label><input value="wordpress:6.5-php8.3"></div><div><label>Host port</label><input value="8084"></div><div><label>Container port</label><input value="80"></div></div>
+          <div class="row g2" style="margin-top:16px"><div><label>Volumes</label><input value="wp-content:/var/www/html/wp-content"></div><div><label>Healthcheck</label><input value="curl -f http://localhost/ || exit 1"></div></div>
+          <div class="row g2" style="margin-top:16px"><div><label>Depends on</label><input value="db, cache"></div><div><label>Restart policy</label><select><option>unless-stopped</option><option>always</option></select></div></div>
+          <div class="save"><button class="btn primary">Save service</button></div>
+        </div>
+      </div>
+      <div data-sv="db" class="hide"><div class="card"><div class="cardhdr"><h2><span class="svc-ico">🛢️</span> db <span class="tag ok">healthy</span></h2><button class="btn sm ghost-danger">Remove service</button></div><div class="row g3"><div><label>Image</label><input value="mariadb:11"></div><div><label>Port</label><input value="3306"></div><div><label>Volume</label><input value="db-data:/var/lib/mysql"></div></div><div class="save"><button class="btn primary">Save service</button></div></div></div>
+      <div data-sv="cache" class="hide"><div class="card"><div class="cardhdr"><h2><span class="svc-ico">⚡</span> cache <span class="tag ok">healthy</span></h2><button class="btn sm ghost-danger">Remove service</button></div><div class="row g2"><div><label>Image</label><input value="redis:7-alpine"></div><div><label>Volume</label><input value="redis-data:/data"></div></div><div class="save"><button class="btn primary">Save service</button></div></div></div>
+      <div data-sv="adminer" class="hide"><div class="card"><div class="cardhdr"><h2><span class="svc-ico">🔧</span> adminer</h2><button class="btn sm ghost-danger">Remove service</button></div><div class="row g2"><div><label>Image</label><input value="adminer:4"></div><div><label>Host port</label><input value="8085"></div></div><div class="save"><button class="btn primary">Save service</button></div></div></div>
+    </section>
+
+    <!-- ENVIRONMENTS -->
+    <section data-p="envs" class="hide">
+      <div class="subtabs" id="envTabs">
+        <button class="stab active" data-e="dev"><span class="dot" style="background:var(--ok)"></span>dev</button>
+        <button class="stab" data-e="stage"><span class="dot" style="background:var(--ok)"></span>stage</button>
+        <button class="stab" data-e="prod"><span class="dot" style="background:var(--ok)"></span>prod</button>
+        <button class="stab" data-e="qa"><span class="dot" style="background:var(--subtle)"></span>qa</button>
+      </div>
+      <div data-ev="dev">
+        <div class="card">
+          <div class="cardhdr"><h2>dev <span class="tag">compose · local-docker</span></h2><button class="btn sm ghost-danger">Remove environment</button></div>
+          <div class="row g2"><div><label>Deployment</label><select><option>compose</option><option>swarm</option></select></div><div><label>Domain</label><input value="dev.company.example"></div></div>
+          <div style="margin-top:16px"><label>Environment variables</label>
+            <div class="kv"><span class="k mono">WP_DB_HOST</span><span class="mono">db</span></div>
+            <div class="kv"><span class="k mono">WP_DB_PASSWORD</span><span class="mono">•••••••• 🔒</span></div>
+            <div class="kv"><span class="k mono">REDIS_URL</span><span class="mono">redis://cache:6379</span></div>
+            <button class="btn sm" style="margin-top:10px">Manage variables…</button>
+          </div>
+          <div class="save"><button class="btn primary">Save environment</button></div>
+        </div>
+      </div>
+      <div data-ev="stage" class="hide"><div class="card"><div class="cardhdr"><h2>stage <span class="tag">compose · host-02</span></h2><button class="btn sm ghost-danger">Remove environment</button></div><div class="row g2"><div><label>Deployment</label><select><option>compose</option></select></div><div><label>Domain</label><input value="stage.company.example"></div></div><div class="save"><button class="btn primary">Save environment</button></div></div></div>
+      <div data-ev="prod" class="hide"><div class="card"><div class="cardhdr"><h2>prod <span class="tag">swarm · host-prod</span></h2><button class="btn sm ghost-danger">Remove environment</button></div><div class="row g2"><div><label>Deployment</label><select><option>swarm</option></select></div><div><label>Domain</label><input value="www.company.example"></div></div><div class="save"><button class="btn primary">Save environment</button></div></div></div>
+      <div data-ev="qa" class="hide"><div class="card"><div class="cardhdr"><h2>qa <span class="tag">compose · local-docker</span></h2><button class="btn sm ghost-danger">Remove environment</button></div><div class="row g2"><div><label>Deployment</label><select><option>compose</option></select></div><div><label>Domain</label><input value="qa.company.example"></div></div><div class="save"><button class="btn primary">Save environment</button></div></div></div>
+    </section>
+
+    <!-- HOST -->
+    <section data-p="host" class="hide">
+      <div class="card"><h2>Per-environment host</h2>
+        <div class="kv"><span class="k">dev</span><span>local-docker</span></div><div class="kv"><span class="k">stage</span><span>host-02 (10.0.0.12)</span></div><div class="kv"><span class="k">prod</span><span>host-prod (10.0.0.20)</span></div><div class="kv"><span class="k">qa</span><span>local-docker</span></div>
+      </div>
+      <div class="card"><h2>Move the whole project</h2><div class="row g2"><div><label>Target host</label><select><option>host-03 (10.0.0.30)</option></select></div><div style="display:flex;align-items:flex-end"><button class="btn">Migrate</button></div></div></div>
+    </section>
+
+    <!-- BACKUP -->
+    <section data-p="backup" class="hide">
+      <div class="note">Each environment can run independent backup schedules. Newest snapshots are kept per retention count.</div>
+      <div class="card"><h2>dev</h2><div class="kv"><span class="k">db — daily 03:00</span><span class="tag ok">enabled · keep 7</span></div></div>
+      <div class="card"><h2>prod</h2><div class="kv"><span class="k">db — hourly</span><span class="tag ok">enabled · keep 24</span></div><div class="kv"><span class="k">everything — daily 02:00</span><span class="tag ok">enabled · keep 14</span></div></div>
+      <div class="save"><button class="btn primary">Save schedules</button></div>
+    </section>
+
+    <!-- DANGER -->
+    <section data-p="danger" class="hide">
+      <div class="dz"><div class="rowx"><div><b style="color:var(--strong)">Delete this project</b><div class="sub" style="margin:0">Permanently removes all files, configs and backups.</div></div><button class="btn danger">Delete project</button></div></div>
+    </section>
+  </div>
+
+<script>
+  const tabs=document.querySelectorAll('.tab');
+  const panes=document.querySelectorAll('[data-p]');
+  const addBtn=document.getElementById('addBtn');
+  const addLabel={services:'+ Add service',envs:'+ Add environment'};
+  function showTab(t){
+    tabs.forEach(x=>x.classList.toggle('active',x===t));
+    panes.forEach(p=>p.classList.toggle('hide',p.dataset.p!==t.dataset.t));
+    if(addLabel[t.dataset.t]){addBtn.textContent=addLabel[t.dataset.t];addBtn.classList.remove('hide');}
+    else addBtn.classList.add('hide');
+  }
+  tabs.forEach(t=>t.addEventListener('click',()=>showTab(t)));
+  // sub-tabs
+  function wireSub(barId,attr,paneAttr){
+    const bar=document.getElementById(barId);
+    bar.querySelectorAll('.stab').forEach(s=>s.addEventListener('click',()=>{
+      bar.querySelectorAll('.stab').forEach(x=>x.classList.remove('active'));s.classList.add('active');
+      document.querySelectorAll('['+paneAttr+']').forEach(p=>p.classList.toggle('hide',p.getAttribute(paneAttr)!==s.dataset[attr]));
+    }));
+  }
+  wireSub('svcTabs','s','data-sv');
+  wireSub('envTabs','e','data-ev');
+</script>
+</body>
+</html>
