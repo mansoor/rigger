@@ -5,11 +5,14 @@ import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
+import ChannelForm from '../components/ChannelForm'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
+  fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
+  fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
   fetchWorkspaceSettings, updateWorkspaceSettings,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
@@ -19,6 +22,8 @@ const TABS = [
   { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
+  { id: 'notifications',  label: 'Notifications' },
+  { id: 'alerts',         label: 'Alert Rules' },
   { id: 'danger',         label: 'Danger Zone' },
 ]
 
@@ -74,6 +79,8 @@ export default function ManageWorkspacePage() {
         {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
         {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
         {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
+        {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
+        {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
         {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
       </div>
     </Layout>
@@ -541,6 +548,395 @@ function BackupTargetsSection({ workspace, qc }) {
           <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Backup schedules pointing at this target will fall back to local. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function channelSummary(ch) {
+  let c = ch.config
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch { c = {} } }
+  c = c || {}
+  if (ch.type === 'email') return `${c.from || '—'} → ${c.to || '—'}`
+  const urls = (c.urls || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+  return urls.length ? `${urls.length} Apprise URL${urls.length > 1 ? 's' : ''}: ${urls[0].split('://')[0]}…` : 'no URLs'
+}
+
+function NotificationsSection({ workspace, qc }) {
+  const chKey = ['ws-notification-channels', workspace]
+  const { data: channels = [], isLoading } = useQuery({
+    queryKey: chKey, queryFn: () => fetchWorkspaceNotificationChannels(workspace), enabled: !!workspace,
+  })
+  const [modal, setModal]       = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [testStatus, setTestStatus] = useState({})
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceNotificationChannel(workspace, id, body) : createWorkspaceNotificationChannel(workspace, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: chKey }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceNotificationChannel(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: chKey }); setDeleting(null) },
+  })
+
+  async function handleTest(id) {
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      await testWorkspaceNotificationChannel(workspace, id)
+      setTestStatus(s => ({ ...s, [id]: { ok: true } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Test failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 6000)
+  }
+
+  const isOwned = (ch) => ch.owner_scope === `ws:${workspace}`
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Notification channels</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Where this workspace's alerts are delivered: its own channels plus any shared by an administrator. Assign them to rules on the Alert Rules tab.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add channel
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : channels.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No notification channels available. Add one for this workspace, or ask an admin to share a global channel with it.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {channels.map(ch => {
+              const owned = isOwned(ch)
+              const ts = testStatus[ch.id]
+              return (
+                <div key={ch.id} className="flex items-center gap-3 p-4">
+                  <span className={`flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider
+                    ${ch.type === 'email' ? 'bg-cyan-100/70 text-cyan-700 dark:bg-cyan-900/60 dark:text-cyan-300' : 'bg-purple-100/70 text-purple-700 dark:bg-purple-900/60 dark:text-purple-300'}`}>
+                    {ch.type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-content-strong truncate">{ch.name}</p>
+                      {owned
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40 shrink-0">this workspace</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint shrink-0" title="Shared by an administrator — managed in Settings">shared</span>}
+                      {!ch.enabled && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint shrink-0">disabled</span>}
+                    </div>
+                    <p className="text-xs text-content-subtle mt-0.5 truncate">{channelSummary(ch)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ts?.loading && <span className="text-xs text-content-subtle">Sending…</span>}
+                    {ts?.ok && <span className="text-xs text-success-fg">✓ Sent</span>}
+                    {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                    <button onClick={() => handleTest(ch.id)} disabled={ts?.loading}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    {owned ? (
+                      <>
+                        <button onClick={() => setModal({ editing: ch })}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                        <button onClick={() => setDeleting(ch)}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-content-faint px-2">read-only</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add channel' : `Edit “${modal.editing.name}”`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <ChannelForm
+              initial={modal === 'new' ? null : modal.editing}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Alert rules using this channel will stop notifying it. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const SEVERITY_BADGE = {
+  info:     'bg-sky-100/70 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/40',
+  warning:  'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
+  critical: 'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
+}
+
+// WsRuleForm — workspace-scoped alert rule form. The workspace tier is fixed
+// (ws_key set server-side); only stack-scope conditions are offered; the project
+// picker lists this workspace's projects; channels come from the workspace pool.
+function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, saving }) {
+  const conditions = (meta?.conditions || []).filter(c => c.scope !== 'host')
+  const isEdit = !!initial?.id
+  const [name, setName]                   = useState(initial?.name || '')
+  const [conditionType, setConditionType] = useState(initial?.condition_type || conditions[0]?.value || 'container_down')
+  const [threshold, setThreshold]         = useState(initial?.threshold ?? 80)
+  const [severity, setSeverity]           = useState(initial?.severity || 'warning')
+  const [project, setProject]             = useState(initial?.workspace || '')
+  const [env, setEnv]                     = useState(initial?.env || '')
+  const [cooldown, setCooldown]           = useState(initial?.cooldown_minutes ?? 15)
+  const [enabled, setEnabled]             = useState(initial?.enabled ?? true)
+  const [notifyIds, setNotifyIds]         = useState(initial?.notify_channel_ids || [])
+  const [error, setError]                 = useState('')
+
+  const cond = conditions.find(c => c.value === conditionType) || {}
+  const isNumeric = !!cond.numeric
+  const projObj = projects.find(p => p.name === project)
+  const inp = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
+
+  function toggleChannel(id) {
+    setNotifyIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+  }
+  function changeProject(v) { setProject(v); if (!v) setEnv('') }
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (!name.trim()) { setError('Name is required'); return }
+    if (isNumeric && Number(threshold) <= 0) { setError('Threshold must be greater than 0'); return }
+    const body = {
+      name: name.trim(),
+      condition_type: conditionType,
+      threshold: isNumeric ? Number(threshold) : 0,
+      workspace: project,                 // project key within this workspace ('' = all projects)
+      env: project ? env : '',
+      severity,
+      cooldown_minutes: Number(cooldown) || 15,
+      enabled,
+      notify_channel_ids: notifyIds,
+    }
+    try { await onSave(body) }
+    catch (err) { setError(err.response?.data?.error || 'Failed to save') }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-5">
+      <div>
+        <label className={lbl}>Rule name</label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Production stack down" className={inp} />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={lbl}>Condition</label>
+          <select value={conditionType} onChange={e => setConditionType(e.target.value)} className={inp}>
+            {conditions.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Severity</label>
+          <select value={severity} onChange={e => setSeverity(e.target.value)} className={inp}>
+            {(meta?.severities || ['info', 'warning', 'critical']).map(s => <option key={s} value={s}>{s[0].toUpperCase() + s.slice(1)}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {isNumeric && (
+        <div>
+          <label className={lbl}>Threshold {cond.unit ? `(${cond.unit})` : ''}</label>
+          <input value={threshold} onChange={e => setThreshold(e.target.value)} type="number" placeholder="80" className={inp} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={lbl}>Project</label>
+          <select value={project} onChange={e => changeProject(e.target.value)} className={inp}>
+            <option value="">All projects</option>
+            {projects.map(p => <option key={p.name} value={p.name}>{p.config?.project?.name || p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={lbl}>Environment</label>
+          <select value={env} onChange={e => setEnv(e.target.value)} disabled={!project} className={`${inp} disabled:opacity-50`}>
+            <option value="">All environments</option>
+            {(projObj?.envs || []).map(en => <option key={en} value={en}>{en}</option>)}
+          </select>
+          {!project && <p className="text-xs text-content-faint mt-1">Applies to all projects in this workspace.</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 items-end">
+        <div>
+          <label className={lbl}>Cooldown (minutes)</label>
+          <input value={cooldown} onChange={e => setCooldown(e.target.value)} type="number" placeholder="15" className={inp} />
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer pb-2">
+          <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} className="accent-brand-500" />
+          <span className="text-sm text-content">{enabled ? 'Enabled' : 'Disabled'}</span>
+        </label>
+      </div>
+
+      <div>
+        <label className={lbl}>Notify channels</label>
+        {channels.length === 0 ? (
+          <p className="text-xs text-content-faint mt-1">No channels in this workspace yet — add one on the Notifications tab. The alert still shows in the inbox without a channel.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2 mt-1">
+            {channels.map(ch => {
+              const on = notifyIds.includes(ch.id)
+              return (
+                <button key={ch.id} type="button" onClick={() => toggleChannel(ch.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${on ? 'bg-brand-600/20 border-brand-500 text-brand-300' : 'bg-surface-raised border-border-strong text-content-muted hover:text-content'}`}>
+                  {on ? '✓ ' : ''}{ch.name}<span className="ml-1 text-content-subtle">{ch.type}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+
+      <div className="flex gap-2 justify-end pt-2">
+        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+        <button type="submit" disabled={saving} className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add rule'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function AlertRulesSection({ workspace, projects, qc }) {
+  const rulesKey = ['ws-alert-rules', workspace]
+  const { data: rules = [], isLoading } = useQuery({ queryKey: rulesKey, queryFn: () => fetchWorkspaceAlertRules(workspace), enabled: !!workspace })
+  const { data: meta } = useQuery({ queryKey: ['alert-meta'], queryFn: fetchAlertMeta })
+  const { data: channels = [] } = useQuery({ queryKey: ['ws-notification-channels', workspace], queryFn: () => fetchWorkspaceNotificationChannels(workspace), enabled: !!workspace })
+  const [modal, setModal]       = useState(null)
+  const [deleting, setDeleting] = useState(null)
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceAlertRule(workspace, id, body) : createWorkspaceAlertRule(workspace, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: rulesKey }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceAlertRule(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: rulesKey }); setDeleting(null) },
+  })
+  const toggleMut = useMutation({
+    mutationFn: (rule) => updateWorkspaceAlertRule(workspace, rule.id, { ...rule, enabled: !rule.enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: rulesKey }),
+  })
+
+  const condLabel = (v) => meta?.conditions?.find(c => c.value === v)?.label || v
+  const condUnit  = (v) => meta?.conditions?.find(c => c.value === v)?.unit || ''
+  const projLabel = (key) => projects.find(p => p.name === key)?.config?.project?.name || key
+  const targetLabel = (r) => !r.workspace ? 'All projects' : (r.env ? `${projLabel(r.workspace)} / ${r.env}` : `${projLabel(r.workspace)} (all envs)`)
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Alert rules</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Per-project conditions for this workspace, evaluated every 60s. Host/infra rules are managed globally in Settings.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add rule
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : rules.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No alert rules for this workspace yet. Add one to be notified when a container goes down, a backup goes stale, CPU/memory spikes, and more.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {rules.map(r => (
+              <div key={r.id} className="flex items-center gap-3 p-4">
+                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider border ${SEVERITY_BADGE[r.severity] || SEVERITY_BADGE.warning}`}>
+                  {r.severity}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-content-strong truncate">{r.name}</p>
+                  <p className="text-xs text-content-subtle mt-0.5 truncate">
+                    {condLabel(r.condition_type)}{r.threshold > 0 ? ` ${r.threshold}${condUnit(r.condition_type)}` : ''} · {targetLabel(r)}
+                    {r.notify_channel_ids?.length > 0 && <span className="text-content-muted"> · 🔔 {r.notify_channel_ids.length}</span>}
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={r.enabled} onChange={() => toggleMut.mutate(r)} className="accent-brand-500" />
+                </label>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setModal({ editing: r })} className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                  <button onClick={() => setDeleting(r)} className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add alert rule' : `Edit “${modal.editing.name}”`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <WsRuleForm
+              initial={modal === 'new' ? null : modal.editing}
+              meta={meta} projects={projects} channels={channels}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
               <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}

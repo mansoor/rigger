@@ -55,6 +55,16 @@ var validSeverities = map[string]bool{
 // IsNumeric reports whether a condition type compares a metric to a threshold.
 func IsNumeric(condition string) bool { return numericConditions[condition] }
 
+// hostConditions apply to the control-plane host, not a per-workspace stack.
+// Such rules are global-only (managed from admin Settings, ws_key always "").
+var hostConditions = map[string]bool{
+	CondDiskAbovePct: true,
+}
+
+// IsHostScoped reports whether a condition is a host/infra-level metric (global),
+// as opposed to a per-container/stack metric that can be scoped to a workspace.
+func IsHostScoped(condition string) bool { return hostConditions[condition] }
+
 // ── Types ───────────────────────────────────────────────────────────────────────
 
 // Rule is one alert rule. Targeting: workspace+env (specific stack), workspace
@@ -64,7 +74,8 @@ type Rule struct {
 	Name            string    `json:"name"`
 	ConditionType   string    `json:"condition_type"`
 	Threshold       float64   `json:"threshold"`
-	Workspace       string    `json:"workspace"`
+	WorkspaceKey    string    `json:"workspace_key"` // workspace TIER target ('' = all workspaces)
+	Workspace       string    `json:"workspace"`     // project key within the tier ('' = all projects)
 	Env             string    `json:"env"`
 	Severity        string    `json:"severity"`
 	CooldownMinutes int       `json:"cooldown_minutes"`
@@ -114,9 +125,16 @@ func (r *Rule) Validate() error {
 	if r.CooldownMinutes == 0 {
 		r.CooldownMinutes = 15
 	}
-	// An env target without a workspace is meaningless.
+	// An env target needs a project; a project target needs a workspace tier.
 	if r.Env != "" && r.Workspace == "" {
-		return fmt.Errorf("env target requires a workspace")
+		return fmt.Errorf("env target requires a project")
+	}
+	if r.Workspace != "" && r.WorkspaceKey == "" {
+		return fmt.Errorf("project target requires a workspace")
+	}
+	// Host/infra rules are control-plane-wide and cannot be pinned to a workspace.
+	if IsHostScoped(r.ConditionType) && r.WorkspaceKey != "" {
+		return fmt.Errorf("condition %q is a host-level metric and cannot target a workspace", r.ConditionType)
 	}
 	return nil
 }
@@ -124,7 +142,7 @@ func (r *Rule) Validate() error {
 // ── Rule CRUD ────────────────────────────────────────────────────────────────────
 
 // ruleColumns is the shared SELECT column list (must match scanRule order).
-const ruleColumns = `id, name, condition_type, threshold, project, env, severity,
+const ruleColumns = `id, name, condition_type, threshold, ws_key, project, env, severity,
 	cooldown_minutes, enabled, notify_channel_ids, created_at, updated_at`
 
 func ListRules(d *db.DB) ([]Rule, error) {
@@ -134,6 +152,24 @@ func ListRules(d *db.DB) ([]Rule, error) {
 	}
 	defer rows.Close()
 
+	out := []Rule{}
+	for rows.Next() {
+		r, err := scanRule(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ListRulesForWorkspace returns rules targeting one workspace tier (ws_key=wsKey).
+func ListRulesForWorkspace(d *db.DB, wsKey string) ([]Rule, error) {
+	rows, err := d.Query(`SELECT `+ruleColumns+` FROM alert_rules WHERE ws_key = ? ORDER BY name`, wsKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	out := []Rule{}
 	for rows.Next() {
 		r, err := scanRule(rows)
@@ -181,10 +217,10 @@ func CreateRule(d *db.DB, r Rule) (*Rule, error) {
 		return nil, err
 	}
 	res, err := d.Exec(`
-		INSERT INTO alert_rules (name, condition_type, threshold, project, env,
+		INSERT INTO alert_rules (name, condition_type, threshold, ws_key, project, env,
 		                         severity, cooldown_minutes, enabled, notify_channel_ids)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.Name, r.ConditionType, r.Threshold, r.Workspace, r.Env,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Name, r.ConditionType, r.Threshold, r.WorkspaceKey, r.Workspace, r.Env,
 		r.Severity, r.CooldownMinutes, boolToInt(r.Enabled), marshalIDs(r.NotifyChannelIDs))
 	if err != nil {
 		return nil, err
@@ -199,11 +235,11 @@ func UpdateRule(d *db.DB, id int64, r Rule) (*Rule, error) {
 	}
 	_, err := d.Exec(`
 		UPDATE alert_rules
-		SET name=?, condition_type=?, threshold=?, project=?, env=?,
+		SET name=?, condition_type=?, threshold=?, ws_key=?, project=?, env=?,
 		    severity=?, cooldown_minutes=?, enabled=?, notify_channel_ids=?,
 		    updated_at=CURRENT_TIMESTAMP
 		WHERE id=?`,
-		r.Name, r.ConditionType, r.Threshold, r.Workspace, r.Env,
+		r.Name, r.ConditionType, r.Threshold, r.WorkspaceKey, r.Workspace, r.Env,
 		r.Severity, r.CooldownMinutes, boolToInt(r.Enabled), marshalIDs(r.NotifyChannelIDs), id)
 	if err != nil {
 		return nil, err
@@ -448,7 +484,7 @@ func scanRule(s scanner) (Rule, error) {
 	var r Rule
 	var enabled int
 	var channelIDs string
-	err := s.Scan(&r.ID, &r.Name, &r.ConditionType, &r.Threshold, &r.Workspace,
+	err := s.Scan(&r.ID, &r.Name, &r.ConditionType, &r.Threshold, &r.WorkspaceKey, &r.Workspace,
 		&r.Env, &r.Severity, &r.CooldownMinutes, &enabled, &channelIDs, &r.CreatedAt, &r.UpdatedAt)
 	r.Enabled = enabled != 0
 	r.NotifyChannelIDs = unmarshalIDs(channelIDs)

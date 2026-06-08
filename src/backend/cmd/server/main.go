@@ -244,6 +244,45 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "notification-channels":
+			// Workspace-scoped Notification Channels (Phase 3).
+			// /api/workspaces/{ws}/notification-channels[/{id}[/test]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("channelid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			sub := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceNotificationChannels(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceNotificationChannel(w, r)
+			case r.Method == "POST" && sub == "test":
+				handler.TestWorkspaceNotificationChannel(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceNotificationChannel(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceNotificationChannel(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "alerts":
+			// Workspace-scoped Alert Rules (Phase 3).
+			// /api/workspaces/{ws}/alerts/rules[/{id}]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("ruleid", pathSegment(r.URL.Path, 5))
+			id := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && pathSegment(r.URL.Path, 4) == "rules" && id == "":
+				handler.ListWorkspaceAlertRules(w, r)
+			case r.Method == "POST" && pathSegment(r.URL.Path, 4) == "rules" && id == "":
+				handler.CreateWorkspaceAlertRule(w, r)
+			case r.Method == "PUT" && pathSegment(r.URL.Path, 4) == "rules" && id != "":
+				handler.UpdateWorkspaceAlertRule(w, r)
+			case r.Method == "DELETE" && pathSegment(r.URL.Path, 4) == "rules" && id != "":
+				handler.DeleteWorkspaceAlertRule(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "settings":
 			// Per-workspace general settings (Phase 3). /api/workspaces/{ws}/settings
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))

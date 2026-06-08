@@ -258,6 +258,14 @@ func (d *DB) migrate() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
+		-- Settings-scopes (Phase 3): a GLOBAL notification channel's workspace
+		-- allowlist, mirroring the host/registry/backup-target grant tables.
+		CREATE TABLE IF NOT EXISTS global_notification_channel_grants (
+			channel_id INTEGER NOT NULL REFERENCES notification_channels(id) ON DELETE CASCADE,
+			workspace  TEXT    NOT NULL,
+			PRIMARY KEY (channel_id, workspace)
+		);
+
 		-- 6d: Metrics history. A background collector writes one row per
 		-- workspace+env every few minutes; env cards render sparklines from it.
 		-- Old rows are pruned (90-day retention) by the collector.
@@ -358,6 +366,7 @@ func (d *DB) migrate() error {
 	// SQLite has no "ADD COLUMN IF NOT EXISTS", so we run the ALTER and ignore
 	// the duplicate-column error on databases that already have it.
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
+	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
 	d.addColumn("metrics_snapshots", "net_rx_bytes INTEGER NOT NULL DEFAULT 0")
 	d.addColumn("metrics_snapshots", "net_tx_bytes INTEGER NOT NULL DEFAULT 0")
 	d.addColumn("audit_log", "host TEXT NOT NULL DEFAULT ''")       // Phase 7: host name
@@ -378,6 +387,10 @@ func (d *DB) migrate() error {
 	if d.addColumn("backup_targets", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_backup_target_grants (target_id, workspace) SELECT id, '*' FROM backup_targets`) //nolint:errcheck
 	}
+	// Same scoping for notification channels (Phase 3); pre-scope channels → '*'.
+	if d.addColumn("notification_channels", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
+		d.Exec(`INSERT OR IGNORE INTO global_notification_channel_grants (channel_id, workspace) SELECT id, '*' FROM notification_channels`) //nolint:errcheck
+	}
 
 	// SQLite only enforces ON DELETE CASCADE when foreign_keys is ON (off by
 	// default), so deleting a host/registry can leave dangling bindings/grants.
@@ -386,6 +399,7 @@ func (d *DB) migrate() error {
 	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)                           //nolint:errcheck
 	d.Exec(`DELETE FROM global_registry_grants WHERE registry_id NOT IN (SELECT id FROM docker_registries)`)       //nolint:errcheck
 	d.Exec(`DELETE FROM global_backup_target_grants WHERE target_id NOT IN (SELECT id FROM backup_targets)`)      //nolint:errcheck
+	d.Exec(`DELETE FROM global_notification_channel_grants WHERE channel_id NOT IN (SELECT id FROM notification_channels)`) //nolint:errcheck
 	return nil
 }
 

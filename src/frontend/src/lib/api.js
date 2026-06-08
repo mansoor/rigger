@@ -328,6 +328,13 @@ export const getMigrationJob = (id) => api.get(`/migration-jobs/${id}`).then(r =
 
 // ── Settings: Notification Channels (Phase 6b) ────────────────────────────────
 
+// Workspace-scoped notification channel pool (Phase 3): own + granted globals.
+export const fetchWorkspaceNotificationChannels = (ws)       => api.get(`/workspaces/${ws}/notification-channels`).then(r => r.data)
+export const createWorkspaceNotificationChannel = (ws, body) => api.post(`/workspaces/${ws}/notification-channels`, body).then(r => r.data)
+export const updateWorkspaceNotificationChannel = (ws, id, body) => api.put(`/workspaces/${ws}/notification-channels/${id}`, body).then(r => r.data)
+export const deleteWorkspaceNotificationChannel = (ws, id)   => api.delete(`/workspaces/${ws}/notification-channels/${id}`)
+export const testWorkspaceNotificationChannel   = (ws, id)   => api.post(`/workspaces/${ws}/notification-channels/${id}/test`).then(r => r.data)
+
 export const fetchNotificationChannels = ()         => api.get('/settings/notification-channels').then(r => r.data)
 export const createNotificationChannel = (body)     => api.post('/settings/notification-channels', body).then(r => r.data)
 export const updateNotificationChannel = (id, body) => api.put(`/settings/notification-channels/${id}`, body).then(r => r.data)
@@ -342,6 +349,12 @@ export const fetchAlertRules     = ()         => api.get('/alerts/rules').then(r
 export const createAlertRule     = (body)     => api.post('/alerts/rules', body).then(r => r.data)
 export const updateAlertRule     = (id, body) => api.put(`/alerts/rules/${id}`, body).then(r => r.data)
 export const deleteAlertRule     = (id)       => api.delete(`/alerts/rules/${id}`)
+
+// Workspace-scoped alert rules (Phase 3): rules targeting one workspace tier.
+export const fetchWorkspaceAlertRules  = (ws)        => api.get(`/workspaces/${ws}/alerts/rules`).then(r => r.data)
+export const createWorkspaceAlertRule  = (ws, body)  => api.post(`/workspaces/${ws}/alerts/rules`, body).then(r => r.data)
+export const updateWorkspaceAlertRule  = (ws, id, body) => api.put(`/workspaces/${ws}/alerts/rules/${id}`, body).then(r => r.data)
+export const deleteWorkspaceAlertRule  = (ws, id)    => api.delete(`/workspaces/${ws}/alerts/rules/${id}`)
 export const fetchAlertEvents    = (opts = {}) => api.get('/alerts/events', { params: opts }).then(r => r.data)
 export const fetchAlertUnread    = ()         => api.get('/alerts/events/unread-count').then(r => r.data)
 export const dismissAlert        = (id)       => api.post(`/alerts/events/${id}/dismiss`).then(r => r.data)

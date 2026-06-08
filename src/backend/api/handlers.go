@@ -681,6 +681,11 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 			_ = settings.DeleteBackupTarget(h.db, id) //nolint:errcheck
 		}
 	}
+	if ids, derr := notify.WorkspaceOwnedChannelIDs(h.db, wsName); derr == nil {
+		for _, id := range ids {
+			_ = notify.DeleteChannel(h.db, id) //nolint:errcheck
+		}
+	}
 	_ = settings.DeleteWorkspaceSettings(h.db, wsName) //nolint:errcheck
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck

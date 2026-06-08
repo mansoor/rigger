@@ -99,6 +99,9 @@ func (e *Evaluator) expandTargets(rule Rule, wss []workspace.Workspace) []target
 
 	var out []target
 	for _, w := range wss {
+		if rule.WorkspaceKey != "" && w.WorkspaceName != rule.WorkspaceKey {
+			continue
+		}
 		if rule.Workspace != "" && w.Name != rule.Workspace {
 			continue
 		}

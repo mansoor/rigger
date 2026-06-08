@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
+import ChannelForm from '../components/ChannelForm'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -880,6 +881,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
       name: name.trim(),
       condition_type: conditionType,
       threshold: isNumeric ? Number(threshold) : 0,
+      workspace_key: initial?.workspace_key || '', // preserve a rule's workspace scope on edit
       workspace: isHost ? '' : workspace,
       env: (isHost || !workspace) ? '' : env,
       severity,
@@ -1099,123 +1101,12 @@ function RulesTab() {
   )
 }
 
-// ── Notification Channels (Phase 6b) ────────────────────────────────────────────
-
-const EMAIL_DEFAULT   = { host: '', port: 587, username: '', password: '', from: '', to: '', use_tls: true }
-const APPRISE_DEFAULT = { urls: '' }
-
-const APPRISE_EXAMPLES = `slack://TokenA/TokenB/TokenC/#channel
-discord://webhook_id/webhook_token
-tgram://bot_token/chat_id
-json://hooks.example.com/webhook`
-
-function ChannelForm({ initial, onSave, onCancel, saving }) {
-  const isEdit = !!initial?.id
-  const [name, setName]       = useState(initial?.name || '')
-  const [type, setType]       = useState(initial?.type || 'apprise')
-  const [enabled, setEnabled] = useState(initial?.enabled ?? true)
-  const [cfg, setCfg]         = useState(() => {
-    if (initial?.config) {
-      try { return typeof initial.config === 'string' ? JSON.parse(initial.config) : initial.config }
-      catch { /* fallthrough */ }
-    }
-    return (initial?.type || 'apprise') === 'email' ? { ...EMAIL_DEFAULT } : { ...APPRISE_DEFAULT }
-  })
-  const [error, setError] = useState('')
-
-  function setField(k, v) { setCfg(c => ({ ...c, [k]: v })) }
-  function changeType(t)  { setType(t); setCfg(t === 'email' ? { ...EMAIL_DEFAULT } : { ...APPRISE_DEFAULT }) }
-
-  async function submit(e) {
-    e.preventDefault()
-    setError('')
-    if (!name.trim()) { setError('Name is required'); return }
-    try { await onSave({ name: name.trim(), type, config: cfg, enabled }) }
-    catch (err) { setError(err.response?.data?.error || 'Failed to save') }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-5">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label required>Name</Label>
-          <Input value={name} onChange={setName} placeholder="Ops Slack" />
-        </div>
-        <div>
-          <Label required>Type</Label>
-          <Select value={type} onChange={changeType} disabled={isEdit}
-            options={[
-              { value: 'apprise', label: 'Apprise (Slack, Discord, Telegram, webhook…)' },
-              { value: 'email',   label: 'Email (SMTP)' },
-            ]} />
-        </div>
-      </div>
-
-      {type === 'apprise' && (
-        <div className="space-y-2 border border-border-strong/60 rounded-lg p-4">
-          <Label required>Apprise URL(s)</Label>
-          <textarea
-            value={cfg.urls} onChange={e => setField('urls', e.target.value)}
-            placeholder={APPRISE_EXAMPLES} rows={4}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-faint text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
-          />
-          <p className="text-xs text-content-subtle">
-            One Apprise URL per line. Delivered via the Apprise sidecar — see the{' '}
-            <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Apprise wiki</a>{' '}
-            for the URL format of each service.
-          </p>
-        </div>
-      )}
-
-      {type === 'email' && (
-        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">SMTP (sent directly by Rigger)</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label required>SMTP host</Label>
-              <Input value={cfg.host} onChange={v => setField('host', v)} placeholder="smtp.gmail.com" />
-            </div>
-            <div>
-              <Label required>Port</Label>
-              <Input value={cfg.port} onChange={v => setField('port', parseInt(v) || 0)} type="number" placeholder="587" />
-              <p className="text-xs text-content-faint mt-1">465 = implicit TLS; 587/25 = STARTTLS</p>
-            </div>
-            <div>
-              <Label>Username</Label>
-              <Input value={cfg.username} onChange={v => setField('username', v)} placeholder="alerts@example.com" />
-            </div>
-            <div>
-              <Label>Password</Label>
-              <Input value={cfg.password} onChange={v => setField('password', v)} type="password" placeholder="••••••••" />
-            </div>
-            <div>
-              <Label required>From</Label>
-              <Input value={cfg.from} onChange={v => setField('from', v)} placeholder="Rigger <alerts@example.com>" />
-            </div>
-            <div>
-              <Label required>To</Label>
-              <Input value={cfg.to} onChange={v => setField('to', v)} placeholder="you@example.com, oncall@example.com" />
-            </div>
-          </div>
-          <Toggle checked={cfg.use_tls} onChange={v => setField('use_tls', v)} label="Use STARTTLS (recommended)" />
-        </div>
-      )}
-
-      <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
-
-      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-
-      <div className="flex gap-2 justify-end pt-2">
-        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add channel'}</Btn>
-      </div>
-    </form>
-  )
-}
+// ── Notification Channels (Phase 6b; Phase 3: scoping) ────────────────────────
 
 function NotificationsTab() {
   const qc = useQueryClient()
   const { data: channels = [], isLoading } = useQuery({ queryKey: ['notification-channels'], queryFn: fetchNotificationChannels })
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const [modal, setModal]       = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [testStatus, setTestStatus] = useState({})
@@ -1285,7 +1176,14 @@ function NotificationsTab() {
                   {ch.type}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-content-strong truncate">{ch.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-content-strong truncate">{ch.name}</p>
+                    {ch.owner_scope === 'global' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint shrink-0" title={`Offered to: ${grantSummary(ch)}`}>shared · {grantSummary(ch)}</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40 shrink-0" title="Private to a workspace">workspace · {ch.owner_scope.replace(/^ws:/, '')}</span>
+                    )}
+                  </div>
                   <p className="text-xs text-content-subtle mt-0.5 truncate">{summary(ch)}</p>
                 </div>
                 {ts?.loading && <span className="text-xs text-content-subtle">Sending…</span>}
@@ -1315,6 +1213,8 @@ function NotificationsTab() {
               onSave={handleSave}
               onCancel={() => setModal(null)}
               saving={saveMut.isPending}
+              showGrants={modal === 'new' || modal.editing?.owner_scope === 'global'}
+              workspaces={workspaces}
             />
           </div>
         </div>

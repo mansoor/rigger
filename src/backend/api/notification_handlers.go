@@ -9,17 +9,22 @@ import (
 
 // ── Notification Channels (6b) ───────────────────────────────────────────────────
 
-// GET /api/settings/notification-channels
+// GET /api/settings/notification-channels — admin view: all channels; global ones carry grants.
 func (h *Handler) ListNotificationChannels(w http.ResponseWriter, r *http.Request) {
 	channels, err := notify.ListChannels(h.db)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	for i := range channels {
+		if channels[i].OwnerScope == "global" {
+			channels[i].Grants, _ = notify.ChannelGrants(h.db, channels[i].ID) //nolint:errcheck
+		}
+	}
 	writeJSON(w, http.StatusOK, channels)
 }
 
-// POST /api/settings/notification-channels
+// POST /api/settings/notification-channels — admin create (global; grants default to '*').
 func (h *Handler) CreateNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	// Presence-aware decode so an omitted "enabled" defaults to true.
 	var body struct {
@@ -32,6 +37,7 @@ func (h *Handler) CreateNotificationChannel(w http.ResponseWriter, r *http.Reque
 	}
 	ch := body.Channel
 	ch.Enabled = body.Enabled == nil || *body.Enabled
+	ch.OwnerScope = "global"
 
 	created, err := notify.CreateChannel(h.db, ch)
 	if err != nil {
@@ -43,10 +49,16 @@ func (h *Handler) CreateNotificationChannel(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
+	grants := body.Grants
+	if grants == nil {
+		grants = []string{"*"}
+	}
+	_ = notify.SetChannelGrants(h.db, created.ID, grants) //nolint:errcheck
+	created.Grants, _ = notify.ChannelGrants(h.db, created.ID)
 	writeJSON(w, http.StatusCreated, created)
 }
 
-// PUT /api/settings/notification-channels/{id}
+// PUT /api/settings/notification-channels/{id} — admin update incl. the allowlist.
 func (h *Handler) UpdateNotificationChannel(w http.ResponseWriter, r *http.Request) {
 	id, err := parseTrailingID(r.URL.Path, "/api/settings/notification-channels/")
 	if err != nil {
@@ -67,6 +79,10 @@ func (h *Handler) UpdateNotificationChannel(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if updated.OwnerScope == "global" && body.Grants != nil {
+		_ = notify.SetChannelGrants(h.db, id, body.Grants) //nolint:errcheck
+	}
+	updated.Grants, _ = notify.ChannelGrants(h.db, id)
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -94,6 +110,10 @@ func (h *Handler) TestNotificationChannel(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
+	h.testChannelByID(w, id)
+}
+
+func (h *Handler) testChannelByID(w http.ResponseWriter, id int64) {
 	ch, err := notify.GetChannel(h.db, id)
 	if err != nil || ch == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
