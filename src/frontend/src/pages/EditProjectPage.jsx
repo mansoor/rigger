@@ -1047,7 +1047,7 @@ export default function EditProjectPage() {
 
   return (
     <Layout>
-      <div className="p-6 max-w-3xl">
+      <div className="max-w-3xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -1088,15 +1088,15 @@ export default function EditProjectPage() {
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-content mb-3">Project</h2>
           <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
+            <div className="grid sm:grid-cols-5 gap-4">
+              <div className="sm:col-span-4">
                 <Label>Project name</Label>
                 {/* Editable display label — reusable across workspaces. The key and
                     resource prefix (below) are the immutable identity. */}
                 <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
                 <p className="text-xs text-content-subtle mt-1">A display label — editable; may repeat across workspaces.</p>
               </div>
-              <div>
+              <div className="sm:col-span-1">
                 <Label>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></Label>
                 <div
                   title="Fixed after creation — the project's folder / URL identity"
@@ -1104,7 +1104,7 @@ export default function EditProjectPage() {
                 >
                   {name}
                 </div>
-                <p className="text-xs text-content-subtle mt-1">Folder / URL identity. Cannot change.</p>
+                <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
               </div>
             </div>
             {/* Registry only applies to custom (build) stacks — image stacks pull

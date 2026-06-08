@@ -49,7 +49,7 @@ export default function ManageWorkspacePage() {
 
   return (
     <Layout>
-      <div className="p-6 max-w-3xl">
+      <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Manage workspace</p>
           <div className="flex items-center gap-2.5 mt-0.5">
@@ -213,8 +213,8 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
     <section>
       <h2 className="text-sm font-semibold text-content mb-3">General</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
-          <div>
+        <div className="grid sm:grid-cols-5 gap-4">
+          <div className="sm:col-span-4">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
             <input
               value={name} onChange={e => setName(e.target.value)} maxLength={32}
@@ -222,13 +222,13 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
             />
             <p className="text-xs text-content-subtle mt-1">1–32 chars; editable anytime.</p>
           </div>
-          <div>
+          <div className="sm:col-span-1">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Key <span className="font-normal normal-case text-content-faint">(fixed)</span></label>
             <input
               value={workspace} readOnly disabled
               className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed"
             />
-            <p className="text-xs text-content-subtle mt-1">Folder / URL / Docker identity. Cannot change.</p>
+            <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
           </div>
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
