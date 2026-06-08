@@ -273,6 +273,10 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/transfer"):
+			// POST /api/workspaces/{key}/transfer — move projects to another workspace
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			handler.TransferWorkspace(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/migrate"):
 			// /api/workspaces/{ws}/projects/{name}/migrate — move a project to another host
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
@@ -294,6 +298,10 @@ func main() {
 			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
 			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.VerifyRestore(w, r)
+		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "":
+			// PUT /api/workspaces/{key} — rename the workspace (no /projects/ segment)
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			handler.RenameWorkspaceTier(w, r)
 		case r.Method == "PUT" && matchPrefix(r.URL.Path, "/api/workspaces/"):
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
 			r.SetPathValue("name", pathSegment(r.URL.Path, 4))

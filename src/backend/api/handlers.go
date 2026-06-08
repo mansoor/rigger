@@ -652,10 +652,14 @@ func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "key": key, "name": body.Name})
 }
 
-// DELETE /api/workspaces/{workspace} — delete a whole workspace tier (all projects).
-// Caller is expected to have torn down running stacks first.
+// DELETE /api/workspaces/{workspace} — delete a whole workspace tier. Safely
+// tears down every project/env stack (removing containers/networks/volumes)
+// before deleting the folder, so nothing is orphaned.
 func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
+	for _, pk := range workspace.ProjectKeys(h.workspacesDir, wsName) {
+		h.teardownProjectStacks(wsName, pk)
+	}
 	if err := workspace.DeleteWorkspace(h.workspacesDir, wsName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -1469,6 +1473,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
+
+	// Tear down each env's stack first so containers/networks/volumes aren't orphaned.
+	h.teardownProjectStacks(wsName, name)
 
 	if err := os.RemoveAll(wsPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete project: " + err.Error()})

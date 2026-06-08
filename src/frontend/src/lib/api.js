@@ -42,7 +42,11 @@ export const recordTemplateUse = (name)      => api.post(`/templates/${name}/use
 // Workspace tier: list / create / delete the parent-tier workspaces.
 export const fetchWorkspaces      = ()      => api.get('/workspaces').then(r => r.data)
 export const createWorkspaceTier  = (name, key) => api.post('/workspaces', { name, key }).then(r => r.data)
+export const renameWorkspaceTier  = (ws, name) => api.put(`/workspaces/${ws}`, { name }).then(r => r.data)
 export const deleteWorkspaceTier  = (ws)    => api.delete(`/workspaces/${ws}`).then(r => r.data)
+// Move projects to another workspace (projects omitted/empty = all; empties source).
+export const transferWorkspace    = (ws, target, projects = []) =>
+  api.post(`/workspaces/${ws}/transfer`, { target, projects }).then(r => r.data)
 
 // Key helpers (short identifier for folders/URLs/Docker). suggestKey returns a
 // derived, collision-free, validated key; checkKey validates a user override.

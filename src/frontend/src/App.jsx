@@ -9,6 +9,7 @@ import DashboardPage from './pages/DashboardPage'
 import ProjectPage from './pages/ProjectPage'
 import NewProjectPage from './pages/NewProjectPage'
 import EditProjectPage from './pages/EditProjectPage'
+import ManageWorkspacePage from './pages/ManageWorkspacePage'
 import SettingsPage from './pages/SettingsPage'
 import HousekeepingPage from './pages/HousekeepingPage'
 import ToolsPage from './pages/ToolsPage'
@@ -50,6 +51,7 @@ function AppRoutes() {
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+        <Route path="/workspaces/:workspace/manage" element={<RequireAuth><ManageWorkspacePage /></RequireAuth>} />
         <Route path="/workspaces/:workspace/projects/new" element={<RequireAuth><NewProjectPage /></RequireAuth>} />
         <Route path="/workspaces/:workspace/projects/:name" element={<RequireAuth><ProjectPage /></RequireAuth>} />
         <Route path="/workspaces/:workspace/projects/:name/edit" element={<RequireAuth><EditProjectPage /></RequireAuth>} />

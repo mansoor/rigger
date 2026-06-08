@@ -70,7 +70,7 @@ function ProjectSidebarItem({ workspace, project, active }) {
 
 // Top-nav dropdown to pick the active parent-tier Workspace. Changing it scopes
 // the whole UI (sidebar projects, dashboard) and navigates home.
-function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace }) {
+function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onManage }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -116,6 +116,14 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace }) {
             ))}
           </div>
           <div className="border-t border-border-strong mt-1 pt-1">
+            {current && (
+              <button
+                onClick={() => { setOpen(false); onManage() }}
+                className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
+              >
+                ⚙ Manage workspace
+              </button>
+            )}
             <button
               onClick={() => { setOpen(false); onNewWorkspace() }}
               className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
@@ -366,6 +374,7 @@ export default function Layout({ children }) {
               workspaces={workspaces}
               onSelect={selectWorkspace}
               onNewWorkspace={() => setNewWsOpen(true)}
+              onManage={() => navigate(`/workspaces/${current}/manage`)}
             />
           </div>
           <div className="flex items-center gap-1">
