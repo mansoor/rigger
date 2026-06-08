@@ -365,6 +365,65 @@ func (d *DB) migrate() error {
 	// Incremental column additions for tables that may predate a field.
 	// SQLite has no "ADD COLUMN IF NOT EXISTS", so we run the ALTER and ignore
 	// the duplicate-column error on databases that already have it.
+	d.addColumn("users", "last_login_at DATETIME")                                 // Phase 5: track last login
+	d.addColumn("users", "email TEXT NOT NULL DEFAULT ''")                         // Phase 5.1b: required going forward; login identity
+	d.addColumn("users", "phone TEXT NOT NULL DEFAULT ''")                         // Phase 5.1b: optional (SMS later)
+	d.addColumn("users", "email_verified INTEGER NOT NULL DEFAULT 0")             // Phase 5.1b
+	d.addColumn("users", "status TEXT NOT NULL DEFAULT 'active'")                 // Phase 5.1b: 'invited' | 'active'
+	d.addColumn("users", "appearance_prefs TEXT NOT NULL DEFAULT ''")             // per-user theme/typography override (W7)
+	// Unique email among accounts that have one (empty allowed for legacy/pre-email rows).
+	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`) //nolint:errcheck
+	// Global-role rework: the JWT/global role is now superadmin|user (workspace
+	// access comes from membership). Migrate legacy global roles in place —
+	// idempotent, so safe to run every boot.
+	d.Exec(`UPDATE users SET role='superadmin' WHERE role='admin'`)                   //nolint:errcheck
+	d.Exec(`UPDATE users SET role='user' WHERE role NOT IN ('superadmin','user')`)    //nolint:errcheck
+	// Phase 5.2: workspace membership (tier) + per-project role overrides. Roles are
+	// workspace-tier roles (viewer/developer/operator/admin); project_acl may also be
+	// 'none' to revoke a single project. Membership-gated: a non-super-admin sees only
+	// the workspaces listed here.
+	d.Exec(`CREATE TABLE IF NOT EXISTS workspace_members (
+		user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		ws_key  TEXT    NOT NULL,
+		role    TEXT    NOT NULL,
+		PRIMARY KEY (user_id, ws_key)
+	)`) //nolint:errcheck
+	d.Exec(`CREATE TABLE IF NOT EXISTS project_acl (
+		user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		ws_key   TEXT    NOT NULL,
+		proj_key TEXT    NOT NULL,
+		role     TEXT    NOT NULL,
+		PRIMARY KEY (user_id, ws_key, proj_key)
+	)`) //nolint:errcheck
+	// Access requests: a user asks for access to a workspace (and optionally one
+	// project) at a role; a workspace admin or super-admin approves/rejects.
+	d.Exec(`CREATE TABLE IF NOT EXISTS access_requests (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		ws_key     TEXT    NOT NULL,
+		proj_key   TEXT    NOT NULL DEFAULT '',
+		role       TEXT    NOT NULL,
+		message    TEXT    NOT NULL DEFAULT '',
+		status     TEXT    NOT NULL DEFAULT 'pending', -- pending | approved | rejected
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		decided_at DATETIME,
+		decided_by INTEGER
+	)`) //nolint:errcheck
+	// One open (pending) request per (user, workspace, project).
+	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_access_req_pending
+		ON access_requests(user_id, ws_key, proj_key) WHERE status='pending'`) //nolint:errcheck
+
+	// Invite / email-verify / password-reset / 2FA tokens (token_hash = sha256 of the
+	// random value handed out in links; the raw value is never stored).
+	d.Exec(`CREATE TABLE IF NOT EXISTS user_tokens (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		kind       TEXT    NOT NULL,
+		token_hash TEXT    NOT NULL UNIQUE,
+		expires_at DATETIME NOT NULL,
+		used_at    DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`) //nolint:errcheck
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
 	d.addColumn("metrics_snapshots", "net_rx_bytes INTEGER NOT NULL DEFAULT 0")

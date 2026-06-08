@@ -11,9 +11,16 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mansoor/rigger/ui/internal/executor"
 )
+
+// sampleTimeout bounds read-only sampling commands (docker stats/ps/compose ls).
+// A hung container can otherwise make `docker stats` block indefinitely and
+// freeze the metrics collector / dashboard polls. On timeout the command is
+// killed and the cycle simply records nothing for that host.
+const sampleTimeout = 15 * time.Second
 
 // Stats is the full dashboard payload.
 type Stats struct {
@@ -158,7 +165,7 @@ func WorkspaceDiskMB(wsPath string) float64 {
 // a workspace_env stack.
 func projectByContainerID(ex executor.Executor) map[string]string {
 	projectByID := make(map[string]string)
-	psOut, err := ex.DockerOutput(executor.Spec{Args: []string{"ps", "--format", "{{.ID}} {{.Labels}}"}})
+	psOut, err := ex.DockerOutput(executor.Spec{Args: []string{"ps", "--format", "{{.ID}} {{.Labels}}"}, Timeout: sampleTimeout})
 	if err != nil {
 		return projectByID
 	}
@@ -221,7 +228,7 @@ func ContainerStatsByProjectFor(ex executor.Executor) map[string]ProjectStats {
 	}
 
 	out, err := ex.DockerOutput(executor.Spec{Args: []string{"stats", "--no-stream",
-		"--format", "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}"}})
+		"--format", "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}"}, Timeout: sampleTimeout})
 	if err != nil {
 		return result
 	}
@@ -409,7 +416,7 @@ func MemByProjectFor(ex executor.Executor) map[string]float64 {
 	}
 
 	// Get memory stats per container
-	statsOut, err := ex.DockerOutput(executor.Spec{Args: []string{"stats", "--no-stream", "--format", "{{.ID}} {{.MemUsage}}"}})
+	statsOut, err := ex.DockerOutput(executor.Spec{Args: []string{"stats", "--no-stream", "--format", "{{.ID}} {{.MemUsage}}"}, Timeout: sampleTimeout})
 	if err != nil {
 		return result
 	}

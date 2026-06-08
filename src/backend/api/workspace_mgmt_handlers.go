@@ -79,6 +79,13 @@ func (h *Handler) TransferWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target workspace not found"})
 		return
 	}
+	// Caller must also administer the target workspace (the gate already verified
+	// the source). A super-admin satisfies this everywhere.
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil &&
+		h.auth.EffectiveRole(claims.UserID, claims.Role, body.Target, "") != auth.RoleAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you must be an admin of the target workspace"})
+		return
+	}
 
 	all := workspace.ProjectKeys(h.workspacesDir, src)
 	toMove := body.Projects

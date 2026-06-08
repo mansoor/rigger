@@ -87,8 +87,10 @@ function StatusBadge({ label, color }) {
 // Uses ws.env_access (server-resolved values) so ${VAR} references are already substituted.
 function envAccess(cfg, ws, envName) {
   // For an env running on a remote host, direct host:port URLs must point at the
-  // remote host's address, not the control plane's.
-  const host    = ws?.env_hosts?.[envName]?.host_address || window.location.hostname
+  // remote host's address. For local envs, prefer the configured app host/IP
+  // (Admin → General) so links still work when the dashboard is reached via a
+  // proxy domain; only then fall back to the browser's hostname.
+  const host    = ws?.env_hosts?.[envName]?.host_address || ws?.app_host || window.location.hostname
   const traefik = !!cfg?.traefik_enabled
   const ssl     = !!cfg?.ssl_enabled
   const isImage = ws?.config?.project?.type === 'image'
@@ -313,6 +315,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const gitBranch  = cfg?.git?.branch || ''
   const deployment = cfg?.deployment || 'compose'
   const isImage    = ws?.config?.project?.type === 'image'
+  // Role gating: developers+ can run Env Card actions; viewers get a read-only card.
+  const canOp      = ['admin', 'operator', 'developer'].includes(ws?.my_role)
   const { url, port, links, viaTraefik, domainUrl } = envAccess(cfg, ws, envName)
 
   // Poll container status every 15 seconds, refresh immediately after actions
@@ -507,42 +511,53 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {/* Actions — state-aware: primary lifecycle buttons + a compact toolbar.
           Down (Inactivate) is destructive, so it asks to confirm first. */}
       <div className="mt-auto relative flex flex-col gap-2">
-        {/* Primary lifecycle: Deploy / Update (image stacks) / Stop */}
-        <div className="flex gap-2">
-          <PrimaryBtn variant="deploy" icon="deploy" fill onClick={() => handleAction('start')}
-            title="Deploy — bring the stack up (applies the current compose)">Deploy</PrimaryBtn>
-          {isImage && (
-            <PrimaryBtn variant="update" icon="update" pulse={hasImageUpdate} disabled={updateUpToDate}
-              onClick={() => handleAction('update')}
-              title={updateUpToDate ? 'Up to date — no update available'
-                : hasImageUpdate ? `Update available${updateServices.length ? ': ' + updateServices.join(', ') : ''} — pull & recreate`
-                : 'Pull latest images & recreate'}>Update</PrimaryBtn>
-          )}
-          <PrimaryBtn variant="stop" icon="stop" fill disabled={!isRunning} onClick={() => handleAction('stop')}
-            title="Stop containers (keep state)">Stop</PrimaryBtn>
-        </div>
+        {/* Primary lifecycle: Deploy / Update (image stacks) / Stop — operators+ */}
+        {canOp && (
+          <div className="flex gap-2">
+            <PrimaryBtn variant="deploy" icon="deploy" fill onClick={() => handleAction('start')}
+              title="Deploy — bring the stack up (applies the current compose)">Deploy</PrimaryBtn>
+            {isImage && (
+              <PrimaryBtn variant="update" icon="update" pulse={hasImageUpdate} disabled={updateUpToDate}
+                onClick={() => handleAction('update')}
+                title={updateUpToDate ? 'Up to date — no update available'
+                  : hasImageUpdate ? `Update available${updateServices.length ? ': ' + updateServices.join(', ') : ''} — pull & recreate`
+                  : 'Pull latest images & recreate'}>Update</PrimaryBtn>
+            )}
+            <PrimaryBtn variant="stop" icon="stop" fill disabled={!isRunning} onClick={() => handleAction('stop')}
+              title="Stop containers (keep state)">Stop</PrimaryBtn>
+          </div>
+        )}
 
-        {/* Toolbar: secondary lifecycle + files + terminal */}
+        {/* Toolbar: secondary lifecycle + files + terminal. Viewers get read-only
+            actions (View Compose); operators+ get the full set. */}
         <div className="flex items-center gap-0.5 p-1 bg-surface-raised/40 border border-border rounded-lg">
-          <ToolBtn icon="refresh" title="Refresh — regenerate compose from config & deploy"
-            onClick={() => handleAction('refresh')} className="text-content-subtle hover:text-sky-400" />
-          <ToolBtn icon="restart" title="Restart the existing containers in place" disabled={!hasContainers}
-            onClick={() => handleAction('restart')} className="text-content-subtle hover:text-success-fg" />
-          <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
-            onClick={async () => {
-              if (await confirm({
-                title: `Inactivate ${envName}?`,
-                message: 'Removes the containers (volumes are kept). Deploy brings it back.',
-                confirmLabel: 'Inactivate',
-              })) handleAction('down')
-            }} className="text-danger-fg/50 hover:text-danger-fg" />
-          <span className="w-px self-stretch bg-surface-raised mx-1" />
-          <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-content-subtle hover:text-violet-400" />
+          {canOp && (
+            <>
+              <ToolBtn icon="refresh" title="Refresh — regenerate compose from config & deploy"
+                onClick={() => handleAction('refresh')} className="text-content-subtle hover:text-sky-400" />
+              <ToolBtn icon="restart" title="Restart the existing containers in place" disabled={!hasContainers}
+                onClick={() => handleAction('restart')} className="text-content-subtle hover:text-success-fg" />
+              <ToolBtn icon="down" title="Inactivate — remove containers (keeps volumes)" disabled={!hasContainers}
+                onClick={async () => {
+                  if (await confirm({
+                    title: `Inactivate ${envName}?`,
+                    message: 'Removes the containers (volumes are kept). Deploy brings it back.',
+                    confirmLabel: 'Inactivate',
+                  })) handleAction('down')
+                }} className="text-danger-fg/50 hover:text-danger-fg" />
+              <span className="w-px self-stretch bg-surface-raised mx-1" />
+              <ToolBtn icon="vars" title="Edit env vars" onClick={onConfig} className="text-content-subtle hover:text-violet-400" />
+            </>
+          )}
           <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
-          <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
-            onClick={() => onTerminal()} className="text-content-subtle hover:text-emerald-400" />
-          <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
-            onClick={() => setBackupModal(true)} className="text-content-subtle hover:text-indigo-400" />
+          {canOp && (
+            <>
+              <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
+                onClick={() => onTerminal()} className="text-content-subtle hover:text-emerald-400" />
+              <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
+                onClick={() => setBackupModal(true)} className="text-content-subtle hover:text-indigo-400" />
+            </>
+          )}
         </div>
       </div>
 
@@ -1803,6 +1818,10 @@ export default function ProjectPage() {
     queryKey: ['workspace', workspace, name],
     queryFn: () => fetchWorkspace(workspace, name),
   })
+  // Role gating: developers+ run Env Card actions; operators+ edit project config;
+  // admins manage the workspace.
+  const canOp    = ['admin', 'operator', 'developer'].includes(ws?.my_role)
+  const canEdit  = ['admin', 'operator'].includes(ws?.my_role)
 
   function runAction(cmd, env, onComplete, extra = [], services = []) {
     const socket = openActionSocket(workspace, name, cmd, env, extra, services)
@@ -1812,7 +1831,21 @@ export default function ProjectPage() {
   }
 
   if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
-  if (error)     return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load project: {error.message}</div></Layout>
+  if (error) {
+    const status = error.response?.status
+    if (status === 403) {
+      return <Layout>
+        <div className="h-full flex items-center justify-center p-8">
+          <div className="max-w-md text-center">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-surface-raised border border-border flex items-center justify-center text-2xl mb-4">🔒</div>
+            <h1 className="text-lg font-semibold text-content-strong">No access to this project</h1>
+            <p className="text-sm text-content-muted mt-2">You don't have permission to view <strong className="text-content">{name}</strong>. Contact a workspace admin if you need access.</p>
+          </div>
+        </div>
+      </Layout>
+    }
+    return <Layout><div className="p-8 text-danger-fg text-sm">Failed to load project: {error.message}</div></Layout>
+  }
 
   const cfg = ws?.config
   const envs = ws?.envs || []
@@ -1853,8 +1886,8 @@ export default function ProjectPage() {
 
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />
-            {type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
+            {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
+            {canOp && type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
           </div>
         </div>
 

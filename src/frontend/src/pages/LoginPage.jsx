@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/auth'
 import api from '../lib/api'
 
 export default function LoginPage() {
-  const [username, setUsername] = useState('')
+  const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
@@ -26,7 +26,7 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(username, password)
+      await login(email, password)
       navigate('/', { replace: true })
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed')
@@ -41,10 +41,10 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <img
             src="/rigger-logo.png"
-            alt="Rigger — Rig once. Deploy anywhere"
+            alt="With Rigger — More Dev, Less Ops."
             className="w-36 h-36 mx-auto drop-shadow-[0_0_24px_rgba(99,102,241,0.4)]"
           />
-          <p className="text-content-muted text-sm mt-5">Rig once. Deploy anywhere</p>
+          <p className="text-content-muted text-sm mt-5">With Rigger — More Dev, Less Ops.</p>
         </div>
 
         <div className="bg-surface border border-border rounded-xl p-8">
@@ -61,9 +61,9 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-content mb-1">Username</label>
+              <label className="block text-sm font-medium text-content mb-1">Email</label>
               <input
-                type="text" value={username} onChange={e => setUsername(e.target.value)}
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
                 autoFocus required
               />

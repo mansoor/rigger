@@ -13,18 +13,18 @@ import (
 // backup snapshot, excluding older snapshot history (Phase 11 .rwb bloat fix).
 func TestArchiveExcludesOldSnapshots(t *testing.T) {
 	root := t.TempDir()
-	wsDir := filepath.Join(root, "myws")
+	projDir := filepath.Join(root, "proj")
 
-	writeFile(t, filepath.Join(wsDir, "config.json"), `{"project":{"name":"myws"}}`)
-	writeFile(t, filepath.Join(wsDir, "envs", "prod", ".env"), "A=1")
+	writeFile(t, filepath.Join(projDir, "config.json"), `{"project":{"name":"web"}}`)
+	writeFile(t, filepath.Join(projDir, "envs", "prod", ".env"), "A=1")
 	// prod has two snapshots; only the newer (by name) should be kept.
-	writeFile(t, filepath.Join(wsDir, "backups", "prod", "2026-01-01_00-00-00", "old.tar.gz"), strings.Repeat("x", 4096))
-	writeFile(t, filepath.Join(wsDir, "backups", "prod", "2026-02-02_00-00-00", "new.tar.gz"), "new")
+	writeFile(t, filepath.Join(projDir, "backups", "prod", "2026-01-01_00-00-00", "old.tar.gz"), strings.Repeat("x", 4096))
+	writeFile(t, filepath.Join(projDir, "backups", "prod", "2026-02-02_00-00-00", "new.tar.gz"), "new")
 	// stage has one snapshot — kept.
-	writeFile(t, filepath.Join(wsDir, "backups", "stage", "2026-03-03_00-00-00", "s.tar.gz"), "s")
+	writeFile(t, filepath.Join(projDir, "backups", "stage", "2026-03-03_00-00-00", "s.tar.gz"), "s")
 
 	dest := filepath.Join(root, "out.rwb")
-	if _, err := createArchive(wsDir, "myws", dest); err != nil {
+	if _, err := createArchive(projDir, "alpha", "web", dest); err != nil {
 		t.Fatalf("createArchive: %v", err)
 	}
 
@@ -38,17 +38,23 @@ func TestArchiveExcludesOldSnapshots(t *testing.T) {
 		return false
 	}
 
+	// Content is nested under {workspace}/projects/{project}/…
+	const base = "alpha/projects/web"
 	if has("2026-01-01_00-00-00") {
 		t.Errorf("old snapshot should be excluded; got %v", names)
 	}
-	if !has("myws/backups/prod/2026-02-02_00-00-00/new.tar.gz") {
+	if !has(base + "/backups/prod/2026-02-02_00-00-00/new.tar.gz") {
 		t.Errorf("newest prod snapshot should be included; got %v", names)
 	}
-	if !has("myws/backups/stage/2026-03-03_00-00-00/s.tar.gz") {
+	if !has(base + "/backups/stage/2026-03-03_00-00-00/s.tar.gz") {
 		t.Errorf("newest stage snapshot should be included; got %v", names)
 	}
-	if !has("myws/config.json") || !has("myws/envs/prod/.env") {
+	if !has(base+"/config.json") || !has(base+"/envs/prod/.env") {
 		t.Errorf("config + env files should be included; got %v", names)
+	}
+	// The identity manifest must be embedded at the archive root.
+	if !has(riggerBackupManifest) {
+		t.Errorf("manifest %q should be embedded; got %v", riggerBackupManifest, names)
 	}
 }
 

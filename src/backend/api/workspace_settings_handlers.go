@@ -19,6 +19,8 @@ var workspaceSettingKeys = map[string]bool{
 	"default_registry_id":      true,
 	"default_host_id":          true,
 	"default_backup_target_id": true,
+	// W7: workspace default appearance (JSON blob; users can override per-account).
+	"appearance_prefs": true,
 }
 
 // GET /api/workspaces/{ws}/settings

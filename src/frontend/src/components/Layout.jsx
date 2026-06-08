@@ -3,11 +3,13 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, resendVerification } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
 import KeyField from './KeyField'
+import RequestAccessModal from './RequestAccessModal'
+import { AppearanceTab } from '../pages/SettingsPage'
 
 const STATUS_DOT = {
   running: 'bg-green-400',
@@ -70,7 +72,7 @@ function ProjectSidebarItem({ workspace, project, active }) {
 
 // Top-nav dropdown to pick the active parent-tier Workspace. Changing it scopes
 // the whole UI (sidebar projects, dashboard) and navigates home.
-function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onManage }) {
+function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onManage, canManage, canCreate }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -116,20 +118,14 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onMa
             ))}
           </div>
           <div className="border-t border-border-strong mt-1 pt-1">
-            {current && (
+            {canCreate && (
               <button
-                onClick={() => { setOpen(false); onManage() }}
-                className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
+                onClick={() => { setOpen(false); onNewWorkspace() }}
+                className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
               >
-                ⚙ Manage workspace
+                ＋ New workspace
               </button>
             )}
-            <button
-              onClick={() => { setOpen(false); onNewWorkspace() }}
-              className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
-            >
-              ＋ New workspace
-            </button>
           </div>
         </div>
       )}
@@ -257,7 +253,8 @@ function ChangePasswordModal({ onClose }) {
 
 function UserMenu({ user, onLogout }) {
   const [open, setOpen]   = useState(false)
-  const [pwOpen, setPwOpen] = useState(false)
+  const [acct, setAcct]   = useState(null) // null | 'general' | 'security' | 'appearance'
+  const [reqOpen, setReqOpen] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -288,10 +285,16 @@ function UserMenu({ user, onLogout }) {
               <p className="text-sm font-semibold text-content-strong truncate">{user?.sub}</p>
             </div>
             <button
-              onClick={() => { setOpen(false); setPwOpen(true) }}
+              onClick={() => { setOpen(false); setAcct('general') }}
               className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
             >
-              Change password
+              Account settings
+            </button>
+            <button
+              onClick={() => { setOpen(false); setReqOpen(true) }}
+              className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
+            >
+              Request access
             </button>
             <div className="border-t border-border-strong mt-1 pt-1">
               <button
@@ -305,13 +308,87 @@ function UserMenu({ user, onLogout }) {
         )}
       </div>
 
-      {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+      {acct && <AccountModal user={user} tab={acct} setTab={setAcct} onClose={() => setAcct(null)} />}
+      {reqOpen && <RequestAccessModal onClose={() => setReqOpen(false)} />}
     </>
+  )
+}
+
+function ProfileModal({ user, onClose }) {
+  const tryRefresh = useAuthStore(s => s.tryRefresh)
+  const [email, setEmail] = useState(user?.email || '')
+  const [phone, setPhone] = useState('')
+  const [username, setUsername] = useState(user?.sub || '')
+  const [msg, setMsg] = useState('')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await updateProfile({ email: email.trim(), phone: phone.trim(), username: username.trim() })
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.email_sent) setMsg('Saved — a verification link was emailed to you.')
+      else setMsg('Saved.')
+      await tryRefresh().catch(() => {})
+    } catch (err) {
+      setMsg(err.response?.data?.error || 'Failed to save')
+    } finally { setBusy(false) }
+  }
+
+  async function resend() {
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await resendVerification()
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.already_verified) setMsg('Your email is already verified.')
+      else setMsg('Verification link sent to your email.')
+    } catch (err) {
+      setMsg(err.response?.data?.error || 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  const inp = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">Your profile</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        {user && user.ev === false && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
+            <span className="text-xs text-warning-fg">Your email isn't verified.</span>
+            <button onClick={resend} disabled={busy} className="text-xs font-medium text-warning-fg underline underline-offset-2">Resend link</button>
+          </div>
+        )}
+        <form onSubmit={save} className="space-y-3">
+          <div><label className={lbl}>Email</label><input className={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+          <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
+          <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
+          {msg && <p className="text-xs text-content-muted">{msg}</p>}
+          {link && (
+            <div className="text-xs">
+              <p className="text-content-muted mb-1">No system email configured — open this link to verify:</p>
+              <a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Close</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 
 export default function Layout({ children }) {
   const user     = useAuthStore((s) => s.user)
+  const isAdmin  = user?.role === 'superadmin'  // global super-admin
   const logout   = useAuthStore((s) => s.logout)
   const navigate = useNavigate()
   const qc       = useQueryClient()
@@ -330,12 +407,27 @@ export default function Layout({ children }) {
     refetchInterval: 30_000,
   })
 
+  // Phase 5.2b: only workspace admins (or global admins) manage a workspace or
+  // create projects in it. my_role comes from the (membership-filtered) list.
+  const currentWsInfo = (workspaces || []).find(w => w.key === current)
+  const canAdminWs = isAdmin || currentWsInfo?.my_role === 'admin'
+  // A signed-in user with no workspace membership (and not a super-admin) has no
+  // access to anything — hide cross-workspace surfaces (activity/backup/alerts).
+  const hasAccess = isAdmin || (Array.isArray(workspaces) && workspaces.length > 0)
+
   // The route is authoritative: a deep-link to /workspaces/:workspace/... syncs
   // the selected workspace. Otherwise, default to the first available workspace
   // once the list loads and nothing is selected yet.
   useEffect(() => {
     if (routeWs && routeWs !== current) { setCurrent(routeWs); return }
-    if (!current && workspaces?.length) setCurrent(workspaces[0].key)
+    if (!Array.isArray(workspaces)) return
+    // A persisted selection the user can no longer access (e.g. a different user
+    // signed in) must not stick — fall back to the first accessible workspace.
+    if (current && !workspaces.some(w => w.key === current)) {
+      setCurrent(workspaces[0]?.key || '')
+      return
+    }
+    if (!current && workspaces.length) setCurrent(workspaces[0].key)
   }, [routeWs, current, workspaces, setCurrent])
 
   // Projects belonging to the selected workspace (the sidebar list).
@@ -357,6 +449,10 @@ export default function Layout({ children }) {
 
   async function handleLogout() {
     await logout()
+    // Drop the selected workspace + all cached project data so the next user who
+    // signs in (e.g. in the same tab) never sees the previous session's data.
+    setCurrent('')
+    qc.clear()
     navigate('/login')
   }
 
@@ -375,16 +471,18 @@ export default function Layout({ children }) {
               onSelect={selectWorkspace}
               onNewWorkspace={() => setNewWsOpen(true)}
               onManage={() => navigate(`/workspaces/${current}/manage`)}
+              canManage={canAdminWs}
+              canCreate={isAdmin}
             />
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
-            <NavBtn to="/housekeeping" label="Housekeeping" />
+            {isAdmin && <NavBtn to="/housekeeping" label="Housekeeping" />}
             <NavBtn to="/tools" label="Tools" />
-            <NavBtn to="/settings" label="Settings" />
+            {isAdmin && <NavBtn to="/settings" label="Admin" />}
             <div className="w-px h-4 bg-surface-overlay mx-1" />
             <ThemeToggle />
-            <AlertBell active={slidePanel === 'alerts'} onClick={() => setSlidePanel(p => p === 'alerts' ? null : 'alerts')} />
+            {hasAccess && <AlertBell active={slidePanel === 'alerts'} onClick={() => setSlidePanel(p => p === 'alerts' ? null : 'alerts')} />}
             <UserMenu user={user} onLogout={handleLogout} />
           </div>
         </div>
@@ -414,31 +512,36 @@ export default function Layout({ children }) {
 
           {/* Actions — pinned at the bottom, always visible */}
           <div className="p-3 space-y-1.5 shrink-0">
-            <Link
-              to={current ? `/workspaces/${current}/projects/new` : '#'}
-              onClick={(e) => { if (!current) { e.preventDefault(); setNewWsOpen(true) } }}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
-            >
-              <span className="text-base leading-none">＋</span>
-              New project
-            </Link>
-            <div className="pt-1 space-y-0.5">
-              <SidebarBtn label="Recent activity" icon="◎" active={slidePanel === 'activity'} onClick={() => setSlidePanel(p => p === 'activity' ? null : 'activity')} />
-              <SidebarBtn label="Backup history"  icon="○" active={slidePanel === 'backup'}   onClick={() => setSlidePanel(p => p === 'backup'   ? null : 'backup')} />
-              <SidebarBtn label="Version log"     icon="○" active={slidePanel === 'version'}  onClick={() => setSlidePanel(p => p === 'version'  ? null : 'version')} />
-            </div>
+            {canAdminWs && (
+              <Link
+                to={current ? `/workspaces/${current}/projects/new` : '#'}
+                onClick={(e) => { if (!current) { e.preventDefault(); setNewWsOpen(true) } }}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
+              >
+                <span className="text-base leading-none">＋</span>
+                New project
+              </Link>
+            )}
+            {hasAccess && (
+              <div className="pt-1 space-y-0.5">
+                <SidebarBtn label="Recent activity" icon="◎" active={slidePanel === 'activity'} onClick={() => setSlidePanel(p => p === 'activity' ? null : 'activity')} />
+                <SidebarBtn label="Backup history"  icon="○" active={slidePanel === 'backup'}   onClick={() => setSlidePanel(p => p === 'backup'   ? null : 'backup')} />
+                <SidebarBtn label="Version log"     icon="○" active={slidePanel === 'version'}  onClick={() => setSlidePanel(p => p === 'version'  ? null : 'version')} />
+              </div>
+            )}
           </div>
         </aside>
 
         {/* Main content */}
         <main className="flex-1 overflow-auto">
-          {children}
+          {user && user.ev === false && <UnverifiedBanner />}
+          {!isAdmin && Array.isArray(workspaces) && workspaces.length === 0 ? <NoAccess /> : children}
         </main>
       </div>
 
       {/* Slide-out panels (Activity / Backup / Version) */}
       {slidePanel && (
-        <SlideOutPanel panel={slidePanel} onClose={() => setSlidePanel(null)} />
+        <SlideOutPanel panel={slidePanel} workspace={current} onClose={() => setSlidePanel(null)} />
       )}
 
       {/* New-workspace (tier) modal */}
@@ -453,6 +556,163 @@ export default function Layout({ children }) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// NoAccess is shown to a signed-in non-admin who isn't a member of any
+// workspace yet — so they land on a clear message instead of a blank screen.
+function NoAccess() {
+  const [reqOpen, setReqOpen] = useState(false)
+  return (
+    <div className="h-full flex items-center justify-center p-8">
+      <div className="max-w-md text-center">
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-surface-raised border border-border flex items-center justify-center text-2xl mb-4">🔒</div>
+        <h1 className="text-lg font-semibold text-content-strong">No workspace access yet</h1>
+        <p className="text-sm text-content-muted mt-2">
+          You don't have access to any workspace or project. Please contact your administrator to get access.
+        </p>
+        <button
+          onClick={() => setReqOpen(true)}
+          className="mt-5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          Request access
+        </button>
+        <p className="text-xs text-content-faint mt-4">
+          Once you've been added to a workspace, it will appear in the selector at the top-left.
+        </p>
+      </div>
+      {reqOpen && <RequestAccessModal onClose={() => setReqOpen(false)} />}
+    </div>
+  )
+}
+
+// AccountModal — tabbed account settings (General profile / Security password /
+// Appearance). Appearance is per-user and overrides the workspace/global default.
+function AccountModal({ user, tab, setTab, onClose }) {
+  const tabs = [
+    { id: 'general',    label: 'General' },
+    { id: 'security',   label: 'Security' },
+    { id: 'appearance', label: 'Appearance' },
+  ]
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-content-strong">Account settings</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        <div className="flex gap-1 border-b border-border mb-5">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                tab === t.id ? 'border-brand-500 text-brand-400' : 'border-transparent text-content-subtle hover:text-content'
+              }`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {tab === 'general'    && <AccountGeneral user={user} />}
+        {tab === 'security'   && <AccountSecurity onDone={onClose} />}
+        {tab === 'appearance' && (
+          <div className="space-y-3">
+            <p className="text-sm text-content-subtle">Your personal appearance. It overrides the workspace and global defaults on every device you sign in to.</p>
+            <AppearanceTab />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AccountGeneral({ user }) {
+  const tryRefresh = useAuthStore(s => s.tryRefresh)
+  const [email, setEmail] = useState(user?.email || '')
+  const [phone, setPhone] = useState('')
+  const [username, setUsername] = useState(user?.sub || '')
+  const [msg, setMsg] = useState('')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  const inp = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
+  async function save(e) {
+    e.preventDefault(); setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await updateProfile({ email: email.trim(), phone: phone.trim(), username: username.trim() })
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.email_sent) setMsg('Saved — a verification link was emailed to you.')
+      else setMsg('Saved.')
+      await tryRefresh().catch(() => {})
+    } catch (err) { setMsg(err.response?.data?.error || 'Failed to save') } finally { setBusy(false) }
+  }
+  return (
+    <form onSubmit={save} className="space-y-3 max-w-md">
+      <div><label className={lbl}>Email</label><input className={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+      <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
+      <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
+      {msg && <p className="text-xs text-content-muted">{msg}</p>}
+      {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a></div>}
+      <button type="submit" disabled={busy} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{busy ? 'Saving…' : 'Save profile'}</button>
+    </form>
+  )
+}
+
+function AccountSecurity({ onDone }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const mutation = useMutation({
+    mutationFn: () => changePassword(current, next),
+    onSuccess: onDone,
+    onError: (e) => setError(e.response?.data?.error || 'Failed to change password'),
+  })
+  function submit(e) {
+    e.preventDefault(); setError('')
+    if (next.length < 8) { setError('New password must be at least 8 characters'); return }
+    if (next !== confirm) { setError('Passwords do not match'); return }
+    mutation.mutate()
+  }
+  return (
+    <form onSubmit={submit} className="space-y-3 max-w-md">
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      {['Current password', 'New password', 'Confirm new password'].map((label, i) => {
+        const val = [current, next, confirm][i]; const set = [setCurrent, setNext, setConfirm][i]
+        return (
+          <div key={label}>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">{label}</label>
+            <input type="password" value={val} onChange={e => set(e.target.value)} required
+              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+          </div>
+        )
+      })}
+      <button type="submit" disabled={mutation.isPending} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{mutation.isPending ? 'Saving…' : 'Update password'}</button>
+    </form>
+  )
+}
+
+// UnverifiedBanner nudges the signed-in user to verify their email. Resend
+// surfaces the link directly when system email isn't configured.
+function UnverifiedBanner() {
+  const tryRefresh = useAuthStore(s => s.tryRefresh)
+  const [msg, setMsg] = useState('')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function resend() {
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await resendVerification()
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.already_verified) { setMsg('Already verified.'); await tryRefresh().catch(() => {}) }
+      else setMsg('Verification link sent to your email.')
+    } catch { setMsg('Could not send link.') } finally { setBusy(false) }
+  }
+  return (
+    <div className="px-4 py-2 bg-warning-subtle/40 border-b border-warning-border/50 text-sm text-warning-fg flex items-center gap-3 flex-wrap">
+      <span>⚠ Your email isn't verified. Some actions (inviting users, email alerts) need a verified address.</span>
+      <button onClick={resend} disabled={busy} className="font-medium underline underline-offset-2 disabled:opacity-50">{busy ? 'Sending…' : 'Resend link'}</button>
+      {msg && <span className="text-content-muted">{msg}</span>}
+      {link && <a href={link} className="font-mono text-xs text-brand-500 hover:underline break-all">{link}</a>}
     </div>
   )
 }

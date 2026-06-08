@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage } from '../lib/api'
+import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage, fetchWorkspaces } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import Layout from '../components/Layout'
 
@@ -302,6 +302,10 @@ function BackupCoverage() {
 
 export default function DashboardPage() {
   const current = useWorkspaceStore(s => s.current)
+  const { data: workspaceList = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const currentWsInfo = workspaceList.find(w => w.key === current)
+  const currentWsName = currentWsInfo?.name || current
+  const canManageWs = currentWsInfo?.my_role === 'admin' // workspace admin (super-admins see 'admin' too)
   const { data: stats, isLoading } = useQuery({
     queryKey:      ['stats'],
     queryFn:       fetchStats,
@@ -385,11 +389,21 @@ export default function DashboardPage() {
       <div className="p-6 space-y-6 w-full min-w-0">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-content-strong">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-content-strong">
+              Dashboard{current ? <span className="text-content-muted font-semibold"> — {currentWsName}</span> : null}
+            </h1>
             <p className="text-sm text-content-muted mt-0.5">Overview of your Docker stacks and host system</p>
           </div>
+          {current && canManageWs && (
+            <Link
+              to={`/workspaces/${current}/manage`}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors"
+            >
+              ⚙ Manage workspace
+            </Link>
+          )}
         </div>
 
         {/* ── Stat cards ── */}

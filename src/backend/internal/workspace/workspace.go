@@ -162,6 +162,8 @@ type Workspace struct {
 	HostID   int64                 `json:"host_id,omitempty"`
 	HostName string                `json:"host_name,omitempty"`
 	EnvHosts map[string]EnvHostRef `json:"env_hosts,omitempty"` // env name → host
+	MyRole   string                `json:"my_role,omitempty"`   // caller's effective role (Phase 5.2b); set by the API layer
+	AppHost  string                `json:"app_host,omitempty"`  // configured host/IP for direct service links (local envs); set by the API layer
 }
 
 // EnvHostRef is the host an environment runs on (omitted ⇒ local).
@@ -173,9 +175,10 @@ type EnvHostRef struct {
 
 // WorkspaceInfo is one parent-tier workspace (a folder containing projects/).
 type WorkspaceInfo struct {
-	Key  string `json:"key"`  // dir name = URL segment = Docker prefix part (identity)
-	Name string `json:"name"` // free-form display name (from workspace.json)
-	Path string `json:"path"`
+	Key    string `json:"key"`  // dir name = URL segment = Docker prefix part (identity)
+	Name   string `json:"name"` // free-form display name (from workspace.json)
+	Path   string `json:"path"`
+	MyRole string `json:"my_role,omitempty"` // caller's effective role (Phase 5.2b); set by the handler
 }
 
 // ListWorkspaces discovers the parent-tier workspaces (dirs carrying a
@@ -258,7 +261,8 @@ func List(workspacesDir string) ([]Workspace, error) {
 	}
 	projects := []Workspace{} // never nil — encodes as [] not null
 	for _, w := range wss {
-		ps, _ := ListProjects(workspacesDir, w.Name)
+		// Folder identity is the workspace KEY, not the (renameable) display name.
+		ps, _ := ListProjects(workspacesDir, w.Key)
 		projects = append(projects, ps...)
 	}
 	return projects, nil

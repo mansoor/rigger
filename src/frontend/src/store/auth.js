@@ -31,9 +31,15 @@ export const useAuthStore = create((set) => ({
   user:  null,
   ready: false, // true once the startup refresh attempt has completed
 
-  login: async (username, password) => {
-    const { data } = await api.post('/auth/login', { username, password })
+  login: async (email, password) => {
+    const { data } = await api.post('/auth/login', { email, password })
     set({ token: data.token, user: parseJwt(data.token), ready: true })
+    scheduleRefresh()
+  },
+
+  // Adopt a session returned by another flow (e.g. completing invite registration).
+  setSession: (token) => {
+    set({ token, user: parseJwt(token), ready: true })
     scheduleRefresh()
   },
 

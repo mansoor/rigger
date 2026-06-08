@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceStore } from '../store/workspace'
 import { fetchAppearancePrefs, saveAppearancePrefs } from '../lib/api'
 import { applyPrefs, normalizePrefs, resolveTheme, DEFAULT_PREFS } from './themes'
 
@@ -23,11 +24,9 @@ export function ThemeProvider({ children }) {
   const [prefs, setPrefsState] = useState(() => normalizePrefs(readLocal()))
   const [resolvedTheme, setResolvedTheme] = useState(() => resolveTheme(prefs.theme))
 
-  // Whether the user already had local prefs at boot — decides if we adopt the
-  // server copy on first authenticated load (don't clobber fresh local edits).
-  const hadLocalAtBoot = useRef(
-    typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY) != null
-  )
+  // Timestamp of the last local edit — guards against a server re-fetch clobbering
+  // a just-made change before its PUT lands.
+  const lastEdit = useRef(0)
 
   // Apply to <html> + persist locally whenever prefs change.
   useEffect(() => {
@@ -45,28 +44,33 @@ export function ThemeProvider({ children }) {
     return () => mq.removeEventListener('change', handler)
   }, [prefs])
 
-  // Pull server prefs once, after auth — only adopt them if the user had no
-  // local prefs at boot (server is the cross-device default; local edits win).
+  // Resolve the EFFECTIVE prefs (user override ?? workspace default ?? global)
+  // after auth and whenever the selected workspace changes — so an inheriting
+  // user picks up the workspace's default, while a user with their own override
+  // always gets their own back. Skipped briefly after a local edit to avoid a
+  // race with its save.
   const token = useAuthStore((s) => s.token)
-  const pulledFromServer = useRef(false)
+  const currentWs = useWorkspaceStore((s) => s.current)
   useEffect(() => {
-    if (!token || pulledFromServer.current) return
-    pulledFromServer.current = true
+    if (!token) return
     let cancelled = false
-    fetchAppearancePrefs()
+    fetchAppearancePrefs(currentWs)
       .then((server) => {
-        if (cancelled || !server || hadLocalAtBoot.current) return
+        if (cancelled || !server) return
+        if (Date.now() - lastEdit.current < 3000) return // don't clobber a fresh edit
         setPrefsState(normalizePrefs(server))
       })
-      .catch(() => { /* offline / no server prefs — keep local */ })
+      .catch(() => { /* offline / none set — keep local */ })
     return () => { cancelled = true }
-  }, [token])
+  }, [token, currentWs])
 
   const value = useMemo(() => {
     function setPrefs(patch) {
       setPrefsState((prev) => {
         const next = normalizePrefs({ ...prev, ...patch })
-        // Best-effort push so the choice syncs across devices.
+        // Per-user save (cross-device). Mark the edit so the resolver effect
+        // doesn't immediately overwrite it with a stale server read.
+        lastEdit.current = Date.now()
         if (useAuthStore.getState().token) saveAppearancePrefs(next).catch(() => {})
         return next
       })

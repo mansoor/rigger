@@ -4,12 +4,14 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/db"
@@ -62,6 +64,9 @@ type Collector struct {
 	workspacesDir string
 	interval      time.Duration
 	provider      StatsProvider // multi-host stats; nil ⇒ local only
+
+	diskMu    sync.Mutex      // guards diskCache
+	diskCache map[string]int64 // last-known dir size per path (so a slow/timed-out du reuses it)
 }
 
 // NewCollector builds a collector. interval <= 0 defaults to 1 minute. A nil
@@ -70,7 +75,7 @@ func NewCollector(d *db.DB, workspacesDir string, interval time.Duration, provid
 	if interval <= 0 {
 		interval = DefaultIntervalSeconds * time.Second
 	}
-	return &Collector{db: d, workspacesDir: workspacesDir, interval: interval, provider: provider}
+	return &Collector{db: d, workspacesDir: workspacesDir, interval: interval, provider: provider, diskCache: map[string]int64{}}
 }
 
 // Run starts the collector loop in a background goroutine.
@@ -97,14 +102,31 @@ func (c *Collector) Run() {
 	}()
 }
 
+// gatherStats samples per-project usage with a hard ceiling so a hung
+// `docker stats` (e.g. an unhealthy container) can never freeze the collector.
+// The underlying docker command is itself bounded (executor Spec.Timeout); this
+// select is belt-and-suspenders so the ticker keeps firing regardless.
+func (c *Collector) gatherStats() map[string]stats.ProjectStats {
+	done := make(chan map[string]stats.ProjectStats, 1)
+	go func() {
+		if c.provider != nil {
+			done <- c.provider.ProjectStatsAllHosts()
+		} else {
+			done <- stats.ContainerStatsByProject()
+		}
+	}()
+	select {
+	case s := <-done:
+		return s
+	case <-time.After(25 * time.Second):
+		log.Printf("metrics: stats sampling timed out; recording disk-only this cycle")
+		return map[string]stats.ProjectStats{}
+	}
+}
+
 // collect writes one snapshot per workspace/env, then prunes old rows.
 func (c *Collector) collect() {
-	var projStats map[string]stats.ProjectStats
-	if c.provider != nil {
-		projStats = c.provider.ProjectStatsAllHosts()
-	} else {
-		projStats = stats.ContainerStatsByProject()
-	}
+	projStats := c.gatherStats()
 
 	wss, err := workspace.List(c.workspacesDir)
 	if err != nil {
@@ -120,7 +142,7 @@ func (c *Collector) collect() {
 		for _, env := range w.Envs {
 			ps := projStats[base+"_"+env]
 			memBytes := int64(ps.MemMB * 1024 * 1024)
-			diskBytes := dirSizeBytes(wspath.EnvDir(c.workspacesDir, w.WorkspaceName, w.Name, env))
+			diskBytes := c.dirSizeBytes(wspath.EnvDir(c.workspacesDir, w.WorkspaceName, w.Name, env))
 			// Key by the resource prefix (globally unique) so same-named projects in
 			// different workspaces don't collide.
 			if _, err := c.db.Exec(
@@ -190,18 +212,35 @@ func (c *Collector) prune() {
 
 // dirSizeBytes returns the size of a directory in bytes via `du -sk`.
 // Returns 0 if the path is missing or du fails.
-func dirSizeBytes(path string) int64 {
+// dirSizeBytes returns a directory's size via `du`, bounded by a timeout so a
+// slow/stalled walk over a (Windows) bind mount can never freeze the collector.
+// On timeout or error it reuses the last-known size for that path (0 if none),
+// so the metric doesn't flap to zero.
+func (c *Collector) dirSizeBytes(path string) int64 {
 	if _, err := os.Stat(path); err != nil {
 		return 0
 	}
-	out, err := exec.Command("du", "-sk", path).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "du", "-sk", path).Output()
 	if err != nil {
-		return 0
+		// Timed out or failed — fall back to the last value we computed.
+		c.diskMu.Lock()
+		last := c.diskCache[path]
+		c.diskMu.Unlock()
+		if ctx.Err() != nil {
+			log.Printf("metrics: du timed out for %s; reusing last size", path)
+		}
+		return last
 	}
 	fields := strings.Fields(string(out))
 	if len(fields) == 0 {
 		return 0
 	}
 	kb, _ := strconv.ParseInt(fields[0], 10, 64)
-	return kb * 1024
+	size := kb * 1024
+	c.diskMu.Lock()
+	c.diskCache[path] = size
+	c.diskMu.Unlock()
+	return size
 }

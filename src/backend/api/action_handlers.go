@@ -54,7 +54,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	pkey := wsName + "_" + name // resource-prefix key for project-scoped DB rows
+	pkey := h.resourcePrefix(wsName, name) // resource-prefix key for project-scoped DB rows
 
 	var body struct {
 		Command string   `json:"command"`
@@ -147,7 +147,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) MigrateWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 	var body struct {
 		TargetHostID int64 `json:"target_host_id"`
 	}
@@ -178,7 +178,7 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 	var body struct {
 		TargetHostID int64 `json:"host_id"`
 	}

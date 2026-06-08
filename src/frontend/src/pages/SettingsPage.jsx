@@ -5,6 +5,7 @@ import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
+import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -14,8 +15,11 @@ import {
   fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
+  fetchUsers, inviteUser, updateUser, deleteUser, resendInvite,
+  fetchSystemEmail, updateSystemEmail,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
+import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import {
   THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS,
@@ -682,6 +686,7 @@ function GeneralTab() {
   })
   const [acmeEmail, setAcmeEmail] = useState('')
   const [riggerDomain, setRiggerDomain] = useState('')
+  const [appHost, setAppHost] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
@@ -690,6 +695,7 @@ function GeneralTab() {
     mutationFn: () => updateGeneralSettings({
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
+      app_host: appHost,
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
@@ -702,6 +708,7 @@ function GeneralTab() {
   if (!isLoading && !synced && cfg.acme_email !== undefined) {
     setAcmeEmail(cfg.acme_email || '')
     setRiggerDomain(cfg.rigger_domain || '')
+    setAppHost(cfg.app_host || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
@@ -767,6 +774,28 @@ function GeneralTab() {
           <p className="text-xs text-content-subtle mt-1">
             Leave blank to access Rigger UI on port {' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
+          </p>
+        </div>
+      </div>
+
+      {/* App host / IP for service links */}
+      <div>
+        <h2 className="text-base font-semibold text-content-strong mb-1">App host / IP for service links</h2>
+        <p className="text-sm text-content-subtle mb-4">
+          The address users reach published service ports at (the Docker host's IP or hostname).
+          Used to build the <strong>Open app</strong> links on env cards for locally-hosted
+          environments. Set this when you access Rigger through a proxy domain, so links point at
+          the host instead of the proxy. Remote-host envs always use their own host address.
+        </p>
+        <div className="p-4 bg-surface border border-border rounded-xl">
+          <Label>Host address</Label>
+          <Input
+            value={appHost}
+            onChange={setAppHost}
+            placeholder="192.168.1.50 or host.example.com"
+          />
+          <p className="text-xs text-content-subtle mt-1">
+            Leave blank to use the browser's current hostname (works when you reach Rigger directly by IP).
           </p>
         </div>
       </div>
@@ -1254,7 +1283,7 @@ function SettingsSection({ title, description, children }) {
   )
 }
 
-function AppearanceTab() {
+export function AppearanceTab() {
   const { prefs, setPrefs, resolvedTheme, resetPrefs } = useTheme()
   const opt = (list) => list.map(o => ({ value: o.id, label: o.label }))
 
@@ -1368,14 +1397,308 @@ function AppearanceTab() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── Users (Phase 5 RBAC) ──────────────────────────────────────────────────────
+
+// Global roles (Users tab). Workspace/project access is granted separately via
+// workspace membership — see the Members tab on each workspace.
+const ROLE_OPTIONS = [
+  { value: 'user',       label: 'User — access via workspace membership' },
+  { value: 'superadmin', label: 'Super-admin — full control' },
+]
+const ROLE_BADGE = {
+  superadmin: 'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
+  user:       'bg-slate-100/70 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700/40',
+}
+
+// Workspace-tier roles offered when granting access at invite time.
+const INVITE_WS_ROLES = [
+  { value: 'viewer',    label: 'Viewer — read-only' },
+  { value: 'developer', label: 'Developer — operate environments' },
+  { value: 'operator',  label: 'Operator — developer + edit project config' },
+  { value: 'admin',     label: 'Admin — manage the workspace' },
+]
+
+function InviteForm({ onSave, onCancel, saving }) {
+  const [email, setEmail]       = useState('')
+  const [username, setUsername] = useState('')
+  const [role, setRole]         = useState('user')
+  const [workspace, setWorkspace] = useState('')
+  const [project, setProject]     = useState('')
+  const [wsRole, setWsRole]       = useState('viewer')
+  const [error, setError]       = useState('')
+
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects', workspace], queryFn: () => fetchProjects(workspace), enabled: !!workspace,
+  })
+
+  const grantsAccess = role === 'user' // super-admins already see everything
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (!email.trim()) { setError('Email is required'); return }
+    const body = { email: email.trim(), username: username.trim(), role }
+    if (grantsAccess && workspace) {
+      body.workspace = workspace
+      body.ws_role = wsRole
+      if (project) body.project = project
+    }
+    try { await onSave(body) }
+    catch (err) { setError(err.response?.data?.error || 'Failed to invite') }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <Label required>Email</Label>
+        <Input value={email} onChange={setEmail} type="email" placeholder="jane@example.com" />
+        <p className="text-xs text-content-faint mt-1">An invite link is sent here; the user sets their own password.</p>
+      </div>
+      <div>
+        <Label>Display name <span className="font-normal normal-case">(optional)</span></Label>
+        <Input value={username} onChange={setUsername} placeholder="defaults to the part before @" />
+      </div>
+      <div>
+        <Label required>Global role</Label>
+        <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
+      </div>
+
+      {grantsAccess && (
+        <div className="rounded-xl border border-border bg-surface/40 p-3 space-y-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Grant access <span className="font-normal normal-case">(optional)</span></p>
+          <div>
+            <Label>Workspace</Label>
+            <Select value={workspace} onChange={(v) => { setWorkspace(v); setProject('') }}
+              options={[{ value: '', label: '— no access yet —' }, ...workspaces.map(w => ({ value: w.key, label: w.name || w.key }))]} />
+          </div>
+          {workspace && (
+            <>
+              <div>
+                <Label>Limit to one project <span className="font-normal normal-case">(optional)</span></Label>
+                <Select value={project} onChange={setProject}
+                  options={[{ value: '', label: 'Whole workspace' }, ...projects.map(p => ({ value: p.name, label: p.config?.project?.name || p.name }))]} />
+              </div>
+              <div>
+                <Label required>Role in this {project ? 'project' : 'workspace'}</Label>
+                <Select value={wsRole} onChange={setWsRole} options={INVITE_WS_ROLES} />
+              </div>
+            </>
+          )}
+          {!workspace && <p className="text-xs text-content-faint">Leave empty to invite without access — they'll see a "request access" message until you add them to a workspace.</p>}
+        </div>
+      )}
+
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex gap-2 justify-end pt-2">
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn type="submit" disabled={saving}>{saving ? 'Inviting…' : 'Send invite'}</Btn>
+      </div>
+    </form>
+  )
+}
+
+function EditUserForm({ initial, onSave, onCancel, saving }) {
+  const [role, setRole]         = useState(initial?.role || 'user')
+  const [password, setPassword] = useState('')
+  const [error, setError]       = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    try { await onSave({ role, password }) }
+    catch (err) { setError(err.response?.data?.error || 'Failed to save') }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <Label>Email</Label>
+        <Input value={initial?.email || ''} onChange={() => {}} disabled />
+      </div>
+      <div>
+        <Label required>Role</Label>
+        <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
+      </div>
+      <div>
+        <Label>Reset password <span className="font-normal normal-case">(optional)</span></Label>
+        <Input value={password} onChange={setPassword} type="password" placeholder="(leave blank to keep)" />
+      </div>
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex gap-2 justify-end pt-2">
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Btn>
+      </div>
+    </form>
+  )
+}
+
+function UsersTab() {
+  const qc = useQueryClient()
+  const me = useAuthStore(s => s.user)
+  const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const [modal, setModal]       = useState(null)   // 'new' | { editing }
+  const [deleting, setDeleting] = useState(null)
+  const [link, setLink]         = useState(null)    // { email, url } — surfaced invite link (no SMTP)
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
+
+  const inviteMut = useMutation({
+    mutationFn: (body) => inviteUser(body),
+    onSuccess: (data) => { invalidate(); setModal(null); if (data?.invite_link) setLink({ email: data.user?.email, url: data.invite_link }) },
+  })
+  const editMut = useMutation({
+    mutationFn: ({ id, body }) => updateUser(id, body),
+    onSuccess: () => { invalidate(); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteUser(id),
+    onSuccess: () => { invalidate(); setDeleting(null) },
+  })
+  const resendMut = useMutation({
+    mutationFn: (id) => resendInvite(id),
+    onSuccess: (data, id) => { const u = users.find(x => x.id === id); if (data?.invite_link) setLink({ email: u?.email, url: data.invite_link }) },
+  })
+
+  const fmtLast = (s) => s ? new Date(s).toLocaleString() : 'never'
+  function statusBadge(u) {
+    if (u.status === 'invited') return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40">invited</span>
+    if (!u.email_verified) return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-surface-raised border-border-strong text-content-faint">unverified</span>
+    return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-100/70 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">verified</span>
+  }
+
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-base font-semibold text-content-strong">Users</h2>
+          <p className="text-sm text-content-subtle mt-0.5">Invite users by email and set their global role. Per-workspace access is managed on each workspace's Members tab.</p>
+        </div>
+        <Btn onClick={() => setModal('new')}>＋ Invite user</Btn>
+      </div>
+
+      <div className="space-y-2">
+        {users.map(u => (
+          <div key={u.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(u.email[0] || u.username[0] || '?').toUpperCase()}</div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-semibold text-content-strong truncate">{u.email || u.username}</p>
+                {me?.uid === u.id && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">you</span>}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${ROLE_BADGE[u.role] || ROLE_BADGE.viewer}`}>{u.role}</span>
+                {statusBadge(u)}
+              </div>
+              <p className="text-xs text-content-subtle mt-0.5">
+                {u.username}{u.phone ? ` · ${u.phone}` : ''} · {u.status === 'invited' ? 'invite pending' : `last login: ${fmtLast(u.last_login_at)}`}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {u.status === 'invited'
+                ? <Btn variant="ghost" size="sm" onClick={() => resendMut.mutate(u.id)} disabled={resendMut.isPending}>Resend invite</Btn>
+                : <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: u })}>Edit</Btn>}
+              <Btn variant="danger" size="sm" onClick={() => setDeleting(u)} disabled={me?.uid === u.id}>Delete</Btn>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Invite user' : `Edit "${modal.editing.email}"`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            {modal === 'new'
+              ? <InviteForm onSave={(body) => inviteMut.mutateAsync(body)} onCancel={() => setModal(null)} saving={inviteMut.isPending} />
+              : <EditUserForm initial={modal.editing} onSave={(body) => editMut.mutateAsync({ id: modal.editing.id, body })} onCancel={() => setModal(null)} saving={editMut.isPending} />}
+          </div>
+        </div>
+      )}
+
+      {link && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setLink(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Invite link {link.email ? `for ${link.email}` : ''}</h3>
+            <p className="text-sm text-content-muted">No system email is configured, so share this link with the user to complete their registration:</p>
+            <div className="bg-surface-raised border border-border-strong rounded-lg p-3 text-xs font-mono break-all text-content">{link.url}</div>
+            <div className="flex gap-2 justify-end">
+              <Btn variant="secondary" onClick={() => navigator.clipboard?.writeText(link.url)}>Copy</Btn>
+              <Btn onClick={() => setLink(null)}>Done</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <ConfirmDeleteModal
+          name={`user "${deleting.email || deleting.username}"`}
+          onConfirm={() => delMut.mutate(deleting.id)}
+          onClose={() => setDeleting(null)}
+          loading={delMut.isPending}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── System email (transactional SMTP for invites/verification) ────────────────
+
+function SystemEmailTab() {
+  const qc = useQueryClient()
+  const { data: cfg, isLoading } = useQuery({ queryKey: ['system-email'], queryFn: fetchSystemEmail })
+  const [f, setF] = useState(null)
+  const [pw, setPw] = useState('')
+  const [saved, setSaved] = useState(false)
+  if (!f && cfg) setF({ host: cfg.host || '', port: cfg.port || '587', username: cfg.username || '', from: cfg.from || '', tls: cfg.tls !== false, base_url: cfg.base_url || '' })
+
+  const mut = useMutation({
+    mutationFn: () => updateSystemEmail({ ...f, password: pw }),
+    onSuccess: () => { setPw(''); setSaved(true); qc.invalidateQueries({ queryKey: ['system-email'] }) },
+  })
+  const set = (k, v) => { setF(s => ({ ...s, [k]: v })); setSaved(false) }
+  if (isLoading || !f) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <div className="max-w-xl">
+      <div className="mb-6">
+        <h2 className="text-base font-semibold text-content-strong">System email</h2>
+        <p className="text-sm text-content-subtle mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</p>
+      </div>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div><Label>SMTP host</Label><Input value={f.host} onChange={v => set('host', v)} placeholder="smtp.example.com" /></div>
+          <div><Label>Port</Label><Input value={f.port} onChange={v => set('port', v)} type="number" placeholder="587" /></div>
+          <div><Label>Username</Label><Input value={f.username} onChange={v => set('username', v)} placeholder="apikey" /></div>
+          <div><Label>Password</Label><Input value={pw} onChange={setPw} type="password" placeholder={cfg.has_password ? '(unchanged)' : '••••••••'} /></div>
+          <div><Label>From address</Label><Input value={f.from} onChange={v => set('from', v)} placeholder="Rigger <noreply@example.com>" /></div>
+          <div><Label>Public base URL</Label><Input value={f.base_url} onChange={v => set('base_url', v)} placeholder="https://rigger.example.com" /></div>
+        </div>
+        <Toggle checked={f.tls} onChange={v => set('tls', v)} label="Use STARTTLS (recommended; port 465 uses implicit TLS)" />
+        <p className="text-xs text-content-faint">Base URL is used to build links in emails; leave blank to derive from the request host.</p>
+        <div className="flex items-center gap-3">
+          <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save'}</Btn>
+          {saved && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Tab order mirrors the Manage Workspace screen for the shared resource tabs
+// (Remote Hosts → Docker Registries → Backup Targets → Notifications → Alert
+// Rules) so the two settings surfaces feel consistent.
 const TABS = [
   { id: 'general',        label: 'General' },
-  { id: 'appearance',     label: 'Appearance' },
-  { id: 'alerts',         label: 'Alert Rules' },
-  { id: 'notifications',  label: 'Notifications' },
+  { id: 'users',          label: 'Users' },
+  { id: 'access-requests', label: 'Access Requests' },
+  { id: 'system-email',   label: 'System Email' },
+  { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
-  { id: 'hosts',          label: 'Remote Hosts' },
+  { id: 'notifications',  label: 'Notifications' },
+  { id: 'alerts',         label: 'Alert Rules' },
 ]
 
 export default function SettingsPage() {
@@ -1386,8 +1709,8 @@ export default function SettingsPage() {
       <div className="max-w-4xl mx-auto px-6 py-8">
         {/* Page header */}
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-content-strong">Settings</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Configure SSL, integrations, and backup destinations.</p>
+          <h1 className="text-xl font-bold text-content-strong">Admin</h1>
+          <p className="text-sm text-content-subtle mt-0.5">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</p>
         </div>
 
         {/* Tab bar */}
@@ -1408,6 +1731,9 @@ export default function SettingsPage() {
 
         {/* Tab content */}
         {tab === 'general'        && <GeneralTab />}
+        {tab === 'users'          && <UsersTab />}
+        {tab === 'access-requests' && <AccessRequestsInbox />}
+        {tab === 'system-email'   && <SystemEmailTab />}
         {tab === 'appearance'     && <AppearanceTab />}
         {tab === 'alerts'         && <RulesTab />}
         {tab === 'notifications'  && <NotificationsTab />}

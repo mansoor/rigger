@@ -6,6 +6,7 @@ import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
+import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -14,11 +15,14 @@ import {
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
   fetchWorkspaceSettings, updateWorkspaceSettings,
+  fetchMemberCandidates, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 
 const TABS = [
   { id: 'general',        label: 'General' },
+  { id: 'members',        label: 'Members' },
+  { id: 'access-requests', label: 'Access Requests' },
   { id: 'hosts',          label: 'Remote Hosts' },
   { id: 'registries',     label: 'Docker Registries' },
   { id: 'backup-targets', label: 'Backup Targets' },
@@ -45,7 +49,7 @@ export default function ManageWorkspacePage() {
 
   return (
     <Layout>
-      <div className="p-6 max-w-3xl">
+      <div className="max-w-3xl mx-auto px-6 py-8">
         <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Manage workspace</p>
           <div className="flex items-center gap-2.5 mt-0.5">
@@ -75,8 +79,11 @@ export default function ManageWorkspacePage() {
             <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
             <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
             <WorkspaceDefaults workspace={workspace} qc={qc} />
+            <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
           </div>
         )}
+        {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
+        {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
         {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
         {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
         {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
@@ -136,6 +143,57 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   )
 }
 
+// WorkspaceAppearanceDefault sets the workspace's default theme (W7). Members who
+// haven't set a personal appearance inherit this; a per-user choice overrides it.
+const WS_THEME_OPTIONS = [
+  { value: '',       label: 'No default — use the global default' },
+  { value: 'system', label: 'System' },
+  { value: 'light',  label: 'Light' },
+  { value: 'dark',   label: 'Dark' },
+]
+function WorkspaceAppearanceDefault({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({
+    queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const [theme, setTheme] = useState(null) // null = not yet seeded
+  if (theme === null && saved !== undefined) {
+    let t = ''
+    try { t = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
+    setTheme(t)
+  }
+  const mut = useMutation({
+    mutationFn: () => updateWorkspaceSettings(workspace, { appearance_prefs: theme ? JSON.stringify({ theme }) : '' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
+  })
+  let savedTheme = ''
+  try { savedTheme = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
+  const dirty = theme !== null && theme !== savedTheme
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-3">Default appearance</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Default theme</label>
+          <select value={theme ?? ''} onChange={e => setTheme(e.target.value)}
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+            {WS_THEME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <p className="text-xs text-content-subtle mt-1">Applied to members who haven't set their own appearance. A personal choice (Account → Appearance) always overrides this.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            {mut.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function GeneralSection({ workspace, ws, qc, setCurrent }) {
   const [name, setName] = useState('')
   const [err, setErr] = useState('')
@@ -155,13 +213,23 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
     <section>
       <h2 className="text-sm font-semibold text-content mb-3">General</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
-          <input
-            value={name} onChange={e => setName(e.target.value)} maxLength={32}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
-          />
-          <p className="text-xs text-content-subtle mt-1">1–32 chars, letters/digits/space/dash/underscore. The key <code className="font-mono">{workspace}</code> is fixed.</p>
+        <div className="grid sm:grid-cols-5 gap-4">
+          <div className="sm:col-span-4">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
+            <input
+              value={name} onChange={e => setName(e.target.value)} maxLength={32}
+              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
+            />
+            <p className="text-xs text-content-subtle mt-1">1–32 chars; editable anytime.</p>
+          </div>
+          <div className="sm:col-span-1">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Key <span className="font-normal normal-case text-content-faint">(fixed)</span></label>
+            <input
+              value={workspace} readOnly disabled
+              className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed"
+            />
+            <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
+          </div>
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex items-center gap-3">
@@ -175,6 +243,141 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
         </div>
       </div>
     </section>
+  )
+}
+
+const MEMBER_ROLES = [
+  { value: 'viewer',    label: 'Viewer — read-only' },
+  { value: 'developer', label: 'Developer — operate environments' },
+  { value: 'operator',  label: 'Operator — developer + edit project config' },
+  { value: 'admin',     label: 'Admin — manage the workspace' },
+]
+const OVERRIDE_ROLES = [
+  { value: 'none',      label: 'No access' },
+  { value: 'viewer',    label: 'Viewer' },
+  { value: 'developer', label: 'Developer' },
+  { value: 'operator',  label: 'Operator' },
+  { value: 'admin',     label: 'Admin' },
+]
+
+// MembersSection — workspace membership + per-project overrides (Phase 5.2a).
+// Non-admins see only workspaces they're a member of; per-project overrides
+// (incl. "No access") refine access within. Roles take effect once enforcement
+// (5.2b) lands.
+function MembersSection({ workspace, projects, qc }) {
+  const membersKey = ['ws-members', workspace]
+  const { data: members = [], isLoading } = useQuery({ queryKey: membersKey, queryFn: () => fetchWorkspaceMembers(workspace), enabled: !!workspace })
+  const { data: candidates = [] } = useQuery({ queryKey: ['member-candidates', workspace], queryFn: () => fetchMemberCandidates(workspace), enabled: !!workspace })
+  const [expanded, setExpanded] = useState(null) // user_id with open overrides
+  const [addUid, setAddUid] = useState('')
+  const [addRole, setAddRole] = useState('viewer')
+  const sel = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const invalidate = () => { qc.invalidateQueries({ queryKey: membersKey }); qc.invalidateQueries({ queryKey: ['member-candidates', workspace] }) }
+
+  const setMut = useMutation({ mutationFn: ({ uid, role }) => setWorkspaceMember(workspace, uid, role), onSuccess: invalidate })
+  const rmMut  = useMutation({ mutationFn: (uid) => removeWorkspaceMember(workspace, uid), onSuccess: invalidate })
+  const ovSet  = useMutation({ mutationFn: ({ uid, proj, role }) => setProjectOverride(workspace, uid, proj, role), onSuccess: invalidate })
+  const ovRm   = useMutation({ mutationFn: ({ uid, proj }) => removeProjectOverride(workspace, uid, proj), onSuccess: invalidate })
+
+  const addable = candidates // server already excludes existing members + global admins
+
+  function addMember() {
+    if (!addUid) return
+    setMut.mutate({ uid: Number(addUid), role: addRole })
+    setAddUid('')
+  }
+  const projLabel = (key) => projects.find(p => p.name === key)?.config?.project?.name || key
+
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <section>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold text-content">Members</h2>
+        <p className="text-xs text-content-subtle mt-0.5">Who can access this workspace and at what level. Global admins always have full access. Roles take effect once access control is enforced.</p>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl p-4 mb-4 flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-content-muted">Add member:</span>
+        <select value={addUid} onChange={e => setAddUid(e.target.value)} className={sel}>
+          <option value="">Select a user…</option>
+          {addable.map(u => <option key={u.id} value={String(u.id)}>{u.email || u.username}</option>)}
+        </select>
+        <select value={addRole} onChange={e => setAddRole(e.target.value)} className={sel}>
+          {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+        <button onClick={addMember} disabled={!addUid || setMut.isPending}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Add</button>
+        {addable.length === 0 && <span className="text-xs text-content-faint">All users are already members or global admins. Invite more from Admin → Users.</span>}
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {members.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No members yet. Global admins can already access this workspace; add operators/viewers above.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {members.map(m => (
+              <div key={m.user_id} className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(m.email[0] || m.username[0] || '?').toUpperCase()}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-content-strong truncate">{m.email || m.username}</p>
+                    <p className="text-xs text-content-subtle mt-0.5">
+                      {m.overrides.length > 0 ? `${m.overrides.length} project override${m.overrides.length !== 1 ? 's' : ''}` : 'workspace-wide role'}
+                    </p>
+                  </div>
+                  <select value={m.role} onChange={e => setMut.mutate({ uid: m.user_id, role: e.target.value })} className={sel}>
+                    {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button onClick={() => setExpanded(x => x === m.user_id ? null : m.user_id)}
+                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Per-project</button>
+                  <button onClick={() => rmMut.mutate(m.user_id)}
+                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Remove</button>
+                </div>
+
+                {expanded === m.user_id && (
+                  <div className="mt-3 ml-11 border border-border-strong rounded-lg p-3 space-y-2">
+                    <p className="text-xs text-content-muted">Override this member's role on specific projects (defaults to their workspace role).</p>
+                    {m.overrides.map(o => (
+                      <div key={o.proj_key} className="flex items-center gap-2">
+                        <span className="text-sm text-content flex-1 truncate">{projLabel(o.proj_key)}</span>
+                        <select value={o.role} onChange={e => ovSet.mutate({ uid: m.user_id, proj: o.proj_key, role: e.target.value })} className={sel}>
+                          {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                        <button onClick={() => ovRm.mutate({ uid: m.user_id, proj: o.proj_key })}
+                          className="px-2 py-1 text-xs rounded-lg text-content-muted hover:text-danger-fg">✕</button>
+                      </div>
+                    ))}
+                    <AddOverride projects={projects.filter(p => !m.overrides.some(o => o.proj_key === p.name))}
+                      onAdd={(proj, role) => ovSet.mutate({ uid: m.user_id, proj, role })} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function AddOverride({ projects, onAdd }) {
+  const [proj, setProj] = useState('')
+  const [role, setRole] = useState('viewer')
+  const sel = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  if (projects.length === 0) return <p className="text-xs text-content-faint">All projects have an override (or there are none).</p>
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <select value={proj} onChange={e => setProj(e.target.value)} className={sel}>
+        <option value="">Add project override…</option>
+        {projects.map(p => <option key={p.name} value={p.name}>{p.config?.project?.name || p.name}</option>)}
+      </select>
+      <select value={role} onChange={e => setRole(e.target.value)} className={sel}>
+        {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+      </select>
+      <button onClick={() => { if (proj) { onAdd(proj, role); setProj('') } }} disabled={!proj}
+        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-40">Add</button>
+    </div>
   )
 }
 
@@ -1060,9 +1263,9 @@ function DangerZone({ workspace, ws, projects, others, qc, setCurrent, navigate 
           onDone={(target) => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(target); navigate('/') }} />
       )}
       {mode === 'delete' && (
-        <DeleteModal workspace={workspace} ws={ws} projects={projects}
+        <DeleteModal workspace={workspace} ws={ws} projects={projects} others={others}
           onClose={() => setMode(null)}
-          onDone={() => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(''); navigate('/') }} />
+          onDone={(target) => { qc.invalidateQueries({ queryKey: ['workspaces'] }); setCurrent(target || ''); navigate('/') }} />
       )}
     </section>
   )
@@ -1119,36 +1322,113 @@ function TransferModal({ workspace, projects, others, onClose, onDone }) {
   )
 }
 
-function DeleteModal({ workspace, ws, projects, onClose, onDone }) {
+// DeleteModal handles deleting a workspace. When it still holds projects, it
+// first asks how to proceed — Transfer the projects to another workspace, or
+// Destroy everything (item 7).
+function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) {
+  const hasProjects = projects.length > 0
+  const [step, setStep] = useState(hasProjects ? 'choose' : 'destroy')
+  const [target, setTarget] = useState(others[0]?.key || '')
   const [confirm, setConfirm] = useState('')
   const [err, setErr] = useState('')
-  const mut = useMutation({
+
+  const destroyMut = useMutation({
     mutationFn: () => deleteWorkspaceTier(workspace),
-    onSuccess: onDone,
+    onSuccess: () => onDone(''),
     onError: (e) => setErr(e.response?.data?.error || 'Delete failed'),
   })
-  return (
+  // Transferring ALL projects removes the now-empty source workspace server-side.
+  const transferMut = useMutation({
+    mutationFn: () => transferWorkspace(workspace, target, []),
+    onSuccess: () => onDone(target),
+    onError: (e) => setErr(e.response?.data?.error || 'Transfer failed'),
+  })
+
+  const wrap = (children) => (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-danger-border/60 rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="font-semibold text-content-strong">Delete workspace “{ws?.name || workspace}”?</h3>
-        <p className="text-sm text-content-muted">
-          This stops and removes <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span> and all their
-          environments, containers, networks and volumes — then deletes the workspace. <span className="text-danger-fg font-medium">This cannot be undone.</span>
-        </p>
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Type <code className="font-mono text-content">{workspace}</code> to confirm</label>
-          <input value={confirm} onChange={e => setConfirm(e.target.value)}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger" />
-        </div>
-        {err && <p className="text-sm text-danger-fg">{err}</p>}
-        <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={confirm !== workspace || mut.isPending}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
-            {mut.isPending ? 'Deleting…' : 'Delete workspace'}
-          </button>
-        </div>
-      </div>
+      <div className="bg-surface border border-danger-border/60 rounded-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>{children}</div>
     </div>
   )
+
+  if (step === 'choose') {
+    return wrap(<>
+      <h3 className="font-semibold text-content-strong">There are active projects in this workspace</h3>
+      <p className="text-sm text-content-muted">
+        “{ws?.name || workspace}” still holds <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span>. How would you like to proceed?
+      </p>
+      <div className="space-y-2 pt-1">
+        <button onClick={() => { setErr(''); setStep('transfer') }}
+          className="w-full text-left p-4 rounded-xl border border-border-strong hover:border-brand-500 hover:bg-surface-raised transition-colors">
+          <p className="text-sm font-semibold text-content-strong">Transfer projects</p>
+          <p className="text-xs text-content-subtle mt-0.5">Move them to another workspace you administer (containers keep running), then delete this one.</p>
+        </button>
+        <button onClick={() => { setErr(''); setStep('destroy') }}
+          className="w-full text-left p-4 rounded-xl border border-danger-border/60 hover:bg-danger-subtle/30 transition-colors">
+          <p className="text-sm font-semibold text-danger-fg">Destroy everything</p>
+          <p className="text-xs text-content-subtle mt-0.5">Permanently stop and remove every project, environment, container, network and volume.</p>
+        </button>
+      </div>
+      <div className="flex justify-end pt-1">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+      </div>
+    </>)
+  }
+
+  if (step === 'transfer') {
+    if (others.length === 0) {
+      return wrap(<>
+        <h3 className="font-semibold text-content-strong">No other workspace available</h3>
+        <p className="text-sm text-content-muted">
+          You don't have access to any other workspace to transfer these projects to. Request access to another workspace
+          (via <span className="text-content">Request access</span> in your account menu) before deleting this one — or choose Destroy to remove everything.
+        </p>
+        <div className="flex gap-2 justify-end">
+          <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        </div>
+      </>)
+    }
+    return wrap(<>
+      <h3 className="font-semibold text-content-strong">Transfer projects, then delete</h3>
+      <p className="text-sm text-content-muted">All {projects.length} project{projects.length !== 1 ? 's' : ''} move to the chosen workspace; this workspace is removed afterwards. Resource prefixes (and running containers) are unchanged.</p>
+      <div>
+        <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Target workspace</label>
+        <select value={target} onChange={e => setTarget(e.target.value)}
+          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+          {others.map(o => <option key={o.key} value={o.key}>{o.name} ({o.key})</option>)}
+        </select>
+      </div>
+      {err && <p className="text-sm text-danger-fg">{err}</p>}
+      <div className="flex gap-2 justify-end">
+        <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        <button onClick={() => transferMut.mutate()} disabled={!target || transferMut.isPending}
+          className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          {transferMut.isPending ? 'Transferring…' : 'Transfer & delete'}
+        </button>
+      </div>
+    </>)
+  }
+
+  // step === 'destroy'
+  return wrap(<>
+    <h3 className="font-semibold text-content-strong">Delete workspace “{ws?.name || workspace}”?</h3>
+    <p className="text-sm text-content-muted">
+      This stops and removes <span className="text-content-strong font-medium">{projects.length} project{projects.length !== 1 ? 's' : ''}</span> and all their
+      environments, containers, networks and volumes — then deletes the workspace. <span className="text-danger-fg font-medium">This cannot be undone.</span>
+    </p>
+    <div>
+      <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Type <code className="font-mono text-content">{workspace}</code> to confirm</label>
+      <input value={confirm} onChange={e => setConfirm(e.target.value)}
+        className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger" />
+    </div>
+    {err && <p className="text-sm text-danger-fg">{err}</p>}
+    <div className="flex gap-2 justify-end">
+      {hasProjects
+        ? <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+        : <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>}
+      <button onClick={() => destroyMut.mutate()} disabled={confirm !== workspace || destroyMut.isPending}
+        className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+        {destroyMut.isPending ? 'Deleting…' : 'Delete workspace'}
+      </button>
+    </div>
+  </>)
 }

@@ -116,18 +116,30 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Email    string `json:"email"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := readJSON(r, &body); err != nil || body.Username == "" || len(body.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password (min 8 chars) required"})
+	if err := readJSON(r, &body); err != nil || len(body.Password) < 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password (min 8 chars) required"})
 		return
 	}
-	if err := h.auth.CreateUser(body.Username, body.Password, "admin"); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	uid, err := h.auth.SetupAdmin(body.Email, body.Username, body.Password)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
+	// Email verification (pragmatic gate): surface the link if SMTP isn't set up yet.
+	resp := map[string]any{"status": "ok"}
+	if raw, terr := h.auth.CreateVerifyToken(uid); terr == nil {
+		link := h.baseURL(r) + "/verify-email?token=" + raw
+		if sent, _ := h.sendUserLink(strings.ToLower(strings.TrimSpace(body.Email)), "Verify your Rigger email", "Welcome to Rigger — please verify your email address.", "Verify your email", link); sent {
+			resp["email_sent"] = true
+		} else {
+			resp["verify_link"] = link
+		}
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // GET /api/setup/status  — is setup required?
@@ -152,6 +164,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Email    string `json:"email"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
@@ -159,10 +172,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	identifier := strings.TrimSpace(strings.ToLower(body.Email))
+	if identifier == "" {
+		identifier = body.Username // legacy clients / emailless accounts
+	}
 
-	accessToken, refreshToken, err := h.auth.Login2(body.Username, body.Password)
+	accessToken, refreshToken, err := h.auth.Login2(identifier, body.Password)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 		return
 	}
 
@@ -313,19 +330,25 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Workspace workspace.CreateRequest `json:"workspace"`
 	}
 	if err := conn.ReadJSON(&msg); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: invalid request\n")) //nolint:errcheck
+		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: invalid request\033[0m\n")) //nolint:errcheck
 		return
 	}
 
 	claims, err := h.auth.ValidateToken(msg.Token)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: unauthorized\n")) //nolint:errcheck
+		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: unauthorized — please sign in again\033[0m\n")) //nolint:errcheck
 		return
 	}
 
 	send := func(s string) { conn.WriteMessage(websocket.TextMessage, []byte(s)) } //nolint:errcheck
 
 	wsName := msg.Workspace.Workspace
+
+	// Phase 5.2b: creating a project requires workspace-admin (or super-admin).
+	if h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, "") != auth.RoleAdmin {
+		send("\033[31m✗ Error: creating a project requires the admin role in this workspace\033[0m\n")
+		return
+	}
 
 	// Resolve the project key (folder/URL/Docker identity): validated override, or
 	// derived from the display name, collision-free within this workspace.
@@ -334,10 +357,10 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if projKey == "" {
 		projKey = keygen.Suggest(msg.Workspace.Name, min, max, h.projectKeyTaken(wsName))
 	} else if !keygen.Valid(projKey, min, max) {
-		send("\033[31mError: key must be " + strconv.Itoa(min) + "–" + strconv.Itoa(max) + " lowercase letters/digits\033[0m\n")
+		send("\033[31m✗ Error: key must be " + strconv.Itoa(min) + "–" + strconv.Itoa(max) + " lowercase letters/digits\033[0m\n")
 		return
 	} else if h.projectKeyTaken(wsName)(projKey) {
-		send("\033[31mError: project key " + projKey + " is already in use in this workspace\033[0m\n")
+		send("\033[31m✗ Error: project key " + projKey + " is already in use in this workspace\033[0m\n")
 		return
 	}
 	msg.Workspace.Key = projKey
@@ -355,7 +378,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			// Pre-built template: load images + default env vars from template JSON
 			templateImages, defaultEnvs, err := workspace.LoadTemplate(h.templatesDir, msg.Workspace.Template)
 			if err != nil {
-				send("\033[31mError loading template: " + err.Error() + "\033[0m\n")
+				send("\033[31m✗ Error loading template: " + err.Error() + "\033[0m\n")
 				return
 			}
 			if len(msg.Workspace.Images) == 0 {
@@ -379,7 +402,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
 	if err := workspace.Create(h.workspacesDir, msg.Workspace); err != nil {
-		send("\033[31mError: " + err.Error() + "\033[0m\n")
+		send("\033[31m✗ Error: " + err.Error() + "\033[0m\n")
 		return
 	}
 	send("\033[32m✓\033[0m config.json written\n")
@@ -601,6 +624,26 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Phase 5.2b: membership-gated. Super-admins see all; everyone else sees only
+	// the workspaces they're a member of, annotated with their effective role.
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims != nil && !auth.IsSuperadmin(claims.Role) {
+		filtered := wss[:0]
+		for _, ws := range wss {
+			// Show a workspace if the user has any access to it — a membership role
+			// or at least one per-project grant. MyRole carries the workspace-level
+			// role (empty for a project-only member, who has no workspace powers).
+			if h.auth.WorkspaceVisible(claims.UserID, claims.Role, ws.Key) {
+				ws.MyRole = h.auth.EffectiveRole(claims.UserID, claims.Role, ws.Key, "")
+				filtered = append(filtered, ws)
+			}
+		}
+		wss = filtered
+	} else if claims != nil {
+		for i := range wss {
+			wss[i].MyRole = auth.RoleAdmin
+		}
+	}
 	writeJSON(w, http.StatusOK, wss)
 }
 
@@ -613,11 +656,33 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.annotateHosts(projects)
+	// Per-project access: annotate each with the caller's effective role and hide
+	// the ones they can't see (project override of 'none', or no membership). A
+	// super-admin sees everything.
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil && !auth.IsSuperadmin(claims.Role) {
+		visible := projects[:0]
+		for _, p := range projects {
+			if role := h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, p.Name); role != "" {
+				p.MyRole = role
+				visible = append(visible, p)
+			}
+		}
+		projects = visible
+	} else if claims != nil {
+		for i := range projects {
+			projects[i].MyRole = auth.RoleAdmin
+		}
+	}
 	writeJSON(w, http.StatusOK, projects)
 }
 
 // POST /api/workspaces — create a parent-tier workspace. Body: {"name": "..."}.
 func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
+	// Creating a new top-level workspace is a super-admin action (Phase 5.2b).
+	if claims := auth.ClaimsFromContext(r.Context()); claims == nil || !auth.IsSuperadmin(claims.Role) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a super-admin can create a workspace"})
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 		Key  string `json:"key"` // optional override; derived from name when empty
@@ -687,6 +752,7 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = settings.DeleteWorkspaceSettings(h.db, wsName) //nolint:errcheck
+	h.auth.DeleteWorkspaceACL(wsName)                  // Phase 5.2: drop membership/overrides
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
 			claims.UserID, claims.Username, wsName, "delete-workspace", "")
@@ -1272,6 +1338,26 @@ func (h *Handler) hostBindSourceDir() string {
 	return hostWsDirValue
 }
 
+// resourcePrefix returns a project's immutable Docker/DB key — its
+// resource_prefix from config.json. This is NOT always {workspace}_{name}: a
+// transferred project keeps its original prefix, so project-scoped DB rows
+// (metrics, secrets, action runs, backup schedules) MUST be keyed by this value,
+// never by the current folder path. Falls back to {workspace}_{name} when the
+// config can't be read (e.g. a brand-new project).
+func (h *Handler) resourcePrefix(wsName, name string) string {
+	if data, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name)); err == nil {
+		var cfg struct {
+			Project struct {
+				ResourcePrefix string `json:"resource_prefix"`
+			} `json:"project"`
+		}
+		if json.Unmarshal(data, &cfg) == nil && cfg.Project.ResourcePrefix != "" {
+			return cfg.Project.ResourcePrefix
+		}
+	}
+	return wsName + "_" + name
+}
+
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
@@ -1292,6 +1378,14 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	} else if hwd := h.hostBindSourceDir(); hwd != "" {
 		out.HostPath = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + name
 	}
+	// Caller's effective role for this project (Phase 5.2b) — drives UI gating.
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		out.MyRole = h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name)
+	}
+	// Configured host/IP for direct service links — used when an env runs on the
+	// local host and the dashboard is reached via a proxy domain (so the browser's
+	// hostname is the proxy, not the Docker host).
+	out.AppHost = h.appSetting("app_host")
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1329,7 +1423,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	env := r.PathValue("env")
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 	var body struct {
 		Updates    map[string]string `json:"updates"`
 		Deletes    []string          `json:"deletes"`
@@ -1531,7 +1625,7 @@ type actionRequest struct {
 func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	pkey := wsName + "_" + name
+	pkey := h.resourcePrefix(wsName, name)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -1553,6 +1647,18 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.auth.ValidateToken(req.Token)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("error: unauthorized\n")) //nolint:errcheck
+		return
+	}
+
+	// Enforce RBAC (the WS route bypasses the HTTP gate): read-only streams need
+	// viewer; everything else (deploy/restart/stop/backup/…) needs developer+.
+	eff := h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name)
+	minRole := auth.RoleDeveloper
+	if req.Command == "logs" || req.Command == "ps" {
+		minRole = auth.RoleViewer
+	}
+	if eff == "" || !auth.AtLeast(eff, minRole) {
+		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: you don't have permission to run this action on "+name+"\033[0m\n")) //nolint:errcheck
 		return
 	}
 
@@ -1684,14 +1790,38 @@ func (h *Handler) ClearActionRuns(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/stats — dashboard stats (docker info + host metrics + workspace summary)
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.bridge.Stats())
+	s := h.bridge.Stats()
+	// Phase 5.2b: non-admins only see their workspaces in the per-workspace summary.
+	if set, all := h.visibleWorkspaceSet(r); !all {
+		filtered := s.Workspaces.Workspaces[:0]
+		byType := map[string]int{}
+		for _, ws := range s.Workspaces.Workspaces {
+			if set[ws.Workspace] {
+				filtered = append(filtered, ws)
+				byType[ws.Type]++
+			}
+		}
+		s.Workspaces.Workspaces = filtered
+		s.Workspaces.Total = len(filtered)
+		s.Workspaces.ByType = byType
+	}
+	writeJSON(w, http.StatusOK, s)
 }
 
 // GET /api/live-stats — cheap per-project live stats (cpu/mem/net/running/services)
 // for the near-real-time dashboard table. No disk du / docker info, so it's safe
 // to poll every few seconds. Keyed by compose project name ({workspace}_{env}).
 func (h *Handler) GetLiveStats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.bridge.LiveStats())
+	live := h.bridge.LiveStats()
+	// Keyed by compose project name "{wsKey}_{projKey}_{env}"; drop other workspaces'.
+	if set, all := h.visibleWorkspaceSet(r); !all {
+		for k := range live {
+			if !set[strings.SplitN(k, "_", 2)[0]] {
+				delete(live, k)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, live)
 }
 
 // GET /api/workspaces/{name}/envs/{env}/containers — lists containers via docker compose ps
@@ -2019,7 +2149,7 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			projName := projEntry.Name()
-			pkey := wsName + "_" + projName
+			pkey := h.resourcePrefix(wsName, projName)
 			backupsRoot := wspath.BackupsDir(h.workspacesDir, wsName, projName)
 
 			envEntries, err := os.ReadDir(backupsRoot)
@@ -2150,8 +2280,14 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.auth.ValidateToken(init.Token); err != nil {
+	claims, err := h.auth.ValidateToken(init.Token)
+	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: unauthorized\r\n")) //nolint:errcheck
+		return
+	}
+	// Opening a shell is a privileged action — require developer+ on the project.
+	if eff := h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name); eff == "" || !auth.AtLeast(eff, auth.RoleDeveloper) {
+		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: you don't have permission to open a terminal here\r\n")) //nolint:errcheck
 		return
 	}
 	if init.Service == "" {
