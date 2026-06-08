@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, resendVerification } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -258,6 +258,7 @@ function ChangePasswordModal({ onClose }) {
 function UserMenu({ user, onLogout }) {
   const [open, setOpen]   = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
+  const [profOpen, setProfOpen] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
@@ -288,6 +289,12 @@ function UserMenu({ user, onLogout }) {
               <p className="text-sm font-semibold text-content-strong truncate">{user?.sub}</p>
             </div>
             <button
+              onClick={() => { setOpen(false); setProfOpen(true) }}
+              className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
+            >
+              Profile
+            </button>
+            <button
               onClick={() => { setOpen(false); setPwOpen(true) }}
               className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
             >
@@ -306,7 +313,80 @@ function UserMenu({ user, onLogout }) {
       </div>
 
       {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+      {profOpen && <ProfileModal user={user} onClose={() => setProfOpen(false)} />}
     </>
+  )
+}
+
+function ProfileModal({ user, onClose }) {
+  const tryRefresh = useAuthStore(s => s.tryRefresh)
+  const [email, setEmail] = useState(user?.email || '')
+  const [phone, setPhone] = useState('')
+  const [username, setUsername] = useState(user?.sub || '')
+  const [msg, setMsg] = useState('')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function save(e) {
+    e.preventDefault()
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await updateProfile({ email: email.trim(), phone: phone.trim(), username: username.trim() })
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.email_sent) setMsg('Saved — a verification link was emailed to you.')
+      else setMsg('Saved.')
+      await tryRefresh().catch(() => {})
+    } catch (err) {
+      setMsg(err.response?.data?.error || 'Failed to save')
+    } finally { setBusy(false) }
+  }
+
+  async function resend() {
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await resendVerification()
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.already_verified) setMsg('Your email is already verified.')
+      else setMsg('Verification link sent to your email.')
+    } catch (err) {
+      setMsg(err.response?.data?.error || 'Failed')
+    } finally { setBusy(false) }
+  }
+
+  const inp = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">Your profile</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        {user && user.ev === false && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
+            <span className="text-xs text-warning-fg">Your email isn't verified.</span>
+            <button onClick={resend} disabled={busy} className="text-xs font-medium text-warning-fg underline underline-offset-2">Resend link</button>
+          </div>
+        )}
+        <form onSubmit={save} className="space-y-3">
+          <div><label className={lbl}>Email</label><input className={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+          <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
+          <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
+          {msg && <p className="text-xs text-content-muted">{msg}</p>}
+          {link && (
+            <div className="text-xs">
+              <p className="text-content-muted mb-1">No system email configured — open this link to verify:</p>
+              <a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a>
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Close</button>
+            <button type="submit" disabled={busy} className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">{busy ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   )
 }
 
@@ -433,6 +513,7 @@ export default function Layout({ children }) {
 
         {/* Main content */}
         <main className="flex-1 overflow-auto">
+          {user && user.ev === false && <UnverifiedBanner />}
           {children}
         </main>
       </div>
@@ -454,6 +535,32 @@ export default function Layout({ children }) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// UnverifiedBanner nudges the signed-in user to verify their email. Resend
+// surfaces the link directly when system email isn't configured.
+function UnverifiedBanner() {
+  const tryRefresh = useAuthStore(s => s.tryRefresh)
+  const [msg, setMsg] = useState('')
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function resend() {
+    setBusy(true); setMsg(''); setLink('')
+    try {
+      const res = await resendVerification()
+      if (res.verify_link) setLink(res.verify_link)
+      else if (res.already_verified) { setMsg('Already verified.'); await tryRefresh().catch(() => {}) }
+      else setMsg('Verification link sent to your email.')
+    } catch { setMsg('Could not send link.') } finally { setBusy(false) }
+  }
+  return (
+    <div className="px-4 py-2 bg-warning-subtle/40 border-b border-warning-border/50 text-sm text-warning-fg flex items-center gap-3 flex-wrap">
+      <span>⚠ Your email isn't verified. Some actions (inviting users, email alerts) need a verified address.</span>
+      <button onClick={resend} disabled={busy} className="font-medium underline underline-offset-2 disabled:opacity-50">{busy ? 'Sending…' : 'Resend link'}</button>
+      {msg && <span className="text-content-muted">{msg}</span>}
+      {link && <a href={link} className="font-mono text-xs text-brand-500 hover:underline break-all">{link}</a>}
     </div>
   )
 }

@@ -365,7 +365,24 @@ func (d *DB) migrate() error {
 	// Incremental column additions for tables that may predate a field.
 	// SQLite has no "ADD COLUMN IF NOT EXISTS", so we run the ALTER and ignore
 	// the duplicate-column error on databases that already have it.
-	d.addColumn("users", "last_login_at DATETIME")                              // Phase 5: track last login
+	d.addColumn("users", "last_login_at DATETIME")                                 // Phase 5: track last login
+	d.addColumn("users", "email TEXT NOT NULL DEFAULT ''")                         // Phase 5.1b: required going forward; login identity
+	d.addColumn("users", "phone TEXT NOT NULL DEFAULT ''")                         // Phase 5.1b: optional (SMS later)
+	d.addColumn("users", "email_verified INTEGER NOT NULL DEFAULT 0")             // Phase 5.1b
+	d.addColumn("users", "status TEXT NOT NULL DEFAULT 'active'")                 // Phase 5.1b: 'invited' | 'active'
+	// Unique email among accounts that have one (empty allowed for legacy/pre-email rows).
+	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`) //nolint:errcheck
+	// Invite / email-verify / password-reset / 2FA tokens (token_hash = sha256 of the
+	// random value handed out in links; the raw value is never stored).
+	d.Exec(`CREATE TABLE IF NOT EXISTS user_tokens (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		kind       TEXT    NOT NULL,
+		token_hash TEXT    NOT NULL UNIQUE,
+		expires_at DATETIME NOT NULL,
+		used_at    DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`) //nolint:errcheck
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
 	d.addColumn("metrics_snapshots", "net_rx_bytes INTEGER NOT NULL DEFAULT 0")

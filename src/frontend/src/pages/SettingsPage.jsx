@@ -14,7 +14,8 @@ import {
   fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
-  fetchUsers, createUser, updateUser, deleteUser,
+  fetchUsers, inviteUser, updateUser, deleteUser, resendInvite,
+  fetchSystemEmail, updateSystemEmail,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { useAuthStore } from '../store/auth'
@@ -1383,9 +1384,45 @@ const ROLE_BADGE = {
   viewer:   'bg-sky-100/70 text-sky-700 border-sky-200 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800/40',
 }
 
-function UserForm({ initial, onSave, onCancel, saving }) {
-  const isEdit = !!initial?.id
-  const [username, setUsername] = useState(initial?.username || '')
+function InviteForm({ onSave, onCancel, saving }) {
+  const [email, setEmail]       = useState('')
+  const [username, setUsername] = useState('')
+  const [role, setRole]         = useState('viewer')
+  const [error, setError]       = useState('')
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (!email.trim()) { setError('Email is required'); return }
+    try { await onSave({ email: email.trim(), username: username.trim(), role }) }
+    catch (err) { setError(err.response?.data?.error || 'Failed to invite') }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <Label required>Email</Label>
+        <Input value={email} onChange={setEmail} type="email" placeholder="jane@example.com" />
+        <p className="text-xs text-content-faint mt-1">An invite link is sent here; the user sets their own password.</p>
+      </div>
+      <div>
+        <Label>Display name <span className="font-normal normal-case">(optional)</span></Label>
+        <Input value={username} onChange={setUsername} placeholder="defaults to the part before @" />
+      </div>
+      <div>
+        <Label required>Role</Label>
+        <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
+      </div>
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      <div className="flex gap-2 justify-end pt-2">
+        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
+        <Btn type="submit" disabled={saving}>{saving ? 'Inviting…' : 'Send invite'}</Btn>
+      </div>
+    </form>
+  )
+}
+
+function EditUserForm({ initial, onSave, onCancel, saving }) {
   const [role, setRole]         = useState(initial?.role || 'viewer')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
@@ -1393,33 +1430,28 @@ function UserForm({ initial, onSave, onCancel, saving }) {
   async function submit(e) {
     e.preventDefault()
     setError('')
-    if (!isEdit && !username.trim()) { setError('Username is required'); return }
-    if (!isEdit && !password) { setError('Password is required'); return }
-    try {
-      await onSave(isEdit ? { role, password } : { username: username.trim(), password, role })
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save')
-    }
+    try { await onSave({ role, password }) }
+    catch (err) { setError(err.response?.data?.error || 'Failed to save') }
   }
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <Label required={!isEdit}>Username</Label>
-        <Input value={username} onChange={setUsername} placeholder="jane" disabled={isEdit} />
+        <Label>Email</Label>
+        <Input value={initial?.email || ''} onChange={() => {}} disabled />
       </div>
       <div>
         <Label required>Role</Label>
         <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
       </div>
       <div>
-        <Label required={!isEdit}>Password</Label>
-        <Input value={password} onChange={setPassword} type="password" placeholder={isEdit ? '(leave blank to keep)' : '••••••••'} />
+        <Label>Reset password <span className="font-normal normal-case">(optional)</span></Label>
+        <Input value={password} onChange={setPassword} type="password" placeholder="(leave blank to keep)" />
       </div>
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
       <div className="flex gap-2 justify-end pt-2">
         <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add user'}</Btn>
+        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Btn>
       </div>
     </form>
   )
@@ -1429,19 +1461,35 @@ function UsersTab() {
   const qc = useQueryClient()
   const me = useAuthStore(s => s.user)
   const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
-  const [modal, setModal]       = useState(null)
+  const [modal, setModal]       = useState(null)   // 'new' | { editing }
   const [deleting, setDeleting] = useState(null)
+  const [link, setLink]         = useState(null)    // { email, url } — surfaced invite link (no SMTP)
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] })
 
-  const saveMut = useMutation({
-    mutationFn: ({ id, body }) => id ? updateUser(id, body) : createUser(body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setModal(null) },
+  const inviteMut = useMutation({
+    mutationFn: (body) => inviteUser(body),
+    onSuccess: (data) => { invalidate(); setModal(null); if (data?.invite_link) setLink({ email: data.user?.email, url: data.invite_link }) },
+  })
+  const editMut = useMutation({
+    mutationFn: ({ id, body }) => updateUser(id, body),
+    onSuccess: () => { invalidate(); setModal(null) },
   })
   const delMut = useMutation({
     mutationFn: (id) => deleteUser(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setDeleting(null) },
+    onSuccess: () => { invalidate(); setDeleting(null) },
+  })
+  const resendMut = useMutation({
+    mutationFn: (id) => resendInvite(id),
+    onSuccess: (data, id) => { const u = users.find(x => x.id === id); if (data?.invite_link) setLink({ email: u?.email, url: data.invite_link }) },
   })
 
   const fmtLast = (s) => s ? new Date(s).toLocaleString() : 'never'
+  function statusBadge(u) {
+    if (u.status === 'invited') return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40">invited</span>
+    if (!u.email_verified) return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-surface-raised border-border-strong text-content-faint">unverified</span>
+    return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-100/70 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">verified</span>
+  }
+
   if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
@@ -1449,25 +1497,30 @@ function UsersTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Users</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Accounts and global roles. Per-workspace access is managed on each workspace's Members tab.</p>
+          <p className="text-sm text-content-subtle mt-0.5">Invite users by email and set their global role. Per-workspace access is managed on each workspace's Members tab.</p>
         </div>
-        <Btn onClick={() => setModal('new')}>＋ Add user</Btn>
+        <Btn onClick={() => setModal('new')}>＋ Invite user</Btn>
       </div>
 
       <div className="space-y-2">
         {users.map(u => (
           <div key={u.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(u.username[0] || '?').toUpperCase()}</div>
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-surface-raised flex items-center justify-center text-sm">{(u.email[0] || u.username[0] || '?').toUpperCase()}</div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-semibold text-content-strong truncate">{u.username}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-semibold text-content-strong truncate">{u.email || u.username}</p>
                 {me?.uid === u.id && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">you</span>}
                 <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wider ${ROLE_BADGE[u.role] || ROLE_BADGE.viewer}`}>{u.role}</span>
+                {statusBadge(u)}
               </div>
-              <p className="text-xs text-content-subtle mt-0.5">Last login: {fmtLast(u.last_login_at)}</p>
+              <p className="text-xs text-content-subtle mt-0.5">
+                {u.username}{u.phone ? ` · ${u.phone}` : ''} · {u.status === 'invited' ? 'invite pending' : `last login: ${fmtLast(u.last_login_at)}`}
+              </p>
             </div>
             <div className="flex items-center gap-2">
-              <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: u })}>Edit</Btn>
+              {u.status === 'invited'
+                ? <Btn variant="ghost" size="sm" onClick={() => resendMut.mutate(u.id)} disabled={resendMut.isPending}>Resend invite</Btn>
+                : <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: u })}>Edit</Btn>}
               <Btn variant="danger" size="sm" onClick={() => setDeleting(u)} disabled={me?.uid === u.id}>Delete</Btn>
             </div>
           </div>
@@ -1478,22 +1531,33 @@ function UsersTab() {
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
           <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add user' : `Edit "${modal.editing.username}"`}</h3>
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Invite user' : `Edit "${modal.editing.email}"`}</h3>
               <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
             </div>
-            <UserForm
-              initial={modal === 'new' ? null : modal.editing}
-              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
-              onCancel={() => setModal(null)}
-              saving={saveMut.isPending}
-            />
+            {modal === 'new'
+              ? <InviteForm onSave={(body) => inviteMut.mutateAsync(body)} onCancel={() => setModal(null)} saving={inviteMut.isPending} />
+              : <EditUserForm initial={modal.editing} onSave={(body) => editMut.mutateAsync({ id: modal.editing.id, body })} onCancel={() => setModal(null)} saving={editMut.isPending} />}
+          </div>
+        </div>
+      )}
+
+      {link && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setLink(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Invite link {link.email ? `for ${link.email}` : ''}</h3>
+            <p className="text-sm text-content-muted">No system email is configured, so share this link with the user to complete their registration:</p>
+            <div className="bg-surface-raised border border-border-strong rounded-lg p-3 text-xs font-mono break-all text-content">{link.url}</div>
+            <div className="flex gap-2 justify-end">
+              <Btn variant="secondary" onClick={() => navigator.clipboard?.writeText(link.url)}>Copy</Btn>
+              <Btn onClick={() => setLink(null)}>Done</Btn>
+            </div>
           </div>
         </div>
       )}
 
       {deleting && (
         <ConfirmDeleteModal
-          name={`user "${deleting.username}"`}
+          name={`user "${deleting.email || deleting.username}"`}
           onConfirm={() => delMut.mutate(deleting.id)}
           onClose={() => setDeleting(null)}
           loading={delMut.isPending}
@@ -1503,9 +1567,53 @@ function UsersTab() {
   )
 }
 
+// ── System email (transactional SMTP for invites/verification) ────────────────
+
+function SystemEmailTab() {
+  const qc = useQueryClient()
+  const { data: cfg, isLoading } = useQuery({ queryKey: ['system-email'], queryFn: fetchSystemEmail })
+  const [f, setF] = useState(null)
+  const [pw, setPw] = useState('')
+  const [saved, setSaved] = useState(false)
+  if (!f && cfg) setF({ host: cfg.host || '', port: cfg.port || '587', username: cfg.username || '', from: cfg.from || '', tls: cfg.tls !== false, base_url: cfg.base_url || '' })
+
+  const mut = useMutation({
+    mutationFn: () => updateSystemEmail({ ...f, password: pw }),
+    onSuccess: () => { setPw(''); setSaved(true); qc.invalidateQueries({ queryKey: ['system-email'] }) },
+  })
+  const set = (k, v) => { setF(s => ({ ...s, [k]: v })); setSaved(false) }
+  if (isLoading || !f) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <div className="max-w-xl">
+      <div className="mb-6">
+        <h2 className="text-base font-semibold text-content-strong">System email</h2>
+        <p className="text-sm text-content-subtle mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</p>
+      </div>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div><Label>SMTP host</Label><Input value={f.host} onChange={v => set('host', v)} placeholder="smtp.example.com" /></div>
+          <div><Label>Port</Label><Input value={f.port} onChange={v => set('port', v)} type="number" placeholder="587" /></div>
+          <div><Label>Username</Label><Input value={f.username} onChange={v => set('username', v)} placeholder="apikey" /></div>
+          <div><Label>Password</Label><Input value={pw} onChange={setPw} type="password" placeholder={cfg.has_password ? '(unchanged)' : '••••••••'} /></div>
+          <div><Label>From address</Label><Input value={f.from} onChange={v => set('from', v)} placeholder="Rigger <noreply@example.com>" /></div>
+          <div><Label>Public base URL</Label><Input value={f.base_url} onChange={v => set('base_url', v)} placeholder="https://rigger.example.com" /></div>
+        </div>
+        <Toggle checked={f.tls} onChange={v => set('tls', v)} label="Use STARTTLS (recommended; port 465 uses implicit TLS)" />
+        <p className="text-xs text-content-faint">Base URL is used to build links in emails; leave blank to derive from the request host.</p>
+        <div className="flex items-center gap-3">
+          <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save'}</Btn>
+          {saved && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const TABS = [
   { id: 'general',        label: 'General' },
   { id: 'users',          label: 'Users' },
+  { id: 'system-email',   label: 'System Email' },
   { id: 'appearance',     label: 'Appearance' },
   { id: 'alerts',         label: 'Alert Rules' },
   { id: 'notifications',  label: 'Notifications' },
@@ -1545,6 +1653,7 @@ export default function SettingsPage() {
         {/* Tab content */}
         {tab === 'general'        && <GeneralTab />}
         {tab === 'users'          && <UsersTab />}
+        {tab === 'system-email'   && <SystemEmailTab />}
         {tab === 'appearance'     && <AppearanceTab />}
         {tab === 'alerts'         && <RulesTab />}
         {tab === 'notifications'  && <NotificationsTab />}

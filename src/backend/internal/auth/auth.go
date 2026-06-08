@@ -43,9 +43,11 @@ type User struct {
 }
 
 type Claims struct {
-	UserID   int64  `json:"uid"`
-	Username string `json:"sub"`
-	Role     string `json:"role"`
+	UserID        int64  `json:"uid"`
+	Username      string `json:"sub"`
+	Role          string `json:"role"`
+	Email         string `json:"email,omitempty"`
+	EmailVerified bool   `json:"ev"`
 	jwt.RegisteredClaims
 }
 
@@ -97,33 +99,72 @@ func (s *Service) ChangePassword(userID int64, currentPassword, newPassword stri
 	return err
 }
 
-func (s *Service) Login(username, password string) (string, error) {
-	var (
-		id   int64
-		hash string
-		role string
-	)
+// loginRow is the per-user data needed to authenticate and build claims.
+type loginRow struct {
+	id            int64
+	hash          string
+	role          string
+	email         string
+	emailVerified bool
+	status        string
+}
+
+// resolveLogin looks up an account by email first, then (legacy) by username for
+// rows that have no email yet — so the pre-email admin isn't locked out.
+func (s *Service) resolveLogin(identifier string) (*loginRow, error) {
+	var r loginRow
+	var ev int
 	err := s.db.QueryRow(
-		"SELECT id, password, role FROM users WHERE username = ?", username,
-	).Scan(&id, &hash, &role)
+		`SELECT id, password, role, email, email_verified, status FROM users WHERE email = ? LIMIT 1`, identifier,
+	).Scan(&r.id, &r.hash, &r.role, &r.email, &ev, &r.status)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrInvalidCredentials
+		err = s.db.QueryRow(
+			`SELECT id, password, role, email, email_verified, status FROM users WHERE username = ? AND email = '' LIMIT 1`, identifier,
+		).Scan(&r.id, &r.hash, &r.role, &r.email, &ev, &r.status)
 	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInvalidCredentials
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.emailVerified = ev != 0
+	return &r, nil
+}
+
+// authenticate verifies the identifier+password and that the account can log in.
+func (s *Service) authenticate(identifier, password string) (*loginRow, error) {
+	row, err := s.resolveLogin(identifier)
+	if err != nil {
+		return nil, err
+	}
+	// Invited accounts (no password set yet) cannot log in until they complete
+	// registration via their invite link.
+	if row.status != "active" || row.hash == "" {
+		return nil, ErrInvalidCredentials
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(row.hash), []byte(password)); err != nil {
+		return nil, ErrInvalidCredentials
+	}
+	return row, nil
+}
+
+func (s *Service) Login(identifier, password string) (string, error) {
+	row, err := s.authenticate(identifier, password)
 	if err != nil {
 		return "", err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return "", ErrInvalidCredentials
-	}
-	s.touchLastLogin(id)
-	return s.issueToken(id, username, role)
+	s.touchLastLogin(row.id)
+	return s.issueToken(row.id, row.email, row.role, row.email, row.emailVerified)
 }
 
-func (s *Service) issueToken(id int64, username, role string) (string, error) {
+func (s *Service) issueToken(id int64, username, role, email string, emailVerified bool) (string, error) {
 	claims := Claims{
-		UserID:   id,
-		Username: username,
-		Role:     role,
+		UserID:        id,
+		Username:      username,
+		Role:          role,
+		Email:         email,
+		EmailVerified: emailVerified,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(s.jwtExpiry) * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -134,11 +175,13 @@ func (s *Service) issueToken(id int64, username, role string) (string, error) {
 }
 
 // issueRefreshToken creates a long-lived JWT (7 days) stored in the httpOnly cookie.
-func (s *Service) issueRefreshToken(id int64, username, role string) (string, error) {
+func (s *Service) issueRefreshToken(id int64, username, role, email string, emailVerified bool) (string, error) {
 	claims := Claims{
-		UserID:   id,
-		Username: username,
-		Role:     role,
+		UserID:        id,
+		Username:      username,
+		Role:          role,
+		Email:         email,
+		EmailVerified: emailVerified,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -147,6 +190,21 @@ func (s *Service) issueRefreshToken(id int64, username, role string) (string, er
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(s.jwtSecret)
+}
+
+// IssueSession returns a fresh (access, refresh) pair for a user id — used after
+// completing registration so the new user is logged straight in.
+func (s *Service) IssueSession(userID int64) (accessToken, refreshToken string, err error) {
+	u, err := s.getUserByID(userID)
+	if err != nil {
+		return "", "", err
+	}
+	s.touchLastLogin(userID)
+	if accessToken, err = s.issueToken(userID, u.Email, u.Role, u.Email, u.EmailVerified); err != nil {
+		return "", "", err
+	}
+	refreshToken, err = s.issueRefreshToken(userID, u.Email, u.Role, u.Email, u.EmailVerified)
+	return
 }
 
 // RefreshAccessToken validates a refresh token cookie and issues a new short-lived access token.
@@ -178,48 +236,39 @@ func (s *Service) RefreshAccessToken(refreshToken string) (accessToken, newRefre
 		return "", "", fmt.Errorf("invalid token claims")
 	}
 
-	// Re-fetch user from DB to get current role and verify account still exists
-	var username, role string
+	// Re-fetch user from DB to get current role/email and verify account still exists
+	var username, role, email string
+	var ev int
 	if dbErr := s.db.QueryRow(
-		"SELECT username, role FROM users WHERE id = ?", claims.UserID,
-	).Scan(&username, &role); dbErr != nil {
+		"SELECT username, role, email, email_verified FROM users WHERE id = ?", claims.UserID,
+	).Scan(&username, &role, &email, &ev); dbErr != nil {
 		return "", "", fmt.Errorf("user not found")
 	}
-
-	accessToken, err = s.issueToken(claims.UserID, username, role)
+	loginName := email
+	if loginName == "" {
+		loginName = username
+	}
+	accessToken, err = s.issueToken(claims.UserID, loginName, role, email, ev != 0)
 	if err != nil {
 		return "", "", err
 	}
 	// Rolling: issue a fresh 7-day refresh token so the session stays alive with activity
-	newRefresh, err = s.issueRefreshToken(claims.UserID, username, role)
+	newRefresh, err = s.issueRefreshToken(claims.UserID, loginName, role, email, ev != 0)
 	return accessToken, newRefresh, err
 }
 
-// Login2 returns both access and refresh tokens.
-func (s *Service) Login2(username, password string) (accessToken, refreshToken string, err error) {
-	var (
-		id   int64
-		hash string
-		role string
-	)
-	err = s.db.QueryRow(
-		"SELECT id, password, role FROM users WHERE username = ?", username,
-	).Scan(&id, &hash, &role)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", "", ErrInvalidCredentials
-	}
+// Login2 authenticates by email (or legacy username) and returns access + refresh tokens.
+func (s *Service) Login2(identifier, password string) (accessToken, refreshToken string, err error) {
+	row, err := s.authenticate(identifier, password)
 	if err != nil {
 		return "", "", err
 	}
-	if err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return "", "", ErrInvalidCredentials
-	}
-	s.touchLastLogin(id)
-	accessToken, err = s.issueToken(id, username, role)
+	s.touchLastLogin(row.id)
+	accessToken, err = s.issueToken(row.id, row.email, row.role, row.email, row.emailVerified)
 	if err != nil {
 		return "", "", err
 	}
-	refreshToken, err = s.issueRefreshToken(id, username, role)
+	refreshToken, err = s.issueRefreshToken(row.id, row.email, row.role, row.email, row.emailVerified)
 	return
 }
 

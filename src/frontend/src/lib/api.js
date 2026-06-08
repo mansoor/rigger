@@ -206,11 +206,24 @@ export const cleanMigrationLeftover   = (id, onChunk) =>
 
 // ── Settings: General ────────────────────────────────────────────────────────
 
-// Users (Phase 5 RBAC, roadmap 10a) — admin only.
-export const fetchUsers  = ()         => api.get('/users').then(r => r.data)
-export const createUser  = (body)     => api.post('/users', body).then(r => r.data)
-export const updateUser  = (id, body) => api.put(`/users/${id}`, body).then(r => r.data)
-export const deleteUser  = (id)       => api.delete(`/users/${id}`)
+// Users (Phase 5 RBAC) — admin only. createUser now invites (email+role); returns
+// { user, invite_link? } (link surfaced when system SMTP isn't configured).
+export const fetchUsers   = ()         => api.get('/users').then(r => r.data)
+export const inviteUser   = (body)     => api.post('/users', body).then(r => r.data)
+export const updateUser   = (id, body) => api.put(`/users/${id}`, body).then(r => r.data)
+export const deleteUser   = (id)       => api.delete(`/users/${id}`)
+export const resendInvite = (id)       => api.post(`/users/${id}/resend-invite`).then(r => r.data)
+
+// Invite registration + email verification + profile (Phase 5.1b).
+export const fetchRegisterInfo   = (token)       => api.get('/register/info', { params: { token } }).then(r => r.data)
+export const completeRegistration = (body)       => api.post('/register/complete', body).then(r => r.data)
+export const verifyEmail         = (token)       => api.post('/auth/verify-email', { token }).then(r => r.data)
+export const resendVerification  = ()            => api.post('/auth/resend-verification').then(r => r.data)
+export const updateProfile       = (body)        => api.put('/auth/profile', body).then(r => r.data)
+
+// System (transactional) email settings — admin.
+export const fetchSystemEmail  = ()     => api.get('/settings/system-email').then(r => r.data)
+export const updateSystemEmail = (body) => api.put('/settings/system-email', body).then(r => r.data)
 
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)

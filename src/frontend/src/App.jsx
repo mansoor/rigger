@@ -5,6 +5,8 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { ConfirmProvider } from './context/ConfirmContext'
 import LoginPage from './pages/LoginPage'
 import SetupPage from './pages/SetupPage'
+import RegisterPage from './pages/RegisterPage'
+import VerifyEmailPage from './pages/VerifyEmailPage'
 import DashboardPage from './pages/DashboardPage'
 import ProjectPage from './pages/ProjectPage'
 import NewProjectPage from './pages/NewProjectPage'
@@ -50,6 +52,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/setup" element={<SetupPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="/workspaces/:workspace/manage" element={<RequireAuth><ManageWorkspacePage /></RequireAuth>} />
         <Route path="/workspaces/:workspace/projects/new" element={<RequireAuth><NewProjectPage /></RequireAuth>} />

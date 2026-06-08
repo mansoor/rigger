@@ -112,6 +112,12 @@ func sendEmail(cfg EmailConfig, n Notification) error {
 	return nil
 }
 
+// SendTransactional sends a one-off email (invite / verification links) using an
+// SMTP config, bypassing the alert-channel machinery. Reuses the same sender.
+func SendTransactional(cfg EmailConfig, subject, body string) error {
+	return sendEmail(cfg, Notification{Title: subject, Body: body, Level: LevelInfo})
+}
+
 // sendImplicitTLS handles port-465 SMTPS where TLS wraps the whole session.
 func sendImplicitTLS(addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
 	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})

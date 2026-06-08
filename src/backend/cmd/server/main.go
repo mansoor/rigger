@@ -99,6 +99,14 @@ func main() {
 	mux.HandleFunc("POST /api/auth/refresh", handler.Refresh)
 	mux.Handle("POST /api/auth/password", authSvc.Middleware(http.HandlerFunc(handler.ChangePassword)))
 
+	// Invite registration + email verification (Phase 5.1b) — token-authenticated, no JWT.
+	mux.HandleFunc("GET /api/register/info", handler.RegisterInfo)
+	mux.HandleFunc("POST /api/register/complete", handler.CompleteRegistration)
+	mux.HandleFunc("POST /api/auth/verify-email", handler.VerifyEmail)
+	// Self-service (JWT) — resend own verification, update own profile.
+	mux.Handle("POST /api/auth/resend-verification", authSvc.Middleware(http.HandlerFunc(handler.ResendVerification)))
+	mux.Handle("PUT /api/auth/profile", authSvc.Middleware(http.HandlerFunc(handler.UpdateProfile)))
+
 	// adminOnly gates a handler to global-admin callers (Phase 5 RBAC). Wrapped
 	// inside authSvc.Middleware so claims are present.
 	adminOnly := authSvc.RequireRole(auth.RoleAdmin)
@@ -115,10 +123,12 @@ func main() {
 		}
 	}))))
 	mux.Handle("/api/users/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case "PUT":
+		switch {
+		case r.Method == "POST" && hasSuffix(r.URL.Path, "/resend-invite"):
+			handler.ResendInvite(w, r)
+		case r.Method == "PUT":
 			handler.UpdateUser(w, r)
-		case "DELETE":
+		case r.Method == "DELETE":
 			handler.DeleteUser(w, r)
 		default:
 			http.NotFound(w, r)
@@ -536,6 +546,11 @@ func main() {
 			handler.GetGeneralSettings(w, r)
 		case r.Method == "PUT" && path == "/api/settings/general":
 			handler.PutGeneralSettings(w, r)
+		// System (transactional) email — invite/verification links (Phase 5.1b)
+		case r.Method == "GET" && path == "/api/settings/system-email":
+			handler.GetSystemEmail(w, r)
+		case r.Method == "PUT" && path == "/api/settings/system-email":
+			handler.PutSystemEmail(w, r)
 		// Backup targets
 		case r.Method == "GET" && path == "/api/settings/backup-targets":
 			handler.ListBackupTargets(w, r)

@@ -3,67 +3,257 @@ package auth
 import (
 	"database/sql"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-// User management (Phase 5 RBAC, roadmap 10a). Admin-only at the API layer.
+// User management (Phase 5 RBAC + 5.1b identity). Email is the login identity and
+// is required for active accounts; phone is optional. New users are invite-based.
+
+const (
+	StatusActive  = "active"
+	StatusInvited = "invited"
+
+	inviteTTL = 7 * 24 * time.Hour
+	verifyTTL = 24 * time.Hour
+)
 
 var (
 	ErrInvalidRole  = errors.New("invalid role")
 	ErrLastAdmin    = errors.New("cannot remove the last admin")
 	ErrUserNotFound = errors.New("user not found")
+	ErrInvalidEmail = errors.New("a valid email address is required")
+	ErrEmailTaken   = errors.New("a user with that email already exists")
 )
+
+var emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+
+func validEmail(s string) bool { return emailRe.MatchString(strings.TrimSpace(s)) }
 
 // UserInfo is a user record for the admin Users list (never includes the hash).
 type UserInfo struct {
-	ID          int64      `json:"id"`
-	Username    string     `json:"username"`
-	Role        string     `json:"role"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastLoginAt *time.Time `json:"last_login_at"`
+	ID            int64      `json:"id"`
+	Username      string     `json:"username"`
+	Email         string     `json:"email"`
+	Phone         string     `json:"phone"`
+	Role          string     `json:"role"`
+	EmailVerified bool       `json:"email_verified"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastLoginAt   *time.Time `json:"last_login_at"`
 }
 
-// ListUsers returns all users ordered by username.
+const userCols = `id, username, email, phone, role, email_verified, status, created_at, last_login_at`
+
+func scanUser(s scanner) (*UserInfo, error) {
+	var u UserInfo
+	var ev int
+	var last sql.NullTime
+	if err := s.Scan(&u.ID, &u.Username, &u.Email, &u.Phone, &u.Role, &ev, &u.Status, &u.CreatedAt, &last); err != nil {
+		return nil, err
+	}
+	u.EmailVerified = ev != 0
+	if last.Valid {
+		u.LastLoginAt = &last.Time
+	}
+	return &u, nil
+}
+
+type scanner interface{ Scan(dest ...any) error }
+
+// ListUsers returns all users ordered by email/username.
 func (s *Service) ListUsers() ([]UserInfo, error) {
-	rows, err := s.db.Query(`SELECT id, username, role, created_at, last_login_at FROM users ORDER BY username`)
+	rows, err := s.db.Query(`SELECT ` + userCols + ` FROM users ORDER BY email, username`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []UserInfo{}
 	for rows.Next() {
-		var u UserInfo
-		var last sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &last); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		if last.Valid {
-			u.LastLoginAt = &last.Time
-		}
-		out = append(out, u)
+		out = append(out, *u)
 	}
 	return out, rows.Err()
 }
 
-// AdminCreateUser creates a user with an explicit role (admin action).
-func (s *Service) AdminCreateUser(username, password, role string) (*UserInfo, error) {
+func (s *Service) getUserByID(id int64) (*UserInfo, error) {
+	u, err := scanUser(s.db.QueryRow(`SELECT `+userCols+` FROM users WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	return u, err
+}
+
+// GetUser returns a single user by id (admin/profile views).
+func (s *Service) GetUser(id int64) (*UserInfo, error) { return s.getUserByID(id) }
+
+// SetupAdmin creates the first super-admin during first-run setup. The account is
+// active immediately (pragmatic gate); email starts unverified.
+func (s *Service) SetupAdmin(email, username, password string) (int64, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if !validEmail(email) {
+		return 0, ErrInvalidEmail
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return 0, err
+	}
+	if username == "" {
+		username = strings.SplitN(email, "@", 2)[0]
+	}
+	res, err := s.db.Exec(
+		`INSERT INTO users (username, email, password, role, status, email_verified) VALUES (?, ?, ?, ?, 'active', 0)`,
+		username, email, string(hash), RoleAdmin,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return 0, ErrEmailTaken
+		}
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+// InviteUser creates an invited (password-less) account and returns the raw invite
+// token for the registration link.
+func (s *Service) InviteUser(email, role, username string) (*UserInfo, string, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if !validEmail(email) {
+		return nil, "", ErrInvalidEmail
+	}
 	if !ValidRole(role) {
-		return nil, ErrInvalidRole
+		return nil, "", ErrInvalidRole
 	}
-	if strings.TrimSpace(username) == "" || password == "" {
-		return nil, errors.New("username and password are required")
+	if username == "" {
+		username = strings.SplitN(email, "@", 2)[0]
 	}
-	if err := s.CreateUser(username, password, role); err != nil {
+	res, err := s.db.Exec(
+		`INSERT INTO users (username, email, password, role, status, email_verified) VALUES (?, ?, '', ?, 'invited', 0)`,
+		username, email, role,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return nil, "", ErrEmailTaken
+		}
+		return nil, "", err
+	}
+	id, _ := res.LastInsertId()
+	raw, err := s.createToken(id, KindInvite, inviteTTL)
+	if err != nil {
+		return nil, "", err
+	}
+	u, err := s.getUserByID(id)
+	return u, raw, err
+}
+
+// ResendInvite issues a fresh invite token for an account still pending registration.
+func (s *Service) ResendInvite(id int64) (string, error) {
+	u, err := s.getUserByID(id)
+	if err != nil {
+		return "", err
+	}
+	if u.Status != StatusInvited {
+		return "", errors.New("user has already completed registration")
+	}
+	return s.createToken(id, KindInvite, inviteTTL)
+}
+
+// RegisterInfo validates an invite token and returns the invitee's email (for the
+// registration page) without consuming the token.
+func (s *Service) RegisterInfo(rawToken string) (*UserInfo, error) {
+	id, err := s.peekToken(rawToken, KindInvite)
+	if err != nil {
 		return nil, err
 	}
-	return s.getUser(username)
+	return s.getUserByID(id)
+}
+
+// CompleteRegistration consumes an invite token, sets the password (and optional
+// phone/username), and activates the account with a verified email (the user
+// proved ownership by following the emailed link).
+func (s *Service) CompleteRegistration(rawToken, password, phone, username string) (int64, error) {
+	if len(password) < 8 {
+		return 0, errors.New("password must be at least 8 characters")
+	}
+	id, err := s.consumeToken(rawToken, KindInvite)
+	if err != nil {
+		return 0, err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(username) != "" {
+		if _, err := s.db.Exec(`UPDATE users SET username=? WHERE id=?`, strings.TrimSpace(username), id); err != nil {
+			return 0, err
+		}
+	}
+	_, err = s.db.Exec(
+		`UPDATE users SET password=?, phone=?, status='active', email_verified=1 WHERE id=?`,
+		string(hash), strings.TrimSpace(phone), id,
+	)
+	return id, err
+}
+
+// CreateVerifyToken issues an email-verification token for a user (setup, resend,
+// or after an email change).
+func (s *Service) CreateVerifyToken(id int64) (string, error) {
+	return s.createToken(id, KindVerify, verifyTTL)
+}
+
+// VerifyEmail consumes a verification token and marks the email verified.
+func (s *Service) VerifyEmail(rawToken string) (int64, error) {
+	id, err := s.consumeToken(rawToken, KindVerify)
+	if err != nil {
+		return 0, err
+	}
+	_, err = s.db.Exec(`UPDATE users SET email_verified=1 WHERE id=?`, id)
+	return id, err
+}
+
+// IsVerified reports whether a user's email is verified.
+func (s *Service) IsVerified(id int64) bool {
+	u, err := s.getUserByID(id)
+	return err == nil && u.EmailVerified
+}
+
+// UpdateProfile lets a user set their own phone/username and change email. A changed
+// email resets verification; emailChanged signals the caller to send a new link.
+func (s *Service) UpdateProfile(id int64, email, phone, username string) (u *UserInfo, emailChanged bool, err error) {
+	cur, err := s.getUserByID(id)
+	if err != nil {
+		return nil, false, err
+	}
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email != "" && email != cur.Email {
+		if !validEmail(email) {
+			return nil, false, ErrInvalidEmail
+		}
+		if _, e := s.db.Exec(`UPDATE users SET email=?, email_verified=0 WHERE id=?`, email, id); e != nil {
+			if strings.Contains(e.Error(), "UNIQUE") {
+				return nil, false, ErrEmailTaken
+			}
+			return nil, false, e
+		}
+		emailChanged = true
+	}
+	if _, e := s.db.Exec(`UPDATE users SET phone=?, username=? WHERE id=?`,
+		strings.TrimSpace(phone), strings.TrimSpace(username), id); e != nil {
+		return nil, false, e
+	}
+	u, err = s.getUserByID(id)
+	return u, emailChanged, err
 }
 
 // UpdateUser changes a user's role and, if newPassword is non-empty, resets their
-// password. Demoting the last admin is rejected.
+// password (admin action). Demoting the last admin is rejected.
 func (s *Service) UpdateUser(id int64, role, newPassword string) (*UserInfo, error) {
 	if !ValidRole(role) {
 		return nil, ErrInvalidRole
@@ -109,44 +299,10 @@ func (s *Service) DeleteUser(id int64) error {
 
 func (s *Service) countAdmins() (int, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(1) FROM users WHERE role=?`, RoleAdmin).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(1) FROM users WHERE role=? AND status='active'`, RoleAdmin).Scan(&n)
 	return n, err
 }
 
 func (s *Service) touchLastLogin(id int64) {
 	_, _ = s.db.Exec(`UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?`, id) //nolint:errcheck
-}
-
-func (s *Service) getUser(username string) (*UserInfo, error) {
-	var u UserInfo
-	var last sql.NullTime
-	err := s.db.QueryRow(`SELECT id, username, role, created_at, last_login_at FROM users WHERE username=?`, username).
-		Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &last)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if last.Valid {
-		u.LastLoginAt = &last.Time
-	}
-	return &u, nil
-}
-
-func (s *Service) getUserByID(id int64) (*UserInfo, error) {
-	var u UserInfo
-	var last sql.NullTime
-	err := s.db.QueryRow(`SELECT id, username, role, created_at, last_login_at FROM users WHERE id=?`, id).
-		Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt, &last)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	if last.Valid {
-		u.LastLoginAt = &last.Time
-	}
-	return &u, nil
 }

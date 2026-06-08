@@ -116,18 +116,30 @@ func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Email    string `json:"email"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := readJSON(r, &body); err != nil || body.Username == "" || len(body.Password) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password (min 8 chars) required"})
+	if err := readJSON(r, &body); err != nil || len(body.Password) < 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email and password (min 8 chars) required"})
 		return
 	}
-	if err := h.auth.CreateUser(body.Username, body.Password, "admin"); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	uid, err := h.auth.SetupAdmin(body.Email, body.Username, body.Password)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
+	// Email verification (pragmatic gate): surface the link if SMTP isn't set up yet.
+	resp := map[string]any{"status": "ok"}
+	if raw, terr := h.auth.CreateVerifyToken(uid); terr == nil {
+		link := h.baseURL(r) + "/verify-email?token=" + raw
+		if sent, _ := h.sendUserLink(strings.ToLower(strings.TrimSpace(body.Email)), "Verify your Rigger email", "Welcome to Rigger — please verify your email address.", "Verify your email", link); sent {
+			resp["email_sent"] = true
+		} else {
+			resp["verify_link"] = link
+		}
+	}
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // GET /api/setup/status  — is setup required?
@@ -152,6 +164,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
+		Email    string `json:"email"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
@@ -159,10 +172,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	identifier := strings.TrimSpace(strings.ToLower(body.Email))
+	if identifier == "" {
+		identifier = body.Username // legacy clients / emailless accounts
+	}
 
-	accessToken, refreshToken, err := h.auth.Login2(body.Username, body.Password)
+	accessToken, refreshToken, err := h.auth.Login2(identifier, body.Password)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 		return
 	}
 
