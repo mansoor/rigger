@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchWorkspaceHosts } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -84,8 +84,8 @@ function StepHeader({ step, title, subtitle }) {
 const CUSTOM_REGISTRY = '__custom__'
 
 function Step1({ data, onChange, errors, onConflict, workspace }) {
-  // Registered remote hosts (Phase 7) — for the default-host selector.
-  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  // Remote hosts available to this workspace (Phase 3) — for the default-host selector.
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
 
   // The key (set by KeyField) is the identity; display names may repeat within a
   // workspace. onConflict carries key-validity up so validate() can block Continue.
@@ -780,8 +780,8 @@ function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, d
   )
 }
 
-function Step3({ data, onChange }) {
-  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+function Step3({ data, onChange, workspace }) {
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
   function updateEnv(idx, updated) {
     const envs = [...data.environments]
     envs[idx] = updated
@@ -1632,7 +1632,7 @@ export default function NewProjectPage() {
             {/* Services (3) then Environments (4) — define the stack shape before
                 its environments. Step4=Services component, Step3=Environments. */}
             {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
-            {step === 4 && <Step3 data={data} onChange={update} />}
+            {step === 4 && <Step3 data={data} onChange={update} workspace={workspace} />}
             {step === 5 && <Step5 data={data} onChange={update} />}
             {step === 6 && <Step6 data={data} />}
             {step === 7 && (

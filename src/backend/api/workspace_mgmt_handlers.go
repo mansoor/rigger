@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -128,12 +129,32 @@ func (h *Handler) TransferWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 // projectsBlockedByExclusiveHost returns the projects that cannot transfer because
-// an environment runs on a remote host the target workspace cannot use. Hosts are
-// currently global (visible everywhere), so this returns nothing until hosts are
-// scoped per-workspace; the hook keeps the policy in one place for that phase.
+// an environment runs on a remote host the target workspace cannot use — a host
+// private to the source, or a global host not granted to the target. The user must
+// repoint those environments (e.g. to Local) before transferring. A host shared
+// with the target does not block.
 func (h *Handler) projectsBlockedByExclusiveHost(src, target string, projects []string) []string {
-	_ = src
-	_ = target
-	_ = projects
-	return nil
+	var blocked []string
+	for _, pk := range projects {
+		prefix := src + "_" + pk
+		rows, err := h.db.Query(`SELECT DISTINCT host_id FROM workspace_host_envs WHERE project=? AND host_id<>0`, prefix)
+		if err != nil {
+			continue
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if rows.Scan(&id) == nil { //nolint:errcheck
+				ids = append(ids, id)
+			}
+		}
+		rows.Close()
+		for _, id := range ids {
+			if inPool, _ := settings.HostInWorkspacePool(h.db, target, id); !inPool {
+				blocked = append(blocked, pk)
+				break
+			}
+		}
+	}
+	return blocked
 }

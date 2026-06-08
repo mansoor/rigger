@@ -1,0 +1,161 @@
+package api
+
+import (
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/settings"
+	"github.com/mansoor/rigger/ui/internal/wspath"
+)
+
+// Workspace-scoped Remote Hosts (Phase 3: settings scopes). A workspace sees its
+// own hosts (owner_scope='ws:{key}') plus any global host granted to it. It may
+// create/edit/delete only its own; global hosts are read-only here and managed
+// from the admin Settings page.
+
+// wsHostID parses the {hostid} path value set by the router for
+// /api/workspaces/{ws}/hosts/{id}/... routes.
+func wsHostID(r *http.Request) (int64, error) {
+	return strconv.ParseInt(r.PathValue("hostid"), 10, 64)
+}
+
+// ownsHost loads a host and reports whether it is private to the given workspace.
+// Returns (host, owned). host is nil when it doesn't exist.
+func (h *Handler) ownsHost(wsKey string, id int64) (*settings.Host, bool) {
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		return nil, false
+	}
+	return host, host.WorkspaceScope() == wsKey
+}
+
+// GET /api/workspaces/{ws}/hosts — the workspace's host pool (own + granted globals).
+func (h *Handler) ListWorkspaceHosts(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	hosts, err := settings.ListHostsForWorkspace(h.db, ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, hosts)
+}
+
+// POST /api/workspaces/{ws}/hosts — create a host private to this workspace.
+func (h *Handler) CreateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	if _, err := os.Stat(wspath.WorkspaceMeta(h.workspacesDir, ws)); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		return
+	}
+	var b hostBody
+	if err := readJSON(r, &b); err != nil || b.Name == "" || b.Address == "" || b.SSHUser == "" || (b.SSHKey == "" && !b.UseManagedKey) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, address, ssh_user and an SSH key (pasted or Rigger-managed) are required"})
+		return
+	}
+	keyEnc, ok := h.hostKeyEnc(w, b)
+	if !ok {
+		return
+	}
+	host, err := settings.CreateHost(h.db, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir, settings.WorkspaceOwnerScope(ws))
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "a host with that name already exists"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, host)
+}
+
+// PUT /api/workspaces/{ws}/hosts/{id} — edit a host owned by this workspace.
+func (h *Handler) UpdateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	host, owned := h.ownsHost(ws, id)
+	if host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if !owned {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this is a shared global host — manage it from Settings"})
+		return
+	}
+	var b hostBody
+	if err := readJSON(r, &b); err != nil || b.Name == "" || b.Address == "" || b.SSHUser == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, address and ssh_user are required"})
+		return
+	}
+	keyEnc, ok := h.hostKeyEnc(w, b)
+	if !ok {
+		return
+	}
+	updated, err := settings.UpdateHost(h.db, id, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.bridge.EvictHost(id)
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// DELETE /api/workspaces/{ws}/hosts/{id} — delete a host owned by this workspace.
+func (h *Handler) DeleteWorkspaceHost(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	host, owned := h.ownsHost(ws, id)
+	if host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if !owned {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this is a shared global host — manage it from Settings"})
+		return
+	}
+	if err := settings.DeleteHost(h.db, id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.bridge.EvictHost(id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /api/workspaces/{ws}/hosts/{id}/test — connectivity test, gated to the pool.
+func (h *Handler) TestWorkspaceHost(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if inPool, _ := settings.HostInWorkspacePool(h.db, ws, id); !inPool {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	h.testHostByID(w, id)
+}
+
+// GET /api/workspaces/{ws}/hosts/{id}/stats — host health, gated to the pool.
+func (h *Handler) WorkspaceHostStats(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if inPool, _ := settings.HostInWorkspacePool(h.db, ws, id); !inPool {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	h.hostStatsByID(w, id)
+}

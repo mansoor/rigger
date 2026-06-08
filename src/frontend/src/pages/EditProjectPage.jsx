@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchBackupTargets, fetchBackupServices } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchBackupTargets, fetchBackupServices } from '../lib/api'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -1298,7 +1298,7 @@ function MigrationProgress({ jobId, onDone }) {
 function EnvHostsSection({ name }) {
   const { workspace } = useParams()
   const qc = useQueryClient()
-  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
   const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
 
   const [target, setTarget] = useState({})   // env -> selected target id (string)
@@ -1416,7 +1416,7 @@ function EnvHostsSection({ name }) {
 function MigrateSection({ name }) {
   const { workspace } = useParams()
   const qc = useQueryClient()
-  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
   const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
 
   const envs = ws?.envs || []

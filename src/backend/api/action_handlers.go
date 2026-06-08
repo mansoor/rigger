@@ -12,6 +12,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
+	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
 
@@ -184,6 +185,15 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "host_id is required"})
 		return
+	}
+
+	// Pool guard (Phase 3): an env may only be bound to a host this workspace can
+	// use — its own host or a global host granted to it. host_id 0 = move to local.
+	if body.TargetHostID != 0 {
+		if inPool, _ := settings.HostInWorkspacePool(h.db, wsName, body.TargetHostID); !inPool {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "that host is not available to this workspace"})
+			return
+		}
 	}
 
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {

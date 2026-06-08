@@ -282,6 +282,17 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (project, env)
 		);
 
+		-- Settings-scopes (Phase 3): a GLOBAL host's allowlist of workspaces it is
+		-- offered to. workspace='*' = offered to every workspace (the default given
+		-- to pre-scope hosts on migration). A workspace-owned host
+		-- (hosts.owner_scope='ws:{key}') is private to that workspace and never
+		-- appears here. Read pool for a workspace = its own hosts ∪ granted globals.
+		CREATE TABLE IF NOT EXISTS global_host_grants (
+			host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+			workspace TEXT    NOT NULL,
+			PRIMARY KEY (host_id, workspace)
+		);
+
 		-- Mirror any legacy per-project binding forward as the env='' default.
 		-- Idempotent (PK + OR IGNORE); harmless once workspace_hosts is empty.
 		INSERT OR IGNORE INTO workspace_host_envs (project, env, host_id)
@@ -325,18 +336,29 @@ func (d *DB) migrate() error {
 	d.addColumn("audit_log", "host TEXT NOT NULL DEFAULT ''")       // Phase 7: host name
 	d.addColumn("hosts", "workspaces_dir TEXT NOT NULL DEFAULT ''") // Phase 7: per-host WORKSPACES_DIR ('' = global default)
 
+	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
+	// 'ws:{key}' = private to that workspace. When the column is freshly added,
+	// every existing host predates scoping — grant each to all workspaces ('*')
+	// so multi-host behavior is unchanged.
+	if d.addColumn("hosts", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
+		d.Exec(`INSERT OR IGNORE INTO global_host_grants (host_id, workspace) SELECT id, '*' FROM hosts`) //nolint:errcheck
+	}
+
 	// SQLite only enforces ON DELETE CASCADE when foreign_keys is ON (off by
-	// default), so deleting a host can leave dangling env bindings. Sweep any that
-	// reference a host that no longer exists.
+	// default), so deleting a host can leave dangling env bindings/grants. Sweep
+	// any that reference a host that no longer exists.
 	d.Exec(`DELETE FROM workspace_host_envs WHERE host_id NOT IN (SELECT id FROM hosts)`) //nolint:errcheck
+	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)  //nolint:errcheck
 	return nil
 }
 
 // addColumn adds a column to an existing table, ignoring the error raised when
 // the column already exists. colDef is the full column definition, e.g.
-// "notify_channel_ids TEXT NOT NULL DEFAULT '[]'".
-func (d *DB) addColumn(table, colDef string) {
-	_, _ = d.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", table, colDef)) //nolint:errcheck
+// "notify_channel_ids TEXT NOT NULL DEFAULT '[]'". Returns true when the column
+// was newly added (the ALTER succeeded), false when it already existed.
+func (d *DB) addColumn(table, colDef string) bool {
+	_, err := d.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s", table, colDef))
+	return err == nil
 }
 
 // IsSetupRequired returns true when no users exist yet (first run).

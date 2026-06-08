@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace } from '../lib/api'
+import HostForm from '../components/HostForm'
+import {
+  fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
+  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
+} from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/
@@ -33,6 +37,7 @@ export default function ManageWorkspacePage() {
         </div>
 
         <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
+        <HostsSection workspace={workspace} qc={qc} />
         <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />
       </div>
     </Layout>
@@ -77,6 +82,133 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
       </div>
+    </section>
+  )
+}
+
+function HostsSection({ workspace, qc }) {
+  const hostsKey = ['ws-hosts', workspace]
+  const { data: hosts = [], isLoading } = useQuery({
+    queryKey: hostsKey, queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace,
+  })
+  const [modal, setModal]       = useState(null) // null | 'new' | { editing: host }
+  const [deleting, setDeleting] = useState(null)
+  const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, msg, error }
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceHost(workspace, id, body) : createWorkspaceHost(workspace, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: hostsKey }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceHost(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: hostsKey }); setDeleting(null) },
+  })
+
+  async function handleTest(id) {
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      const res = await testWorkspaceHost(workspace, id)
+      if (res.status === 'ok') setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message } }))
+      else setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+  }
+
+  const isOwned = (h) => h.owner_scope === `ws:${workspace}`
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Remote hosts</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Hosts this workspace can deploy to: its own plus any shared by an administrator.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add host
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : hosts.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No hosts available. Add one for this workspace, or ask an admin to share a global host with it.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {hosts.map(host => {
+              const owned = isOwned(host)
+              const ts = testStatus[host.id]
+              return (
+                <div key={host.id} className="flex items-center gap-3 p-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">🖥️</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-content-strong">{host.name}</p>
+                      {owned
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">this workspace</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator — managed in Settings">shared</span>}
+                    </div>
+                    <p className="text-xs text-content-subtle mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                    {ts?.ok && <span className="text-xs text-success-fg max-w-[180px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                    {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                    <button onClick={() => handleTest(host.id)} disabled={ts?.loading}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    {owned ? (
+                      <>
+                        <button onClick={() => setModal({ editing: host })}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                        <button onClick={() => setDeleting(host)}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-content-faint px-2">read-only</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add host' : `Edit “${modal.editing.name}”`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <HostForm
+              initial={modal === 'new' ? null : modal.editing}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Environments bound to this host will need to be repointed. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

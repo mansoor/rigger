@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
+import HostForm from '../components/HostForm'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
-  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, fetchManagedHostKey,
+  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
   fetchGeneralSettings, updateGeneralSettings,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
-  fetchProjects,
+  fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
 } from '../lib/api'
@@ -527,143 +528,20 @@ function RegistriesTab() {
   )
 }
 
-// ── Hosts (Phase 7: Multi-Host Support) ───────────────────────────────────────
+// ── Hosts (Phase 7: Multi-Host Support; Phase 3: scoping) ─────────────────────
 
-function HostForm({ initial, onSave, onCancel, saving }) {
-  const isEdit = !!initial?.id
-  const [name, setName]       = useState(initial?.name || '')
-  const [address, setAddress] = useState(initial?.address || '')
-  const [port, setPort]       = useState(initial?.ssh_port || 22)
-  const [user, setUser]       = useState(initial?.ssh_user || '')
-  const [wsDir, setWsDir]     = useState(initial?.workspaces_dir || '')
-  const [key, setKey]         = useState('')
-  const [managed, setManaged] = useState(false)
-  const [copied, setCopied]   = useState(false)
-  const [error, setError]     = useState('')
-
-  // The Rigger-managed public key — fetched lazily when the toggle is turned on.
-  const { data: managedKey } = useQuery({
-    queryKey: ['managed-host-key'],
-    queryFn: fetchManagedHostKey,
-    enabled: managed,
-    staleTime: Infinity,
-  })
-  const pubKey = managedKey?.public_key || ''
-  const installCmd = pubKey
-    ? `mkdir -p ~/.ssh && echo '${pubKey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
-    : ''
-
-  function copy(text) {
-    navigator.clipboard?.writeText(text)
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
-  }
-
-  async function submit(e) {
-    e.preventDefault()
-    setError('')
-    if (!name.trim() || !address.trim() || !user.trim()) { setError('Name, address, and SSH user are required'); return }
-    if (!isEdit && !managed && !key.trim()) { setError('Paste an SSH private key or enable the Rigger-managed key'); return }
-    try {
-      await onSave({
-        name: name.trim(), address: address.trim(), ssh_port: Number(port) || 22,
-        ssh_user: user.trim(), ssh_key: managed ? '' : key, use_managed_key: managed,
-        workspaces_dir: wsDir.trim(),
-      })
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save')
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label required>Display name</Label>
-          <Input value={name} onChange={setName} placeholder="prod-server-1" />
-        </div>
-        <div>
-          <Label required>Address</Label>
-          <Input value={address} onChange={setAddress} placeholder="10.0.0.5 or host.example.com" />
-        </div>
-        <div>
-          <Label required>SSH user</Label>
-          <Input value={user} onChange={setUser} placeholder="root" />
-        </div>
-        <div>
-          <Label>SSH port</Label>
-          <Input value={port} onChange={setPort} type="number" placeholder="22" />
-        </div>
-      </div>
-
-      <div>
-        <Label>Remote workspaces directory</Label>
-        <Input value={wsDir} onChange={setWsDir} placeholder="/opt/rigger/workspaces" />
-        <p className="text-xs text-content-faint mt-1">
-          Absolute path on the host where workspaces live (for scan/import) and are pushed (for deploy/migrate).
-          Leave blank to use the server default (<code className="font-mono">REMOTE_WORKSPACES_DIR</code>).
-        </p>
-      </div>
-
-      {/* Rigger-managed key toggle */}
-      <label className="flex items-center gap-2.5 cursor-pointer select-none">
-        <input type="checkbox" checked={managed} onChange={e => setManaged(e.target.checked)} className="accent-brand-500" />
-        <span className="text-sm text-content">Use Rigger-managed key</span>
-        <span className="text-xs text-content-subtle">— Rigger holds the private key; you just install its public key on the host</span>
-      </label>
-
-      {managed ? (
-        <div className="space-y-2 rounded-lg border border-border-strong bg-canvas/60 p-3">
-          <p className="text-xs text-content-muted">
-            1. Run this on <strong className="text-content">{user || 'the host'}@{address || 'the host'}</strong> to authorize Rigger:
-          </p>
-          <div className="flex items-start gap-2">
-            <pre className="flex-1 overflow-auto bg-canvas border border-border rounded-lg p-2 text-[11px] font-mono text-content whitespace-pre-wrap">{installCmd || 'Loading Rigger public key…'}</pre>
-            <button type="button" onClick={() => copy(installCmd)} disabled={!installCmd}
-              className="shrink-0 px-2.5 py-1.5 text-xs bg-surface-raised hover:bg-surface-overlay text-content rounded-lg disabled:opacity-40">
-              {copied ? '✓' : 'Copy'}
-            </button>
-          </div>
-          <p className="text-xs text-content-subtle">
-            2. Then add the host and click <strong className="text-content-muted">Test</strong>. The host only needs Docker + SSH.
-            (The private key never leaves Rigger.)
-          </p>
-        </div>
-      ) : (
-        <div>
-          <Label required={!isEdit}>SSH private key</Label>
-          <textarea
-            value={key} onChange={e => setKey(e.target.value)}
-            rows={6} spellCheck={false}
-            placeholder={isEdit ? '(unchanged — paste a new key to replace)' : '-----BEGIN OPENSSH PRIVATE KEY-----'}
-            className="w-full bg-canvas border border-border-strong rounded-lg px-3 py-2 text-xs font-mono text-content focus:border-brand-500 focus:outline-none"
-          />
-          <div className="text-xs text-content-faint mt-1 space-y-1">
-            <p>
-              Paste the <strong>private</strong> key Rigger should log in with — its public half must be in the SSH user's
-              <code className="font-mono"> ~/.ssh/authorized_keys</code> on the host. Must have <strong>no passphrase</strong>.
-              Stored encrypted at rest.{isEdit && ' Leave blank to keep the existing key.'}
-            </p>
-            <p className="text-content-subtle">
-              Generate one with <code className="font-mono">ssh-keygen -t ed25519 -N "" -f rigger_host</code> — paste
-              <code className="font-mono"> rigger_host</code> here and install <code className="font-mono">rigger_host.pub</code> on the host.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-
-      <div className="flex gap-2 justify-end pt-2">
-        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add host'}</Btn>
-      </div>
-    </form>
-  )
+// grantSummary describes who a global host is offered to.
+function grantSummary(host) {
+  if (host.owner_scope !== 'global') return null
+  const g = host.grants || []
+  if (g.length === 0 || g.includes('*')) return 'All workspaces'
+  return `${g.length} workspace${g.length !== 1 ? 's' : ''}`
 }
 
 function HostsTab() {
   const qc = useQueryClient()
   const { data: hosts = [], isLoading } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const [modal, setModal]       = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, msg, error }
@@ -722,7 +600,14 @@ function HostsTab() {
               <div key={host.id} className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
                 <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">🖥️</div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-content-strong">{host.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-content-strong">{host.name}</p>
+                    {host.owner_scope === 'global' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title={`Offered to: ${grantSummary(host)}`}>shared · {grantSummary(host)}</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40" title="Private to a workspace">workspace · {host.owner_scope.replace(/^ws:/, '')}</span>
+                    )}
+                  </div>
                   <p className="text-xs text-content-subtle mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -753,6 +638,8 @@ function HostsTab() {
               onSave={handleSave}
               onCancel={() => setModal(null)}
               saving={saveMut.isPending}
+              showGrants={modal === 'new' || modal.editing?.owner_scope === 'global'}
+              workspaces={workspaces}
             />
           </div>
         </div>

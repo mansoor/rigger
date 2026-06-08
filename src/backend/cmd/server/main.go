@@ -178,6 +178,30 @@ func main() {
 			r.SetPathValue("env", pathSegment(r.URL.Path, 4))
 			r.SetPathValue("date", pathSegment(r.URL.Path, 5))
 			handler.DeleteBackup(w, r)
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "hosts":
+			// Workspace-scoped Remote Hosts (Phase 3). Matched ahead of the generic
+			// /api/workspaces/{ws}/projects/... routing below.
+			// /api/workspaces/{ws}/hosts[/{id}[/test|/stats]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("hostid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			sub := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceHosts(w, r)
+			case r.Method == "GET" && sub == "stats":
+				handler.WorkspaceHostStats(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceHost(w, r)
+			case r.Method == "POST" && sub == "test":
+				handler.TestWorkspaceHost(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceHost(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceHost(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case r.Method == "GET" && r.URL.Path == "/api/workspaces":
 			handler.ListWorkspaces(w, r) // list parent-tier workspaces
 		case r.Method == "POST" && r.URL.Path == "/api/workspaces":

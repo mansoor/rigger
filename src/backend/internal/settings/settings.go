@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/db"
@@ -204,13 +205,27 @@ type Host struct {
 	SSHUser       string    `json:"ssh_user"`
 	SSHKeyEnc     string    `json:"-"` // AES-GCM ciphertext; never exposed
 	SSHHostKey    string    `json:"ssh_host_key,omitempty"`
-	WorkspacesDir string    `json:"workspaces_dir"` // remote WORKSPACES_DIR ('' = global default)
+	WorkspacesDir string    `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
+	OwnerScope    string    `json:"owner_scope"`     // 'global' or 'ws:{key}'
+	Grants        []string  `json:"grants,omitempty"` // for global hosts: workspaces offered to ('*' = all)
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// WorkspaceScope returns the workspace key a host is private to, or "" if the
+// host is global (shared via grants).
+func (h Host) WorkspaceScope() string {
+	if strings.HasPrefix(h.OwnerScope, "ws:") {
+		return h.OwnerScope[len("ws:"):]
+	}
+	return ""
+}
+
+// WorkspaceOwnerScope formats the owner_scope value for a workspace-owned host.
+func WorkspaceOwnerScope(wsKey string) string { return "ws:" + wsKey }
+
 func ListHosts(d *db.DB) ([]Host, error) {
-	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +233,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -229,23 +244,107 @@ func ListHosts(d *db.DB) ([]Host, error) {
 	return out, rows.Err()
 }
 
+// ListHostsForWorkspace returns the host pool visible to one workspace: its own
+// hosts (owner_scope='ws:{key}') plus any global host granted to it (or to '*').
+func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
+	rows, err := d.Query(`
+		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at
+		FROM hosts h
+		WHERE h.owner_scope = ?
+		   OR (h.owner_scope = 'global' AND EXISTS(
+		         SELECT 1 FROM global_host_grants g
+		         WHERE g.host_id = h.id AND g.workspace IN (?, '*')))
+		ORDER BY name`, WorkspaceOwnerScope(wsKey), wsKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Host
+	for rows.Next() {
+		var h Host
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	if out == nil {
+		out = []Host{}
+	}
+	return out, rows.Err()
+}
+
+// HostInWorkspacePool reports whether a host is usable by a workspace (its own
+// host or a global host granted to it). Used to gate env→host binding.
+func HostInWorkspacePool(d *db.DB, wsKey string, hostID int64) (bool, error) {
+	var n int
+	err := d.QueryRow(`
+		SELECT COUNT(1) FROM hosts h
+		WHERE h.id = ?
+		  AND (h.owner_scope = ?
+		    OR (h.owner_scope = 'global' AND EXISTS(
+		          SELECT 1 FROM global_host_grants g
+		          WHERE g.host_id = h.id AND g.workspace IN (?, '*'))))`,
+		hostID, WorkspaceOwnerScope(wsKey), wsKey).Scan(&n)
+	return n > 0, err
+}
+
+// HostGrants returns the workspace allowlist for a global host ('*' = all).
+func HostGrants(d *db.DB, hostID int64) ([]string, error) {
+	rows, err := d.Query(`SELECT workspace FROM global_host_grants WHERE host_id=? ORDER BY workspace`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return nil, err
+		}
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+// SetHostGrants replaces a global host's workspace allowlist. Passing ['*']
+// offers it to every workspace; an empty slice offers it to none.
+func SetHostGrants(d *db.DB, hostID int64, workspaces []string) error {
+	if _, err := d.Exec(`DELETE FROM global_host_grants WHERE host_id=?`, hostID); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, ws := range workspaces {
+		if ws == "" || seen[ws] {
+			continue
+		}
+		seen[ws] = true
+		if _, err := d.Exec(`INSERT OR IGNORE INTO global_host_grants (host_id, workspace) VALUES (?, ?)`, hostID, ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // GetHost returns a host including the encrypted SSH key (for dialing).
 func GetHost(d *db.DB, id int64) (*Host, error) {
 	var h Host
-	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, created_at, updated_at FROM hosts WHERE id=?`, id).
-		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.CreatedAt, &h.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at FROM hosts WHERE id=?`, id).
+		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &h, err
 }
 
-func CreateHost(d *db.DB, name, address string, port int, user, keyEnc, workspacesDir string) (*Host, error) {
+func CreateHost(d *db.DB, name, address string, port int, user, keyEnc, workspacesDir, ownerScope string) (*Host, error) {
 	if port == 0 {
 		port = 22
 	}
-	res, err := d.Exec(`INSERT INTO hosts (name, address, ssh_port, ssh_user, ssh_key_encrypted, workspaces_dir) VALUES (?, ?, ?, ?, ?, ?)`,
-		name, address, port, user, keyEnc, workspacesDir)
+	if ownerScope == "" {
+		ownerScope = "global"
+	}
+	res, err := d.Exec(`INSERT INTO hosts (name, address, ssh_port, ssh_user, ssh_key_encrypted, workspaces_dir, owner_scope) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		name, address, port, user, keyEnc, workspacesDir, ownerScope)
 	if err != nil {
 		return nil, err
 	}
@@ -280,10 +379,44 @@ func DeleteHost(d *db.DB, id int64) error {
 	return err
 }
 
+// WorkspaceOwnedHostIDs returns the ids of hosts private to a workspace.
+func WorkspaceOwnedHostIDs(d *db.DB, wsKey string) ([]int64, error) {
+	rows, err := d.Query(`SELECT id FROM hosts WHERE owner_scope=?`, WorkspaceOwnerScope(wsKey))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // SetHostKey persists the TOFU host fingerprint captured on first connect.
 func SetHostKey(d *db.DB, id int64, hostKey string) error {
 	_, err := d.Exec(`UPDATE hosts SET ssh_host_key=? WHERE id=?`, hostKey, id)
 	return err
+}
+
+// SetHostScope changes a host's ownership ('global' or 'ws:{key}'). Re-scoping a
+// host to a workspace clears its global grants (a workspace-owned host is private).
+func SetHostScope(d *db.DB, id int64, ownerScope string) error {
+	if ownerScope == "" {
+		ownerScope = "global"
+	}
+	if _, err := d.Exec(`UPDATE hosts SET owner_scope=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, ownerScope, id); err != nil {
+		return err
+	}
+	if ownerScope != "global" {
+		_, err := d.Exec(`DELETE FROM global_host_grants WHERE host_id=?`, id)
+		return err
+	}
+	return nil
 }
 
 // SetEnvHost pins one environment to a host (Phase 7). hostID 0 clears the row

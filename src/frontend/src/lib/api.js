@@ -257,6 +257,8 @@ export const testRegistry         = (id)        => api.post(`/settings/registrie
 
 // ── Hosts (Phase 7: Multi-Host Support) ───────────────────────────────────────
 
+// Admin (global Settings) view — every host across all scopes; global hosts
+// carry their `grants` allowlist ('*' = offered to all workspaces).
 export const fetchHosts = ()         => api.get('/hosts').then(r => r.data)
 export const createHost = (body)     => api.post('/hosts', body).then(r => r.data)
 export const updateHost = (id, body) => api.put(`/hosts/${id}`, body).then(r => r.data)
@@ -266,6 +268,16 @@ export const fetchManagedHostKey = () => api.get('/hosts/managed-key').then(r =>
 export const scanHost   = (id)       => api.post(`/hosts/${id}/scan`).then(r => r.data)
 export const importHost = (id, workspaces) => api.post(`/hosts/${id}/import`, { workspaces }).then(r => r.data)
 export const fetchHostStats = (id)   => api.get(`/hosts/${id}/stats`).then(r => r.data)
+
+// Workspace-scoped host pool (Phase 3): a workspace's own hosts + globals granted
+// to it. owner_scope is 'global' or 'ws:{key}'. Create/edit/delete are allowed for
+// own hosts only; globals are read-only here (managed from admin Settings).
+export const fetchWorkspaceHosts  = (ws)         => api.get(`/workspaces/${ws}/hosts`).then(r => r.data)
+export const createWorkspaceHost  = (ws, body)   => api.post(`/workspaces/${ws}/hosts`, body).then(r => r.data)
+export const updateWorkspaceHost  = (ws, id, body) => api.put(`/workspaces/${ws}/hosts/${id}`, body).then(r => r.data)
+export const deleteWorkspaceHost  = (ws, id)     => api.delete(`/workspaces/${ws}/hosts/${id}`)
+export const testWorkspaceHost    = (ws, id)     => api.post(`/workspaces/${ws}/hosts/${id}/test`).then(r => r.data)
+export const fetchWorkspaceHostStats = (ws, id)  => api.get(`/workspaces/${ws}/hosts/${id}/stats`).then(r => r.data)
 
 // Stream a chunked plain-text response body, invoking onChunk per chunk.
 async function streamText(url, method, body, onChunk) {

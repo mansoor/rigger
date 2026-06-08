@@ -18,13 +18,38 @@ import (
 // key; it is encrypted at rest and never returned. An empty ssh_key on update
 // keeps the existing key.
 type hostBody struct {
-	Name          string `json:"name"`
-	Address       string `json:"address"`
-	SSHPort       int    `json:"ssh_port"`
-	SSHUser       string `json:"ssh_user"`
-	SSHKey        string `json:"ssh_key"`
-	UseManagedKey bool   `json:"use_managed_key"` // use the Rigger-managed key instead of a pasted one
-	WorkspacesDir string `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
+	Name          string   `json:"name"`
+	Address       string   `json:"address"`
+	SSHPort       int      `json:"ssh_port"`
+	SSHUser       string   `json:"ssh_user"`
+	SSHKey        string   `json:"ssh_key"`
+	UseManagedKey bool     `json:"use_managed_key"` // use the Rigger-managed key instead of a pasted one
+	WorkspacesDir string   `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
+	Grants        []string `json:"grants"`          // admin only: global host's workspace allowlist ('*' = all)
+}
+
+// hostKeyEnc resolves the encrypted SSH key for a create/update from the request
+// body: the Rigger-managed key, a freshly-pasted key, or "" to keep the existing
+// one. ok is false when an error response has already been written.
+func (h *Handler) hostKeyEnc(w http.ResponseWriter, b hostBody) (keyEnc string, ok bool) {
+	switch {
+	case b.UseManagedKey:
+		_, enc, err := h.managedKey()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "managed key: " + err.Error()})
+			return "", false
+		}
+		return enc, true
+	case b.SSHKey != "":
+		enc, err := crypto.Encrypt(h.cryptoKey, []byte(b.SSHKey))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt key: " + err.Error()})
+			return "", false
+		}
+		return enc, true
+	default:
+		return "", true // keep existing key (update only)
+	}
 }
 
 // hostWorkspacesDir returns a host's effective remote workspaces dir: its own
@@ -71,37 +96,35 @@ func (h *Handler) ManagedHostKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"public_key": pub})
 }
 
-// GET /api/hosts
+// GET /api/hosts — admin view: every host across all scopes, each global host
+// annotated with its workspace allowlist (grants).
 func (h *Handler) ListHosts(w http.ResponseWriter, r *http.Request) {
 	hosts, err := settings.ListHosts(h.db)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	for i := range hosts {
+		if hosts[i].OwnerScope == "global" {
+			hosts[i].Grants, _ = settings.HostGrants(h.db, hosts[i].ID) //nolint:errcheck
+		}
+	}
 	writeJSON(w, http.StatusOK, hosts)
 }
 
-// POST /api/hosts
+// POST /api/hosts — admin create. Creates a global host; grants default to all
+// workspaces ('*') when omitted.
 func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 	var b hostBody
 	if err := readJSON(r, &b); err != nil || b.Name == "" || b.Address == "" || b.SSHUser == "" || (b.SSHKey == "" && !b.UseManagedKey) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, address, ssh_user and an SSH key (pasted or Rigger-managed) are required"})
 		return
 	}
-	var keyEnc string
-	var err error
-	if b.UseManagedKey {
-		// Store a copy of the managed key so dialing stays unchanged; the user must
-		// have installed the matching public key on the host first.
-		if _, keyEnc, err = h.managedKey(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "managed key: " + err.Error()})
-			return
-		}
-	} else if keyEnc, err = crypto.Encrypt(h.cryptoKey, []byte(b.SSHKey)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt key: " + err.Error()})
+	keyEnc, ok := h.hostKeyEnc(w, b)
+	if !ok {
 		return
 	}
-	host, err := settings.CreateHost(h.db, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir)
+	host, err := settings.CreateHost(h.db, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir, "global")
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a host with that name already exists"})
@@ -110,10 +133,17 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	grants := b.Grants
+	if grants == nil {
+		grants = []string{"*"} // default: offered to every workspace
+	}
+	_ = settings.SetHostGrants(h.db, host.ID, grants) //nolint:errcheck
+	host.Grants, _ = settings.HostGrants(h.db, host.ID)
 	writeJSON(w, http.StatusCreated, host)
 }
 
-// PUT /api/hosts/{id}
+// PUT /api/hosts/{id} — admin update, including the workspace allowlist (grants)
+// for global hosts.
 func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	id, err := parseSettingsID(r.URL.Path, "/api/hosts/")
 	if err != nil {
@@ -125,17 +155,9 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, address and ssh_user are required"})
 		return
 	}
-	keyEnc := "" // empty ⇒ keep the existing key
-	if b.UseManagedKey {
-		if _, keyEnc, err = h.managedKey(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "managed key: " + err.Error()})
-			return
-		}
-	} else if b.SSHKey != "" {
-		if keyEnc, err = crypto.Encrypt(h.cryptoKey, []byte(b.SSHKey)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt key: " + err.Error()})
-			return
-		}
+	keyEnc, ok := h.hostKeyEnc(w, b)
+	if !ok {
+		return
 	}
 	host, err := settings.UpdateHost(h.db, id, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir)
 	if err != nil {
@@ -146,6 +168,10 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if host.OwnerScope == "global" && b.Grants != nil {
+		_ = settings.SetHostGrants(h.db, id, b.Grants) //nolint:errcheck
+	}
+	host.Grants, _ = settings.HostGrants(h.db, id)
 	h.bridge.EvictHost(id) // drop any pooled connection — address/key may have changed
 	writeJSON(w, http.StatusOK, host)
 }
@@ -174,6 +200,10 @@ func (h *Handler) TestHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
+	h.testHostByID(w, id)
+}
+
+func (h *Handler) testHostByID(w http.ResponseWriter, id int64) {
 	rh, err := h.dialHost(id)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "error": err.Error()})
@@ -363,6 +393,10 @@ func (h *Handler) HostStats(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
+	h.hostStatsByID(w, id)
+}
+
+func (h *Handler) hostStatsByID(w http.ResponseWriter, id int64) {
 	rh, err := h.dialHost(id)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "error": err.Error()})
