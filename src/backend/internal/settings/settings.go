@@ -120,17 +120,27 @@ func validateBackupType(t string) error {
 // ── Docker Registries ─────────────────────────────────────────────────────────
 
 type DockerRegistry struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	URL       string    `json:"url"`
-	Username  string    `json:"username"`
-	Password  string    `json:"password,omitempty"` // omitted in list responses
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	Username   string    `json:"username"`
+	Password   string    `json:"password,omitempty"` // omitted in list responses
+	OwnerScope string    `json:"owner_scope"`        // 'global' or 'ws:{key}'
+	Grants     []string  `json:"grants,omitempty"`   // for global registries: workspaces offered to ('*' = all)
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// WorkspaceScope returns the workspace key a registry is private to, or "" if global.
+func (r DockerRegistry) WorkspaceScope() string {
+	if strings.HasPrefix(r.OwnerScope, "ws:") {
+		return r.OwnerScope[len("ws:"):]
+	}
+	return ""
 }
 
 func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
-	rows, err := d.Query(`SELECT id, name, url, username, created_at, updated_at FROM docker_registries ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, url, username, owner_scope, created_at, updated_at FROM docker_registries ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +149,7 @@ func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
 	var out []DockerRegistry
 	for rows.Next() {
 		var r DockerRegistry
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -150,19 +160,121 @@ func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
 	return out, rows.Err()
 }
 
+// ListRegistriesForWorkspace returns the registry pool visible to one workspace:
+// its own (owner_scope='ws:{key}') plus any global registry granted to it (or '*').
+func ListRegistriesForWorkspace(d *db.DB, wsKey string) ([]DockerRegistry, error) {
+	rows, err := d.Query(`
+		SELECT id, name, url, username, owner_scope, created_at, updated_at
+		FROM docker_registries r
+		WHERE r.owner_scope = ?
+		   OR (r.owner_scope = 'global' AND EXISTS(
+		         SELECT 1 FROM global_registry_grants g
+		         WHERE g.registry_id = r.id AND g.workspace IN (?, '*')))
+		ORDER BY name`, WorkspaceOwnerScope(wsKey), wsKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DockerRegistry
+	for rows.Next() {
+		var r DockerRegistry
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if out == nil {
+		out = []DockerRegistry{}
+	}
+	return out, rows.Err()
+}
+
+// RegistryGrants returns the workspace allowlist for a global registry ('*' = all).
+func RegistryGrants(d *db.DB, id int64) ([]string, error) {
+	rows, err := d.Query(`SELECT workspace FROM global_registry_grants WHERE registry_id=? ORDER BY workspace`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return nil, err
+		}
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+// SetRegistryGrants replaces a global registry's workspace allowlist.
+func SetRegistryGrants(d *db.DB, id int64, workspaces []string) error {
+	if _, err := d.Exec(`DELETE FROM global_registry_grants WHERE registry_id=?`, id); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, ws := range workspaces {
+		if ws == "" || seen[ws] {
+			continue
+		}
+		seen[ws] = true
+		if _, err := d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) VALUES (?, ?)`, id, ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SetRegistryScope changes a registry's ownership ('global' or 'ws:{key}').
+// Re-scoping to a workspace clears its global grants.
+func SetRegistryScope(d *db.DB, id int64, ownerScope string) error {
+	if ownerScope == "" {
+		ownerScope = "global"
+	}
+	if _, err := d.Exec(`UPDATE docker_registries SET owner_scope=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, ownerScope, id); err != nil {
+		return err
+	}
+	if ownerScope != "global" {
+		_, err := d.Exec(`DELETE FROM global_registry_grants WHERE registry_id=?`, id)
+		return err
+	}
+	return nil
+}
+
+// WorkspaceOwnedRegistryIDs returns the ids of registries private to a workspace.
+func WorkspaceOwnedRegistryIDs(d *db.DB, wsKey string) ([]int64, error) {
+	rows, err := d.Query(`SELECT id FROM docker_registries WHERE owner_scope=?`, WorkspaceOwnerScope(wsKey))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func GetRegistry(d *db.DB, id int64) (*DockerRegistry, error) {
 	var r DockerRegistry
-	err := d.QueryRow(`SELECT id, name, url, username, password, created_at, updated_at FROM docker_registries WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.Password, &r.CreatedAt, &r.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, url, username, password, owner_scope, created_at, updated_at FROM docker_registries WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.Password, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &r, err
 }
 
-func CreateRegistry(d *db.DB, name, url, username, password string) (*DockerRegistry, error) {
-	res, err := d.Exec(`INSERT INTO docker_registries (name, url, username, password) VALUES (?, ?, ?, ?)`,
-		name, url, username, password)
+func CreateRegistry(d *db.DB, name, url, username, password, ownerScope string) (*DockerRegistry, error) {
+	if ownerScope == "" {
+		ownerScope = "global"
+	}
+	res, err := d.Exec(`INSERT INTO docker_registries (name, url, username, password, owner_scope) VALUES (?, ?, ?, ?, ?)`,
+		name, url, username, password, ownerScope)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +302,42 @@ func UpdateRegistry(d *db.DB, id int64, name, url, username, password string) (*
 
 func DeleteRegistry(d *db.DB, id int64) error {
 	_, err := d.Exec(`DELETE FROM docker_registries WHERE id=?`, id)
+	return err
+}
+
+// ── Workspace general settings (Phase 3) ──────────────────────────────────────
+// Scalar key/value scoped to a single workspace (mirrors app_settings).
+
+// GetWorkspaceSettings returns all stored settings for a workspace as a map.
+func GetWorkspaceSettings(d *db.DB, wsKey string) (map[string]string, error) {
+	rows, err := d.Query(`SELECT key, value FROM workspace_settings WHERE workspace=?`, wsKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// SetWorkspaceSetting upserts one workspace-scoped setting.
+func SetWorkspaceSetting(d *db.DB, wsKey, key, value string) error {
+	_, err := d.Exec(
+		`INSERT INTO workspace_settings (workspace, key, value) VALUES (?, ?, ?)
+		 ON CONFLICT(workspace, key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`,
+		wsKey, key, value)
+	return err
+}
+
+// DeleteWorkspaceSettings removes all settings for a workspace (used on delete).
+func DeleteWorkspaceSettings(d *db.DB, wsKey string) error {
+	_, err := d.Exec(`DELETE FROM workspace_settings WHERE workspace=?`, wsKey)
 	return err
 }
 

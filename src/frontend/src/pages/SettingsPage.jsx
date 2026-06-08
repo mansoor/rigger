@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import RegistryForm from '../components/RegistryForm'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -365,64 +366,12 @@ function BackupTargetsTab() {
   )
 }
 
-// ── Docker Registries ─────────────────────────────────────────────────────────
-
-function RegistryForm({ initial, onSave, onCancel, saving }) {
-  const isEdit = !!initial?.id
-  const [name, setName]         = useState(initial?.name || '')
-  const [url, setUrl]           = useState(initial?.url || '')
-  const [username, setUsername] = useState(initial?.username || '')
-  const [password, setPassword] = useState('')
-  const [error, setError]       = useState('')
-
-  async function submit(e) {
-    e.preventDefault()
-    setError('')
-    if (!name.trim() || !url.trim() || !username.trim()) { setError('Name, URL, and username are required'); return }
-    if (!isEdit && !password) { setError('Password is required'); return }
-    try {
-      await onSave({ name: name.trim(), url: url.trim(), username: username.trim(), password })
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save')
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label required>Display name</Label>
-          <Input value={name} onChange={setName} placeholder="My Registry" />
-        </div>
-        <div>
-          <Label required>Registry URL</Label>
-          <Input value={url} onChange={setUrl} placeholder="registry.example.com" />
-          <p className="text-xs text-content-faint mt-1">e.g. docker.io, ghcr.io, registry.example.com</p>
-        </div>
-        <div>
-          <Label required>Username</Label>
-          <Input value={username} onChange={setUsername} placeholder="myuser" />
-        </div>
-        <div>
-          <Label required={!isEdit}>Password / Token</Label>
-          <Input value={password} onChange={setPassword} type="password" placeholder={isEdit ? '(unchanged)' : '••••••••'} />
-          {isEdit && <p className="text-xs text-content-faint mt-1">Leave blank to keep existing password</p>}
-        </div>
-      </div>
-
-      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-
-      <div className="flex gap-2 justify-end pt-2">
-        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add registry'}</Btn>
-      </div>
-    </form>
-  )
-}
+// ── Docker Registries (Phase 3: scoping) ──────────────────────────────────────
 
 function RegistriesTab() {
   const qc = useQueryClient()
   const { data: regs = [], isLoading } = useQuery({ queryKey: ['registries'], queryFn: fetchRegistries })
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const [modal, setModal]   = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, error }
@@ -482,7 +431,14 @@ function RegistriesTab() {
                   📦
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-content-strong">{r.name}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-content-strong">{r.name}</p>
+                    {r.owner_scope === 'global' ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title={`Offered to: ${grantSummary(r)}`}>shared · {grantSummary(r)}</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40" title="Private to a workspace">workspace · {r.owner_scope.replace(/^ws:/, '')}</span>
+                    )}
+                  </div>
                   <p className="text-xs text-content-subtle mt-0.5">{r.url} · {r.username}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -511,6 +467,8 @@ function RegistriesTab() {
               onSave={handleSave}
               onCancel={() => setModal(null)}
               saving={saveMut.isPending}
+              showGrants={modal === 'new' || modal.editing?.owner_scope === 'global'}
+              workspaces={workspaces}
             />
           </div>
         </div>

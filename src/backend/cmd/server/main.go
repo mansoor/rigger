@@ -202,6 +202,38 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "registries":
+			// Workspace-scoped Docker Registries (Phase 3).
+			// /api/workspaces/{ws}/registries[/{id}[/test]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("regid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			sub := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceRegistries(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceRegistry(w, r)
+			case r.Method == "POST" && sub == "test":
+				handler.TestWorkspaceRegistry(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceRegistry(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceRegistry(w, r)
+			default:
+				http.NotFound(w, r)
+			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "settings":
+			// Per-workspace general settings (Phase 3). /api/workspaces/{ws}/settings
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			switch r.Method {
+			case "GET":
+				handler.GetWorkspaceSettings(w, r)
+			case "PUT":
+				handler.PutWorkspaceSettings(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case r.Method == "GET" && r.URL.Path == "/api/workspaces":
 			handler.ListWorkspaces(w, r) // list parent-tier workspaces
 		case r.Method == "POST" && r.URL.Path == "/api/workspaces":

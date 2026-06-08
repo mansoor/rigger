@@ -249,11 +249,23 @@ export const syncWorkspaceArchive = (filename, body = {}) =>
 
 // ── Settings: Docker Registries ───────────────────────────────────────────────
 
+// Admin (global Settings) view — every registry; global ones carry their `grants`.
 export const fetchRegistries      = ()          => api.get('/settings/registries').then(r => r.data)
 export const createRegistry       = (body)      => api.post('/settings/registries', body).then(r => r.data)
 export const updateRegistry       = (id, body)  => api.put(`/settings/registries/${id}`, body).then(r => r.data)
 export const deleteRegistry       = (id)        => api.delete(`/settings/registries/${id}`)
 export const testRegistry         = (id)        => api.post(`/settings/registries/${id}/test`).then(r => r.data)
+
+// Workspace-scoped registry pool (Phase 3): own registries + granted globals.
+export const fetchWorkspaceRegistries = (ws)         => api.get(`/workspaces/${ws}/registries`).then(r => r.data)
+export const createWorkspaceRegistry  = (ws, body)   => api.post(`/workspaces/${ws}/registries`, body).then(r => r.data)
+export const updateWorkspaceRegistry  = (ws, id, body) => api.put(`/workspaces/${ws}/registries/${id}`, body).then(r => r.data)
+export const deleteWorkspaceRegistry  = (ws, id)     => api.delete(`/workspaces/${ws}/registries/${id}`)
+export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${ws}/registries/${id}/test`).then(r => r.data)
+
+// Per-workspace general settings (Phase 3): acme_email, domain.
+export const fetchWorkspaceSettings = (ws)       => api.get(`/workspaces/${ws}/settings`).then(r => r.data)
+export const updateWorkspaceSettings = (ws, body) => api.put(`/workspaces/${ws}/settings`, body).then(r => r.data)
 
 // ── Hosts (Phase 7: Multi-Host Support) ───────────────────────────────────────
 

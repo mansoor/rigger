@@ -151,29 +151,39 @@ func (h *Handler) DeleteBackupTarget(w http.ResponseWriter, r *http.Request) {
 
 // ── Docker Registries ─────────────────────────────────────────────────────────
 
-// GET /api/settings/registries
+// registryBody is the create/update payload. grants is admin-only — the workspace
+// allowlist for a global registry ('*' = offered to all).
+type registryBody struct {
+	Name     string   `json:"name"`
+	URL      string   `json:"url"`
+	Username string   `json:"username"`
+	Password string   `json:"password"` // empty on update = keep existing
+	Grants   []string `json:"grants"`
+}
+
+// GET /api/settings/registries — admin view: all registries; global ones carry grants.
 func (h *Handler) ListRegistries(w http.ResponseWriter, r *http.Request) {
 	regs, err := settings.ListRegistries(h.db)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	for i := range regs {
+		if regs[i].OwnerScope == "global" {
+			regs[i].Grants, _ = settings.RegistryGrants(h.db, regs[i].ID) //nolint:errcheck
+		}
+	}
 	writeJSON(w, http.StatusOK, regs)
 }
 
-// POST /api/settings/registries
+// POST /api/settings/registries — admin create (global; grants default to '*').
 func (h *Handler) CreateRegistry(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
+	var body registryBody
 	if err := readJSON(r, &body); err != nil || body.Name == "" || body.URL == "" || body.Username == "" || body.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, url, username, and password are required"})
 		return
 	}
-	reg, err := settings.CreateRegistry(h.db, body.Name, body.URL, body.Username, body.Password)
+	reg, err := settings.CreateRegistry(h.db, body.Name, body.URL, body.Username, body.Password, "global")
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a registry with that name already exists"})
@@ -182,24 +192,25 @@ func (h *Handler) CreateRegistry(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	grants := body.Grants
+	if grants == nil {
+		grants = []string{"*"}
+	}
+	_ = settings.SetRegistryGrants(h.db, reg.ID, grants) //nolint:errcheck
+	reg.Grants, _ = settings.RegistryGrants(h.db, reg.ID)
 	// Auto-login after create
 	_ = dockerLogin(body.URL, body.Username, body.Password)
 	writeJSON(w, http.StatusCreated, reg)
 }
 
-// PUT /api/settings/registries/{id}
+// PUT /api/settings/registries/{id} — admin update incl. the workspace allowlist.
 func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 	id, err := parseSettingsID(r.URL.Path, "/api/settings/registries/")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
-	var body struct {
-		Name     string `json:"name"`
-		URL      string `json:"url"`
-		Username string `json:"username"`
-		Password string `json:"password"` // empty = keep existing
-	}
+	var body registryBody
 	if err := readJSON(r, &body); err != nil || body.Name == "" || body.URL == "" || body.Username == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, url, and username are required"})
 		return
@@ -213,6 +224,10 @@ func (h *Handler) UpdateRegistry(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if reg.OwnerScope == "global" && body.Grants != nil {
+		_ = settings.SetRegistryGrants(h.db, id, body.Grants) //nolint:errcheck
+	}
+	reg.Grants, _ = settings.RegistryGrants(h.db, id)
 	// Re-login if password changed
 	if body.Password != "" {
 		_ = dockerLogin(body.URL, body.Username, body.Password)

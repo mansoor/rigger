@@ -3,11 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import RegistryForm from '../components/RegistryForm'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
+  fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry,
+  fetchWorkspaceSettings, updateWorkspaceSettings,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
+
+const TABS = [
+  { id: 'general',    label: 'General' },
+  { id: 'hosts',      label: 'Remote Hosts' },
+  { id: 'registries', label: 'Docker Registries' },
+  { id: 'danger',     label: 'Danger Zone' },
+]
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/
 
@@ -23,11 +33,12 @@ export default function ManageWorkspacePage() {
   })
   const ws = workspaces.find(w => w.key === workspace)
   const others = workspaces.filter(w => w.key !== workspace)
+  const [tab, setTab] = useState('general')
 
   return (
     <Layout>
-      <div className="p-6 max-w-3xl space-y-8">
-        <div>
+      <div className="p-6 max-w-3xl">
+        <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Manage workspace</p>
           <div className="flex items-center gap-2.5 mt-0.5">
             <h1 className="text-2xl font-bold text-content-strong">{ws?.name || workspace}</h1>
@@ -36,11 +47,80 @@ export default function ManageWorkspacePage() {
           <p className="text-sm text-content-muted mt-1">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
         </div>
 
-        <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
-        <HostsSection workspace={workspace} qc={qc} />
-        <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />
+        <div className="flex gap-1 border-b border-border mb-6">
+          {TABS.map(t => (
+            <button
+              key={t.id} onClick={() => setTab(t.id)}
+              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                tab === t.id
+                  ? (t.id === 'danger' ? 'border-danger text-danger-fg' : 'border-brand-500 text-brand-400')
+                  : 'border-transparent text-content-subtle hover:text-content'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'general' && (
+          <div className="space-y-8">
+            <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
+            <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
+          </div>
+        )}
+        {tab === 'hosts'      && <HostsSection workspace={workspace} qc={qc} />}
+        {tab === 'registries' && <RegistriesSection workspace={workspace} qc={qc} />}
+        {tab === 'danger'     && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
       </div>
     </Layout>
+  )
+}
+
+// WorkspaceGeneralSettings — workspace-scoped general settings (ACME email, base
+// domain). Like the global General tab, these are stored values used for SSL/URL
+// config; full per-workspace Traefik wiring lands with later automation.
+function WorkspaceGeneralSettings({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({
+    queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const [acme, setAcme] = useState('')
+  const [domain, setDomain] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && saved) { setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setSeeded(true) }
+
+  const mut = useMutation({
+    mutationFn: () => updateWorkspaceSettings(workspace, { acme_email: acme.trim(), domain: domain.trim() }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
+  })
+  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || ''))
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-3">SSL &amp; domain</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">ACME email</label>
+          <input value={acme} onChange={e => setAcme(e.target.value)} type="email" placeholder="ops@example.com"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+          <p className="text-xs text-content-subtle mt-1">Let's Encrypt registration email for this workspace's certificates.</p>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Default domain</label>
+          <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="apps.example.com"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+          <p className="text-xs text-content-subtle mt-1">Base domain new environments in this workspace default to.</p>
+        </div>
+        <p className="text-xs text-content-faint">Stored now; full per-workspace SSL automation arrives with a later phase (today Traefik reads the global <code className="font-mono">ACME_EMAIL</code>).</p>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            {mut.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -199,6 +279,132 @@ function HostsSection({ workspace, qc }) {
           <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Environments bound to this host will need to be repointed. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function RegistriesSection({ workspace, qc }) {
+  const regsKey = ['ws-registries', workspace]
+  const { data: regs = [], isLoading } = useQuery({
+    queryKey: regsKey, queryFn: () => fetchWorkspaceRegistries(workspace), enabled: !!workspace,
+  })
+  const [modal, setModal]       = useState(null) // null | 'new' | { editing }
+  const [deleting, setDeleting] = useState(null)
+  const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, error }
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceRegistry(workspace, id, body) : createWorkspaceRegistry(workspace, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: regsKey }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceRegistry(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: regsKey }); setDeleting(null) },
+  })
+
+  async function handleTest(id) {
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      await testWorkspaceRegistry(workspace, id)
+      setTestStatus(s => ({ ...s, [id]: { ok: true } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Login failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 6000)
+  }
+
+  const isOwned = (r) => r.owner_scope === `ws:${workspace}`
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Docker registries</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add registry
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : regs.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No registries available. Add one for this workspace, or ask an admin to share a global registry with it.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {regs.map(r => {
+              const owned = isOwned(r)
+              const ts = testStatus[r.id]
+              return (
+                <div key={r.id} className="flex items-center gap-3 p-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">📦</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-content-strong">{r.name}</p>
+                      {owned
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">this workspace</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator — managed in Settings">shared</span>}
+                    </div>
+                    <p className="text-xs text-content-subtle mt-0.5">{r.url} · {r.username}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                    {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
+                    {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                    <button onClick={() => handleTest(r.id)} disabled={ts?.loading}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    {owned ? (
+                      <>
+                        <button onClick={() => setModal({ editing: r })}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                        <button onClick={() => setDeleting(r)}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-content-faint px-2">read-only</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add registry' : `Edit “${modal.editing.name}”`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <RegistryForm
+              initial={modal === 'new' ? null : modal.editing}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Projects referencing this registry will need a different one. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
               <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}

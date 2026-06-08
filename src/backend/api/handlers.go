@@ -664,13 +664,19 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// Remove hosts private to this workspace so they don't dangle (Phase 3).
+	// Remove resources private to this workspace so they don't dangle (Phase 3).
 	if ids, derr := settings.WorkspaceOwnedHostIDs(h.db, wsName); derr == nil {
 		for _, id := range ids {
 			h.bridge.EvictHost(id)
 			_ = settings.DeleteHost(h.db, id) //nolint:errcheck
 		}
 	}
+	if ids, derr := settings.WorkspaceOwnedRegistryIDs(h.db, wsName); derr == nil {
+		for _, id := range ids {
+			_ = settings.DeleteRegistry(h.db, id) //nolint:errcheck
+		}
+	}
+	_ = settings.DeleteWorkspaceSettings(h.db, wsName) //nolint:errcheck
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
 			claims.UserID, claims.Username, wsName, "delete-workspace", "")

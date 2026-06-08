@@ -81,6 +81,25 @@ func (d *DB) migrate() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
+		-- Settings-scopes (Phase 3): a GLOBAL registry's workspace allowlist, mirroring
+		-- global_host_grants. workspace='*' = offered to all (default for pre-scope
+		-- registries). A workspace-owned registry (owner_scope='ws:{key}') is private.
+		CREATE TABLE IF NOT EXISTS global_registry_grants (
+			registry_id INTEGER NOT NULL REFERENCES docker_registries(id) ON DELETE CASCADE,
+			workspace   TEXT    NOT NULL,
+			PRIMARY KEY (registry_id, workspace)
+		);
+
+		-- Per-workspace general settings (Phase 3): scalar key/value scoped to one
+		-- workspace (e.g. acme_email, domain). Mirrors app_settings but workspace-keyed.
+		CREATE TABLE IF NOT EXISTS workspace_settings (
+			workspace  TEXT    NOT NULL,
+			key        TEXT    NOT NULL,
+			value      TEXT    NOT NULL DEFAULT '',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (workspace, key)
+		);
+
 		CREATE TABLE IF NOT EXISTS housekeeping_log (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			task         TEXT    NOT NULL,
@@ -343,12 +362,17 @@ func (d *DB) migrate() error {
 	if d.addColumn("hosts", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_host_grants (host_id, workspace) SELECT id, '*' FROM hosts`) //nolint:errcheck
 	}
+	// Same scoping for docker registries (Phase 3); pre-scope registries → '*'.
+	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
+		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck
+	}
 
 	// SQLite only enforces ON DELETE CASCADE when foreign_keys is ON (off by
-	// default), so deleting a host can leave dangling env bindings/grants. Sweep
-	// any that reference a host that no longer exists.
-	d.Exec(`DELETE FROM workspace_host_envs WHERE host_id NOT IN (SELECT id FROM hosts)`) //nolint:errcheck
-	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)  //nolint:errcheck
+	// default), so deleting a host/registry can leave dangling bindings/grants.
+	// Sweep any that reference a row that no longer exists.
+	d.Exec(`DELETE FROM workspace_host_envs WHERE host_id NOT IN (SELECT id FROM hosts)`)                          //nolint:errcheck
+	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)                           //nolint:errcheck
+	d.Exec(`DELETE FROM global_registry_grants WHERE registry_id NOT IN (SELECT id FROM docker_registries)`)       //nolint:errcheck
 	return nil
 }
 

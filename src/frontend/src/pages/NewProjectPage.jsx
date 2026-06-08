@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchRegistries, fetchBackupTargets, fetchWorkspaceHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchBackupTargets, fetchWorkspaceHosts } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -423,10 +423,11 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
 // custom (build-type) stacks: those tag & push built images to the registry so
 // remote hosts can pull them without rebuilding. Image/prebuilt stacks pull
 // their images directly (registry embedded in each image ref), so it's hidden.
-function RegistryField({ data, onChange, errors }) {
+function RegistryField({ data, onChange, errors, workspace }) {
   const { data: registries = [], isLoading } = useQuery({
-    queryKey: ['registries'],
-    queryFn: fetchRegistries,
+    queryKey: ['ws-registries', workspace],
+    queryFn: () => fetchWorkspaceRegistries(workspace),
+    enabled: !!workspace,
   })
 
   // Default to the first saved registry once loaded (if none chosen yet).
@@ -502,7 +503,7 @@ function RegistryField({ data, onChange, errors }) {
   )
 }
 
-function Step2({ data, onChange, errors }) {
+function Step2({ data, onChange, errors, workspace }) {
   const { data: templates } = useQuery({ queryKey: ['templates'], queryFn: fetchTemplates })
 
   return (
@@ -528,7 +529,7 @@ function Step2({ data, onChange, errors }) {
 
       {/* Container registry — custom (build) stacks only; image/prebuilt pull directly */}
       {data.stackType === 'custom' && (
-        <RegistryField data={data} onChange={onChange} errors={errors} />
+        <RegistryField data={data} onChange={onChange} errors={errors} workspace={workspace} />
       )}
 
       {/* Image stack: custom image list + env vars */}
@@ -1628,7 +1629,7 @@ export default function NewProjectPage() {
 
           <div className="bg-surface border border-border rounded-2xl p-8">
             {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} />}
-            {step === 2 && <Step2 data={data} onChange={update} errors={errors} />}
+            {step === 2 && <Step2 data={data} onChange={update} errors={errors} workspace={workspace} />}
             {/* Services (3) then Environments (4) — define the stack shape before
                 its environments. Step4=Services component, Step3=Environments. */}
             {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
