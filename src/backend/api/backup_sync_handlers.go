@@ -26,6 +26,10 @@ func (h *Handler) TestBackupTarget(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
+	h.testBackupTargetByID(w, r, id)
+}
+
+func (h *Handler) testBackupTargetByID(w http.ResponseWriter, r *http.Request, id int64) {
 	target, err := settings.GetBackupTarget(h.db, id)
 	if err != nil || target == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup target not found"})
@@ -88,6 +92,11 @@ func (h *Handler) SyncEnvBackup(w http.ResponseWriter, r *http.Request) {
 	target, err := settings.GetBackupTarget(h.db, *targetID)
 	if err != nil || target == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "backup target not found"})
+		return
+	}
+	// Pool guard (Phase 3): the target must be one this workspace can use.
+	if inPool, _ := settings.TargetInWorkspacePool(h.db, ws, *targetID); !inPool {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "that backup target is not available to this workspace"})
 		return
 	}
 

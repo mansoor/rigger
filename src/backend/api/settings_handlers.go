@@ -68,23 +68,33 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 
 // ── Backup Targets ────────────────────────────────────────────────────────────
 
-// GET /api/settings/backup-targets
+// backupTargetBody is the create/update payload. grants is admin-only — the
+// workspace allowlist for a global target ('*' = offered to all).
+type backupTargetBody struct {
+	Name   string          `json:"name"`
+	Type   string          `json:"type"`
+	Config json.RawMessage `json:"config"`
+	Grants []string        `json:"grants"`
+}
+
+// GET /api/settings/backup-targets — admin view: all targets; global ones carry grants.
 func (h *Handler) ListBackupTargets(w http.ResponseWriter, r *http.Request) {
 	targets, err := settings.ListBackupTargets(h.db)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	for i := range targets {
+		if targets[i].OwnerScope == "global" {
+			targets[i].Grants, _ = settings.TargetGrants(h.db, targets[i].ID) //nolint:errcheck
+		}
+	}
 	writeJSON(w, http.StatusOK, targets)
 }
 
-// POST /api/settings/backup-targets
+// POST /api/settings/backup-targets — admin create (global; grants default to '*').
 func (h *Handler) CreateBackupTarget(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name   string          `json:"name"`
-		Type   string          `json:"type"`
-		Config json.RawMessage `json:"config"`
-	}
+	var body backupTargetBody
 	if err := readJSON(r, &body); err != nil || body.Name == "" || body.Type == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, type, and config are required"})
 		return
@@ -92,7 +102,7 @@ func (h *Handler) CreateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	if body.Config == nil {
 		body.Config = json.RawMessage(`{}`)
 	}
-	t, err := settings.CreateBackupTarget(h.db, body.Name, body.Type, body.Config)
+	t, err := settings.CreateBackupTarget(h.db, body.Name, body.Type, body.Config, "global")
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "a backup target with that name already exists"})
@@ -101,21 +111,23 @@ func (h *Handler) CreateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	grants := body.Grants
+	if grants == nil {
+		grants = []string{"*"}
+	}
+	_ = settings.SetTargetGrants(h.db, t.ID, grants) //nolint:errcheck
+	t.Grants, _ = settings.TargetGrants(h.db, t.ID)
 	writeJSON(w, http.StatusCreated, t)
 }
 
-// PUT /api/settings/backup-targets/{id}
+// PUT /api/settings/backup-targets/{id} — admin update incl. the workspace allowlist.
 func (h *Handler) UpdateBackupTarget(w http.ResponseWriter, r *http.Request) {
 	id, err := parseSettingsID(r.URL.Path, "/api/settings/backup-targets/")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
-	var body struct {
-		Name   string          `json:"name"`
-		Type   string          `json:"type"`
-		Config json.RawMessage `json:"config"`
-	}
+	var body backupTargetBody
 	if err := readJSON(r, &body); err != nil || body.Name == "" || body.Type == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, type, and config are required"})
 		return
@@ -132,6 +144,10 @@ func (h *Handler) UpdateBackupTarget(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	if t.OwnerScope == "global" && body.Grants != nil {
+		_ = settings.SetTargetGrants(h.db, id, body.Grants) //nolint:errcheck
+	}
+	t.Grants, _ = settings.TargetGrants(h.db, id)
 	writeJSON(w, http.StatusOK, t)
 }
 

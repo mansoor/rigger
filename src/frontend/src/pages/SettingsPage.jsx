@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
+import BackupTargetForm from '../components/BackupTargetForm'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -111,149 +112,12 @@ function ConfirmDeleteModal({ name, onConfirm, onClose, loading }) {
   )
 }
 
-// ── Backup Targets ─────────────────────────────────────────────────────────────
-
-const S3_DEFAULT = { endpoint: '', bucket: '', region: 'us-east-1', access_key: '', secret_key: '', path_prefix: 'backups/', use_ssl: true }
-const SFTP_DEFAULT = { host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '', remote_path: '/backups' }
-
-function BackupTargetForm({ initial, onSave, onCancel, saving }) {
-  const isEdit = !!initial?.id
-  const [name, setName]   = useState(initial?.name || '')
-  const [type, setType]   = useState(initial?.type || 's3')
-  const [cfg, setCfg]     = useState(() => {
-    if (initial?.config) {
-      try { return JSON.parse(typeof initial.config === 'string' ? initial.config : JSON.stringify(initial.config)) }
-      catch { /* fallthrough */ }
-    }
-    return type === 's3' ? { ...S3_DEFAULT } : { ...SFTP_DEFAULT }
-  })
-  const [error, setError] = useState('')
-
-  function setField(key, val) { setCfg(c => ({ ...c, [key]: val })) }
-
-  function handleTypeChange(t) {
-    setType(t)
-    setCfg(t === 's3' ? { ...S3_DEFAULT } : { ...SFTP_DEFAULT })
-  }
-
-  async function submit(e) {
-    e.preventDefault()
-    setError('')
-    if (!name.trim()) { setError('Name is required'); return }
-    try {
-      await onSave({ name: name.trim(), type, config: cfg })
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to save')
-    }
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-5">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label required>Name</Label>
-          <Input value={name} onChange={setName} placeholder="my-s3-backup" />
-        </div>
-        <div>
-          <Label required>Type</Label>
-          <Select value={type} onChange={handleTypeChange} disabled={isEdit}
-            options={[{ value: 's3', label: 'S3 / Object Storage' }, { value: 'sftp', label: 'SFTP' }]} />
-        </div>
-      </div>
-
-      {type === 's3' && (
-        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">S3 Configuration</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label required>Endpoint</Label>
-              <Input value={cfg.endpoint} onChange={v => setField('endpoint', v)} placeholder="s3.amazonaws.com" />
-              <p className="text-xs text-content-faint mt-1">Use custom endpoint for MinIO / Wasabi / R2</p>
-            </div>
-            <div>
-              <Label required>Bucket</Label>
-              <Input value={cfg.bucket} onChange={v => setField('bucket', v)} placeholder="my-backups" />
-            </div>
-            <div>
-              <Label>Region</Label>
-              <Input value={cfg.region} onChange={v => setField('region', v)} placeholder="us-east-1" />
-            </div>
-            <div>
-              <Label>Path Prefix</Label>
-              <Input value={cfg.path_prefix} onChange={v => setField('path_prefix', v)} placeholder="backups/" />
-            </div>
-            <div>
-              <Label required>Access Key</Label>
-              <Input value={cfg.access_key} onChange={v => setField('access_key', v)} placeholder="AKIAIOSFODNN7EXAMPLE" />
-            </div>
-            <div>
-              <Label required>Secret Key</Label>
-              <Input value={cfg.secret_key} onChange={v => setField('secret_key', v)} type="password" placeholder="••••••••" />
-            </div>
-          </div>
-          <Toggle checked={cfg.use_ssl} onChange={v => setField('use_ssl', v)} label="Use SSL/TLS" />
-        </div>
-      )}
-
-      {type === 'sftp' && (
-        <div className="space-y-4 border border-border-strong/60 rounded-lg p-4">
-          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">SFTP Configuration</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label required>Host</Label>
-              <Input value={cfg.host} onChange={v => setField('host', v)} placeholder="backup.example.com" />
-            </div>
-            <div>
-              <Label required>Port</Label>
-              <Input value={cfg.port} onChange={v => setField('port', parseInt(v) || 22)} type="number" placeholder="22" />
-            </div>
-            <div>
-              <Label required>Username</Label>
-              <Input value={cfg.username} onChange={v => setField('username', v)} placeholder="backup" />
-            </div>
-            <div>
-              <Label required>Remote Path</Label>
-              <Input value={cfg.remote_path} onChange={v => setField('remote_path', v)} placeholder="/backups" />
-            </div>
-          </div>
-          <div>
-            <Label required>Authentication</Label>
-            <Select value={cfg.auth_type} onChange={v => setField('auth_type', v)}
-              options={[{ value: 'password', label: 'Password' }, { value: 'key', label: 'SSH Private Key' }]} />
-          </div>
-          {cfg.auth_type === 'password' && (
-            <div>
-              <Label required>Password</Label>
-              <Input value={cfg.password} onChange={v => setField('password', v)} type="password" placeholder="••••••••" />
-            </div>
-          )}
-          {cfg.auth_type === 'key' && (
-            <div>
-              <Label required>Private Key</Label>
-              <textarea
-                value={cfg.private_key} onChange={e => setField('private_key', e.target.value)}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
-                rows={6}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-xs font-mono focus:outline-none focus:border-brand-500 resize-none"
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-
-      <div className="flex gap-2 justify-end pt-2">
-        <Btn variant="secondary" onClick={onCancel}>Cancel</Btn>
-        <Btn type="submit" disabled={saving}>{saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add target'}</Btn>
-      </div>
-    </form>
-  )
-}
+// ── Backup Targets (Phase 3: scoping) ─────────────────────────────────────────
 
 function BackupTargetsTab() {
   const qc = useQueryClient()
   const { data: targets = [], isLoading } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const [modal, setModal] = useState(null) // null | 'new' | { editing: target }
   const [deleting, setDeleting] = useState(null)
   const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, error }
@@ -314,7 +178,14 @@ function BackupTargetsTab() {
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-content-strong">{t.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-content-strong">{t.name}</p>
+                  {t.owner_scope === 'global' ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title={`Offered to: ${grantSummary(t)}`}>shared · {grantSummary(t)}</span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40" title="Private to a workspace">workspace · {t.owner_scope.replace(/^ws:/, '')}</span>
+                  )}
+                </div>
                 <p className="text-xs text-content-subtle mt-0.5 truncate">
                   {t.type === 's3'
                     ? `${t.config?.endpoint || 's3'} / ${t.config?.bucket || '—'}`
@@ -348,6 +219,8 @@ function BackupTargetsTab() {
               onSave={handleSave}
               onCancel={() => setModal(null)}
               saving={saveMut.isPending}
+              showGrants={modal === 'new' || modal.editing?.owner_scope === 'global'}
+              workspaces={workspaces}
             />
           </div>
         </div>

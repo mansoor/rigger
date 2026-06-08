@@ -71,6 +71,14 @@ func (d *DB) migrate() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 
+		-- Settings-scopes (Phase 3): a GLOBAL backup target's workspace allowlist,
+		-- mirroring global_host_grants / global_registry_grants. workspace='*' = all.
+		CREATE TABLE IF NOT EXISTS global_backup_target_grants (
+			target_id INTEGER NOT NULL REFERENCES backup_targets(id) ON DELETE CASCADE,
+			workspace TEXT    NOT NULL,
+			PRIMARY KEY (target_id, workspace)
+		);
+
 		CREATE TABLE IF NOT EXISTS docker_registries (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			name       TEXT    NOT NULL UNIQUE,
@@ -366,6 +374,10 @@ func (d *DB) migrate() error {
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck
 	}
+	// Same scoping for backup targets (Phase 3); pre-scope targets → '*'.
+	if d.addColumn("backup_targets", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
+		d.Exec(`INSERT OR IGNORE INTO global_backup_target_grants (target_id, workspace) SELECT id, '*' FROM backup_targets`) //nolint:errcheck
+	}
 
 	// SQLite only enforces ON DELETE CASCADE when foreign_keys is ON (off by
 	// default), so deleting a host/registry can leave dangling bindings/grants.
@@ -373,6 +385,7 @@ func (d *DB) migrate() error {
 	d.Exec(`DELETE FROM workspace_host_envs WHERE host_id NOT IN (SELECT id FROM hosts)`)                          //nolint:errcheck
 	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)                           //nolint:errcheck
 	d.Exec(`DELETE FROM global_registry_grants WHERE registry_id NOT IN (SELECT id FROM docker_registries)`)       //nolint:errcheck
+	d.Exec(`DELETE FROM global_backup_target_grants WHERE target_id NOT IN (SELECT id FROM backup_targets)`)      //nolint:errcheck
 	return nil
 }
 

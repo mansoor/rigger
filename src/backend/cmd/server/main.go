@@ -223,6 +223,27 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "backup-targets":
+			// Workspace-scoped Backup Targets (Phase 3).
+			// /api/workspaces/{ws}/backup-targets[/{id}[/test]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("targetid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			sub := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceBackupTargets(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceBackupTarget(w, r)
+			case r.Method == "POST" && sub == "test":
+				handler.TestWorkspaceBackupTarget(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceBackupTarget(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceBackupTarget(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "settings":
 			// Per-workspace general settings (Phase 3). /api/workspaces/{ws}/settings
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))

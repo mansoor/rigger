@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchBackupTargets, fetchBackupServices } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -1533,7 +1533,7 @@ function EnvBackupSchedules({ workspaceName, env, cfg, updateEnv, targets }) {
 }
 
 function BackupSection({ workspaceName, envs, updateEnv }) {
-  const { data: targets = [] } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
+  const { data: targets = [] } = useQuery({ queryKey: ['ws-backup-targets', workspaceName], queryFn: () => fetchWorkspaceBackupTargets(workspaceName), enabled: !!workspaceName })
   const envNames = Object.keys(envs || {})
   return (
     <div className="space-y-3">

@@ -221,11 +221,19 @@ export const saveAppearancePrefs = (prefs) =>
 
 // ── Settings: Backup Targets ──────────────────────────────────────────────────
 
+// Admin (global Settings) view — every target; global ones carry their `grants`.
 export const fetchBackupTargets   = ()          => api.get('/settings/backup-targets').then(r => r.data)
 export const createBackupTarget   = (body)      => api.post('/settings/backup-targets', body).then(r => r.data)
 export const updateBackupTarget   = (id, body)  => api.put(`/settings/backup-targets/${id}`, body).then(r => r.data)
 export const deleteBackupTarget   = (id)        => api.delete(`/settings/backup-targets/${id}`)
 export const testBackupTarget     = (id)        => api.post(`/settings/backup-targets/${id}/test`).then(r => r.data)
+
+// Workspace-scoped backup-target pool (Phase 3): own targets + granted globals.
+export const fetchWorkspaceBackupTargets = (ws)       => api.get(`/workspaces/${ws}/backup-targets`).then(r => r.data)
+export const createWorkspaceBackupTarget = (ws, body) => api.post(`/workspaces/${ws}/backup-targets`, body).then(r => r.data)
+export const updateWorkspaceBackupTarget = (ws, id, body) => api.put(`/workspaces/${ws}/backup-targets/${id}`, body).then(r => r.data)
+export const deleteWorkspaceBackupTarget = (ws, id)   => api.delete(`/workspaces/${ws}/backup-targets/${id}`)
+export const testWorkspaceBackupTarget   = (ws, id)   => api.post(`/workspaces/${ws}/backup-targets/${id}/test`).then(r => r.data)
 
 // 11d: push the latest local snapshot of an env to its configured remote target.
 export const syncEnvBackup        = (ws, name, env, body = {}) =>

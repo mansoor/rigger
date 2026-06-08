@@ -4,19 +4,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
 import RegistryForm from '../components/RegistryForm'
+import BackupTargetForm from '../components/BackupTargetForm'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry,
+  fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceSettings, updateWorkspaceSettings,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 
 const TABS = [
-  { id: 'general',    label: 'General' },
-  { id: 'hosts',      label: 'Remote Hosts' },
-  { id: 'registries', label: 'Docker Registries' },
-  { id: 'danger',     label: 'Danger Zone' },
+  { id: 'general',        label: 'General' },
+  { id: 'hosts',          label: 'Remote Hosts' },
+  { id: 'registries',     label: 'Docker Registries' },
+  { id: 'backup-targets', label: 'Backup Targets' },
+  { id: 'danger',         label: 'Danger Zone' },
 ]
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/
@@ -68,9 +71,10 @@ export default function ManageWorkspacePage() {
             <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
           </div>
         )}
-        {tab === 'hosts'      && <HostsSection workspace={workspace} qc={qc} />}
-        {tab === 'registries' && <RegistriesSection workspace={workspace} qc={qc} />}
-        {tab === 'danger'     && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
+        {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
+        {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
+        {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
+        {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
       </div>
     </Layout>
   )
@@ -405,6 +409,138 @@ function RegistriesSection({ workspace, qc }) {
           <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Projects referencing this registry will need a different one. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function BackupTargetsSection({ workspace, qc }) {
+  const targetsKey = ['ws-backup-targets', workspace]
+  const { data: targets = [], isLoading } = useQuery({
+    queryKey: targetsKey, queryFn: () => fetchWorkspaceBackupTargets(workspace), enabled: !!workspace,
+  })
+  const [modal, setModal]       = useState(null)
+  const [deleting, setDeleting] = useState(null)
+  const [testStatus, setTestStatus] = useState({})
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceBackupTarget(workspace, id, body) : createWorkspaceBackupTarget(workspace, body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: targetsKey }); setModal(null) },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceBackupTarget(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: targetsKey }); setDeleting(null) },
+  })
+
+  async function handleTest(id) {
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      await testWorkspaceBackupTarget(workspace, id)
+      setTestStatus(s => ({ ...s, [id]: { ok: true } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 6000)
+  }
+
+  const isOwned = (t) => t.owner_scope === `ws:${workspace}`
+  const detail = (t) => t.type === 's3'
+    ? `${t.config?.endpoint || 's3'} / ${t.config?.bucket || '—'}`
+    : `${t.config?.username || ''}@${t.config?.host || '—'}:${t.config?.port || 22}`
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Backup targets</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Off-site destinations this workspace's environments can back up to: its own plus any shared by an administrator.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add target
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : targets.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No backup targets available. Add one for this workspace, or ask an admin to share a global target with it.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {targets.map(t => {
+              const owned = isOwned(t)
+              const ts = testStatus[t.id]
+              return (
+                <div key={t.id} className="flex items-center gap-3 p-4">
+                  <span className={`flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wider
+                    ${t.type === 's3' ? 'bg-warning-subtle/60 text-warning-fg' : 'bg-cyan-100/70 text-cyan-700 dark:bg-cyan-900/60 dark:text-cyan-300'}`}>
+                    {t.type}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-content-strong">{t.name}</p>
+                      {owned
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">this workspace</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator — managed in Settings">shared</span>}
+                    </div>
+                    <p className="text-xs text-content-subtle mt-0.5 truncate">{detail(t)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                    {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
+                    {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                    <button onClick={() => handleTest(t.id)} disabled={ts?.loading}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    {owned ? (
+                      <>
+                        <button onClick={() => setModal({ editing: t })}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                        <button onClick={() => setDeleting(t)}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                      </>
+                    ) : (
+                      <span className="text-[11px] text-content-faint px-2">read-only</span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add backup target' : `Edit “${modal.editing.name}”`}</h3>
+              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+            </div>
+            <BackupTargetForm
+              initial={modal === 'new' ? null : modal.editing}
+              onSave={(body) => saveMut.mutateAsync({ id: modal?.editing?.id, body })}
+              onCancel={() => setModal(null)}
+              saving={saveMut.isPending}
+            />
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Backup schedules pointing at this target will fall back to local. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
               <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}

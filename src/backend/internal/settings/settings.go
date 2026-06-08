@@ -13,12 +13,22 @@ import (
 // ── Backup Targets ────────────────────────────────────────────────────────────
 
 type BackupTarget struct {
-	ID        int64           `json:"id"`
-	Name      string          `json:"name"`
-	Type      string          `json:"type"` // "s3" | "sftp"
-	Config    json.RawMessage `json:"config"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID         int64           `json:"id"`
+	Name       string          `json:"name"`
+	Type       string          `json:"type"` // "s3" | "sftp"
+	Config     json.RawMessage `json:"config"`
+	OwnerScope string          `json:"owner_scope"`      // 'global' or 'ws:{key}'
+	Grants     []string        `json:"grants,omitempty"` // for global targets: workspaces offered to ('*' = all)
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+// WorkspaceScope returns the workspace key a target is private to, or "" if global.
+func (t BackupTarget) WorkspaceScope() string {
+	if strings.HasPrefix(t.OwnerScope, "ws:") {
+		return t.OwnerScope[len("ws:"):]
+	}
+	return ""
 }
 
 // S3Config holds S3/compatible object storage settings.
@@ -43,18 +53,13 @@ type SFTPConfig struct {
 	RemotePath string `json:"remote_path"`
 }
 
-func ListBackupTargets(d *db.DB) ([]BackupTarget, error) {
-	rows, err := d.Query(`SELECT id, name, type, config, created_at, updated_at FROM backup_targets ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
+func scanBackupTargets(rows *sql.Rows) ([]BackupTarget, error) {
 	defer rows.Close()
-
 	var out []BackupTarget
 	for rows.Next() {
 		var t BackupTarget
 		var cfg string
-		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &cfg, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Type, &cfg, &t.OwnerScope, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.Config = json.RawMessage(cfg)
@@ -66,11 +71,104 @@ func ListBackupTargets(d *db.DB) ([]BackupTarget, error) {
 	return out, rows.Err()
 }
 
+func ListBackupTargets(d *db.DB) ([]BackupTarget, error) {
+	rows, err := d.Query(`SELECT id, name, type, config, owner_scope, created_at, updated_at FROM backup_targets ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	return scanBackupTargets(rows)
+}
+
+// ListBackupTargetsForWorkspace returns the target pool visible to one workspace:
+// its own (owner_scope='ws:{key}') plus any global target granted to it (or '*').
+func ListBackupTargetsForWorkspace(d *db.DB, wsKey string) ([]BackupTarget, error) {
+	rows, err := d.Query(`
+		SELECT id, name, type, config, owner_scope, created_at, updated_at
+		FROM backup_targets t
+		WHERE t.owner_scope = ?
+		   OR (t.owner_scope = 'global' AND EXISTS(
+		         SELECT 1 FROM global_backup_target_grants g
+		         WHERE g.target_id = t.id AND g.workspace IN (?, '*')))
+		ORDER BY name`, WorkspaceOwnerScope(wsKey), wsKey)
+	if err != nil {
+		return nil, err
+	}
+	return scanBackupTargets(rows)
+}
+
+// TargetInWorkspacePool reports whether a backup target is usable by a workspace.
+func TargetInWorkspacePool(d *db.DB, wsKey string, id int64) (bool, error) {
+	var n int
+	err := d.QueryRow(`
+		SELECT COUNT(1) FROM backup_targets t
+		WHERE t.id = ?
+		  AND (t.owner_scope = ?
+		    OR (t.owner_scope = 'global' AND EXISTS(
+		          SELECT 1 FROM global_backup_target_grants g
+		          WHERE g.target_id = t.id AND g.workspace IN (?, '*'))))`,
+		id, WorkspaceOwnerScope(wsKey), wsKey).Scan(&n)
+	return n > 0, err
+}
+
+// TargetGrants returns the workspace allowlist for a global target ('*' = all).
+func TargetGrants(d *db.DB, id int64) ([]string, error) {
+	rows, err := d.Query(`SELECT workspace FROM global_backup_target_grants WHERE target_id=? ORDER BY workspace`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var ws string
+		if err := rows.Scan(&ws); err != nil {
+			return nil, err
+		}
+		out = append(out, ws)
+	}
+	return out, rows.Err()
+}
+
+// SetTargetGrants replaces a global target's workspace allowlist.
+func SetTargetGrants(d *db.DB, id int64, workspaces []string) error {
+	if _, err := d.Exec(`DELETE FROM global_backup_target_grants WHERE target_id=?`, id); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, ws := range workspaces {
+		if ws == "" || seen[ws] {
+			continue
+		}
+		seen[ws] = true
+		if _, err := d.Exec(`INSERT OR IGNORE INTO global_backup_target_grants (target_id, workspace) VALUES (?, ?)`, id, ws); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// WorkspaceOwnedTargetIDs returns the ids of backup targets private to a workspace.
+func WorkspaceOwnedTargetIDs(d *db.DB, wsKey string) ([]int64, error) {
+	rows, err := d.Query(`SELECT id FROM backup_targets WHERE owner_scope=?`, WorkspaceOwnerScope(wsKey))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func GetBackupTarget(d *db.DB, id int64) (*BackupTarget, error) {
 	var t BackupTarget
 	var cfg string
-	err := d.QueryRow(`SELECT id, name, type, config, created_at, updated_at FROM backup_targets WHERE id = ?`, id).
-		Scan(&t.ID, &t.Name, &t.Type, &cfg, &t.CreatedAt, &t.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, type, config, owner_scope, created_at, updated_at FROM backup_targets WHERE id = ?`, id).
+		Scan(&t.ID, &t.Name, &t.Type, &cfg, &t.OwnerScope, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -81,11 +179,14 @@ func GetBackupTarget(d *db.DB, id int64) (*BackupTarget, error) {
 	return &t, nil
 }
 
-func CreateBackupTarget(d *db.DB, name, typ string, cfg json.RawMessage) (*BackupTarget, error) {
+func CreateBackupTarget(d *db.DB, name, typ string, cfg json.RawMessage, ownerScope string) (*BackupTarget, error) {
 	if err := validateBackupType(typ); err != nil {
 		return nil, err
 	}
-	res, err := d.Exec(`INSERT INTO backup_targets (name, type, config) VALUES (?, ?, ?)`, name, typ, string(cfg))
+	if ownerScope == "" {
+		ownerScope = "global"
+	}
+	res, err := d.Exec(`INSERT INTO backup_targets (name, type, config, owner_scope) VALUES (?, ?, ?, ?)`, name, typ, string(cfg), ownerScope)
 	if err != nil {
 		return nil, err
 	}

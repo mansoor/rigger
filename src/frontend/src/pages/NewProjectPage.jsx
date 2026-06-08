@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchBackupTargets, fetchWorkspaceHosts } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -1237,8 +1237,8 @@ function wizardServices(data) {
   return out
 }
 
-function Step5({ data, onChange }) {
-  const { data: targets = [] } = useQuery({ queryKey: ['backup-targets'], queryFn: fetchBackupTargets })
+function Step5({ data, onChange, workspace }) {
+  const { data: targets = [] } = useQuery({ queryKey: ['ws-backup-targets', workspace], queryFn: () => fetchWorkspaceBackupTargets(workspace), enabled: !!workspace })
   const services = wizardServices(data)
   const namedEnvs = data.environments.filter(e => e.name)
 
@@ -1634,7 +1634,7 @@ export default function NewProjectPage() {
                 its environments. Step4=Services component, Step3=Environments. */}
             {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
             {step === 4 && <Step3 data={data} onChange={update} workspace={workspace} />}
-            {step === 5 && <Step5 data={data} onChange={update} />}
+            {step === 5 && <Step5 data={data} onChange={update} workspace={workspace} />}
             {step === 6 && <Step6 data={data} />}
             {step === 7 && (
               <Step7
