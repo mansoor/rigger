@@ -173,9 +173,10 @@ type EnvHostRef struct {
 
 // WorkspaceInfo is one parent-tier workspace (a folder containing projects/).
 type WorkspaceInfo struct {
-	Key  string `json:"key"`  // dir name = URL segment = Docker prefix part (identity)
-	Name string `json:"name"` // free-form display name (from workspace.json)
-	Path string `json:"path"`
+	Key    string `json:"key"`  // dir name = URL segment = Docker prefix part (identity)
+	Name   string `json:"name"` // free-form display name (from workspace.json)
+	Path   string `json:"path"`
+	MyRole string `json:"my_role,omitempty"` // caller's effective role (Phase 5.2b); set by the handler
 }
 
 // ListWorkspaces discovers the parent-tier workspaces (dirs carrying a

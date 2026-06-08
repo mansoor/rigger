@@ -344,6 +344,12 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	wsName := msg.Workspace.Workspace
 
+	// Phase 5.2b: creating a project requires workspace-admin (or super-admin).
+	if h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, "") != auth.RoleAdmin {
+		send("\033[31mError: creating a project requires the admin role in this workspace\033[0m\n")
+		return
+	}
+
 	// Resolve the project key (folder/URL/Docker identity): validated override, or
 	// derived from the display name, collision-free within this workspace.
 	min, max := h.keyLengths()
@@ -618,6 +624,23 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Phase 5.2b: membership-gated. Global admins see all (role 'admin'); everyone
+	// else sees only the workspaces they're a member of, annotated with their role.
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims != nil && claims.Role != auth.RoleAdmin {
+		filtered := wss[:0]
+		for _, ws := range wss {
+			if role := h.auth.EffectiveRole(claims.UserID, claims.Role, ws.Key, ""); role != "" {
+				ws.MyRole = role
+				filtered = append(filtered, ws)
+			}
+		}
+		wss = filtered
+	} else if claims != nil {
+		for i := range wss {
+			wss[i].MyRole = auth.RoleAdmin
+		}
+	}
 	writeJSON(w, http.StatusOK, wss)
 }
 
@@ -635,6 +658,11 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/workspaces — create a parent-tier workspace. Body: {"name": "..."}.
 func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
+	// Creating a new top-level workspace is a super-admin action (Phase 5.2b).
+	if claims := auth.ClaimsFromContext(r.Context()); claims == nil || claims.Role != auth.RoleAdmin {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "only a super-admin can create a workspace"})
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 		Key  string `json:"key"` // optional override; derived from name when empty

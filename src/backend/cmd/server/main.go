@@ -137,6 +137,10 @@ func main() {
 
 	// Protected API routes (JWT middleware applied per-route group)
 	protected := authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Phase 5.2b: enforce workspace-scoped access before dispatching ws sub-routes.
+		if matchPrefix(r.URL.Path, "/api/workspaces/") && !handler.GateWorkspace(w, r) {
+			return
+		}
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/api/templates":
 			handler.ListTemplates(w, r)

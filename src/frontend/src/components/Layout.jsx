@@ -70,7 +70,7 @@ function ProjectSidebarItem({ workspace, project, active }) {
 
 // Top-nav dropdown to pick the active parent-tier Workspace. Changing it scopes
 // the whole UI (sidebar projects, dashboard) and navigates home.
-function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onManage }) {
+function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onManage, canManage, canCreate }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   useEffect(() => {
@@ -116,7 +116,7 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onMa
             ))}
           </div>
           <div className="border-t border-border-strong mt-1 pt-1">
-            {current && (
+            {current && canManage && (
               <button
                 onClick={() => { setOpen(false); onManage() }}
                 className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
@@ -124,12 +124,14 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onMa
                 ⚙ Manage workspace
               </button>
             )}
-            <button
-              onClick={() => { setOpen(false); onNewWorkspace() }}
-              className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
-            >
-              ＋ New workspace
-            </button>
+            {canCreate && (
+              <button
+                onClick={() => { setOpen(false); onNewWorkspace() }}
+                className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
+              >
+                ＋ New workspace
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -411,6 +413,11 @@ export default function Layout({ children }) {
     refetchInterval: 30_000,
   })
 
+  // Phase 5.2b: only workspace admins (or global admins) manage a workspace or
+  // create projects in it. my_role comes from the (membership-filtered) list.
+  const currentWsInfo = (workspaces || []).find(w => w.key === current)
+  const canAdminWs = isAdmin || currentWsInfo?.my_role === 'admin'
+
   // The route is authoritative: a deep-link to /workspaces/:workspace/... syncs
   // the selected workspace. Otherwise, default to the first available workspace
   // once the list loads and nothing is selected yet.
@@ -456,6 +463,8 @@ export default function Layout({ children }) {
               onSelect={selectWorkspace}
               onNewWorkspace={() => setNewWsOpen(true)}
               onManage={() => navigate(`/workspaces/${current}/manage`)}
+              canManage={canAdminWs}
+              canCreate={isAdmin}
             />
           </div>
           <div className="flex items-center gap-1">
@@ -495,14 +504,16 @@ export default function Layout({ children }) {
 
           {/* Actions — pinned at the bottom, always visible */}
           <div className="p-3 space-y-1.5 shrink-0">
-            <Link
-              to={current ? `/workspaces/${current}/projects/new` : '#'}
-              onClick={(e) => { if (!current) { e.preventDefault(); setNewWsOpen(true) } }}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
-            >
-              <span className="text-base leading-none">＋</span>
-              New project
-            </Link>
+            {canAdminWs && (
+              <Link
+                to={current ? `/workspaces/${current}/projects/new` : '#'}
+                onClick={(e) => { if (!current) { e.preventDefault(); setNewWsOpen(true) } }}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg transition-colors"
+              >
+                <span className="text-base leading-none">＋</span>
+                New project
+              </Link>
+            )}
             <div className="pt-1 space-y-0.5">
               <SidebarBtn label="Recent activity" icon="◎" active={slidePanel === 'activity'} onClick={() => setSlidePanel(p => p === 'activity' ? null : 'activity')} />
               <SidebarBtn label="Backup history"  icon="○" active={slidePanel === 'backup'}   onClick={() => setSlidePanel(p => p === 'backup'   ? null : 'backup')} />
