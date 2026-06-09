@@ -2,6 +2,9 @@ package api
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"strconv"
@@ -208,17 +211,10 @@ func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Audit + create the run record (status running).
 	h.db.Exec( //nolint:errcheck
 		"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
 		claims.UserID, claims.Username, pkey, "pipeline:"+p.Name, "",
 	)
-	startedAt := time.Now()
-	runID, _ := pipelines.CreateRun(h.db, pipelines.Run{
-		PipelineID: p.ID, Workspace: ws, Project: name, Trigger: "manual",
-		Username: claims.Username, Status: "running", StartedAt: startedAt.UnixMilli(),
-	})
-
 	conn.WriteMessage(websocket.TextMessage, []byte("\033[1mRunning pipeline \""+p.Name+"\"…\033[0m\n")) //nolint:errcheck
 
 	// Stream stage output to the socket via a pipe (same pattern as RunAction).
@@ -238,14 +234,10 @@ func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	results, ok := pipelines.Execute(h.bridge, *p, pw)
+	ok := h.executePipelineRun(p, "manual", claims.Username, pw)
 	pw.Close()
 	<-done
 
-	status := "ok"
-	if !ok {
-		status = "fail"
-	}
 	var marker bytes.Buffer
 	if ok {
 		marker.WriteString("\n\033[32m✓ Pipeline \"" + p.Name + "\" completed successfully.\033[0m\n")
@@ -253,17 +245,136 @@ func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
 		marker.WriteString("\n\033[31m✗ Pipeline \"" + p.Name + "\" failed.\033[0m\n")
 	}
 	conn.WriteMessage(websocket.TextMessage, marker.Bytes()) //nolint:errcheck
+}
 
+// ── Webhooks (9a) ─────────────────────────────────────────────────────────────
+
+// GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks
+func (h *Handler) ListPipelineWebhooks(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
+		return
+	}
+	list, err := pipelines.ListWebhooks(h.db, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks
+// Returns the webhook with its raw token (shown once).
+func (h *Handler) CreatePipelineWebhook(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
+		return
+	}
+	var body struct {
+		Secret string `json:"secret"`
+	}
+	readJSON(r, &body) //nolint:errcheck — secret is optional
+	created, err := pipelines.CreateWebhook(h.db, pipelines.Webhook{
+		PipelineID: id, Workspace: ws, Project: name, Secret: body.Secret,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+// DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks/{whId}
+func (h *Handler) DeletePipelineWebhook(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	if _, ok := h.ownedPipeline(w, r, ws, name); !ok {
+		return
+	}
+	whID, _ := strconv.ParseInt(r.PathValue("whId"), 10, 64)
+	if err := pipelines.DeleteWebhook(h.db, whID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// InboundWebhook is the PUBLIC trigger endpoint (no JWT). It resolves the webhook
+// by URL token, optionally verifies an HMAC-SHA256 signature, then runs the bound
+// pipeline in the background (trigger=webhook). POST /api/pipelines/hooks/{token}.
+func (h *Handler) InboundWebhook(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	wh, err := pipelines.GetWebhookByToken(h.db, token)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "webhook not found"})
+		return
+	}
+
+	// Read the body (bounded) for optional signature verification.
+	body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if wh.Secret != "" {
+		sig := r.Header.Get("X-Hub-Signature-256") // GitHub/Gitea style: "sha256=<hex>"
+		mac := hmac.New(sha256.New, []byte(wh.Secret))
+		mac.Write(body)
+		expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+		if sig == "" || !hmac.Equal([]byte(sig), []byte(expected)) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid signature"})
+			return
+		}
+	}
+
+	p, err := pipelines.Get(h.db, wh.PipelineID)
+	if err != nil || p == nil || !p.Enabled {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found or disabled"})
+		return
+	}
+
+	pipelines.TouchWebhook(h.db, wh.ID)
+	h.db.Exec( //nolint:errcheck
+		"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+		0, "webhook", h.resourcePrefix(wh.Workspace, wh.Project), "pipeline:"+p.Name, "",
+	)
+	// Run in the background — the caller (CI) just gets an accepted ack. Per-stage
+	// output is still captured into the run record for the history view.
+	go h.executePipelineRun(p, "webhook", "webhook", io.Discard)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "pipeline": p.Name})
+}
+
+// executePipelineRun creates a run record, executes the pipeline (streaming live
+// output to out), finalizes the record, and invalidates image caches for any
+// update/deploy stage. Shared by the interactive WS run and webhook-triggered
+// background runs. Returns whether every stage succeeded.
+func (h *Handler) executePipelineRun(p *pipelines.Pipeline, trigger, username string, out io.Writer) bool {
+	runID, _ := pipelines.CreateRun(h.db, pipelines.Run{
+		PipelineID: p.ID, Workspace: p.Workspace, Project: p.Project, Trigger: trigger,
+		Username: username, Status: "running", StartedAt: time.Now().UnixMilli(),
+	})
+	results, ok := pipelines.Execute(h.bridge, *p, out)
+	status := "ok"
+	if !ok {
+		status = "fail"
+	}
 	pipelines.UpdateRun(h.db, pipelines.Run{ //nolint:errcheck
 		ID: runID, PipelineID: p.ID, Status: status, Stages: results,
 		FinishedAt: time.Now().UnixMilli(),
 	})
-
-	// An update/deploy stage changes running images; invalidate the image-check
-	// cache for each affected env so the next poll re-checks (matches RunAction).
 	for _, s := range p.Stages {
 		if s.Type == "update" || s.Type == "deploy" {
-			h.imgCache.Invalidate(ws, name, s.Env)
+			h.imgCache.Invalidate(p.Workspace, p.Project, s.Env)
 		}
 	}
+	return ok
 }

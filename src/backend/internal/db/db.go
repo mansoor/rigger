@@ -391,6 +391,22 @@ func (d *DB) migrate() error {
 			finished_at  INTEGER
 		);
 		CREATE INDEX IF NOT EXISTS idx_pipeline_runs_pipe ON pipeline_runs(pipeline_id, started_at);
+
+		-- Phase 9a: inbound webhooks that trigger a pipeline. token_hash = sha256 of
+		-- the URL token (raw shown once on create); secret is the optional HMAC key
+		-- for verifying GitHub/Gitea-style signatures.
+		CREATE TABLE IF NOT EXISTS pipeline_webhooks (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			pipeline_id       INTEGER NOT NULL,
+			workspace         TEXT    NOT NULL,
+			project           TEXT    NOT NULL,
+			token_hash        TEXT    NOT NULL,
+			secret            TEXT    NOT NULL DEFAULT '',
+			enabled           INTEGER NOT NULL DEFAULT 1,
+			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_triggered_at DATETIME
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_webhooks_token ON pipeline_webhooks(token_hash);
 	`)
 	if err != nil {
 		return err

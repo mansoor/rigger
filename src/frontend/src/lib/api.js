@@ -119,6 +119,9 @@ export const updatePipeline    = (ws, name, id, body) => api.put(`${projBase(ws,
 export const deletePipeline    = (ws, name, id)       => api.delete(`${projBase(ws, name)}/pipelines/${id}`).then(r => r.data)
 export const fetchPipelineRuns = (ws, name, id, limit = 30) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs`, { params: { limit } }).then(r => r.data)
 export const fetchPipelineRun  = (ws, name, id, runId) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}`).then(r => r.data)
+export const fetchPipelineWebhooks = (ws, name, id) => api.get(`${projBase(ws, name)}/pipelines/${id}/webhooks`).then(r => r.data)
+export const createPipelineWebhook = (ws, name, id, body = {}) => api.post(`${projBase(ws, name)}/pipelines/${id}/webhooks`, body).then(r => r.data)
+export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projBase(ws, name)}/pipelines/${id}/webhooks/${whId}`).then(r => r.data)
 // Host-aware port-conflict check: host_ports = [{host_id, port, service}].
 export const checkPorts        = (hostPorts, excludeWorkspace = '') =>
   api.post('/port-check', { host_ports: hostPorts, exclude_workspace: excludeWorkspace }).then(r => r.data)

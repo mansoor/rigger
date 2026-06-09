@@ -775,6 +775,15 @@ func main() {
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
 		handler.RunPipeline(w, r)
 	})
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineWebhooks)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePipelineWebhook)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks/{whId}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipelineWebhook)))
+
+	// PUBLIC pipeline webhook trigger — no JWT; authed by the URL token (+ optional
+	// HMAC signature). Registered as a specific pattern so it isn't shadowed.
+	mux.HandleFunc("POST /api/pipelines/hooks/{token}", func(w http.ResponseWriter, r *http.Request) {
+		handler.InboundWebhook(w, r)
+	})
 
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {

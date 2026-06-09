@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPipelines, createPipeline, updatePipeline, deletePipeline,
   fetchPipelineRuns, openPipelineSocket,
+  fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
 } from '../lib/api'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
@@ -105,6 +106,7 @@ function stageSummary(s) {
 
 function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
   const [showHistory, setShowHistory] = useState(false)
+  const [showHooks, setShowHooks] = useState(false)
   return (
     <div className="bg-surface border border-border rounded-xl p-4">
       <div className="flex items-start gap-3">
@@ -127,10 +129,68 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
           <button onClick={onDelete} className="text-xs px-2.5 py-1.5 rounded-lg text-danger-fg hover:bg-danger-subtle/40 transition-colors">Delete</button>
         </div>
       </div>
-      <button onClick={() => setShowHistory(v => !v)} className="mt-3 text-xs text-content-subtle hover:text-content transition-colors">
-        {showHistory ? '▾' : '▸'} Run history
-      </button>
+      <div className="mt-3 flex items-center gap-4">
+        <button onClick={() => setShowHistory(v => !v)} className="text-xs text-content-subtle hover:text-content transition-colors">
+          {showHistory ? '▾' : '▸'} Run history
+        </button>
+        <button onClick={() => setShowHooks(v => !v)} className="text-xs text-content-subtle hover:text-content transition-colors">
+          {showHooks ? '▾' : '▸'} Webhooks
+        </button>
+      </div>
       {showHistory && <RunHistory workspace={workspace} name={name} pipelineId={pipeline.id} />}
+      {showHooks && <Webhooks workspace={workspace} name={name} pipelineId={pipeline.id} />}
+    </div>
+  )
+}
+
+function Webhooks({ workspace, name, pipelineId }) {
+  const qc = useQueryClient()
+  const { data: hooks = [], isLoading } = useQuery({
+    queryKey: ['pipeline-webhooks', workspace, name, pipelineId],
+    queryFn: () => fetchPipelineWebhooks(workspace, name, pipelineId),
+  })
+  const [newToken, setNewToken] = useState(null) // raw token shown once after create
+
+  const addMut = useMutation({
+    mutationFn: () => createPipelineWebhook(workspace, name, pipelineId, {}),
+    onSuccess: (wh) => {
+      setNewToken(`${window.location.origin}/api/pipelines/hooks/${wh.token}`)
+      qc.invalidateQueries({ queryKey: ['pipeline-webhooks', workspace, name, pipelineId] })
+    },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deletePipelineWebhook(workspace, name, pipelineId, id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-webhooks', workspace, name, pipelineId] }),
+  })
+
+  return (
+    <div className="mt-2 space-y-2 border-t border-border pt-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-content-subtle">POST to a webhook URL to trigger this pipeline (e.g. from GitHub/Gitea on push).</p>
+        <button onClick={() => addMut.mutate()} disabled={addMut.isPending} className="text-xs font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-40">+ Add webhook</button>
+      </div>
+
+      {newToken && (
+        <div className="px-3 py-2 rounded-lg bg-warning-subtle/40 border border-warning-border/60 text-xs">
+          <p className="text-warning-fg font-semibold mb-1">Copy this URL now — it won't be shown again:</p>
+          <code className="block font-mono break-all text-content-strong select-all">{newToken}</code>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-xs text-content-subtle">Loading…</p>
+      ) : hooks.length === 0 ? (
+        <p className="text-xs text-content-faint">No webhooks yet.</p>
+      ) : (
+        hooks.map(h => (
+          <div key={h.id} className="flex items-center gap-2 text-xs">
+            <span className="font-mono text-content-muted">hook #{h.id}</span>
+            <span className="text-content-faint">created {new Date(h.created_at).toLocaleDateString()}</span>
+            {h.last_triggered_at && <span className="text-content-faint">· last fired {new Date(h.last_triggered_at).toLocaleString()}</span>}
+            <button onClick={() => delMut.mutate(h.id)} className="ml-auto text-danger-fg hover:bg-danger-subtle/40 px-1.5 py-0.5 rounded">Delete</button>
+          </div>
+        ))
+      )}
     </div>
   )
 }
