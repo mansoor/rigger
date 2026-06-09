@@ -742,7 +742,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {/* Environment variables */}
       {isNew
         ? <NewEnvVarsEditor cfg={cfg} onChange={onChange} />
-        : <EnvVarsInline workspaceName={workspaceName} envName={envName} />
+        : <EnvVarsInline workspaceName={workspaceName} envName={envName} deployment={cfg.deployment} />
       }
 
       {/* Service overrides — image stacks only */}
@@ -904,14 +904,17 @@ function NewEnvVarsEditor({ cfg, onChange }) {
 
 // ── Inline env vars editor (used inside EnvEditor) ────────────────────────────
 
-function EnvVarsInline({ workspaceName, envName }) {
+function EnvVarsInline({ workspaceName, envName, deployment }) {
   const { workspace } = useParams()
+  const swarm = deployment === 'swarm'
   const [open, setOpen]       = useState(false)
   const [reveal, setReveal]   = useState(false)
   const [edits, setEdits]     = useState({})
   const [deletes, setDeletes] = useState(new Set())
+  const [flags, setFlags]     = useState({}) // explicit secret-flag overrides: key → bool
   const [newKey, setNewKey]   = useState('')
   const [newVal, setNewVal]   = useState('')
+  const [newSecret, setNewSecret] = useState(false)
   const qc = useQueryClient()
 
   const { data: vars, isLoading } = useQuery({
@@ -920,10 +923,13 @@ function EnvVarsInline({ workspaceName, envName }) {
     enabled:  open,
   })
 
+  // Effective secret flag: a pending toggle wins, else the server's stored value.
+  const isSecret = (k) => (k in flags ? flags[k] : !!vars?.[k]?.secret)
+
   const saveMut = useMutation({
-    mutationFn: ({ updates, dels }) => updateEnvVars(workspace, workspaceName, envName, updates, dels),
+    mutationFn: ({ updates, dels, secretKeys }) => updateEnvVars(workspace, workspaceName, envName, updates, dels, secretKeys),
     onSuccess: () => {
-      setEdits({}); setDeletes(new Set()); setNewKey(''); setNewVal('')
+      setEdits({}); setDeletes(new Set()); setFlags({}); setNewKey(''); setNewVal(''); setNewSecret(false)
       qc.invalidateQueries({ queryKey: ['envvars', workspace, workspaceName, envName] })
     },
   })
@@ -932,11 +938,18 @@ function EnvVarsInline({ workspaceName, envName }) {
     setDeletes(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
     setEdits(prev => { const n = { ...prev }; delete n[k]; return n })
   }
+  function toggleSecret(k) {
+    setFlags(prev => ({ ...prev, [k]: !isSecret(k) }))
+  }
 
   function handleSave() {
     const updates = { ...edits }
-    if (newKey.trim()) updates[newKey.trim()] = newVal
-    saveMut.mutate({ updates, dels: [...deletes] })
+    const nk = newKey.trim()
+    if (nk) updates[nk] = newVal
+    // secret_keys is the full desired set of secret-flagged keys for this env.
+    const secretKeys = Object.keys(vars || {}).filter(k => !deletes.has(k) && isSecret(k))
+    if (nk && newSecret) secretKeys.push(nk)
+    saveMut.mutate({ updates, dels: [...deletes], secretKeys })
   }
 
   return (
@@ -954,9 +967,9 @@ function EnvVarsInline({ workspaceName, envName }) {
       {open && (
         <div className="mt-3 space-y-3">
           {/* Reveal + hint */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-warning-fg/80 flex items-center gap-1">
-              <span>⚠</span> Use <strong>Deploy ▾ → Refresh</strong> after saving to apply.
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-content-subtle">
+              After saving, <strong className="text-content-muted">Refresh</strong> the environment from its card to apply.
             </p>
             <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
               <input type="checkbox" checked={reveal}
@@ -965,6 +978,9 @@ function EnvVarsInline({ workspaceName, envName }) {
               <span className="text-xs text-content-muted select-none">Show values</span>
             </label>
           </div>
+          {swarm
+            ? <p className="text-[11px] text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) on the next deploy.</p>
+            : <p className="text-[11px] text-content-faint">🔒 Flag secrets here; deploy with Swarm to store them as encrypted Docker secrets (Compose keeps them in <code className="font-mono">.env</code>).</p>}
 
           {/* Existing vars */}
           {isLoading
@@ -976,11 +992,16 @@ function EnvVarsInline({ workspaceName, envName }) {
                   // Values arrive as { value, secret } objects; tolerate a bare
                   // string too. Secrets stay masked even when revealing values.
                   const val    = typeof v === 'string' ? v : (v?.value ?? '')
-                  const secret = typeof v === 'object' && !!v?.secret
+                  const secret = isSecret(k)
                   const show   = reveal && !secret
                   return (
-                    <div key={k} className={`flex items-center gap-2 ${marked ? 'opacity-40' : ''}`}>
-                      <span className="font-mono text-xs text-content-muted w-36 shrink-0 truncate" title={k}>{k}</span>
+                    <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'} ${marked ? 'opacity-40' : ''}`}>
+                      <button type="button" onClick={() => toggleSecret(k)} disabled={marked}
+                        title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
+                        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+                        {secret ? '🔒' : '🔓'}
+                      </button>
+                      <span className="font-mono text-xs text-content-muted w-32 shrink-0 truncate" title={k}>{k}</span>
                       <input
                         type={show ? 'text' : 'password'}
                         placeholder={show ? val : '••••••••'}
@@ -1004,10 +1025,15 @@ function EnvVarsInline({ workspaceName, envName }) {
 
           {/* Add new variable */}
           <div className="flex gap-2 pt-2 border-t border-border-strong/40">
+            <button type="button" onClick={() => setNewSecret(s => !s)}
+              title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
+              className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${newSecret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+              {newSecret ? '🔒' : '🔓'}
+            </button>
             <input type="text" placeholder="NEW_KEY" value={newKey}
               onChange={e => setNewKey(e.target.value)}
-              className="w-36 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-            <input type={reveal ? 'text' : 'password'} placeholder="value" value={newVal}
+              className="w-32 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+            <input type={newSecret ? 'password' : (reveal ? 'text' : 'password')} placeholder="value" value={newVal}
               onChange={e => setNewVal(e.target.value)}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
             <button type="button" onClick={() => newKey.trim() && handleSave()}
