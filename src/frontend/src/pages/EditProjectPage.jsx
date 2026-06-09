@@ -64,9 +64,30 @@ function Select({ value, onChange, options }) {
 }
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
-const BACKEND_OPTIONS    = [{ value: 'laravel', label: 'Laravel (PHP-FPM)' }, { value: 'nodejs', label: 'Node.js' }]
-const FRONTEND_OPTIONS   = [{ value: 'none', label: 'None (API only)' }, { value: 'nextjs', label: 'Next.js' }, { value: 'react', label: 'React / Vite' }]
 const DB_OPTIONS         = [{ value: 'none', label: 'None' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'mysql', label: 'MySQL' }]
+
+// Unified service model (Phase 2a): a service is built, pulled, or reuses another
+// service's image (a worker). Build services scaffold a Dockerfile from a template.
+const SERVICE_SOURCE = [
+  { value: 'image', label: 'Pull image' },
+  { value: 'build', label: 'Build from source' },
+  { value: 'image_from', label: 'Reuse a service’s image (worker)' },
+]
+const BUILD_TEMPLATES = [
+  { value: '', label: 'Custom Dockerfile (no scaffold)' },
+  { value: 'laravel', label: 'Laravel (PHP-FPM)' },
+  { value: 'nodejs', label: 'Node.js' },
+  { value: 'nextjs', label: 'Next.js' },
+  { value: 'react', label: 'React / Vite' },
+]
+// Managed-dependency service names a service may depend_on (env toggles).
+const MANAGED_DEPS = ['postgres', 'mysql', 'redis', 'garage']
+
+function serviceSource(s) {
+  if (s.build) return 'build'
+  if (s.image_from) return 'image_from'
+  return 'image'
+}
 
 // ── Helpers: port rows ↔ img fields ──────────────────────────────────────────
 
@@ -189,8 +210,16 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   function upd(field, val) {
     onUpdate(idx, { ...img, [field]: val })
   }
+  // Switch a service's source, clearing the other source fields.
+  function setSource(s) {
+    const base = { ...img, build: undefined, image: undefined, tag: undefined, image_from: undefined }
+    if (s === 'build') onUpdate(idx, { ...base, build: img.build || { template: '' }, env_file: true })
+    else if (s === 'image_from') onUpdate(idx, { ...base, image_from: img.image_from || (otherNames[0] || ''), env_file: true })
+    else onUpdate(idx, { ...base, image: img.image || '', tag: img.tag || 'latest' })
+  }
 
   const otherNames = allImages.map((m, j) => j !== idx ? m.name : null).filter(Boolean)
+  const depOptions = [...otherNames, ...MANAGED_DEPS]
 
   const monoInput = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500'
 
@@ -219,14 +248,56 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       </div>
       {open && (<div className="px-4 pb-4 space-y-4 border-t border-border-strong pt-4">
 
-      {/* Identity */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Identity + source */}
+      <div className="grid grid-cols-2 gap-3">
         <div><Label required>Service name</Label>
-          <Input value={img.name} onChange={v => upd('name', v)} placeholder="app" /></div>
-        <div><Label required>Image</Label>
-          <Input value={img.image} onChange={v => upd('image', v)} placeholder="nginx" /></div>
-        <div><Label>Tag</Label>
-          <Input value={img.tag} onChange={v => upd('tag', v)} placeholder="latest" /></div>
+          <Input value={img.name} onChange={v => upd('name', v)} placeholder="api" /></div>
+        <div><Label>Source</Label>
+          <Select value={serviceSource(img)} onChange={setSource} options={SERVICE_SOURCE} /></div>
+      </div>
+
+      {serviceSource(img) === 'image' && (
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label required>Image</Label>
+            <Input value={img.image} onChange={v => upd('image', v)} placeholder="nginx" /></div>
+          <div><Label>Tag</Label>
+            <Input value={img.tag} onChange={v => upd('tag', v)} placeholder="latest" /></div>
+        </div>
+      )}
+      {serviceSource(img) === 'build' && (
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>Dockerfile template</Label>
+            <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={BUILD_TEMPLATES} />
+            <p className="text-xs text-content-subtle mt-1">Scaffolds a starter Dockerfile; replace with your own via repo sync.</p></div>
+          <div><Label>Build context</Label>
+            <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
+        </div>
+      )}
+      {serviceSource(img) === 'image_from' && (
+        <div>
+          <Label required>Reuse image of</Label>
+          <Select value={img.image_from || ''} onChange={v => upd('image_from', v)}
+            options={[{ value: '', label: '— pick a service —' }, ...otherNames.map(n => ({ value: n, label: n }))]} />
+          <p className="text-xs text-content-subtle mt-1">A worker/scheduler that runs another service's built image with a custom command.</p>
+        </div>
+      )}
+
+      {/* Command + web routing + env file */}
+      <div className="grid grid-cols-2 gap-3">
+        <div><Label>Command <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+          <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" /></div>
+        <div className="flex items-end pb-1">
+          <Toggle label="Mount .env (env_file)" checked={img.env_file !== false && serviceSource(img) !== 'image'} onChange={v => upd('env_file', v)} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-end pb-1">
+          <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={v => upd('web_routed', v)} />
+        </div>
+        {img.web_routed && (
+          <div><Label>Subdomain <span className="font-normal normal-case text-content-faint">(blank = apex domain)</span></Label>
+            <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="app" /></div>
+        )}
       </div>
 
       {/* Port mappings */}
@@ -373,15 +444,15 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       </div>
 
       {/* depends_on */}
-      {otherNames.length > 0 && (
+      {depOptions.length > 0 && (
         <div>
           <Label>Depends on</Label>
           <p className="text-xs text-content-subtle mb-2">
-            This service waits for selected services before starting.
-            Compose waits for healthy status if the dependency has a healthcheck.
+            This service waits for selected services (and enabled managed dependencies)
+            before starting. Compose waits for healthy status when available.
           </p>
           <div className="flex flex-wrap gap-3">
-            {otherNames.map(svcName => {
+            {depOptions.map(svcName => {
               const checked = (img.depends_on || []).includes(svcName)
               return (
                 <label key={svcName} className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -480,19 +551,14 @@ function SwarmSettings({ cfg, onChange, projectType, imageNames = [] }) {
   const updPolicy = (key, patch) => updSwarm({ [key]: { ...(sw[key] || {}), ...patch } })
   const [advOpen, setAdvOpen] = useState(false)
 
-  const services = projectType === 'image'
-    ? imageNames
-    : ['backend',
-       ...(cfg.frontend && cfg.frontend !== 'none' ? ['frontend'] : []),
-       ...(cfg.database && cfg.database !== 'none' ? [cfg.database] : []),
-       ...(cfg.redis_enabled ? ['redis'] : []),
-       ...(cfg.garage_enabled ? ['garage'] : [])]
+  const services = [...imageNames,
+    ...(cfg.database && cfg.database !== 'none' ? [cfg.database] : []),
+    ...(cfg.redis_enabled ? ['redis'] : []),
+    ...(cfg.garage_enabled ? ['garage'] : [])]
 
   const svcReplicas = (svc) => {
     const o = sw.services?.[svc]
     if (o?.replicas != null && o.replicas !== '') return o.replicas
-    if (svc === 'backend') return cfg.replicas?.backend ?? 1
-    if (svc === 'frontend') return cfg.replicas?.frontend ?? 1
     return 1
   }
   const svcPlacement = (svc) => (sw.services?.[svc]?.placement || []).join(', ')
@@ -741,53 +807,26 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
       </div>
 
-      {/* Custom-stack-only fields */}
-      {projectType === 'custom' && (
-        <div className="space-y-4 pt-3 border-t border-border-strong/50">
-          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Application stack</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Backend</Label>
-              <Select value={cfg.backend} onChange={v => upd('backend', v)} options={BACKEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Frontend</Label>
-              <Select value={cfg.frontend} onChange={v => upd('frontend', v)} options={FRONTEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Database</Label>
-              <Select value={cfg.database} onChange={v => upd('database', v)} options={DB_OPTIONS} />
-            </div>
+      {/* Managed dependencies (env toggles). App services live in the Services tab. */}
+      <div className="space-y-3 pt-3 border-t border-border-strong/50">
+        <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Managed dependencies</p>
+        <div className="grid grid-cols-3 gap-3 items-end">
+          <div>
+            <Label>Database</Label>
+            <Select value={cfg.database || 'none'} onChange={v => upd('database', v)} options={DB_OPTIONS} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
-            <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
-          </div>
-          {/* Replicas only take effect on Swarm; when Swarm is selected the
-              per-service Swarm settings below own them, so hide these here. */}
-          {cfg.deployment !== 'swarm' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Backend replicas</Label>
-                <Input type="number" value={cfg.replicas?.backend ?? 1} onChange={v => updReplicas('backend', v)} />
-              </div>
-              <div>
-                <Label>Frontend replicas</Label>
-                <Input type="number" value={cfg.replicas?.frontend ?? 1} onChange={v => updReplicas('frontend', v)} />
-              </div>
-            </div>
-          )}
+          <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
+          <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
         </div>
-      )}
+        <p className="text-xs text-content-subtle">
+          Define app services (build / pull / worker) in the <strong>Services</strong> tab; these managed
+          dependencies are provisioned for you and referenced via env vars + <code className="font-mono">depends_on</code>.
+        </p>
+      </div>
 
       {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
       {cfg.deployment === 'swarm' && (
         <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames} />
-      )}
-
-      {/* Workers / processes — custom apps only (image stacks add extra services as images). */}
-      {projectType !== 'image' && (
-        <ProcessesSettings cfg={cfg} onChange={onChange} />
       )}
 
       {/* Git */}
@@ -1141,7 +1180,8 @@ function serializeConfig(project, envs, images, rawConfig) {
     const { _initial_vars, _id, ...rest } = v // eslint-disable-line no-unused-vars
     cleanEnvs[k] = rest
   }
-  const updated = { ...rawConfig, project, environments: cleanEnvs, ...(project?.type === 'image' && { images }) }
+  const updated = { ...rawConfig, project, environments: cleanEnvs, services: images }
+  delete updated.images // legacy field, fully replaced by services[]
   return JSON.stringify(updated)
 }
 
@@ -1179,8 +1219,8 @@ export default function EditProjectPage() {
       })
       setEnvs(withIds)
       setProject(rawConfig.project || {})
-      setImages(rawConfig.images || [])
-      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.images || [], rawConfig))
+      setImages(rawConfig.services || [])
+      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.services || [], rawConfig))
       // Pre-load vars from first env for use when adding new environments
       const firstEnvName = Object.keys(rawConfig.environments || {})[0]
       if (firstEnvName) {
@@ -1260,7 +1300,6 @@ export default function EditProjectPage() {
   function addEnv() {
     const n = `new-env-${newEnvCounter + 1}`
     setNewEnvCounter(c => c + 1)
-    const isImage = project?.type === 'image'
     const firstEnv = Object.values(envs || {})[0] || {}
     const base = {
       domain: '',
@@ -1270,16 +1309,11 @@ export default function EditProjectPage() {
       traefik_network: 'traefik_net',
       ssl_enabled: false,
       git: { enabled: false, repo: '', branch: '' },
-    }
-    if (!isImage) {
-      Object.assign(base, {
-        backend: firstEnv.backend || 'laravel',
-        frontend: firstEnv.frontend || 'none',
-        database: firstEnv.database || 'none',
-        redis_enabled: false,
-        garage_enabled: false,
-        replicas: { backend: 1, frontend: 1 },
-      })
+      // Managed-dependency toggles inherit from the first env (services are
+      // project-level and shared across envs).
+      database: firstEnv.database || 'none',
+      redis_enabled: !!firstEnv.redis_enabled,
+      garage_enabled: !!firstEnv.garage_enabled,
     }
     // firstEnvVars is the API shape { KEY: { value, secret } }; flatten it to the
     // plain { KEY: value } map _initial_vars expects, and carry over secret flags.
@@ -1363,7 +1397,7 @@ export default function EditProjectPage() {
         <VerticalTabs
           tabs={[
             { id: 'project', label: 'Project', icon: '📋' },
-            ...(project?.type === 'image' ? [{ id: 'services', label: 'Services', icon: '🧱', count: (images || []).length }] : []),
+            { id: 'services', label: 'Services', icon: '🧱', count: (images || []).length },
             { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
             { id: 'host', label: 'Host', icon: '🖥' },
             { id: 'backup', label: 'Backup', icon: '💾' },
@@ -1440,13 +1474,13 @@ export default function EditProjectPage() {
         </section>
         )}
 
-        {/* Services (image stacks only) */}
-        {tab === 'services' && project?.type === 'image' && (
+        {/* Services — the unified service graph (build / pull / worker) */}
+        {tab === 'services' && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages} />
             <PortWarnings warnings={hostWarnings} />
-            <p className="text-xs text-content-subtle mt-2">After saving, redeploy each environment to pick up image changes.</p>
+            <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
         )}
 

@@ -38,14 +38,13 @@ function ProjectSidebarItem({ workspace, project, active }) {
   const type = cfg?.project?.type || 'custom'
   const envs = project.envs || []
 
-  // Derive a short stack description from config
+  // Derive a short stack description from the unified service graph + managed deps.
   let stackLine = ''
-  if (type === 'image') {
-    const images = cfg?.images || []
-    stackLine = images.map(i => i.image?.split('/').pop()).join(' · ')
-  } else {
+  {
     const firstEnv = cfg?.environments?.[envs[0]] || {}
-    const parts = [firstEnv.backend, firstEnv.frontend].filter(Boolean)
+    const parts = (cfg?.services || []).map(s => s.name).filter(Boolean)
+    if (firstEnv.database && firstEnv.database !== 'none') parts.push(firstEnv.database)
+    if (firstEnv.redis_enabled) parts.push('redis')
     stackLine = parts.join(' · ') || type
   }
 

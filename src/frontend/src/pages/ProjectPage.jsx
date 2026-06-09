@@ -101,7 +101,7 @@ function envAccess(cfg, ws, envName) {
   const access   = ws?.env_access?.[envName] || {}
   const domain   = access.domain   || cfg?.domain   || ''
   const httpPort = access.http_port || String(cfg?.http_port || '')
-  const images   = (access.images  || []).length > 0 ? access.images : (ws?.config?.images || [])
+  const images   = (access.images  || []).length > 0 ? access.images : (ws?.config?.services || [])
 
   const domainUrl = domain ? `${ssl ? 'https' : 'http'}://${domain}` : null
 
@@ -456,10 +456,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   })
 
   // Build a merged service list: all expected services + actual runtime state.
-  // For image stacks: start from config.images so we show services not yet started.
-  // For custom stacks: use whatever docker compose ps returned.
-  const configImages = ws?.config?.images || []
-  const serviceRows = isImage && configImages.length > 0
+  // Start from config.services so services not yet started still show; managed
+  // dependencies (db/redis/garage) appear once running from compose ps.
+  const configImages = ws?.config?.services || []
+  const serviceRows = configImages.length > 0
     ? configImages.map(img => {
         const live = containerDetails.find(c => c.short === img.name)
         return live || { short: img.name, Name: '', Service: `${name}_${envName}_${img.name}`, State: '', Health: '', Status: '' }
@@ -1867,16 +1867,14 @@ export default function ProjectPage() {
   const version = cfg?.project?.version
   const vStr = version ? `v${version.major}.${version.minor}.${version.patch}-build.${version.build}` : ''
 
-  // Build header stack description
+  // Build header stack description from the unified service graph + managed deps.
   const stackParts = []
-  if (type === 'image') {
-    ;(cfg?.images || []).forEach(img => stackParts.push(img.image?.split('/').pop()))
-  } else {
+  ;(cfg?.services || []).forEach(s => { if (s.name) stackParts.push(s.name) })
+  {
     const firstEnvCfg = cfg?.environments?.[envs[0]] || {}
-    if (firstEnvCfg.backend) stackParts.push(capitalize(firstEnvCfg.backend))
-    if (firstEnvCfg.frontend && firstEnvCfg.frontend !== 'none') stackParts.push(capitalize(firstEnvCfg.frontend))
     if (firstEnvCfg.database && firstEnvCfg.database !== 'none') stackParts.push(capitalize(firstEnvCfg.database))
     if (firstEnvCfg.redis_enabled) stackParts.push('Redis')
+    if (firstEnvCfg.garage_enabled) stackParts.push('Garage')
   }
 
   return (
