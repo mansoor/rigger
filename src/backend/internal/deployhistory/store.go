@@ -100,12 +100,38 @@ func scan(s scanner) (*Entry, error) {
 // version string; image stacks return ptype=image with no image map.
 func Resolve(workspacesDir, workspace, project, env string) Entry {
 	e := Entry{Workspace: workspace, Project: project, Env: env, Ptype: "custom", Images: map[string]string{}}
-	cfg, err := wsconfig.Load(wspath.ConfigPath(workspacesDir, workspace, project))
+	raw, err := os.ReadFile(wspath.ConfigPath(workspacesDir, workspace, project))
+	if err != nil {
+		return e
+	}
+	cfg, err := wsconfig.Parse(raw)
 	if err != nil {
 		return e
 	}
 	e.Ptype = cfg.ProjectType()
 	if e.Ptype == "image" {
+		// Image stacks: capture the configured images[].image:tag (project-level).
+		var ic struct {
+			Images []struct {
+				Name  string `json:"name"`
+				Image string `json:"image"`
+				Tag   string `json:"tag"`
+			} `json:"images"`
+		}
+		json.Unmarshal(raw, &ic) //nolint:errcheck
+		for _, im := range ic.Images {
+			ref := im.Image
+			if im.Tag != "" {
+				ref += ":" + im.Tag
+			}
+			key := im.Name
+			if key == "" {
+				key = im.Image
+			}
+			if ref != "" {
+				e.Images[key] = ref
+			}
+		}
 		return e
 	}
 	e.Version = cfg.VersionString()

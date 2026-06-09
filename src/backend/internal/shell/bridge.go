@@ -15,6 +15,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/builder"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/deployhistory"
 	"github.com/mansoor/rigger/ui/internal/dockerops"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
@@ -43,6 +44,7 @@ var allowedCommands = map[string]bool{
 	"build":   true,
 	"promote": true,
 	"test":    true, // Phase 9: sandboxed compose-exec inside a service container
+	"script":  true, // Phase 9: one-off tool container (Trivy/Cypress/Sonar/custom)
 }
 
 // Bridge executes workspace commands, locally or — when a workspace is
@@ -805,6 +807,62 @@ func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, ou
 	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, out)
 }
 
+// runScript runs a one-off tool container for a pipeline `script` stage, injecting
+// the env's context as RIGGER_* variables and streaming output. Runs on the env's
+// host (remote) or the local daemon. A non-zero exit fails the stage.
+func (b *Bridge) runScript(opts RunOptions, rt *remoteTarget) error {
+	if opts.ScriptImage == "" || strings.TrimSpace(opts.ScriptCommand) == "" {
+		return fmt.Errorf("script stage requires an image and a command")
+	}
+	stack := b.resourcePrefix(opts.Workspace, opts.Project) + "_" + opts.Env
+
+	ctx := []string{
+		"RIGGER_WORKSPACE=" + opts.Workspace,
+		"RIGGER_PROJECT=" + opts.Project,
+		"RIGGER_ENV=" + opts.Env,
+		"RIGGER_STACK=" + stack,
+	}
+	// App URL from config (domain → https; else the published HTTP port on localhost).
+	if cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, opts.Workspace, opts.Project)); err == nil {
+		ec := cfg.Environments[opts.Env]
+		if ec.Domain != "" {
+			ctx = append(ctx, "RIGGER_APP_URL=https://"+ec.Domain)
+		} else if p := string(ec.HTTPPort); p != "" {
+			ctx = append(ctx, "RIGGER_APP_URL=http://localhost:"+p)
+		}
+	}
+	// Resolved image refs (custom: version/override tags; image: configured tags).
+	refs := deployhistory.Resolve(b.workspacesDir, opts.Workspace, opts.Project, opts.Env).Images
+	if len(refs) > 0 {
+		all := make([]string, 0, len(refs))
+		for svc, ref := range refs {
+			all = append(all, ref)
+			ctx = append(ctx, "RIGGER_IMAGE_"+strings.ToUpper(svc)+"="+ref)
+		}
+		ctx = append(ctx, "RIGGER_IMAGES="+strings.Join(all, " "))
+	}
+
+	args := []string{"run", "--rm"}
+	if opts.ScriptNetwork {
+		args = append(args, "--network", stack+"_default")
+	}
+	for _, e := range ctx {
+		args = append(args, "-e", e)
+	}
+	args = append(args, opts.ScriptImage, "sh", "-c", opts.ScriptCommand)
+
+	fmt.Fprintf(opts.Stdout, "⚑ Running tool container %s\n", opts.ScriptImage)
+	var ex executor.Executor = executor.Local{}
+	if rt != nil {
+		ex = rt.exec
+	}
+	if err := ex.Docker(executor.Spec{Args: args, Env: shellEnv(), Stdout: opts.Stdout, Stderr: opts.Stderr}); err != nil {
+		return err
+	}
+	fmt.Fprintf(opts.Stdout, "✓ %s completed\n", opts.ScriptImage)
+	return nil
+}
+
 // RunOptions configures a command execution.
 type RunOptions struct {
 	Workspace string // parent tier
@@ -821,6 +879,12 @@ type RunOptions struct {
 	ScheduleID   string
 	ScheduleName string
 	Trigger      string // "scheduled" | "manual"
+
+	// Script-stage only (Phase 9 tool stage): run a one-off tool container with the
+	// env's context injected.
+	ScriptImage   string // tool container image (e.g. aquasec/trivy)
+	ScriptCommand string // command run via `sh -c`
+	ScriptNetwork bool   // attach to the env's compose network ({prefix}_{env}_default)
 }
 
 // shellEnv builds the environment for child processes.
@@ -918,6 +982,12 @@ func (b *Bridge) Run(opts RunOptions) error {
 	rt, err := b.resolveRemote(opts.Workspace, opts.Project, opts.Env)
 	if err != nil {
 		return err
+	}
+
+	// Phase 9 tool stage: run a one-off tool container (Trivy/Cypress/Sonar/custom)
+	// with the env's context injected as RIGGER_* variables.
+	if opts.Command == "script" {
+		return b.runScript(opts, rt)
 	}
 
 	// Phase 6.5 finish: init re-bootstraps an environment natively in Go.

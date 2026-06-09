@@ -133,6 +133,17 @@ func TestStageRunOptionsMapping(t *testing.T) {
 	}
 }
 
+func TestStageRunOptionsVersionScript(t *testing.T) {
+	v := StageRunOptions("mcl", "web", Stage{Type: "version", Part: "minor"})
+	if v.Command != "version" || v.Env != "bump" || strings.Join(v.Extra, ",") != "minor" {
+		t.Fatalf("version mapping: %+v", v)
+	}
+	s := StageRunOptions("mcl", "web", Stage{Type: "script", Env: "dev", Image: "aquasec/trivy", Command: "trivy image $RIGGER_IMAGES", Network: true})
+	if s.Command != "script" || s.ScriptImage != "aquasec/trivy" || !s.ScriptNetwork || s.ScriptCommand == "" || s.Env != "dev" {
+		t.Fatalf("script mapping: %+v", s)
+	}
+}
+
 // fakeBridge records the commands it was asked to run and can fail a chosen one.
 type fakeBridge struct {
 	calls    []string
