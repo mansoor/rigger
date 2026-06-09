@@ -876,13 +876,18 @@ function EnvVarsInline({ workspaceName, envName }) {
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {Object.entries(vars || {}).map(([k, v]) => {
                   const marked = deletes.has(k)
+                  // Values arrive as { value, secret } objects; tolerate a bare
+                  // string too. Secrets stay masked even when revealing values.
+                  const val    = typeof v === 'string' ? v : (v?.value ?? '')
+                  const secret = typeof v === 'object' && !!v?.secret
+                  const show   = reveal && !secret
                   return (
                     <div key={k} className={`flex items-center gap-2 ${marked ? 'opacity-40' : ''}`}>
                       <span className="font-mono text-xs text-content-muted w-36 shrink-0 truncate" title={k}>{k}</span>
                       <input
-                        type={reveal ? 'text' : 'password'}
-                        placeholder={reveal ? v : '••••••••'}
-                        value={marked ? '' : (edits[k] ?? (reveal ? v : ''))}
+                        type={show ? 'text' : 'password'}
+                        placeholder={show ? val : '••••••••'}
+                        value={marked ? '' : (edits[k] ?? (show ? val : ''))}
                         disabled={marked}
                         onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
                         className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
@@ -1080,7 +1085,14 @@ export default function EditProjectPage() {
         replicas: { backend: 1, frontend: 1 },
       })
     }
-    setEnvs(prev => ({ ...prev, [n]: { ...base, _id: `env-new-${newEnvCounter + 1}`, _initial_vars: { ...firstEnvVars } } }))
+    // firstEnvVars is the API shape { KEY: { value, secret } }; flatten it to the
+    // plain { KEY: value } map _initial_vars expects, and carry over secret flags.
+    const seedVars = {}, seedSecrets = []
+    for (const [k, v] of Object.entries(firstEnvVars)) {
+      seedVars[k] = typeof v === 'string' ? v : (v?.value ?? '')
+      if (typeof v === 'object' && v?.secret) seedSecrets.push(k)
+    }
+    setEnvs(prev => ({ ...prev, [n]: { ...base, _id: `env-new-${newEnvCounter + 1}`, _initial_vars: seedVars, _secret_keys: seedSecrets } }))
   }
 
   const originalEnvNames = rawConfig ? Object.keys(rawConfig.environments || {}) : []
