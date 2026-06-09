@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPipelines, createPipeline, updatePipeline, deletePipeline,
   fetchPipelineRuns, openPipelineSocket,
+  approvePipelineRun, rejectPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
 } from '../lib/api'
 
@@ -17,8 +18,9 @@ const STAGE_TYPES = [
   { value: 'restart', label: 'Restart' },
   { value: 'backup',  label: 'Backup' },
   { value: 'test',    label: 'Test — exec in container' },
+  { value: 'gate',    label: 'Gate — manual approval' },
 ]
-const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪' }
+const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', gate: '⏸️' }
 
 const blankStage = (env) => ({ type: 'deploy', env: env || '', service: '', command: '', on_failure: 'stop' })
 
@@ -100,6 +102,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
 }
 
 function stageSummary(s) {
+  if (s.type === 'gate') return 'gate'
   if (s.type === 'test') return `test ${s.service}`
   return `${s.type} ${s.env}`
 }
@@ -197,15 +200,25 @@ function Webhooks({ workspace, name, pipelineId }) {
 
 function statusChipCls(status) {
   if (status === 'ok') return 'bg-success-subtle text-success-fg border-success-border/60'
-  if (status === 'fail') return 'bg-danger-subtle text-danger-fg border-danger-border/60'
-  if (status === 'skipped') return 'bg-surface-raised text-content-faint border-border-strong'
-  return 'bg-warning-subtle text-warning-fg border-warning-border/60' // running
+  if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle text-danger-fg border-danger-border/60'
+  if (status === 'cancelled' || status === 'skipped') return 'bg-surface-raised text-content-faint border-border-strong'
+  return 'bg-warning-subtle text-warning-fg border-warning-border/60' // running | awaiting
 }
 
 function RunHistory({ workspace, name, pipelineId }) {
+  const qc = useQueryClient()
   const { data: runs = [], isLoading } = useQuery({
     queryKey: ['pipeline-runs', workspace, name, pipelineId],
     queryFn: () => fetchPipelineRuns(workspace, name, pipelineId, 20),
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : false,
+  })
+  const approveMut = useMutation({
+    mutationFn: (runId) => approvePipelineRun(workspace, name, pipelineId, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipelineId] }),
+  })
+  const rejectMut = useMutation({
+    mutationFn: (runId) => rejectPipelineRun(workspace, name, pipelineId, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipelineId] }),
   })
   if (isLoading) return <p className="mt-2 text-xs text-content-subtle">Loading…</p>
   if (runs.length === 0) return <p className="mt-2 text-xs text-content-subtle">No runs yet.</p>
@@ -216,6 +229,14 @@ function RunHistory({ workspace, name, pipelineId }) {
           <span className={`px-1.5 py-0.5 rounded border ${statusChipCls(r.status)}`}>{r.status}</span>
           <span className="text-content-subtle">{new Date(r.started_at).toLocaleString()}</span>
           <span className="text-content-faint">· {r.username || 'system'}</span>
+          {r.status === 'awaiting' && (
+            <span className="flex items-center gap-1.5 ml-2">
+              <button onClick={() => approveMut.mutate(r.id)} disabled={approveMut.isPending}
+                className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-40">Approve</button>
+              <button onClick={() => rejectMut.mutate(r.id)} disabled={rejectMut.isPending}
+                className="px-2 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/40">Reject</button>
+            </span>
+          )}
           <div className="flex flex-wrap gap-1 ml-auto">
             {r.stages.map((s, i) => (
               <span key={i} title={`${s.label} — ${s.status}`} className={`px-1 rounded border text-[10px] ${statusChipCls(s.status)}`}>
@@ -294,17 +315,23 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
         <select value={stage.type} onChange={e => onChange({ type: e.target.value })} className={inputCls}>
           {STAGE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
-        <select value={stage.env} onChange={e => onChange({ env: e.target.value })} className={inputCls}>
-          <option value="">— env —</option>
-          {envNames.map(e => <option key={e} value={e}>{e}</option>)}
-        </select>
-        {stage.type === 'backup' && (
-          <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (optional)" className={`${inputCls} w-36`} />
+        {stage.type === 'gate' ? (
+          <input value={stage.command} onChange={e => onChange({ command: e.target.value })} placeholder="approval note (optional)" className={`${inputCls} flex-1`} />
+        ) : (
+          <>
+            <select value={stage.env} onChange={e => onChange({ env: e.target.value })} className={inputCls}>
+              <option value="">— env —</option>
+              {envNames.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+            {stage.type === 'backup' && (
+              <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (optional)" className={`${inputCls} w-36`} />
+            )}
+            <select value={stage.on_failure} onChange={e => onChange({ on_failure: e.target.value })} className={inputCls} title="On failure">
+              <option value="stop">on fail: stop</option>
+              <option value="continue">on fail: continue</option>
+            </select>
+          </>
         )}
-        <select value={stage.on_failure} onChange={e => onChange({ on_failure: e.target.value })} className={inputCls} title="On failure">
-          <option value="stop">on fail: stop</option>
-          <option value="continue">on fail: continue</option>
-        </select>
         <div className="ml-auto flex items-center gap-1">
           <button onClick={() => onMove(-1)} disabled={idx === 0} className="text-xs px-1.5 py-1 rounded text-content-faint hover:text-content disabled:opacity-30">↑</button>
           <button onClick={() => onMove(1)} disabled={idx === count - 1} className="text-xs px-1.5 py-1 rounded text-content-faint hover:text-content disabled:opacity-30">↓</button>

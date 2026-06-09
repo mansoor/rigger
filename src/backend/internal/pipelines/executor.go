@@ -46,6 +46,11 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 
 func stageLabel(s Stage) string {
 	switch s.Type {
+	case "gate":
+		if s.Command != "" {
+			return "gate: " + s.Command
+		}
+		return "manual gate"
 	case "test":
 		return fmt.Sprintf("test %s: %s", s.Service, s.Command)
 	case "backup":
@@ -58,16 +63,38 @@ func stageLabel(s Stage) string {
 	}
 }
 
-// Execute runs a pipeline stage-by-stage, streaming all output to out, and returns
-// the per-stage results plus whether every (non-skipped) stage succeeded. A failed
-// stage with on_failure=stop halts the run and marks the remaining stages skipped.
-func Execute(bridge BridgeRunner, p Pipeline, out io.Writer) (results []StageResult, ok bool) {
-	results = []StageResult{}
-	ok = true
-	for i, s := range p.Stages {
-		label := stageLabel(s)
-		fmt.Fprintf(out, "\n\033[1;36m━━ Stage %d/%d: %s ━━\033[0m\n", i+1, len(p.Stages), label)
+// Outcome values returned by Execute.
+const (
+	OutcomeOK       = "ok"
+	OutcomeFail     = "fail"
+	OutcomeAwaiting = "awaiting" // paused at a manual gate; resume with Execute(startIdx)
+)
 
+// Execute runs a pipeline's stages from startIdx, streaming output to out, and
+// returns the per-stage results for the segment plus an outcome:
+//   - "ok"       — all stages in the segment succeeded
+//   - "fail"     — a stage failed with on_failure=stop (remaining marked skipped)
+//   - "awaiting" — hit a manual `gate` stage; the gate is recorded as the last
+//     result with status "awaiting". Resume by calling Execute again with
+//     startIdx = (previous accumulated stage count).
+//
+// startIdx is 0 for a fresh run; for a resume it is the number of stages already
+// recorded (so the gate slot is consumed and execution continues after it).
+func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int) (results []StageResult, outcome string) {
+	results = []StageResult{}
+	outcome = OutcomeOK
+	for i := startIdx; i < len(p.Stages); i++ {
+		s := p.Stages[i]
+		label := stageLabel(s)
+
+		// Manual gate: pause here. Record it as awaiting and stop the segment.
+		if s.Type == "gate" {
+			fmt.Fprintf(out, "\n\033[1;33m⏸ Stage %d/%d: %s — awaiting approval\033[0m\n", i+1, len(p.Stages), label)
+			results = append(results, StageResult{Type: "gate", Label: label, Status: OutcomeAwaiting})
+			return results, OutcomeAwaiting
+		}
+
+		fmt.Fprintf(out, "\n\033[1;36m━━ Stage %d/%d: %s ━━\033[0m\n", i+1, len(p.Stages), label)
 		cap := &capWriter{cap: maxOutputBytes}
 		mw := io.MultiWriter(out, cap)
 		opts := StageRunOptions(p.Workspace, p.Project, s)
@@ -83,7 +110,7 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer) (results []StageRes
 			res.Status = "fail"
 			res.Output = cap.String()
 			results = append(results, res)
-			ok = false
+			outcome = OutcomeFail
 			if s.OnFailure != "continue" {
 				for j := i + 1; j < len(p.Stages); j++ {
 					sk := p.Stages[j]
@@ -92,7 +119,7 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer) (results []StageRes
 					})
 				}
 				fmt.Fprintf(out, "\n\033[33m■ Pipeline halted after stage %d (on_failure=stop).\033[0m\n", i+1)
-				return results, false
+				return results, OutcomeFail
 			}
 			continue
 		}
@@ -102,7 +129,7 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer) (results []StageRes
 		res.Output = cap.String()
 		results = append(results, res)
 	}
-	return results, ok
+	return results, outcome
 }
 
 // capWriter captures written bytes for the recorded history, bounded to ~cap bytes

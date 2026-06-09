@@ -234,14 +234,17 @@ func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	ok := h.executePipelineRun(p, "manual", claims.Username, pw)
+	outcome := h.executePipelineRun(p, "manual", claims.Username, pw)
 	pw.Close()
 	<-done
 
 	var marker bytes.Buffer
-	if ok {
+	switch outcome {
+	case pipelines.OutcomeOK:
 		marker.WriteString("\n\033[32m✓ Pipeline \"" + p.Name + "\" completed successfully.\033[0m\n")
-	} else {
+	case pipelines.OutcomeAwaiting:
+		marker.WriteString("\n\033[33m⏸ Pipeline \"" + p.Name + "\" is awaiting approval — approve it from the run history to continue.\033[0m\n")
+	default:
 		marker.WriteString("\n\033[31m✗ Pipeline \"" + p.Name + "\" failed.\033[0m\n")
 	}
 	conn.WriteMessage(websocket.TextMessage, marker.Bytes()) //nolint:errcheck
@@ -353,28 +356,112 @@ func (h *Handler) InboundWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "triggered", "pipeline": p.Name})
 }
 
-// executePipelineRun creates a run record, executes the pipeline (streaming live
-// output to out), finalizes the record, and invalidates image caches for any
-// update/deploy stage. Shared by the interactive WS run and webhook-triggered
-// background runs. Returns whether every stage succeeded.
-func (h *Handler) executePipelineRun(p *pipelines.Pipeline, trigger, username string, out io.Writer) bool {
+// executePipelineRun creates a run record, executes the pipeline from the start
+// (streaming live output to out), finalizes the record, and invalidates image
+// caches for any update/deploy stage. Shared by the interactive WS run and
+// webhook-triggered background runs. Returns the outcome (ok|fail|awaiting).
+func (h *Handler) executePipelineRun(p *pipelines.Pipeline, trigger, username string, out io.Writer) string {
 	runID, _ := pipelines.CreateRun(h.db, pipelines.Run{
 		PipelineID: p.ID, Workspace: p.Workspace, Project: p.Project, Trigger: trigger,
 		Username: username, Status: "running", StartedAt: time.Now().UnixMilli(),
 	})
-	results, ok := pipelines.Execute(h.bridge, *p, out)
-	status := "ok"
-	if !ok {
-		status = "fail"
+	results, outcome := pipelines.Execute(h.bridge, *p, out, 0)
+	h.finalizeRun(runID, p, results, outcome)
+	return outcome
+}
+
+// finalizeRun persists a run's outcome (finish time left NULL while awaiting) and
+// invalidates image caches for deploy/update stages.
+func (h *Handler) finalizeRun(runID int64, p *pipelines.Pipeline, stages []pipelines.StageResult, outcome string) {
+	finished := time.Now().UnixMilli()
+	if outcome == pipelines.OutcomeAwaiting {
+		finished = 0
 	}
 	pipelines.UpdateRun(h.db, pipelines.Run{ //nolint:errcheck
-		ID: runID, PipelineID: p.ID, Status: status, Stages: results,
-		FinishedAt: time.Now().UnixMilli(),
+		ID: runID, PipelineID: p.ID, Status: outcome, Stages: stages, FinishedAt: finished,
 	})
 	for _, s := range p.Stages {
 		if s.Type == "update" || s.Type == "deploy" {
 			h.imgCache.Invalidate(p.Workspace, p.Project, s.Env)
 		}
 	}
-	return ok
+}
+
+// resumePipelineRun continues an awaiting run after gate approval: it flips the
+// trailing awaiting gate to ok and executes the remaining stages in the
+// background. Runs to completion (or the next gate).
+func (h *Handler) resumePipelineRun(run *pipelines.Run, p *pipelines.Pipeline) {
+	if n := len(run.Stages); n > 0 && run.Stages[n-1].Status == pipelines.OutcomeAwaiting {
+		run.Stages[n-1].Status = "ok"
+	}
+	newRes, outcome := pipelines.Execute(h.bridge, *p, io.Discard, len(run.Stages))
+	all := append(run.Stages, newRes...)
+	h.finalizeRun(run.ID, p, all, outcome)
+}
+
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve
+func (h *Handler) ApprovePipelineRun(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	p, run, ok := h.awaitingRun(w, r, ws, name)
+	if !ok {
+		return
+	}
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec( //nolint:errcheck
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+			claims.UserID, claims.Username, h.resourcePrefix(ws, name), "pipeline-approve:"+p.Name, "",
+		)
+	}
+	go h.resumePipelineRun(run, p)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "resumed"})
+}
+
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject
+func (h *Handler) RejectPipelineRun(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	p, run, ok := h.awaitingRun(w, r, ws, name)
+	if !ok {
+		return
+	}
+	// Flip the gate to rejected and mark the remaining stages skipped.
+	if n := len(run.Stages); n > 0 && run.Stages[n-1].Status == pipelines.OutcomeAwaiting {
+		run.Stages[n-1].Status = "rejected"
+	}
+	for i := len(run.Stages); i < len(p.Stages); i++ {
+		s := p.Stages[i]
+		run.Stages = append(run.Stages, pipelines.StageResult{Type: s.Type, Env: s.Env, Status: "skipped"})
+	}
+	pipelines.UpdateRun(h.db, pipelines.Run{ //nolint:errcheck
+		ID: run.ID, PipelineID: p.ID, Status: "cancelled", Stages: run.Stages, FinishedAt: time.Now().UnixMilli(),
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// awaitingRun loads the pipeline + run for an approve/reject, validating ownership
+// and that the run is actually awaiting approval.
+func (h *Handler) awaitingRun(w http.ResponseWriter, r *http.Request, ws, name string) (*pipelines.Pipeline, *pipelines.Run, bool) {
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
+		return nil, nil, false
+	}
+	p, _ := pipelines.Get(h.db, id)
+	runID, _ := strconv.ParseInt(r.PathValue("runId"), 10, 64)
+	run, err := pipelines.GetRun(h.db, runID)
+	if err != nil || run == nil || run.PipelineID != id {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return nil, nil, false
+	}
+	if run.Status != pipelines.OutcomeAwaiting {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not awaiting approval"})
+		return nil, nil, false
+	}
+	return p, run, true
 }

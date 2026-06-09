@@ -158,9 +158,9 @@ func TestRunHaltsOnFailure(t *testing.T) {
 		{Type: "restart", Env: "dev", OnFailure: "stop"},
 	}}
 	fb := &fakeBridge{failOn: "test"}
-	results, ok := Execute(fb, p, io.Discard)
-	if ok {
-		t.Fatal("expected overall failure")
+	results, outcome := Execute(fb, p, io.Discard, 0)
+	if outcome != OutcomeFail {
+		t.Fatalf("expected fail outcome, got %q", outcome)
 	}
 	if len(results) != 3 {
 		t.Fatalf("expected 3 stage results (incl skipped), got %d", len(results))
@@ -182,12 +182,42 @@ func TestRunContinueOnFailure(t *testing.T) {
 		{Type: "restart", Env: "dev", OnFailure: "stop"},
 	}}
 	fb := &fakeBridge{failOn: "test"}
-	results, ok := Execute(fb, p, io.Discard)
-	if ok {
-		t.Fatal("expected overall failure (one stage failed)")
+	results, outcome := Execute(fb, p, io.Discard, 0)
+	if outcome != OutcomeFail {
+		t.Fatalf("expected fail outcome (one stage failed), got %q", outcome)
 	}
 	if results[0].Status != "fail" || results[1].Status != "ok" {
 		t.Fatalf("expected fail then ok, got %s/%s", results[0].Status, results[1].Status)
+	}
+}
+
+func TestRunGatePauseResume(t *testing.T) {
+	p := Pipeline{Workspace: "mcl", Project: "web", Name: "x", Stages: []Stage{
+		{Type: "deploy", Env: "stage", OnFailure: "stop"},
+		{Type: "gate", Command: "approve for prod"},
+		{Type: "deploy", Env: "prod", OnFailure: "stop"},
+	}}
+	fb := &fakeBridge{}
+
+	// First segment: runs deploy stage, then pauses at the gate.
+	seg1, outcome := Execute(fb, p, io.Discard, 0)
+	if outcome != OutcomeAwaiting {
+		t.Fatalf("expected awaiting, got %q", outcome)
+	}
+	if len(seg1) != 2 || seg1[0].Status != "ok" || seg1[1].Status != OutcomeAwaiting {
+		t.Fatalf("unexpected segment 1: %+v", seg1)
+	}
+	if len(fb.calls) != 1 { // only the stage deploy ran; prod deploy must not
+		t.Fatalf("expected 1 call before gate, got %v", fb.calls)
+	}
+
+	// Resume after approval: continue from index len(seg1) = 2.
+	seg2, outcome2 := Execute(fb, p, io.Discard, len(seg1))
+	if outcome2 != OutcomeOK {
+		t.Fatalf("expected ok after resume, got %q", outcome2)
+	}
+	if len(seg2) != 1 || seg2[0].Env != "prod" || seg2[0].Status != "ok" {
+		t.Fatalf("unexpected segment 2: %+v", seg2)
 	}
 }
 

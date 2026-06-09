@@ -26,6 +26,7 @@ const (
 var stageTypes = map[string]bool{
 	"deploy": true, "update": true, "build": true,
 	"restart": true, "backup": true, "test": true,
+	"gate": true, // manual approval pause (9d) — no env
 }
 
 // Stage is one step of a pipeline definition.
@@ -86,7 +87,8 @@ func (p *Pipeline) Validate() error {
 		if !stageTypes[s.Type] {
 			return fmt.Errorf("stage %d: unknown type %q", i+1, s.Type)
 		}
-		if strings.TrimSpace(s.Env) == "" {
+		// A gate is a manual approval pause — it targets no environment.
+		if s.Type != "gate" && strings.TrimSpace(s.Env) == "" {
 			return fmt.Errorf("stage %d (%s): an environment is required", i+1, s.Type)
 		}
 		if s.Type == "test" {

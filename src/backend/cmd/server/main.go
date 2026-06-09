@@ -772,6 +772,8 @@ func main() {
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipeline)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineRuns)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve", authSvc.Middleware(http.HandlerFunc(handler.ApprovePipelineRun)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject", authSvc.Middleware(http.HandlerFunc(handler.RejectPipelineRun)))
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
 		handler.RunPipeline(w, r)
 	})
