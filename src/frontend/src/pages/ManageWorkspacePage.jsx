@@ -7,6 +7,7 @@ import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
 import AccessRequestsInbox from '../components/AccessRequestsInbox'
+import VerticalTabs from '../components/VerticalTabs'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -20,15 +21,17 @@ import {
 import { useWorkspaceStore } from '../store/workspace'
 
 const TABS = [
-  { id: 'general',        label: 'General' },
-  { id: 'members',        label: 'Members' },
-  { id: 'access-requests', label: 'Access Requests' },
-  { id: 'hosts',          label: 'Remote Hosts' },
-  { id: 'registries',     label: 'Docker Registries' },
-  { id: 'backup-targets', label: 'Backup Targets' },
-  { id: 'notifications',  label: 'Notifications' },
-  { id: 'alerts',         label: 'Alert Rules' },
-  { id: 'danger',         label: 'Danger Zone' },
+  { id: 'general',        label: 'General',          icon: '⚙' },
+  { id: 'members',        label: 'Members',          icon: '👥' },
+  { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
+  { group: 'Shared resources' },
+  { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
+  { id: 'registries',     label: 'Docker Registries', icon: '📦' },
+  { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
+  { id: 'notifications',  label: 'Notifications',    icon: '📣' },
+  { id: 'alerts',         label: 'Alert Rules',      icon: '🚨' },
+  { group: 'Workspace' },
+  { id: 'danger',         label: 'Danger Zone',      icon: '⚠', danger: true },
 ]
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/
@@ -49,7 +52,7 @@ export default function ManageWorkspacePage() {
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-6">
           <p className="text-xs font-medium uppercase tracking-wider text-content-subtle">Manage workspace</p>
           <div className="flex items-center gap-2.5 mt-0.5">
@@ -59,37 +62,24 @@ export default function ManageWorkspacePage() {
           <p className="text-sm text-content-muted mt-1">{projects.length} project{projects.length !== 1 ? 's' : ''}</p>
         </div>
 
-        <div className="flex gap-1 border-b border-border mb-6">
-          {TABS.map(t => (
-            <button
-              key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                tab === t.id
-                  ? (t.id === 'danger' ? 'border-danger text-danger-fg' : 'border-brand-500 text-brand-400')
-                  : 'border-transparent text-content-subtle hover:text-content'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'general' && (
-          <div className="space-y-8">
-            <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
-            <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
-            <WorkspaceDefaults workspace={workspace} qc={qc} />
-            <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
-          </div>
-        )}
-        {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
-        {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
-        {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
-        {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
-        {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
-        {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
-        {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
-        {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
+        <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
+          {tab === 'general' && (
+            <div className="space-y-8">
+              <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
+              <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
+              <WorkspaceDefaults workspace={workspace} qc={qc} />
+              <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
+            </div>
+          )}
+          {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
+          {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
+          {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
+          {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
+          {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
+          {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
+          {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
+          {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
+        </VerticalTabs>
       </div>
     </Layout>
   )

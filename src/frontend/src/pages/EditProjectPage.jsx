@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
+import VerticalTabs from '../components/VerticalTabs'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -1126,7 +1127,7 @@ export default function EditProjectPage() {
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -1163,35 +1164,20 @@ export default function EditProjectPage() {
           <div className="mb-5 px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">{saveError}</div>
         )}
 
-        {/* Tab bar (Prototype A — combined view per tab) */}
-        {(() => {
-          const isImage = project?.type === 'image'
-          const tabDefs = [
-            { id: 'project', label: 'Project' },
-            ...(isImage ? [{ id: 'services', label: `Services`, badge: (images || []).length }] : []),
-            { id: 'envs', label: 'Environments', badge: currentEnvNames.length },
-            { id: 'host', label: 'Host' },
-            { id: 'backup', label: 'Backup' },
-            { id: 'danger', label: 'Danger Zone', danger: true },
-          ]
-          return (
-            <div className="flex gap-1 border-b border-border mb-6 overflow-x-auto">
-              {tabDefs.map(t => (
-                <button
-                  key={t.id} onClick={() => setTab(t.id)}
-                  className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
-                    tab === t.id
-                      ? (t.danger ? 'border-danger text-danger-fg' : 'border-brand-500 text-brand-400')
-                      : 'border-transparent text-content-subtle hover:text-content'
-                  }`}
-                >
-                  {t.label}
-                  {t.badge != null && <span className={`ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[11px] rounded-full ${tab === t.id ? 'bg-brand-500 text-white' : 'bg-surface-raised text-content-muted'}`}>{t.badge}</span>}
-                </button>
-              ))}
-            </div>
-          )
-        })()}
+        {/* Vertical tab rail (Prototype A — combined view per tab) */}
+        <VerticalTabs
+          tabs={[
+            { id: 'project', label: 'Project', icon: '📋' },
+            ...(project?.type === 'image' ? [{ id: 'services', label: 'Services', icon: '🧱', count: (images || []).length }] : []),
+            { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
+            { id: 'host', label: 'Host', icon: '🖥' },
+            { id: 'backup', label: 'Backup', icon: '💾' },
+            { group: 'Project' },
+            { id: 'danger', label: 'Danger Zone', icon: '⚠', danger: true },
+          ]}
+          active={tab}
+          onChange={setTab}
+        >
 
         {/* Project settings */}
         {tab === 'project' && (
@@ -1324,6 +1310,7 @@ export default function EditProjectPage() {
 
         {/* Danger zone */}
         {tab === 'danger' && <DangerZone name={name} />}
+        </VerticalTabs>
       </div>
 
       {/* Discard-changes confirmation */}
