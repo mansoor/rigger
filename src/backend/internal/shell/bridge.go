@@ -42,6 +42,7 @@ var allowedCommands = map[string]bool{
 	"version": true,
 	"build":   true,
 	"promote": true,
+	"test":    true, // Phase 9: sandboxed compose-exec inside a service container
 }
 
 // Bridge executes workspace commands, locally or — when a workspace is

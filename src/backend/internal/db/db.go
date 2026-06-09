@@ -358,6 +358,39 @@ func (d *DB) migrate() error {
 			private_key_encrypted TEXT    NOT NULL,
 			created_at            DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
+
+		-- Phase 9: deployment pipelines. A pipeline is an ordered list of stages
+		-- (JSON), project-scoped by (workspace, project) keys. Each stage maps to an
+		-- existing bridge command (deploy/build/push/restart/backup) or a sandboxed
+		-- 'test' (compose exec inside a service container).
+		CREATE TABLE IF NOT EXISTS pipelines (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace   TEXT    NOT NULL,
+			project     TEXT    NOT NULL,
+			name        TEXT    NOT NULL,
+			stages      TEXT    NOT NULL DEFAULT '[]',
+			enabled     INTEGER NOT NULL DEFAULT 1,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_pipelines_name ON pipelines(workspace, project, name);
+
+		-- One execution of a pipeline. stages holds the per-stage result JSON
+		-- (type, env, status, capped output, duration); pruned to the most recent
+		-- runs per pipeline.
+		CREATE TABLE IF NOT EXISTS pipeline_runs (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			pipeline_id  INTEGER NOT NULL,
+			workspace    TEXT    NOT NULL,
+			project      TEXT    NOT NULL,
+			trigger      TEXT    NOT NULL DEFAULT 'manual',
+			username     TEXT    NOT NULL DEFAULT '',
+			status       TEXT    NOT NULL,
+			stages       TEXT    NOT NULL DEFAULT '[]',
+			started_at   INTEGER NOT NULL,
+			finished_at  INTEGER
+		);
+		CREATE INDEX IF NOT EXISTS idx_pipeline_runs_pipe ON pipeline_runs(pipeline_id, started_at);
 	`)
 	if err != nil {
 		return err

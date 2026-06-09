@@ -763,6 +763,19 @@ func main() {
 		handler.RunAction(w, r)
 	})
 
+	// Phase 9: deployment pipelines (project-scoped). REST CRUD + run history are
+	// JWT-authed via middleware (per-project RBAC enforced in the handlers); the run
+	// endpoint is a WebSocket authed by a token in its first message (like /action).
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.ListPipelines)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.CreatePipeline)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.UpdatePipeline)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipeline)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineRuns)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
+	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
+		handler.RunPipeline(w, r)
+	})
+
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {
 		handler.Terminal(w, r)

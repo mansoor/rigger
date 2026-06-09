@@ -30,6 +30,7 @@ var deployCommands = map[string]bool{
 	"ps":      true,
 	"logs":    true,
 	"refresh": true,
+	"test":    true, // Phase 9: `compose exec` inside a service container
 }
 
 // Handles reports whether dockerops owns a command (for compose deployments).
@@ -172,6 +173,8 @@ func Run(opts Options) (bool, error) {
 		return true, r.logs()
 	case "refresh":
 		return true, r.refresh()
+	case "test":
+		return true, r.test()
 	}
 	return false, nil
 }
@@ -357,6 +360,27 @@ func (r *runner) refresh() error {
 		return err
 	}
 	return r.up()
+}
+
+// test runs a command inside a running service container via `compose exec`
+// (Phase 9 pipeline `test` stage). Extra[0] is the service, Extra[1] the command.
+// The command is run through `sh -c` so a single string can be a full shell
+// expression; -T disables the TTY so output streams cleanly to the writers.
+func (r *runner) test() error {
+	svc := r.firstExtra()
+	cmd := ""
+	if len(r.opts.Extra) > 1 {
+		cmd = r.opts.Extra[1]
+	}
+	if svc == "" || strings.TrimSpace(cmd) == "" {
+		return fmt.Errorf("test stage requires a service and a command")
+	}
+	r.info("Testing '%s' — exec in %s: %s", r.stack, svc, cmd)
+	if err := r.compose("exec", "-T", r.resolveSvc(svc), "sh", "-c", cmd); err != nil {
+		return err
+	}
+	r.success("Test passed")
+	return nil
 }
 
 // writeFile writes compose content, creating the parent dir if needed.
