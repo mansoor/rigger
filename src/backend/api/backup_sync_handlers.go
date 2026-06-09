@@ -391,6 +391,7 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 		Sync       *syncState `json:"sync,omitempty"`
 	}
 
+	wsFilter := r.URL.Query().Get("workspace")
 	syncStates := h.backupSyncStates()
 	var rows []row
 	wsEntries, _ := os.ReadDir(h.workspacesDir)
@@ -399,6 +400,9 @@ func (h *Handler) GetBackupCoverage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		ws := we.Name()
+		if wsFilter != "" && ws != wsFilter {
+			continue
+		}
 		projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, ws))
 		if perr != nil {
 			continue

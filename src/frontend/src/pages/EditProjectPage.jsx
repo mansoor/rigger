@@ -552,6 +552,74 @@ function SwarmSettings({ cfg, onChange, projectType, imageNames = [] }) {
   )
 }
 
+// ProcessesSettings edits the custom-app extra processes (queue workers,
+// scheduler, job processors). Each reuses the built backend (or frontend) image
+// with a custom command — no ports, not web-routed. Replicas show only on swarm
+// (matching the backend/frontend replica behaviour). cfg here is one env.
+function ProcessesSettings({ cfg, onChange }) {
+  const procs = cfg.processes || []
+  const swarm = cfg.deployment === 'swarm'
+  const frontendEnabled = cfg.frontend && cfg.frontend !== 'none'
+  const sourceOpts = [
+    { value: 'backend', label: 'backend image' },
+    ...(frontendEnabled ? [{ value: 'frontend', label: 'frontend image' }] : []),
+  ]
+  const setProcs = (next) => onChange({ ...cfg, processes: next })
+  const updProc = (i, patch) => setProcs(procs.map((p, idx) => idx === i ? { ...p, ...patch } : p))
+  const addProc = (preset) => setProcs([...procs, { name: '', command: '', source: 'backend', ...preset }])
+  const removeProc = (i) => setProcs(procs.filter((_, idx) => idx !== i))
+
+  // Backend-aware quick-add presets for the common worker/scheduler cases.
+  const presets = cfg.backend === 'nodejs'
+    ? [{ label: '+ worker', value: { name: 'worker', command: 'node worker.js' } }]
+    : [
+        { label: '+ queue worker', value: { name: 'queue', command: 'php artisan queue:work --tries=3' } },
+        { label: '+ scheduler', value: { name: 'scheduler', command: 'php artisan schedule:work' } },
+      ]
+
+  const names = procs.map(p => (p.name || '').trim())
+  const dup = (i) => names[i] && names.indexOf(names[i]) !== i
+
+  return (
+    <div className="space-y-3 pt-3 border-t border-border-strong/50">
+      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider flex items-center gap-2">
+        ⚙ Workers / processes <span className="text-content-faint normal-case font-normal tracking-normal">extra containers from your app image</span>
+      </p>
+
+      {procs.length === 0 && (
+        <p className="text-xs text-content-subtle">
+          No extra processes. Add a queue worker, scheduler, or job processor — each runs your built image with a different command (no web port).
+        </p>
+      )}
+
+      {procs.map((p, i) => (
+        <div key={i} className={`grid ${swarm ? 'grid-cols-[130px_1fr_120px_70px_28px]' : 'grid-cols-[130px_1fr_120px_28px]'} gap-2 items-center`}>
+          <Input value={p.name || ''} onChange={v => updProc(i, { name: v })} placeholder="name" />
+          <Input value={p.command || ''} onChange={v => updProc(i, { command: v })} placeholder="command, e.g. php artisan queue:work" />
+          <Select value={p.source || 'backend'} onChange={v => updProc(i, { source: v })} options={sourceOpts} />
+          {swarm && <Input type="number" value={p.replicas ?? 1} onChange={v => updProc(i, { replicas: v })} title="replicas" />}
+          <button type="button" onClick={() => removeProc(i)} title="Remove process"
+            className="text-content-faint hover:text-danger-fg text-sm">✕</button>
+        </div>
+      ))}
+      {procs.some((_, i) => dup(i)) && <p className="text-[11px] text-danger-fg">Process names must be unique.</p>}
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {presets.map(pr => (
+          <button key={pr.label} type="button" onClick={() => addProc(pr.value)}
+            className="text-xs px-2 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
+            {pr.label}
+          </button>
+        ))}
+        <button type="button" onClick={() => addProc()}
+          className="text-xs px-2 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
+          + custom
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [] }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -715,6 +783,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
       {cfg.deployment === 'swarm' && (
         <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames} />
+      )}
+
+      {/* Workers / processes — custom apps only (image stacks add extra services as images). */}
+      {projectType !== 'image' && (
+        <ProcessesSettings cfg={cfg} onChange={onChange} />
       )}
 
       {/* Git */}

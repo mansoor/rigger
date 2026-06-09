@@ -58,6 +58,10 @@ type Env struct {
 	SSLEnabled       bool                       `json:"ssl_enabled"`
 	Deployment       string                     `json:"deployment"`
 	Replicas         Replicas                   `json:"replicas"`
+	// Processes are extra long-running containers for custom apps (queue workers,
+	// scheduler, job processors) that reuse a built image with a custom command.
+	// Empty ⇒ no extra services, so existing configs/output are unchanged.
+	Processes        []Process                  `json:"processes,omitempty"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides"`
 	// Swarm holds per-env Docker Swarm scheduling: env-level rolling-update/restart
 	// policy plus per-service replicas/placement overrides. Only consulted for swarm
@@ -72,6 +76,16 @@ type Env struct {
 type Replicas struct {
 	Backend  flexStr `json:"backend"`
 	Frontend flexStr `json:"frontend"`
+}
+
+// Process is an extra long-running container that reuses a built image (the
+// backend or frontend) with a custom command — e.g. a queue worker, scheduler,
+// or job processor. It has no published ports and is not web-routed.
+type Process struct {
+	Name     string  `json:"name"`               // dns-safe; unique within the env
+	Command  string  `json:"command"`            // e.g. "php artisan queue:work --tries=3"
+	Source   string  `json:"source,omitempty"`   // "backend" (default) | "frontend"
+	Replicas flexStr `json:"replicas,omitempty"` // swarm only (mirrors backend/frontend today)
 }
 
 // SwarmConfig is the per-env Docker Swarm deploy tuning. Empty fields fall back to

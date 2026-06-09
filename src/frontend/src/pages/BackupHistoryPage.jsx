@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchBackups, syncEnvBackup } from '../lib/api'
 import Layout from '../components/Layout'
+import { useWorkspaceStore } from '../store/workspace'
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -89,9 +90,10 @@ function SnapshotRow({ snap, isOpen, onToggle }) {
 }
 
 export default function BackupHistoryPage() {
+  const current = useWorkspaceStore(s => s.current)
   const { data: backups, isLoading } = useQuery({
-    queryKey: ['backups'],
-    queryFn: fetchBackups,
+    queryKey: ['backups', current],
+    queryFn: () => fetchBackups(current),
   })
 
   const [expanded, setExpanded] = useState(null)
@@ -114,7 +116,9 @@ export default function BackupHistoryPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-content-strong">Backup history</h1>
-            <p className="text-sm text-content-muted mt-0.5">All snapshots across every workspace and environment</p>
+            <p className="text-sm text-content-muted mt-0.5">
+              {current ? `Snapshots in this workspace, across every environment` : 'All snapshots across every workspace and environment'}
+            </p>
           </div>
           <input
             type="text"

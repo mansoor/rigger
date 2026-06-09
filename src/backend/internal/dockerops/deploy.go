@@ -278,21 +278,38 @@ func (r *runner) down() error {
 
 func (r *runner) restart() error {
 	svc := r.firstExtra()
-	if svc == "" {
-		r.info("Restarting all services in '%s'", r.stack)
-	} else {
-		r.info("Restarting %s in '%s'", svc, r.stack)
-	}
-	// up -d --remove-orphans (not `restart`) so it works whether containers are
-	// running or were previously removed with `down`.
-	args := []string{"up", "-d", "--remove-orphans"}
+	var target []string
 	if svc != "" {
-		args = append(args, r.resolveSvc(svc))
+		target = []string{r.resolveSvc(svc)}
+		r.info("Restarting %s in '%s'", svc, r.stack)
+	} else {
+		r.info("Restarting all services in '%s'", r.stack)
 	}
-	if err := r.compose(args...); err != nil {
+	// Prefer a real `compose restart`, which bounces the running containers in
+	// place (what "Restart" promises). But `restart` is a no-op when nothing is
+	// running — e.g. the target was previously `down`ed or stopped — so in that
+	// case fall back to `up -d` to (re)create it, matching the old behaviour.
+	running := false
+	if out, err := r.composeOutput(append([]string{"ps", "--status", "running", "--quiet"}, target...)...); err == nil {
+		running = len(bytes.TrimSpace(out)) > 0
+	}
+	if running {
+		if err := r.compose(append([]string{"restart"}, target...)...); err != nil {
+			return err
+		}
+		r.success("Restart complete")
+		return nil
+	}
+	r.info("Nothing running — bringing it up instead")
+	up := []string{"up", "-d"}
+	if svc == "" {
+		up = append(up, "--remove-orphans")
+	}
+	up = append(up, target...)
+	if err := r.compose(up...); err != nil {
 		return err
 	}
-	r.success("Restart complete")
+	r.success("Started (was not running)")
 	return nil
 }
 

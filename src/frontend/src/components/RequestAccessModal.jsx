@@ -1,13 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchAccessTargets, createAccessRequest, fetchMyAccessRequests } from '../lib/api'
-
-const ROLES = [
-  { value: 'viewer',    label: 'Viewer — read-only' },
-  { value: 'developer', label: 'Developer — operate environments' },
-  { value: 'operator',  label: 'Operator — developer + edit project config' },
-  { value: 'admin',     label: 'Admin — manage the workspace' },
-]
+import { wsRoleOptions } from '../lib/roles'
+import RoleHelp from './RoleHelp'
 
 const STATUS_BADGE = {
   pending:  'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
@@ -75,11 +70,12 @@ export default function RequestAccessModal({ onClose }) {
               </select>
             </div>
           )}
-          <div>
+          <div className="space-y-2">
             <label className={lbl}>Role requested</label>
             <select value={role} onChange={e => setRole(e.target.value)} className={inp}>
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {wsRoleOptions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
+            <RoleHelp scope="workspace" />
           </div>
           <div>
             <label className={lbl}>Message <span className="font-normal normal-case text-content-faint">(optional)</span></label>

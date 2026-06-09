@@ -372,6 +372,7 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	wsFilter := r.URL.Query().Get("workspace")
 	syncStates := h.archiveSyncStates()
 	var archives []ArchiveInfo
 	for _, e := range entries {
@@ -394,6 +395,9 @@ func (h *Handler) ListWorkspaceArchives(w http.ResponseWriter, r *http.Request) 
 			ai.Project = m.Project
 		} else {
 			ai.Workspace = wsNameFromArchive(e.Name())
+		}
+		if wsFilter != "" && ai.Workspace != wsFilter {
+			continue
 		}
 		if st, ok := syncStates[e.Name()]; ok {
 			s := st

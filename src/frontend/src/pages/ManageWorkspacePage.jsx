@@ -8,6 +8,7 @@ import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
 import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import VerticalTabs from '../components/VerticalTabs'
+import RoleHelp from '../components/RoleHelp'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -19,6 +20,7 @@ import {
   fetchMemberCandidates, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
+import { WS_ROLES, wsRoleOptions } from '../lib/roles'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -236,18 +238,10 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
   )
 }
 
-const MEMBER_ROLES = [
-  { value: 'viewer',    label: 'Viewer — read-only' },
-  { value: 'developer', label: 'Developer — operate environments' },
-  { value: 'operator',  label: 'Operator — developer + edit project config' },
-  { value: 'admin',     label: 'Admin — manage the workspace' },
-]
+const MEMBER_ROLES = wsRoleOptions
 const OVERRIDE_ROLES = [
-  { value: 'none',      label: 'No access' },
-  { value: 'viewer',    label: 'Viewer' },
-  { value: 'developer', label: 'Developer' },
-  { value: 'operator',  label: 'Operator' },
-  { value: 'admin',     label: 'Admin' },
+  { value: 'none', label: 'No access' },
+  ...WS_ROLES.map(r => ({ value: r.value, label: r.label })),
 ]
 
 // MembersSection — workspace membership + per-project overrides (Phase 5.2a).
@@ -300,6 +294,8 @@ function MembersSection({ workspace, projects, qc }) {
           className="px-3 py-1.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Add</button>
         {addable.length === 0 && <span className="text-xs text-content-faint">All users are already members or global admins. Invite more from Admin → Users.</span>}
       </div>
+
+      <RoleHelp scope="workspace" className="mb-4" />
 
       <div className="bg-surface border border-border rounded-xl">
         {members.length === 0 ? (

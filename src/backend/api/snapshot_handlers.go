@@ -320,6 +320,7 @@ func uniqueSnapshotName(dataDir, name string) string {
 
 // GET /api/tools/workspace-snapshots
 func (h *Handler) ListWorkspaceSnapshots(w http.ResponseWriter, r *http.Request) {
+	wsFilter := r.URL.Query().Get("workspace")
 	entries, err := os.ReadDir(snapshotsDir(h.dataDir))
 	out := []SnapshotInfo{}
 	if err != nil {
@@ -340,6 +341,9 @@ func (h *Handler) ListWorkspaceSnapshots(w http.ResponseWriter, r *http.Request)
 			if !meta.CreatedAt.IsZero() {
 				info.CreatedAt = meta.CreatedAt
 			}
+		}
+		if wsFilter != "" && info.Workspace != wsFilter {
+			continue
 		}
 		out = append(out, info)
 	}

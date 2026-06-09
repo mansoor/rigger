@@ -142,8 +142,11 @@ export const putCompose        = (ws, name, env, content) =>
 export const fetchConfig       = (ws, name)      => api.get(`${projBase(ws, name)}/config`).then(r => r.data)
 export const changePassword    = (current_password, new_password) =>
   api.post('/auth/password', { current_password, new_password }).then(r => r.data)
-export const fetchBackups      = ()          => api.get('/backups').then(r => r.data)
-export const fetchBackupCoverage = ()        => api.get('/backups/coverage').then(r => r.data) // 11b
+// Optional workspace scoping: when a workspace key is passed these lists are
+// filtered server-side to that workspace; omit it to span every workspace.
+const wsQuery = (ws) => (ws ? `?workspace=${encodeURIComponent(ws)}` : '')
+export const fetchBackups      = (ws)        => api.get(`/backups${wsQuery(ws)}`).then(r => r.data)
+export const fetchBackupCoverage = (ws)      => api.get(`/backups/coverage${wsQuery(ws)}`).then(r => r.data) // 11b
 export const deleteBackup      = (workspace, project, env, date) => api.delete(`/backups/${workspace}/${project}/${env}/${date}`).then(r => r.data)
 export const fetchStats        = ()          => api.get('/stats').then(r => r.data)
 export const fetchLiveStats    = ()          => api.get('/live-stats').then(r => r.data)
@@ -159,8 +162,8 @@ export const startWorkspaceBackup    = (workspace, project, name) =>
   api.post('/tools/workspace-backup', { workspace, project, name }).then(r => r.data)
 export const getBackupJob            = (id) =>
   api.get(`/tools/backup-jobs/${id}`).then(r => r.data)
-export const listWorkspaceArchives   = () =>
-  api.get('/tools/workspace-archives').then(r => r.data)
+export const listWorkspaceArchives   = (ws) =>
+  api.get(`/tools/workspace-archives${wsQuery(ws)}`).then(r => r.data)
 export const deleteWorkspaceArchive  = (filename) =>
   api.delete(`/tools/workspace-archives/${filename}`).then(r => r.data)
 export const restoreWorkspace = (formData) =>
@@ -178,8 +181,8 @@ export const uploadWorkspaceArchive = (formData) =>
 // ── Workspace configuration snapshots (.rws — config only, no data) ──
 export const createWorkspaceSnapshot = (workspace, project, name) =>
   api.post('/tools/workspace-snapshots', { workspace, project, name }).then(r => r.data)
-export const fetchWorkspaceSnapshots = () =>
-  api.get('/tools/workspace-snapshots').then(r => r.data)
+export const fetchWorkspaceSnapshots = (ws) =>
+  api.get(`/tools/workspace-snapshots${wsQuery(ws)}`).then(r => r.data)
 export const deleteWorkspaceSnapshot = (filename) =>
   api.delete(`/tools/workspace-snapshots/${encodeURIComponent(filename)}`).then(r => r.data)
 export const rollbackWorkspaceSnapshot = (filename) =>

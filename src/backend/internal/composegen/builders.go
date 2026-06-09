@@ -13,6 +13,7 @@ const (
 	dashGarageWebUI = 61
 	dashFrontend    = 52
 	dashImageSvc    = 41
+	dashProcess     = 50 // extra worker/scheduler processes (no historical parity)
 )
 
 // ── Custom stack ─────────────────────────────────────────────────────────────────
@@ -75,6 +76,30 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 	}
 	g.deployBlock(isSwarm, "backend", string(e.Replicas.Backend), "unless-stopped")
 	g.line("")
+
+	// ── Extra processes (workers / scheduler) ──
+	// Each reuses a built image (backend by default, or frontend) with a custom
+	// command. No container_name (so a pool can scale to N replicas), no ports,
+	// no healthcheck. Emitted after the backend so they sit with the app code.
+	for _, p := range e.Processes {
+		if p.Name == "" || p.Command == "" {
+			continue // defensively skip incomplete rows; validated at save time
+		}
+		img := "${BACKEND_IMAGE:-" + registry + "/" + project + "-backend:" + tag + "}"
+		if p.Source == "frontend" && e.FrontendEnabled {
+			img = "${FRONTEND_IMAGE:-" + registry + "/" + project + "-frontend:" + tag + "}"
+		}
+		g.line(sectionComment("Process: "+p.Name, dashProcess))
+		g.line("  " + prefix + "_" + p.Name + ":")
+		g.line("    image: " + img)
+		g.line("    command: '" + p.Command + "'")
+		g.line("    env_file: .env")
+		g.line("    networks:")
+		g.line("      - " + prefix + "_net")
+		g.emitProcessDeps(prefix, isSwarm)
+		g.deployBlock(isSwarm, "proc_"+p.Name, string(p.Replicas), "unless-stopped")
+		g.line("")
+	}
 
 	// ── Nginx ──
 	g.line(sectionComment("Nginx", dashNginx))
@@ -203,6 +228,33 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		}
 		g.deployBlock(isSwarm, "frontend", string(e.Replicas.Frontend), "unless-stopped")
 		g.line("")
+	}
+}
+
+// emitProcessDeps writes a depends_on block for a worker/scheduler process: the
+// database (if any) and redis (if enabled) — the backing stores a worker needs.
+// Mirrors the backend's depends_on shape: map+condition for compose, plain list
+// for swarm (which ignores conditions). Emits nothing when there are no deps.
+func (g *gen) emitProcessDeps(prefix string, isSwarm bool) {
+	e := g.e
+	var deps []string
+	if e.Database == "postgres" || e.Database == "mysql" {
+		deps = append(deps, prefix+"_"+e.Database)
+	}
+	if e.RedisEnabled {
+		deps = append(deps, prefix+"_redis")
+	}
+	if len(deps) == 0 {
+		return
+	}
+	g.line("    depends_on:")
+	for _, d := range deps {
+		if isSwarm {
+			g.line("      - " + d)
+			continue
+		}
+		g.line("      " + d + ":")
+		g.line("        condition: service_healthy")
 	}
 }
 

@@ -899,6 +899,67 @@ func configEnvDeployments(data []byte) map[string]string {
 }
 
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
+// processNameOK reports whether a worker/process name is a safe Docker service
+// suffix: 1–30 chars of lowercase letters, digits or hyphens, not starting or
+// ending with a hyphen.
+func processNameOK(s string) bool {
+	if len(s) == 0 || len(s) > 30 || s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// validateConfigProcesses checks the custom-app extra processes (queue workers,
+// scheduler, etc.) in a config.json payload. Returns a user-facing message on the
+// first problem, or "" if all good. Names must be dns-safe, unique per env, and
+// not collide with the fixed service suffixes; commands required; a frontend
+// source needs the frontend enabled.
+func validateConfigProcesses(content []byte) string {
+	reserved := map[string]bool{
+		"backend": true, "frontend": true, "nginx": true, "postgres": true,
+		"mysql": true, "redis": true, "garage": true, "garage_webui": true,
+	}
+	var doc struct {
+		Environments map[string]struct {
+			FrontendEnabled bool `json:"frontend_enabled"`
+			Processes       []struct {
+				Name    string `json:"name"`
+				Command string `json:"command"`
+				Source  string `json:"source"`
+			} `json:"processes"`
+		} `json:"environments"`
+	}
+	if err := json.Unmarshal(content, &doc); err != nil {
+		return "" // malformed JSON is reported by the caller's own parse check
+	}
+	for env, ec := range doc.Environments {
+		seen := map[string]bool{}
+		for _, p := range ec.Processes {
+			switch {
+			case p.Name == "" || p.Command == "":
+				return fmt.Sprintf("environment %q: each process needs a name and a command", env)
+			case !processNameOK(p.Name):
+				return fmt.Sprintf("environment %q: process name %q must be 1–30 chars of lowercase letters, digits or hyphens", env, p.Name)
+			case reserved[p.Name]:
+				return fmt.Sprintf("environment %q: process name %q is reserved for a built-in service", env, p.Name)
+			case seen[p.Name]:
+				return fmt.Sprintf("environment %q: duplicate process name %q", env, p.Name)
+			case p.Source != "" && p.Source != "backend" && p.Source != "frontend":
+				return fmt.Sprintf("environment %q: process %q source must be \"backend\" or \"frontend\"", env, p.Name)
+			case p.Source == "frontend" && !ec.FrontendEnabled:
+				return fmt.Sprintf("environment %q: process %q uses the frontend image but the frontend is disabled", env, p.Name)
+			}
+			seen[p.Name] = true
+		}
+	}
+	return ""
+}
+
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
@@ -914,6 +975,10 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	var check any
 	if err := json.Unmarshal([]byte(body.Content), &check); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	if msg := validateConfigProcesses([]byte(body.Content)); msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
 	path := wspath.ConfigPath(h.workspacesDir, wsName, name)
@@ -2131,6 +2196,7 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var results []BackupSnapshot
+	wsFilter := r.URL.Query().Get("workspace")
 	syncStates := h.backupSyncStates()
 
 	wsEntries, err := os.ReadDir(h.workspacesDir)
@@ -2144,6 +2210,9 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		wsName := wsEntry.Name()
+		if wsFilter != "" && wsName != wsFilter {
+			continue
+		}
 		projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, wsName))
 		if perr != nil {
 			continue

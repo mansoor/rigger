@@ -241,9 +241,10 @@ function fmtBackupAge(h) {
 }
 
 function BackupCoverage() {
+  const current = useWorkspaceStore(s => s.current)
   const { data: rows = [] } = useQuery({
-    queryKey: ['backup-coverage'],
-    queryFn: fetchBackupCoverage,
+    queryKey: ['backup-coverage', current],
+    queryFn: () => fetchBackupCoverage(current),
     refetchInterval: 60_000,
   })
   if (!rows.length) return null

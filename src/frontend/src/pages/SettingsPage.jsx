@@ -7,6 +7,8 @@ import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
 import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import VerticalTabs from '../components/VerticalTabs'
+import RoleHelp from '../components/RoleHelp'
+import { globalRoleOptions, wsRoleOptions } from '../lib/roles'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -1402,22 +1404,14 @@ export function AppearanceTab() {
 
 // Global roles (Users tab). Workspace/project access is granted separately via
 // workspace membership — see the Members tab on each workspace.
-const ROLE_OPTIONS = [
-  { value: 'user',       label: 'User — access via workspace membership' },
-  { value: 'superadmin', label: 'Super-admin — full control' },
-]
+const ROLE_OPTIONS = globalRoleOptions
 const ROLE_BADGE = {
   superadmin: 'bg-red-100/70 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800/40',
   user:       'bg-slate-100/70 text-slate-700 border-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700/40',
 }
 
 // Workspace-tier roles offered when granting access at invite time.
-const INVITE_WS_ROLES = [
-  { value: 'viewer',    label: 'Viewer — read-only' },
-  { value: 'developer', label: 'Developer — operate environments' },
-  { value: 'operator',  label: 'Operator — developer + edit project config' },
-  { value: 'admin',     label: 'Admin — manage the workspace' },
-]
+const INVITE_WS_ROLES = wsRoleOptions
 
 function InviteForm({ onSave, onCancel, saving }) {
   const [email, setEmail]       = useState('')
@@ -1460,9 +1454,10 @@ function InviteForm({ onSave, onCancel, saving }) {
         <Label>Display name <span className="font-normal normal-case">(optional)</span></Label>
         <Input value={username} onChange={setUsername} placeholder="defaults to the part before @" />
       </div>
-      <div>
+      <div className="space-y-2">
         <Label required>Global role</Label>
         <Select value={role} onChange={setRole} options={ROLE_OPTIONS} />
+        <RoleHelp scope="global" />
       </div>
 
       {grantsAccess && (
@@ -1480,9 +1475,10 @@ function InviteForm({ onSave, onCancel, saving }) {
                 <Select value={project} onChange={setProject}
                   options={[{ value: '', label: 'Whole workspace' }, ...projects.map(p => ({ value: p.name, label: p.config?.project?.name || p.name }))]} />
               </div>
-              <div>
+              <div className="space-y-2">
                 <Label required>Role in this {project ? 'project' : 'workspace'}</Label>
                 <Select value={wsRole} onChange={setWsRole} options={INVITE_WS_ROLES} />
+                <RoleHelp scope="workspace" />
               </div>
             </>
           )}

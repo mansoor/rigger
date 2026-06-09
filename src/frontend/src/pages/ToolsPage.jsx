@@ -989,16 +989,16 @@ function WorkspaceBackup() {
     },
   })
 
-  // Refresh archives list when job completes
+  // Refresh archives list when job completes (scoped to the selected workspace)
   const { data: archives = [], refetch: refetchArchives } = useQuery({
-    queryKey: ['workspace-archives'],
-    queryFn: listWorkspaceArchives,
+    queryKey: ['workspace-archives', currentWs],
+    queryFn: () => listWorkspaceArchives(currentWs),
   })
 
-  // Config snapshots
+  // Config snapshots (scoped to the selected workspace)
   const { data: snapshots = [], refetch: refetchSnapshots } = useQuery({
-    queryKey: ['workspace-snapshots'],
-    queryFn: fetchWorkspaceSnapshots,
+    queryKey: ['workspace-snapshots', currentWs],
+    queryFn: () => fetchWorkspaceSnapshots(currentWs),
   })
 
   // When job completes/fails, refresh archives
