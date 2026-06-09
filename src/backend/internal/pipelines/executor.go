@@ -43,6 +43,15 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 	case "test":
 		o.Command = "test" // sandboxed compose exec inside the service container
 		o.Extra = []string{s.Service, s.Command}
+	case "version":
+		o.Command = "version" // bridge maps Env→subcommand, Extra[0]→arg
+		o.Env = "bump"
+		o.Extra = []string{s.Part}
+	case "script":
+		o.Command = "script" // one-off tool container with env context injected
+		o.ScriptImage = s.Image
+		o.ScriptCommand = s.Command
+		o.ScriptNetwork = s.Network
 	}
 	return o
 }
@@ -56,6 +65,10 @@ func stageLabel(s Stage) string {
 		return "manual gate"
 	case "push":
 		return "promote " + s.Env + " → " + s.ToEnv
+	case "version":
+		return "version bump " + s.Part
+	case "script":
+		return "script: " + s.Image
 	case "test":
 		return fmt.Sprintf("test %s: %s", s.Service, s.Command)
 	case "backup":

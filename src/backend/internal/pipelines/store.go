@@ -26,17 +26,22 @@ const (
 var stageTypes = map[string]bool{
 	"deploy": true, "update": true, "build": true,
 	"restart": true, "backup": true, "test": true,
-	"push": true, // promote src env → dst env (pull/tag/push via registry)
-	"gate": true, // manual approval pause (9d) — no env
+	"push":    true, // promote src env → dst env (pull/tag/push via registry)
+	"gate":    true, // manual approval pause (9d) — no env
+	"version": true, // semver bump (major|minor|patch|build) — no env
+	"script":  true, // run a one-off tool container (Trivy/Cypress/Sonar/custom)
 }
 
 // Stage is one step of a pipeline definition.
 type Stage struct {
-	Type      string `json:"type"`              // deploy|update|build|restart|backup|test|push|gate
-	Env       string `json:"env"`               // target env (source env for push)
+	Type      string `json:"type"`              // deploy|update|build|restart|backup|test|push|gate|version|script
+	Env       string `json:"env"`               // target env (source env for push; context env for script)
 	ToEnv     string `json:"to_env,omitempty"`  // push only — destination env
 	Service   string `json:"service,omitempty"` // test (required) / backup (optional)
-	Command   string `json:"command,omitempty"` // test command / gate note
+	Command   string `json:"command,omitempty"` // test/script command / gate note
+	Image     string `json:"image,omitempty"`   // script only — the tool container image
+	Network   bool   `json:"network,omitempty"` // script only — attach to the env's compose network
+	Part      string `json:"part,omitempty"`    // version only — major|minor|patch|build
 	OnFailure string `json:"on_failure"`        // stop | continue (default stop)
 }
 
@@ -89,9 +94,21 @@ func (p *Pipeline) Validate() error {
 		if !stageTypes[s.Type] {
 			return fmt.Errorf("stage %d: unknown type %q", i+1, s.Type)
 		}
-		// A gate is a manual approval pause — it targets no environment.
-		if s.Type != "gate" && strings.TrimSpace(s.Env) == "" {
+		// gate (manual pause) and version (project-global bump) target no env.
+		if s.Type != "gate" && s.Type != "version" && strings.TrimSpace(s.Env) == "" {
 			return fmt.Errorf("stage %d (%s): an environment is required", i+1, s.Type)
+		}
+		if s.Type == "version" {
+			switch s.Part {
+			case "major", "minor", "patch", "build":
+			default:
+				return fmt.Errorf("stage %d (version): part must be major|minor|patch|build", i+1)
+			}
+		}
+		if s.Type == "script" {
+			if strings.TrimSpace(s.Image) == "" || strings.TrimSpace(s.Command) == "" {
+				return fmt.Errorf("stage %d (script): an image and command are required", i+1)
+			}
 		}
 		if s.Type == "test" {
 			if strings.TrimSpace(s.Service) == "" || strings.TrimSpace(s.Command) == "" {

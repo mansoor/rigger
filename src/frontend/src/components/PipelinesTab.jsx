@@ -18,10 +18,22 @@ const STAGE_TYPES = [
   { value: 'restart', label: 'Restart' },
   { value: 'backup',  label: 'Backup' },
   { value: 'test',    label: 'Test — exec in container' },
+  { value: 'script',  label: 'Script — run a tool container' },
+  { value: 'version', label: 'Version — bump semver' },
   { value: 'push',    label: 'Promote — copy env → env (registry)' },
   { value: 'gate',    label: 'Gate — manual approval' },
 ]
-const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', push: '📤', gate: '⏸️' }
+const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
+
+// Script-stage presets prefill the tool image + command (env context is injected
+// as RIGGER_* vars; secrets like a Sonar token are inlined by the user).
+const SCRIPT_PRESETS = [
+  { id: 'custom',    label: 'Custom', image: '', command: '', network: false },
+  { id: 'trivy',     label: 'Vuln scan (Trivy)',   image: 'aquasec/trivy:latest',                 command: 'trivy image $RIGGER_IMAGES', network: false },
+  { id: 'cypress',   label: 'E2E (Cypress)',        image: 'cypress/included:latest',              command: 'cypress run --config baseUrl=$RIGGER_APP_URL', network: true },
+  { id: 'playwright',label: 'E2E (Playwright)',     image: 'mcr.microsoft.com/playwright:latest',  command: 'npx playwright test', network: true },
+  { id: 'sonar',     label: 'Code analysis (SonarQube)', image: 'sonarsource/sonar-scanner-cli:latest', command: 'sonar-scanner -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN', network: false },
+]
 
 const blankStage = (env) => ({ type: 'deploy', env: env || '', service: '', command: '', on_failure: 'stop' })
 
@@ -106,6 +118,8 @@ function stageSummary(s) {
   if (s.type === 'gate') return 'gate'
   if (s.type === 'test') return `test ${s.service}`
   if (s.type === 'push') return `promote ${s.env}→${s.to_env}`
+  if (s.type === 'version') return `version ${s.part || ''}`
+  if (s.type === 'script') return `script ${s.image || ''}`.trim()
   return `${s.type} ${s.env}`
 }
 
@@ -317,9 +331,22 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
         <select value={stage.type} onChange={e => onChange({ type: e.target.value })} className={inputCls}>
           {STAGE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
-        {stage.type === 'gate' ? (
+        {stage.type === 'gate' && (
           <input value={stage.command} onChange={e => onChange({ command: e.target.value })} placeholder="approval note (optional)" className={`${inputCls} flex-1`} />
-        ) : (
+        )}
+        {stage.type === 'version' && (
+          <>
+            <select value={stage.part || ''} onChange={e => onChange({ part: e.target.value })} className={inputCls}>
+              <option value="">— part —</option>
+              <option value="major">major</option>
+              <option value="minor">minor</option>
+              <option value="patch">patch</option>
+              <option value="build">build</option>
+            </select>
+            <span className="text-xs text-content-faint">bump semver (custom apps)</span>
+          </>
+        )}
+        {stage.type !== 'gate' && stage.type !== 'version' && (
           <>
             <select value={stage.env} onChange={e => onChange({ env: e.target.value })} className={inputCls}>
               <option value="">{stage.type === 'push' ? '— from —' : '— env —'}</option>
@@ -337,6 +364,21 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
             {stage.type === 'backup' && (
               <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (optional)" className={`${inputCls} w-36`} />
             )}
+            {stage.type === 'script' && (
+              <>
+                <select defaultValue="" onChange={e => {
+                  const p = SCRIPT_PRESETS.find(x => x.id === e.target.value)
+                  if (p && p.id !== 'custom') onChange({ image: p.image, command: p.command, network: p.network })
+                }} className={inputCls} title="Preset tool">
+                  <option value="">preset…</option>
+                  {SCRIPT_PRESETS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-content-muted cursor-pointer">
+                  <input type="checkbox" checked={!!stage.network} onChange={e => onChange({ network: e.target.checked })} className="w-3.5 h-3.5 accent-brand-500" />
+                  app network
+                </label>
+              </>
+            )}
             <select value={stage.on_failure} onChange={e => onChange({ on_failure: e.target.value })} className={inputCls} title="On failure">
               <option value="stop">on fail: stop</option>
               <option value="continue">on fail: continue</option>
@@ -353,6 +395,13 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
         <div className="flex items-center gap-2 mt-2 pl-7">
           <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (e.g. app)" className={`${inputCls} w-40`} />
           <input value={stage.command} onChange={e => onChange({ command: e.target.value })} placeholder='command, e.g. curl -f http://localhost/' className={`${inputCls} flex-1 font-mono`} />
+        </div>
+      )}
+      {stage.type === 'script' && (
+        <div className="mt-2 pl-7 space-y-2">
+          <input value={stage.image || ''} onChange={e => onChange({ image: e.target.value })} placeholder="tool image, e.g. aquasec/trivy:latest" className={`${inputCls} w-full font-mono`} />
+          <input value={stage.command || ''} onChange={e => onChange({ command: e.target.value })} placeholder='command (sh -c), e.g. trivy image $RIGGER_IMAGES' className={`${inputCls} w-full font-mono`} />
+          <p className="text-[11px] text-content-faint">Injected: <code className="font-mono">$RIGGER_ENV $RIGGER_APP_URL $RIGGER_STACK $RIGGER_IMAGES $RIGGER_IMAGE_&lt;SVC&gt;</code>. Secrets (e.g. a Sonar token) are inlined here and stored in the pipeline — treat with care.</p>
         </div>
       )}
     </div>
