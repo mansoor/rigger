@@ -9,6 +9,7 @@ import ComposeEditor from '../components/ComposeEditor'
 import TerminalModal from '../components/TerminalModal'
 import ContainerInfoModal from '../components/ContainerInfoModal'
 import FileBrowserModal from '../components/FileBrowserModal'
+import RollbackModal from '../components/RollbackModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -189,6 +190,7 @@ const EI = {
   compose: <><path d="M9 8l-4 4 4 4" /><path d="M15 8l4 4-4 4" /></>,
   terminal:<><path d="M6 7l5 5-5 5" /><path d="M13 17h6" /></>,
   backup:  <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" /></>,
+  rollback:<><path d="M3 7v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /></>,
 }
 function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
   return (
@@ -433,6 +435,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   }
 
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
+  const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
@@ -556,6 +559,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                 onClick={() => onTerminal()} className="text-content-subtle hover:text-emerald-400" />
               <ToolBtn icon="backup" title="Back up this environment" disabled={!isRunning}
                 onClick={() => setBackupModal(true)} className="text-content-subtle hover:text-indigo-400" />
+              <ToolBtn icon="rollback" title="Roll back to a previous deploy"
+                onClick={() => setRollbackOpen(true)} className="text-content-subtle hover:text-amber-400" />
             </>
           )}
         </div>
@@ -737,6 +742,15 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           name={name} envName={envName}
           onClose={() => setBackupModal(false)}
           onRun={(services) => { setBackupModal(false); handleAction('backup', [], services) }}
+        />
+      )}
+
+      {/* Rollback (Phase 9e) — custom: pick a prior deploy; image: guidance */}
+      {rollbackOpen && (
+        <RollbackModal
+          workspace={workspace} name={name} envName={envName} isImage={isImage}
+          onClose={() => setRollbackOpen(false)}
+          onDone={() => { refetchStatus(); qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] }) }}
         />
       )}
 

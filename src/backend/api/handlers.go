@@ -1719,6 +1719,10 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		marker = "\n\033[31m✗ " + req.Command + " failed: " + runErr.Error() + "\033[0m\n"
 	} else {
 		marker = "\n\033[32m✓ " + req.Command + " " + req.Env + " completed successfully.\033[0m\n"
+		// Record image-changing deploys for rollback (Phase 9e).
+		if (req.Command == "start" || req.Command == "update") && req.Env != "" {
+			h.recordDeploy(wsName, name, req.Env, claims.Username)
+		}
 		// After a successful update, invalidate the image-check cache so the next
 		// frontend poll triggers a fresh check against the newly pulled image digests.
 		if req.Command == "update" && req.Env != "" {

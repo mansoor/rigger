@@ -110,6 +110,8 @@ export const downloadContainerFile = async (ws, name, env, svc, path) => {
 export const fetchEnvMetrics    = (ws, name, env, minutes = 60) => api.get(`${projBase(ws, name)}/envs/${env}/metrics`, { params: { minutes } }).then(r => r.data)
 export const fetchMetricsConfig = ()         => api.get('/metrics/config').then(r => r.data)
 export const fetchActivity     = (ws, name)      => api.get(`${projBase(ws, name)}/activity`).then(r => r.data)
+export const fetchDeployHistory = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/deploy-history`).then(r => r.data)
+export const rollbackEnv        = (ws, name, env, toId)  => api.post(`${projBase(ws, name)}/envs/${env}/rollback`, { to_id: toId }).then(r => r.data)
 export const fetchActionRuns   = (ws, name, limit = 100) => api.get(`${projBase(ws, name)}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (ws, name)      => api.delete(`${projBase(ws, name)}/action-runs`).then(r => r.data)
 // Phase 9: deployment pipelines (project-scoped).
