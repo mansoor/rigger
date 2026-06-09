@@ -81,22 +81,27 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		return err
 	}
 
-	// 3. A Dockerfile per build service, scaffolded from its blueprint template.
-	//    A build service with no template uses a user-supplied Dockerfile (2b repo
-	//    sync) — nothing to scaffold.
-	for _, svc := range cfg.BuildServices() {
-		tmpl := svc.Build.Template
-		if tmpl == "" {
-			continue
+	// 3. A Dockerfile per build service, scaffolded from its blueprint template —
+	//    UNLESS the project has a source repo, in which case the repo's own
+	//    Dockerfiles are used (cloned into envs/{env}/_src at build time). A build
+	//    service with no template and no repo expects a user-supplied Dockerfile.
+	if cfg.SourceRepo() == "" {
+		for _, svc := range cfg.BuildServices() {
+			tmpl := svc.Build.Template
+			if tmpl == "" {
+				continue
+			}
+			tmplDir := filepath.Join(templatesDir, "dockerfiles", tmpl)
+			if !isDir(tmplDir) {
+				return fmt.Errorf("no Dockerfile template %q for service %q: %s", tmpl, svc.Name, tmplDir)
+			}
+			if err := installDockerfile(tmplDir, filepath.Join(outDir, svc.ContextDir()), env); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "  %s Dockerfile (%s) installed\n", svc.Name, tmpl)
 		}
-		tmplDir := filepath.Join(templatesDir, "dockerfiles", tmpl)
-		if !isDir(tmplDir) {
-			return fmt.Errorf("no Dockerfile template %q for service %q: %s", tmpl, svc.Name, tmplDir)
-		}
-		if err := installDockerfile(tmplDir, filepath.Join(outDir, svc.ContextDir()), env); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  %s Dockerfile (%s) installed\n", svc.Name, tmpl)
+	} else {
+		fmt.Fprintf(out, "  source repo configured — Dockerfiles come from the repo at build time\n")
 	}
 
 	// 4. nginx.conf for any service that fronts the app (config_template set).

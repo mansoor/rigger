@@ -1442,6 +1442,20 @@ export default function EditProjectPage() {
               </div>
             )}
 
+            {/* Source repository — one repo per project; build services build from
+                a subdir of it (cloned into the build context before build). */}
+            <div className="grid sm:grid-cols-[1fr_auto] gap-4">
+              <div>
+                <Label>Source repository <span className="font-normal normal-case text-content-faint">(for build services)</span></Label>
+                <Input value={project?.git_repo} onChange={v => setProject(p => ({ ...p, git_repo: v }))} placeholder="https://github.com/org/repo.git" />
+                <p className="text-xs text-content-subtle mt-1">One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL.</p>
+              </div>
+              <div className="sm:w-40">
+                <Label>Default branch</Label>
+                <Input value={project?.git_branch} onChange={v => setProject(p => ({ ...p, git_branch: v }))} placeholder="main" />
+              </div>
+            </div>
+
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
             <div>
               <Label>Resource prefix</Label>

@@ -57,6 +57,7 @@ RUN apk add --no-cache \
     coreutils \
     ca-certificates \
     tzdata \
+    git \
     docker-cli \
     docker-cli-compose
 

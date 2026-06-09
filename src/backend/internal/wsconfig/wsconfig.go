@@ -74,6 +74,26 @@ type Project struct {
 	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
 	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
 	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// GitRepo / GitBranch are the project's single source repository (one repo per
+	// project; each build service's build.context is a subdir). Cloned into
+	// envs/{env}/_src before build. Empty ⇒ build services use scaffolded Dockerfiles.
+	GitRepo   string `json:"git_repo,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
+}
+
+// SourceRepo returns the project's source repository URL ("" if none).
+func (c *Config) SourceRepo() string { return c.Project.GitRepo }
+
+// Branch returns the git branch to build env from: the env override, else the
+// project default, else "main".
+func (c *Config) Branch(env string) string {
+	if e, ok := c.Environments[env]; ok && e.Git.Branch != "" {
+		return e.Git.Branch
+	}
+	if c.Project.GitBranch != "" {
+		return c.Project.GitBranch
+	}
+	return "main"
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to Name.
@@ -102,7 +122,13 @@ type Env struct {
 	GarageEnabled  bool           `json:"garage_enabled"`
 	TraefikEnabled bool           `json:"traefik_enabled"`
 	Deployment     string         `json:"deployment"`
+	Git            EnvGit         `json:"git"`
 	EnvVars        map[string]Str `json:"env_vars"`
+}
+
+// EnvGit is the per-env git override (branch). The repo is project-level.
+type EnvGit struct {
+	Branch string `json:"branch"`
 }
 
 // Load reads and parses a config.json from disk.

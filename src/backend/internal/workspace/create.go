@@ -25,6 +25,8 @@ type CreateRequest struct {
 	Name         string            `json:"name"`      // free-form display name
 	Key          string            `json:"key"`       // project key (folder/URL/Docker identity); derived if empty
 	Registry     string            `json:"registry"`
+	SourceRepo   string            `json:"source_repo"`   // project-level git repo (one per project)
+	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
 	Images       []ImageDef        `json:"images"`       // populated from template or manual entry
@@ -301,6 +303,25 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		"version": map[string]any{
 			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},
+	}
+	// Project-level source repo (one repo per project). Prefer the explicit field;
+	// fall back to the wizard's per-env git fields (first env with a repo) so the
+	// existing UI drives source until the dedicated project field lands.
+	srcRepo, srcBranch := req.SourceRepo, req.SourceBranch
+	for _, e := range req.Envs {
+		if srcRepo == "" && e.GitRepo != "" {
+			srcRepo = e.GitRepo
+			if srcBranch == "" {
+				srcBranch = e.GitBranch
+			}
+		}
+	}
+	if srcRepo != "" {
+		project["git_repo"] = srcRepo
+		if srcBranch == "" {
+			srcBranch = "main"
+		}
+		project["git_branch"] = srcBranch
 	}
 	// Host-side folder path, resolved once by the API layer at creation.
 	if req.ProjectRootDir != "" {

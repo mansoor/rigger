@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -47,42 +48,75 @@ func (o Options) build() error {
 	}
 
 	builds := cfg.BuildServices()
-	if target == "all" {
-		if len(builds) == 0 {
-			o.info("No build services for %q — nothing to build", o.Env)
-			return nil
-		}
+	if target != "all" {
+		var only []wsconfig.Service
 		for _, svc := range builds {
-			if err := o.buildImage(cfg, svc.Name, push); err != nil {
-				return err
+			if svc.Name == target {
+				only = append(only, svc)
 			}
 		}
+		if len(only) == 0 {
+			names := make([]string, 0, len(builds))
+			for _, svc := range builds {
+				names = append(names, svc.Name)
+			}
+			return fmt.Errorf("unknown build service %q (build services: %v)", target, names)
+		}
+		builds = only
+	}
+	if len(builds) == 0 {
+		o.info("No build services for %q — nothing to build", o.Env)
 		return nil
 	}
-	for _, svc := range builds {
-		if svc.Name == target {
-			return o.buildImage(cfg, svc.Name, push)
+
+	// If the project has a source repo, check it out once for this env; each build
+	// service then builds from a subdir of the checkout (using the repo's own
+	// Dockerfile). Otherwise services build from the scaffolded context dir.
+	srcDir := ""
+	if repo := cfg.SourceRepo(); repo != "" {
+		envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
+		var serr error
+		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.Stdout); serr != nil {
+			return serr
 		}
 	}
-	names := make([]string, 0, len(builds))
+
 	for _, svc := range builds {
-		names = append(names, svc.Name)
+		if err := o.buildService(cfg, svc, srcDir, push); err != nil {
+			return err
+		}
 	}
-	return fmt.Errorf("unknown build service %q (build services: %v)", target, names)
+	return nil
 }
 
-func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) error {
-	ctxDir := filepath.Join(wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env), service)
-	if fi, err := os.Stat(ctxDir); err != nil || !fi.IsDir() {
-		return fmt.Errorf("build context not found: %s (run init %s first)", ctxDir, o.Env)
+// buildService builds (and optionally pushes) one build service. When srcDir is
+// set (the project has a source repo) the context is a subdir of the checkout and
+// the repo's own Dockerfile is used; otherwise the scaffolded context dir is used.
+func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir string, push bool) error {
+	dockerfile := "Dockerfile"
+	if svc.Build != nil && svc.Build.Dockerfile != "" {
+		dockerfile = svc.Build.Dockerfile
 	}
-	if _, err := os.Stat(filepath.Join(ctxDir, "Dockerfile")); err != nil {
-		return fmt.Errorf("Dockerfile not found: %s/Dockerfile", ctxDir)
+	var ctxDir string
+	if srcDir != "" {
+		sub := "."
+		if svc.Build != nil && svc.Build.Context != "" {
+			sub = svc.Build.Context
+		}
+		ctxDir = filepath.Join(srcDir, sub)
+	} else {
+		ctxDir = filepath.Join(wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env), svc.ContextDir())
+	}
+	if fi, err := os.Stat(ctxDir); err != nil || !fi.IsDir() {
+		return fmt.Errorf("build context not found: %s (configure a source repo or run init)", ctxDir)
+	}
+	if _, err := os.Stat(filepath.Join(ctxDir, dockerfile)); err != nil {
+		return fmt.Errorf("%s not found in build context %s", dockerfile, ctxDir)
 	}
 
 	ver := cfg.VersionString()
-	imgTag := cfg.ImageTag(service, o.Env)
-	o.info("Building %s image: %s", service, imgTag)
+	imgTag := cfg.ImageTag(svc.Name, o.Env)
+	o.info("Building %s image: %s", svc.Name, imgTag)
 
 	// Run with the build context as the working dir and relative paths, so the
 	// remote executor can translate the dir to the host and build against the
@@ -94,9 +128,9 @@ func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) err
 		"--label", "project="+cfg.Project.Name,
 		"--label", "environment="+o.Env,
 		"--label", "version="+ver,
-		"--label", "service="+service,
+		"--label", "service="+svc.Name,
 		"-t", imgTag,
-		"-f", "Dockerfile",
+		"-f", dockerfile,
 		".",
 	); err != nil {
 		return err
