@@ -380,9 +380,10 @@ func (h *Handler) finalizeRun(runID int64, p *pipelines.Pipeline, stages []pipel
 	pipelines.UpdateRun(h.db, pipelines.Run{ //nolint:errcheck
 		ID: runID, PipelineID: p.ID, Status: outcome, Stages: stages, FinishedAt: finished,
 	})
-	for _, s := range p.Stages {
-		if s.Type == "update" || s.Type == "deploy" {
+	for _, s := range stages {
+		if (s.Type == "update" || s.Type == "deploy") && s.Status == "ok" {
 			h.imgCache.Invalidate(p.Workspace, p.Project, s.Env)
+			h.recordDeploy(p.Workspace, p.Project, s.Env, "pipeline")
 		}
 	}
 }

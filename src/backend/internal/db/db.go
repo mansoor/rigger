@@ -407,6 +407,23 @@ func (d *DB) migrate() error {
 			last_triggered_at DATETIME
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_webhooks_token ON pipeline_webhooks(token_hash);
+
+		-- Phase 9e: per-env deploy history — the resolved image refs at each deploy,
+		-- so a custom stack can be rolled back to a prior image set. ptype records
+		-- the project type ('custom' | 'image'); image stacks are informational only
+		-- (their tags aren't per-env overridable, so they roll back via Backup).
+		CREATE TABLE IF NOT EXISTS deploy_history (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace   TEXT NOT NULL,
+			project     TEXT NOT NULL,
+			env         TEXT NOT NULL,
+			ptype       TEXT NOT NULL,
+			images      TEXT NOT NULL DEFAULT '{}',
+			version     TEXT NOT NULL DEFAULT '',
+			username    TEXT NOT NULL DEFAULT '',
+			created_at  INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_deploy_history_env ON deploy_history(workspace, project, env, id);
 	`)
 	if err != nil {
 		return err

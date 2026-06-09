@@ -99,6 +99,13 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 		marker = fmt.Sprintf("\n\033[31m✗ %s failed: %s\033[0m\n", body.Command, runErr.Error())
 	} else {
 		marker = fmt.Sprintf("\n\033[32m✓ %s %s completed successfully.\033[0m\n", body.Command, env)
+		if (body.Command == "start" || body.Command == "update") && env != "" {
+			uname := ""
+			if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+				uname = claims.Username
+			}
+			h.recordDeploy(wsName, name, env, uname)
+		}
 		if body.Command == "update" && env != "" {
 			h.imgCache.Invalidate(wsName, name, env)
 			go func() {
