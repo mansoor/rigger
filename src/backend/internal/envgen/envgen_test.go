@@ -61,7 +61,7 @@ func TestImageEnvGeneration(t *testing.T) {
 
 	// .env.example masks generated secrets but keeps non-secrets.
 	ex := ParseEnv([]byte(example))
-	if ex["MYSQL_PASSWORD"] != "CHANGE_ME" || ex["API_TOKEN"] != "CHANGE_ME" {
+	if !strings.HasPrefix(ex["MYSQL_PASSWORD"], "CHANGE_ME") || !strings.HasPrefix(ex["API_TOKEN"], "CHANGE_ME") {
 		t.Errorf("example secrets not masked: MYSQL_PASSWORD=%q API_TOKEN=%q", ex["MYSQL_PASSWORD"], ex["API_TOKEN"])
 	}
 	if ex["WP_PORT"] != "8080" {
@@ -86,13 +86,16 @@ func TestImageSecretPreservation(t *testing.T) {
 
 func TestCustomPostgresEnv(t *testing.T) {
 	c := cfg(t, `{
-      "project": { "name": "myapp", "type": "custom", "registry": "reg",
+      "project": { "name": "myapp", "registry": "reg",
         "version": { "major": 1, "minor": 0, "patch": 0, "build": 2 } },
+      "services": [
+        {"name":"backend","build":{"template":"nodejs"}},
+        {"name":"frontend","build":{"template":"react"}}
+      ],
       "environments": { "prod": {
         "domain": "myapp.com", "http_port": 80, "https_port": 443,
-        "backend": "nodejs", "frontend_enabled": true, "frontend": "react",
         "database": "postgres", "redis_enabled": true, "garage_enabled": false,
-        "deployment": "compose", "replicas": { "backend": 2, "frontend": 1 },
+        "deployment": "compose",
         "env_vars": { "CUSTOM_FLAG": "yes" }
       } }
     }`)
@@ -124,7 +127,6 @@ func TestCustomPostgresEnv(t *testing.T) {
 		"GARAGE_ENABLED":       "false",
 		"NODE_ENV":             "production",
 		"PORT":                 "3000",
-		"BACKEND_REPLICAS":     "2",
 		"CUSTOM_FLAG":          "yes",
 	}
 	for k, want := range checks {

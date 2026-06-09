@@ -2,129 +2,301 @@ package composegen
 
 import "strings"
 
-// Trailing dash counts for each section comment — measured from compose-gen.sh.
+// Trailing dash counts for section comments. App services use a fixed width
+// (no historical parity to match — the unified model regenerates goldens); the
+// managed-dependency widths are kept from the old output for tidy diffs.
 const (
-	dashBackend     = 54
-	dashNginx       = 66
+	dashService     = 50
 	dashPostgres    = 48
 	dashMySQL       = 54
 	dashRedis       = 54
 	dashGarage      = 38
 	dashGarageWebUI = 61
-	dashFrontend    = 52
-	dashImageSvc    = 41
-	dashProcess     = 50 // extra worker/scheduler processes (no historical parity)
 )
 
-// ── Custom stack ─────────────────────────────────────────────────────────────────
+// buildStack emits the volumes + services blocks for the unified service graph:
+// every app service in cfg.Services, then the managed-dependency toggles
+// (database / redis / garage) which stay as env flags until Phase 3.
+func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
+	g.emitVolumes(prefix)
+	g.line("services:")
+	g.line("")
+	for _, svc := range g.cfg.Services {
+		if svc.Name == "" {
+			continue
+		}
+		g.buildService(prefix, rp, registry, tag, svc, isSwarm)
+	}
+	g.buildManagedDeps(prefix, isSwarm)
+}
 
-func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bool) {
-	c := g.cfg
+// emitVolumes writes the top-level volumes block: named volumes referenced by
+// services, the managed-dependency volumes (toggle-driven), and explicit
+// named_volumes[]. Bind mounts and env-var paths are skipped.
+func (g *gen) emitVolumes(prefix string) {
+	c, e := g.cfg, g.e
+	var vols []string
+	seen := map[string]bool{}
+	add := func(v string) {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			vols = append(vols, v)
+		}
+	}
+	for _, svc := range c.Services {
+		for _, vol := range svc.Volumes {
+			if vol == "" {
+				continue
+			}
+			if host := volHost(vol); isNamedVolume(host) {
+				add(prefix + "_" + host)
+			}
+		}
+	}
+	if e.Database == "postgres" {
+		add(prefix + "_pg_data")
+	}
+	if e.Database == "mysql" {
+		add(prefix + "_mysql_data")
+	}
+	if e.RedisEnabled {
+		add(prefix + "_redis_data")
+	}
+	if e.GarageEnabled {
+		add(prefix + "_garage_data")
+		add(prefix + "_garage_meta")
+	}
+	for _, nv := range c.NamedVolumes {
+		if nv.Name == "" || strings.HasPrefix(nv.Name, ".") || strings.HasPrefix(nv.Name, "/") {
+			continue
+		}
+		add(prefix + "_" + nv.Name)
+	}
+	if len(vols) == 0 {
+		return
+	}
+	g.line("volumes:")
+	for _, v := range vols {
+		g.line("  " + v + ":")
+	}
+	g.line("")
+}
+
+// buildService emits one app service from the unified model. The image line is
+// resolved from the service's source (Build / Image / ImageFrom); web routing,
+// ports, healthcheck, depends_on, volumes, env and the deploy block all derive
+// from per-service fields — no language branching.
+func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwarm bool) {
 	e := g.e
-	verNginx := c.version("nginx", "1.25-alpine")
+	key := prefix + "_" + svc.Name
+	restart := svc.Restart
+	if restart == "" {
+		restart = "unless-stopped"
+	}
+
+	g.line(sectionComment(svc.Name+" ("+serviceLabel(svc)+")", dashService))
+	g.line("  " + key + ":")
+	g.line("    image: " + serviceImageRef(svc, rp, registry, tag))
+	if svc.Command != "" {
+		g.line("    command: '" + svc.Command + "'")
+	}
+	if svc.EnvFile {
+		g.line("    env_file: .env")
+	}
+
+	// Networks — long form with a short-name alias; join the Traefik network when
+	// this service is the web entry under Traefik.
+	g.line("    networks:")
+	g.line("      " + prefix + "_net:")
+	g.line("        aliases:")
+	g.line("          - " + svc.Name)
+	if svc.WebRouted && e.TraefikEnabled {
+		g.line("      " + e.TraefikNetwork + ": {}")
+	}
+
+	g.emitDependsOn(prefix, svc.DependsOn, isSwarm)
+
+	// Volumes (named volumes get the prefix; bind/env-var mounts pass through).
+	firstVol := true
+	for _, vol := range svc.Volumes {
+		if vol == "" {
+			continue
+		}
+		if firstVol {
+			g.line("    volumes:")
+			firstVol = false
+		}
+		if host := volHost(vol); isNamedVolume(host) {
+			g.line("      - " + prefix + "_" + host + ":" + volRest(vol))
+		} else {
+			g.line("      - " + vol)
+		}
+	}
+
+	// Environment (keys sorted for deterministic output).
+	if keys := sortedKeys(svc.EnvVars); len(keys) > 0 {
+		g.line("    environment:")
+		for _, k := range keys {
+			g.line("      - " + k + "=" + string(svc.EnvVars[k]))
+		}
+	}
+
+	g.emitServicePorts(key, svc)
+
+	if svc.Healthcheck != "" {
+		hc := svc.HealthcheckConfig
+		g.healthcheck(svc.Healthcheck,
+			strOr(hc.Interval, "30s"), strOr(hc.Timeout, "10s"),
+			strOr(hc.Retries, "3"), strOr(hc.StartPeriod, "30s"),
+			string(hc.StartInterval))
+	}
+
+	g.deployBlock(isSwarm, svc.Name, string(svc.Replicas), restart)
+
+	// extra_compose: service-level then env-level override.
+	g.emitExtraCompose(svc.ExtraCompose)
+	if ov, ok := e.ServiceOverrides[svc.Name]; ok {
+		g.emitExtraCompose(ov.ExtraCompose)
+	}
+	g.line("")
+}
+
+// emitServicePorts handles web routing and port publishing. A web-routed service
+// gets Traefik labels (when Traefik is on) or binds the env HTTP port; otherwise
+// host_port/extra_ports are published, or the container port is exposed.
+func (g *gen) emitServicePorts(key string, svc Service) {
+	e := g.e
+	port := string(svc.Port)
+	if svc.WebRouted {
+		if e.TraefikEnabled {
+			host := e.Domain
+			if svc.Subdomain != "" && e.Domain != "" {
+				host = svc.Subdomain + "." + e.Domain
+			}
+			g.traefikLabels(key, host, port)
+		} else if svc.Subdomain == "" && string(e.HTTPPort) != "" {
+			// Apex web service without Traefik binds the env HTTP port. Subdomain
+			// services need Traefik, so without it they aren't published here.
+			g.portMapping(string(e.HTTPPort), portOr(port, "80"))
+		}
+	}
+	var publishes []string
+	if string(svc.HostPort) != "" && port != "" {
+		publishes = append(publishes, string(svc.HostPort)+":"+port)
+	}
+	for _, ep := range svc.ExtraPorts {
+		if string(ep) != "" {
+			publishes = append(publishes, string(ep))
+		}
+	}
+	if len(publishes) > 0 {
+		g.line("    ports:")
+		for _, p := range publishes {
+			g.line("      - \"" + p + "\"")
+		}
+		return
+	}
+	if !svc.WebRouted && port != "" {
+		g.line("    expose:")
+		g.line("      - \"" + port + "\"")
+	}
+}
+
+// emitDependsOn resolves short dependency names to {prefix}_{name} and emits the
+// block: compose uses condition (service_healthy when the target has a
+// healthcheck, else service_started); swarm uses the bare list form.
+func (g *gen) emitDependsOn(prefix string, deps []string, isSwarm bool) {
+	var names []string
+	for _, d := range deps {
+		if d != "" {
+			names = append(names, d)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	g.line("    depends_on:")
+	for _, dep := range names {
+		if isSwarm {
+			g.line("      - " + prefix + "_" + dep)
+			continue
+		}
+		g.line("      " + prefix + "_" + dep + ":")
+		if g.depHasHealthcheck(dep) {
+			g.line("        condition: service_healthy")
+		} else {
+			g.line("        condition: service_started")
+		}
+	}
+}
+
+// depHasHealthcheck reports whether a dependency (an app service or a managed dep)
+// defines a healthcheck, so compose depends_on can wait for service_healthy.
+func (g *gen) depHasHealthcheck(name string) bool {
+	for _, s := range g.cfg.Services {
+		if s.Name == name {
+			return s.Healthcheck != ""
+		}
+	}
+	switch name {
+	case "postgres", "mysql", "redis", "garage":
+		return true // managed deps always carry a healthcheck (see buildManagedDeps)
+	}
+	return false
+}
+
+// serviceImageRef resolves a service's `image:` value from its source.
+func serviceImageRef(svc Service, rp, registry, tag string) string {
+	switch {
+	case svc.ImageFrom != "":
+		return "${" + imageEnvVar(svc.ImageFrom) + ":-" + registry + "/" + rp + "-" + svc.ImageFrom + ":" + tag + "}"
+	case svc.Build != nil:
+		return "${" + imageEnvVar(svc.Name) + ":-" + registry + "/" + rp + "-" + svc.Name + ":" + tag + "}"
+	default:
+		if svc.Tag != "" {
+			return svc.Image + ":" + svc.Tag
+		}
+		return svc.Image
+	}
+}
+
+// serviceLabel is the short descriptor in a service's section comment.
+func serviceLabel(svc Service) string {
+	switch {
+	case svc.ImageFrom != "":
+		return "reuses " + svc.ImageFrom
+	case svc.Build != nil:
+		return "build"
+	default:
+		if svc.Tag != "" {
+			return svc.Image + ":" + svc.Tag
+		}
+		return svc.Image
+	}
+}
+
+// imageEnvVar maps a service name to its image-override env var (api → API_IMAGE).
+func imageEnvVar(name string) string {
+	return strings.ReplaceAll(strings.ToUpper(name), "-", "_") + "_IMAGE"
+}
+
+func portOr(p, def string) string {
+	if p == "" {
+		return def
+	}
+	return p
+}
+
+// ── Managed dependencies (db / redis / garage) — env toggles until Phase 3 ───────
+
+func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
+	c, e := g.cfg, g.e
 	verPostgres := c.version("postgres", "15-alpine")
 	verMySQL := c.version("mysql", "8.0")
 	verRedis := c.version("redis", "7-alpine")
 	verGarage := c.version("garage", "v1.0.1")
 	verGarageWebUI := c.version("garage_webui", "latest")
 
-	// ── Volumes ──
-	g.line("volumes:")
-	if e.Database == "postgres" {
-		g.line("  " + prefix + "_pg_data:")
-	}
-	if e.Database == "mysql" {
-		g.line("  " + prefix + "_mysql_data:")
-	}
-	if e.RedisEnabled {
-		g.line("  " + prefix + "_redis_data:")
-	}
-	if e.GarageEnabled {
-		g.line("  " + prefix + "_garage_data:")
-		g.line("  " + prefix + "_garage_meta:")
-	}
-	g.line("  " + prefix + "_uploads:")
-	g.line("")
-
-	g.line("services:")
-	g.line("")
-
-	// ── Backend ──
-	g.line(sectionComment("Backend ("+e.Backend+")", dashBackend))
-	g.line("  " + prefix + "_backend:")
-	g.line("    image: ${BACKEND_IMAGE:-" + registry + "/" + project + "-backend:" + tag + "}")
-	g.line("    container_name: " + prefix + "_backend")
-	g.line("    env_file: .env")
-	g.line("    volumes:")
-	g.line("      - " + prefix + "_uploads:/app/storage/uploads")
-	g.line("    networks:")
-	g.line("      - " + prefix + "_net")
-	if e.Database == "postgres" || e.Database == "mysql" {
-		db := prefix + "_" + e.Database
-		if isSwarm {
-			// `docker stack deploy` only accepts the short list form and ignores
-			// startup-ordering conditions; the map+condition form fails validation.
-			g.raw("    depends_on:\n      - " + db + "\n")
-		} else {
-			g.raw("    depends_on:\n      " + db + ":\n        condition: service_healthy\n")
-		}
-	}
-	if e.Backend == "nodejs" {
-		g.healthcheck("wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1", "30s", "10s", "3", "40s", "")
-	} else {
-		g.healthcheck("php -r 'exit(0);' 2>/dev/null || exit 1", "30s", "5s", "3", "60s", "")
-	}
-	g.deployBlock(isSwarm, "backend", string(e.Replicas.Backend), "unless-stopped")
-	g.line("")
-
-	// ── Extra processes (workers / scheduler) ──
-	// Each reuses a built image (backend by default, or frontend) with a custom
-	// command. No container_name (so a pool can scale to N replicas), no ports,
-	// no healthcheck. Emitted after the backend so they sit with the app code.
-	for _, p := range e.Processes {
-		if p.Name == "" || p.Command == "" {
-			continue // defensively skip incomplete rows; validated at save time
-		}
-		img := "${BACKEND_IMAGE:-" + registry + "/" + project + "-backend:" + tag + "}"
-		if p.Source == "frontend" && e.FrontendEnabled {
-			img = "${FRONTEND_IMAGE:-" + registry + "/" + project + "-frontend:" + tag + "}"
-		}
-		g.line(sectionComment("Process: "+p.Name, dashProcess))
-		g.line("  " + prefix + "_" + p.Name + ":")
-		g.line("    image: " + img)
-		g.line("    command: '" + p.Command + "'")
-		g.line("    env_file: .env")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
-		g.emitProcessDeps(prefix, isSwarm)
-		g.deployBlock(isSwarm, "proc_"+p.Name, string(p.Replicas), "unless-stopped")
-		g.line("")
-	}
-
-	// ── Nginx ──
-	g.line(sectionComment("Nginx", dashNginx))
-	g.line("  " + prefix + "_nginx:")
-	g.line("    image: nginx:" + verNginx)
-	g.line("    container_name: " + prefix + "_nginx")
-	g.line("    volumes:")
-	g.line("      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro")
-	g.line("      - " + prefix + "_uploads:/var/www/uploads:ro")
-	g.line("    depends_on:")
-	g.line("      - " + prefix + "_backend")
-	g.line("    networks:")
-	g.line("      - " + prefix + "_net")
-	if e.TraefikEnabled {
-		g.line("      - " + e.TraefikNetwork)
-	}
-	g.traefikLabels(prefix+"_nginx", e.Domain, "80")
-	if !e.TraefikEnabled {
-		g.portMapping(string(e.HTTPPort), "80")
-	}
-	g.healthcheck("curl -sf http://localhost/ -o /dev/null || exit 1", "30s", "5s", "3", "20s", "")
-	g.deployBlock(isSwarm, "nginx", "1", "unless-stopped")
-	g.line("")
-
-	// ── PostgreSQL ──
 	if e.Database == "postgres" {
 		g.line(sectionComment("PostgreSQL "+verPostgres, dashPostgres))
 		g.line("  " + prefix + "_postgres:")
@@ -143,7 +315,6 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("")
 	}
 
-	// ── MySQL ──
 	if e.Database == "mysql" {
 		g.line(sectionComment("MySQL "+verMySQL, dashMySQL))
 		g.line("  " + prefix + "_mysql:")
@@ -164,7 +335,6 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("")
 	}
 
-	// ── Redis ──
 	if e.RedisEnabled {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  " + prefix + "_redis:")
@@ -180,7 +350,6 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("")
 	}
 
-	// ── Garage (S3-compatible storage) ──
 	if e.GarageEnabled {
 		g.line(sectionComment("Garage "+verGarage+" (S3-compatible)", dashGarage))
 		g.line("  " + prefix + "_garage:")
@@ -212,234 +381,6 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
 		g.line("")
 	}
-
-	// ── Frontend ──
-	if e.FrontendEnabled {
-		g.line(sectionComment("Frontend ("+e.Frontend+")", dashFrontend))
-		g.line("  " + prefix + "_frontend:")
-		g.line("    image: ${FRONTEND_IMAGE:-" + registry + "/" + project + "-frontend:" + tag + "}")
-		g.line("    container_name: " + prefix + "_frontend")
-		g.line("    env_file: .env")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
-		if e.TraefikEnabled {
-			g.line("      - " + e.TraefikNetwork)
-			g.traefikLabels(prefix+"_frontend", "app."+e.Domain, "3000")
-		}
-		g.deployBlock(isSwarm, "frontend", string(e.Replicas.Frontend), "unless-stopped")
-		g.line("")
-	}
-}
-
-// emitProcessDeps writes a depends_on block for a worker/scheduler process: the
-// database (if any) and redis (if enabled) — the backing stores a worker needs.
-// Mirrors the backend's depends_on shape: map+condition for compose, plain list
-// for swarm (which ignores conditions). Emits nothing when there are no deps.
-func (g *gen) emitProcessDeps(prefix string, isSwarm bool) {
-	e := g.e
-	var deps []string
-	if e.Database == "postgres" || e.Database == "mysql" {
-		deps = append(deps, prefix+"_"+e.Database)
-	}
-	if e.RedisEnabled {
-		deps = append(deps, prefix+"_redis")
-	}
-	if len(deps) == 0 {
-		return
-	}
-	g.line("    depends_on:")
-	for _, d := range deps {
-		if isSwarm {
-			g.line("      - " + d)
-			continue
-		}
-		g.line("      " + d + ":")
-		g.line("        condition: service_healthy")
-	}
-}
-
-// ── Image stack ──────────────────────────────────────────────────────────────────
-
-func (g *gen) buildImageStack(prefix string, isSwarm bool) {
-	c := g.cfg
-	images := c.Images
-
-	// Named volumes block — from image mounts, then named_volumes[].
-	seen := map[string]bool{}
-	hasNamedVol := false
-	emit := func(vkey string) {
-		if seen[vkey] {
-			return
-		}
-		if !hasNamedVol {
-			g.line("volumes:")
-			hasNamedVol = true
-		}
-		g.line("  " + vkey + ":")
-		seen[vkey] = true
-	}
-	for _, img := range images {
-		for _, vol := range img.Volumes {
-			if vol == "" {
-				continue
-			}
-			if host := volHost(vol); isNamedVolume(host) {
-				emit(prefix + "_" + host)
-			}
-		}
-	}
-	for _, nv := range c.NamedVolumes {
-		if nv.Name == "" {
-			continue
-		}
-		if !strings.HasPrefix(nv.Name, ".") && !strings.HasPrefix(nv.Name, "/") {
-			emit(prefix + "_" + nv.Name)
-		}
-	}
-	if hasNamedVol {
-		g.line("")
-	}
-
-	g.line("services:")
-	g.line("")
-
-	for _, img := range images {
-		g.buildImageService(prefix, img, images, isSwarm)
-	}
-}
-
-func (g *gen) buildImageService(prefix string, img Image, images []Image, isSwarm bool) {
-	e := g.e
-	svc := img.Name
-	port := string(img.Port)
-	hport := string(img.HostPort)
-	restart := img.Restart
-	if restart == "" {
-		restart = "unless-stopped"
-	}
-
-	g.line(sectionComment(svc+" ("+img.Image+":"+img.Tag+")", dashImageSvc))
-	g.line("  " + prefix + "_" + svc + ":")
-	g.line("    image: " + img.Image + ":" + img.Tag)
-	g.line("    container_name: " + prefix + "_" + svc)
-	g.line("    env_file: .env")
-	if img.Command != "" {
-		g.line("    command: '" + img.Command + "'")
-	}
-
-	// Networks — long-form map with alias = short service name.
-	g.line("    networks:")
-	g.line("      " + prefix + "_net:")
-	g.line("        aliases:")
-	g.line("          - " + svc)
-	if hport != "" && e.TraefikEnabled {
-		g.line("      " + e.TraefikNetwork + ": {}")
-	}
-
-	// depends_on — service_healthy if the dependency has a healthcheck.
-	var deps []string
-	for _, d := range img.DependsOn {
-		if d != "" {
-			deps = append(deps, d)
-		}
-	}
-	if len(deps) > 0 {
-		g.line("    depends_on:")
-		for _, dep := range deps {
-			if isSwarm {
-				// Swarm: short list form only (conditions are unsupported/ignored).
-				g.line("      - " + prefix + "_" + dep)
-				continue
-			}
-			depHasHC := false
-			for _, di := range images {
-				if di.Name == dep {
-					depHasHC = di.Healthcheck != ""
-					break
-				}
-			}
-			g.line("      " + prefix + "_" + dep + ":")
-			if depHasHC {
-				g.line("        condition: service_healthy")
-			} else {
-				g.line("        condition: service_started")
-			}
-		}
-	}
-
-	// Volumes
-	firstVol := true
-	for _, vol := range img.Volumes {
-		if vol == "" {
-			continue
-		}
-		if firstVol {
-			g.line("    volumes:")
-			firstVol = false
-		}
-		host := volHost(vol)
-		if isNamedVolume(host) {
-			g.line("      - " + prefix + "_" + host + ":" + volRest(vol))
-		} else {
-			g.line("      - " + vol)
-		}
-	}
-
-	// Environment (keys sorted to match jq `keys[]`)
-	if keys := sortedKeys(img.EnvVars); len(keys) > 0 {
-		g.line("    environment:")
-		for _, k := range keys {
-			g.line("      - " + k + "=" + string(img.EnvVars[k]))
-		}
-	}
-
-	// Ports vs expose
-	hasExt := hport != ""
-	if !hasExt {
-		for _, ep := range img.ExtraPorts {
-			if string(ep) != "" {
-				hasExt = true
-				break
-			}
-		}
-	}
-	if hasExt {
-		g.line("    ports:")
-		if hport != "" {
-			g.line("      - \"" + hport + ":" + port + "\"")
-		}
-		for _, ep := range img.ExtraPorts {
-			if string(ep) == "" {
-				continue
-			}
-			g.line("      - \"" + string(ep) + "\"")
-		}
-		if hport != "" && e.TraefikEnabled {
-			g.traefikLabels(prefix+"_"+svc, e.Domain, port)
-		}
-	} else {
-		g.line("    expose:")
-		g.line("      - \"" + port + "\"")
-	}
-
-	// Healthcheck (image-stack defaults: start_period 40s)
-	if img.Healthcheck != "" {
-		hc := img.HealthcheckConfig
-		g.healthcheck(img.Healthcheck,
-			strOr(hc.Interval, "30s"), strOr(hc.Timeout, "10s"),
-			strOr(hc.Retries, "3"), strOr(hc.StartPeriod, "40s"),
-			string(hc.StartInterval))
-	}
-
-	g.deployBlock(isSwarm, svc, "1", restart)
-
-	// extra_compose: service-level then env-level override.
-	g.emitExtraCompose(img.ExtraCompose)
-	if ov, ok := e.ServiceOverrides[svc]; ok {
-		g.emitExtraCompose(ov.ExtraCompose)
-	}
-
-	g.line("")
 }
 
 // ── small helpers ────────────────────────────────────────────────────────────────

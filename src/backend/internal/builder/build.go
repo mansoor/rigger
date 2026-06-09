@@ -25,8 +25,8 @@ func (o Options) build() error {
 			bump = true
 		case "major", "minor", "patch", "build":
 			bumpPart = arg
-		case "backend", "frontend", "all":
-			target = arg
+		default:
+			target = arg // "all" or a specific build-service name
 		}
 	}
 
@@ -46,30 +46,29 @@ func (o Options) build() error {
 		return err
 	}
 
-	buildImage := func(service string) error {
-		return o.buildImage(cfg, service, push)
-	}
-
-	switch target {
-	case "backend":
-		return buildImage("backend")
-	case "frontend":
-		if !cfg.Environments[o.Env].FrontendEnabled {
-			return fmt.Errorf("frontend is disabled for %q in config.json", o.Env)
+	builds := cfg.BuildServices()
+	if target == "all" {
+		if len(builds) == 0 {
+			o.info("No build services for %q — nothing to build", o.Env)
+			return nil
 		}
-		return buildImage("frontend")
-	case "all":
-		if err := buildImage("backend"); err != nil {
-			return err
+		for _, svc := range builds {
+			if err := o.buildImage(cfg, svc.Name, push); err != nil {
+				return err
+			}
 		}
-		if cfg.Environments[o.Env].FrontendEnabled {
-			return buildImage("frontend")
-		}
-		o.info("Frontend disabled for %q — skipping", o.Env)
 		return nil
-	default:
-		return fmt.Errorf("unknown build target %q (use: backend | frontend | all)", target)
 	}
+	for _, svc := range builds {
+		if svc.Name == target {
+			return o.buildImage(cfg, svc.Name, push)
+		}
+	}
+	names := make([]string, 0, len(builds))
+	for _, svc := range builds {
+		names = append(names, svc.Name)
+	}
+	return fmt.Errorf("unknown build service %q (build services: %v)", target, names)
 }
 
 func (o Options) buildImage(cfg *wsconfig.Config, service string, push bool) error {

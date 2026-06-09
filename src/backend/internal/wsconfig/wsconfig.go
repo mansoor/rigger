@@ -22,8 +22,48 @@ import (
 // Config is the subset of config.json the non-compose operations read.
 type Config struct {
 	Project      Project        `json:"project"`
+	Services     []Service      `json:"services"`
 	Versions     map[string]Str `json:"versions"`
 	Environments map[string]Env `json:"environments"`
+}
+
+// Service is the read view of a unified services[] entry — enough for build,
+// bootstrap, envgen and deploy-history to know which services build, from what
+// context/template, and how to reuse images.
+type Service struct {
+	Name           string `json:"name"`
+	Build          *Build `json:"build,omitempty"`
+	Image          string `json:"image,omitempty"`
+	ImageFrom      string `json:"image_from,omitempty"`
+	Tag            string `json:"tag,omitempty"`
+	ConfigTemplate string `json:"config_template,omitempty"` // bootstrap renders templates/nginx/<x>.conf → nginx.conf
+}
+
+// Build describes how a build service's image is produced.
+type Build struct {
+	Context    string `json:"context,omitempty"`    // subdir under envs/<env>/, default = service name
+	Dockerfile string `json:"dockerfile,omitempty"` // default "Dockerfile"
+	Template   string `json:"template,omitempty"`   // templates/dockerfiles/<template> to scaffold
+	Target     string `json:"target,omitempty"`
+}
+
+// BuildServices returns the services that build from source (Build != nil).
+func (c *Config) BuildServices() []Service {
+	var out []Service
+	for _, s := range c.Services {
+		if s.Build != nil {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ContextDir returns the build context subdir for a build service (default = name).
+func (s Service) ContextDir() string {
+	if s.Build != nil && s.Build.Context != "" {
+		return s.Build.Context
+	}
+	return s.Name
 }
 
 type Project struct {
@@ -51,26 +91,18 @@ type Version struct {
 	Build int `json:"build"`
 }
 
-// Env is one environment's config.
+// Env is one environment's config. App services are project-level (Config.Services);
+// database/redis/garage stay as managed-dependency toggles until Phase 3.
 type Env struct {
-	Domain          string         `json:"domain"`
-	HTTPPort        Str            `json:"http_port"`
-	HTTPSPort       Str            `json:"https_port"`
-	Backend         string         `json:"backend"`
-	FrontendEnabled bool           `json:"frontend_enabled"`
-	Frontend        string         `json:"frontend"`
-	Database        string         `json:"database"`
-	RedisEnabled    bool           `json:"redis_enabled"`
-	GarageEnabled   bool           `json:"garage_enabled"`
-	TraefikEnabled  bool           `json:"traefik_enabled"`
-	Deployment      string         `json:"deployment"`
-	Replicas        Replicas       `json:"replicas"`
-	EnvVars         map[string]Str `json:"env_vars"`
-}
-
-type Replicas struct {
-	Backend  Str `json:"backend"`
-	Frontend Str `json:"frontend"`
+	Domain         string         `json:"domain"`
+	HTTPPort       Str            `json:"http_port"`
+	HTTPSPort      Str            `json:"https_port"`
+	Database       string         `json:"database"` // none | postgres | mysql
+	RedisEnabled   bool           `json:"redis_enabled"`
+	GarageEnabled  bool           `json:"garage_enabled"`
+	TraefikEnabled bool           `json:"traefik_enabled"`
+	Deployment     string         `json:"deployment"`
+	EnvVars        map[string]Str `json:"env_vars"`
 }
 
 // Load reads and parses a config.json from disk.

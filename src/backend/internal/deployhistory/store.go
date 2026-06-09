@@ -99,7 +99,7 @@ func scan(s scanner) (*Entry, error) {
 // image ref (the .env override if set, else the version-derived ImageTag) plus the
 // version string; image stacks return ptype=image with no image map.
 func Resolve(workspacesDir, workspace, project, env string) Entry {
-	e := Entry{Workspace: workspace, Project: project, Env: env, Ptype: "custom", Images: map[string]string{}}
+	e := Entry{Workspace: workspace, Project: project, Env: env, Ptype: "image", Images: map[string]string{}}
 	raw, err := os.ReadFile(wspath.ConfigPath(workspacesDir, workspace, project))
 	if err != nil {
 		return e
@@ -108,57 +108,40 @@ func Resolve(workspacesDir, workspace, project, env string) Entry {
 	if err != nil {
 		return e
 	}
-	e.Ptype = cfg.ProjectType()
-	if e.Ptype == "image" {
-		// Image stacks: capture the configured images[].image:tag (project-level).
-		var ic struct {
-			Images []struct {
-				Name  string `json:"name"`
-				Image string `json:"image"`
-				Tag   string `json:"tag"`
-			} `json:"images"`
-		}
-		json.Unmarshal(raw, &ic) //nolint:errcheck
-		for _, im := range ic.Images {
-			ref := im.Image
-			if im.Tag != "" {
-				ref += ":" + im.Tag
-			}
-			key := im.Name
-			if key == "" {
-				key = im.Image
-			}
-			if ref != "" {
-				e.Images[key] = ref
-			}
-		}
-		return e
-	}
 	e.Version = cfg.VersionString()
-	envCfg := cfg.Environments[env]
 	dotEnv := readDotEnv(wspath.DotEnv(workspacesDir, workspace, project, env))
-	resolveSvc := func(svc, overrideKey string) {
-		if v := dotEnv[overrideKey]; v != "" {
-			e.Images[svc] = v
-		} else {
-			e.Images[svc] = cfg.ImageTag(svc, env)
+	hasBuild := false
+	for _, svc := range cfg.Services {
+		if svc.Build != nil {
+			// Build service: its effective image is the .env override if set, else
+			// the version-derived tag. These are what rollback re-pins.
+			hasBuild = true
+			if v := dotEnv[OverrideKey(svc.Name)]; v != "" {
+				e.Images[svc.Name] = v
+			} else {
+				e.Images[svc.Name] = cfg.ImageTag(svc.Name, env)
+			}
+		} else if svc.Image != "" {
+			// Pull service: record image:tag for audit (not roll-back-able).
+			ref := svc.Image
+			if svc.Tag != "" {
+				ref += ":" + svc.Tag
+			}
+			e.Images[svc.Name] = ref
 		}
 	}
-	resolveSvc("backend", "BACKEND_IMAGE")
-	if envCfg.FrontendEnabled {
-		resolveSvc("frontend", "FRONTEND_IMAGE")
+	// "custom" = has build services (roll-back-able via image overrides); "image" =
+	// pull-only (rolls back via backup/restore instead). Preserves the rollback gate.
+	if hasBuild {
+		e.Ptype = "custom"
 	}
 	return e
 }
 
-// OverrideKey maps a built service name to its compose image-override env var.
+// OverrideKey maps a built service name to its compose image-override env var
+// (api → API_IMAGE), matching composegen/envgen.
 func OverrideKey(service string) string {
-	switch service {
-	case "frontend":
-		return "FRONTEND_IMAGE"
-	default:
-		return "BACKEND_IMAGE"
-	}
+	return strings.ToUpper(strings.ReplaceAll(service, "-", "_")) + "_IMAGE"
 }
 
 // readDotEnv is a minimal KEY=VALUE parser (comments/blank lines ignored).

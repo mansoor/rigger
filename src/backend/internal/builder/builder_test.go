@@ -12,9 +12,10 @@ import (
 const cfgBody = `{
   "project": { "name": "app", "registry": "reg",
     "version": { "major": 1, "minor": 2, "patch": 3, "build": 4 } },
+  "services": [ { "name": "backend", "build": { "template": "laravel", "context": "backend" } } ],
   "environments": {
-    "stage": { "domain": "stage.app", "frontend_enabled": false },
-    "prod":  { "domain": "app.com",  "frontend_enabled": false }
+    "stage": { "domain": "stage.app" },
+    "prod":  { "domain": "app.com" }
   }
 }`
 

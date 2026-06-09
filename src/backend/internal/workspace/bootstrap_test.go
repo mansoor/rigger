@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// imageConfig is a minimal image-stack config.json that composegen can render.
+// imageConfig is a minimal pull-image (no build services) config.json — so
+// bootstrap should write .env + compose but no Dockerfiles or nginx.conf.
 const imageConfig = `{
-  "project": { "name": "wp", "type": "image" },
-  "images": [ { "name": "app", "image": "wordpress", "tag": "latest", "port": 80, "host_port": 8080 } ],
+  "project": { "name": "wp" },
+  "services": [ { "name": "app", "image": "wordpress", "tag": "latest", "port": "80", "host_port": "8080", "env_file": true } ],
   "environments": { "prod": { "env_vars": { "WP_PASSWORD": "CHANGE_ME", "WP_PORT": "8080" } } }
 }`
 

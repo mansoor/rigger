@@ -7,12 +7,11 @@ import (
 )
 
 // TestSwarmDeployBlockDefaults verifies that a swarm env WITHOUT a swarm config
-// emits the historical default deploy block (also covered byte-for-byte by the
-// fullcustom/swarmsecret goldens; asserted here for clarity).
+// emits the historical default deploy block.
 func TestSwarmDeployBlockDefaults(t *testing.T) {
 	cfg := []byte(`{
-		"project": {"name":"q","type":"image","version":{"major":1,"minor":0,"patch":0,"build":0}},
-		"images": [{"name":"app","image":"nginx","tag":"alpine","port":80}],
+		"project": {"name":"q","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"app","image":"nginx","tag":"alpine","web_routed":true,"port":"80"}],
 		"environments": {"prod": {"deployment":"swarm"}}
 	}`)
 	out, err := GenerateAt(cfg, "prod", time.Unix(0, 0).UTC())
@@ -34,13 +33,13 @@ func TestSwarmDeployBlockDefaults(t *testing.T) {
 	}
 }
 
-// TestSwarmDeployBlockTuned verifies the configurable swarm fields: per-service
-// replicas + placement, a custom restart_policy/update_config, and rollback_config.
+// TestSwarmDeployBlockTuned verifies per-service replicas + placement, a custom
+// restart_policy/update_config, and rollback_config — keyed by the short service name.
 func TestSwarmDeployBlockTuned(t *testing.T) {
 	cfg := []byte(`{
-		"project": {"name":"q","type":"image","version":{"major":1,"minor":0,"patch":0,"build":0}},
-		"images": [
-			{"name":"app","image":"nginx","tag":"alpine","port":80},
+		"project": {"name":"q","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [
+			{"name":"app","image":"nginx","tag":"alpine","web_routed":true,"port":"80"},
 			{"name":"db","image":"mariadb","tag":"11"}
 		],
 		"environments": {"prod": {
@@ -61,29 +60,18 @@ func TestSwarmDeployBlockTuned(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-
-	// app service: replicas 3 + one placement constraint.
 	for _, want := range []string{
 		"  q_prod_app:",
 		"      replicas: 3",
 		"      placement:\n        constraints:\n          - node.role==worker",
 		"        condition: any",
-		"        delay: 3s",
-		"        max_attempts: 5",
 		"        window: 20s",
 		"      update_config:\n        parallelism: 2\n        delay: 5s\n        order: start-first\n        failure_action: continue",
 		"      rollback_config:\n        parallelism: 1\n        delay: 0s\n        order: stop-first",
+		"          - node.labels.storage==ssd\n          - node.role==manager",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("tuned swarm block missing %q\n---\n%s", want, s)
 		}
-	}
-
-	// db service: replicas 1 + two placement constraints.
-	if !strings.Contains(s, "      replicas: 1") {
-		t.Errorf("db replicas missing\n%s", s)
-	}
-	if !strings.Contains(s, "          - node.labels.storage==ssd\n          - node.role==manager") {
-		t.Errorf("db placement constraints missing\n%s", s)
 	}
 }

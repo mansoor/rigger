@@ -217,14 +217,6 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		if envName == "" {
 			continue
 		}
-		bePeers := e.BEReplicas
-		if bePeers < 1 {
-			bePeers = 1
-		}
-		fePeers := e.FEReplicas
-		if fePeers < 1 {
-			fePeers = 1
-		}
 		traefik := e.TraefikNet
 		if traefik == "" {
 			traefik = "traefik_net"
@@ -232,10 +224,6 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		deployment := e.Deployment
 		if deployment == "" {
 			deployment = "compose"
-		}
-		frontend := req.Frontend
-		if frontend == "" {
-			frontend = "none"
 		}
 		database := req.Database
 		if database == "" {
@@ -265,20 +253,13 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			},
 		}
 
-		// Custom stacks carry source-build fields; image stacks don't need them.
+		// Managed-dependency toggles (custom stacks). Image stacks bring their own
+		// data services as images. App services now live in the project-level
+		// services[] graph, not per-env.
 		if req.Type == "custom" {
-			envBlock["backend"] = req.Backend
-			envBlock["frontend_enabled"] = frontend != "none"
-			envBlock["frontend"] = frontend
 			envBlock["database"] = database
 			envBlock["redis_enabled"] = req.Redis
 			envBlock["garage_enabled"] = req.Garage
-			envBlock["replicas"] = map[string]any{
-				"backend":  bePeers,
-				"frontend": fePeers,
-			}
-			envBlock["git"].(map[string]any)["backend_path"] = "./src/backend"
-			envBlock["git"].(map[string]any)["frontend_path"] = "./src/frontend"
 		}
 
 		// Merge env vars: template/smart-defaults first, then user's initial vars on top,
@@ -327,13 +308,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	}
 	cfg := map[string]any{
 		"project":      project,
+		"services":     seedServices(req),
 		"versions":     versions,
 		"environments": environments,
-	}
-
-	// Image stacks include the images array
-	if req.Type == "image" && len(req.Images) > 0 {
-		cfg["images"] = req.Images
 	}
 
 	// Additional named volumes declared in the wizard
@@ -345,6 +322,106 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	// envBlock above. No workspace-level backup config.
 
 	return cfg, nil
+}
+
+// seedServices builds the unified services[] from the wizard request. Image stacks
+// map each image to a pull service; custom stacks seed a build "backend" fronted by
+// nginx (+ an optional build "frontend") from the chosen language. This is a
+// transitional mapping of the legacy wizard fields until the blueprint picker
+// (Phase 2a-2b) seeds richer, language-agnostic graphs directly.
+func seedServices(req CreateRequest) []map[string]any {
+	if req.Type == "image" {
+		out := make([]map[string]any, 0, len(req.Images))
+		for _, im := range req.Images {
+			tag := im.Tag
+			if tag == "" {
+				tag = "latest"
+			}
+			s := map[string]any{"name": im.Name, "image": im.Image, "tag": tag, "env_file": true}
+			if im.Port != 0 {
+				s["port"] = im.Port
+			}
+			if im.HostPort != "" {
+				s["host_port"] = im.HostPort
+			}
+			if len(im.ExtraPorts) > 0 {
+				s["extra_ports"] = im.ExtraPorts
+			}
+			if len(im.Volumes) > 0 {
+				s["volumes"] = im.Volumes
+			}
+			if len(im.DependsOn) > 0 {
+				s["depends_on"] = im.DependsOn
+			}
+			if im.Healthcheck != "" {
+				s["healthcheck"] = im.Healthcheck
+			}
+			if im.Restart != "" {
+				s["restart"] = im.Restart
+			}
+			if im.ExtraCompose != "" {
+				s["extra_compose"] = im.ExtraCompose
+			}
+			if len(im.EnvVars) > 0 {
+				s["env_vars"] = im.EnvVars
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	// Custom: a build "backend" fronted by nginx, plus an optional build "frontend".
+	be := req.Backend
+	if be == "" {
+		be = "laravel"
+	}
+	port, health := backendDefaults(be)
+	backend := map[string]any{
+		"name":        "backend",
+		"role":        "app",
+		"build":       map[string]any{"template": be, "context": "backend"},
+		"env_file":    true,
+		"port":        port,
+		"healthcheck": health,
+		"volumes":     []string{"uploads:/app/storage/uploads"},
+	}
+	if req.Database == "postgres" || req.Database == "mysql" {
+		backend["depends_on"] = []string{req.Database}
+	}
+	nginx := map[string]any{
+		"name":            "nginx",
+		"image":           "nginx",
+		"tag":             "1.25-alpine",
+		"web_routed":      true,
+		"port":            "80",
+		"depends_on":      []string{"backend"},
+		"config_template": be,
+		"volumes":         []string{"./nginx.conf:/etc/nginx/conf.d/default.conf:ro", "uploads:/var/www/uploads:ro"},
+		"healthcheck":     "curl -sf http://localhost/ -o /dev/null || exit 1",
+	}
+	out := []map[string]any{backend, nginx}
+	if req.Frontend != "" && req.Frontend != "none" {
+		out = append(out, map[string]any{
+			"name":       "frontend",
+			"role":       "app",
+			"build":      map[string]any{"template": req.Frontend, "context": "frontend"},
+			"env_file":   true,
+			"port":       "3000",
+			"web_routed": true,
+			"subdomain":  "app",
+		})
+	}
+	return out
+}
+
+// backendDefaults returns the listen port + healthcheck for a legacy backend type.
+func backendDefaults(backend string) (port, health string) {
+	switch backend {
+	case "nodejs":
+		return "3000", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1"
+	default: // laravel / php-fpm
+		return "9000", "php -r 'exit(0);' 2>/dev/null || exit 1"
+	}
 }
 
 // TemplateInfo is a summary of a stack template for the API.

@@ -45,9 +45,7 @@ func (g *gen) raw(s string) { g.b.WriteString(s) }
 func (g *gen) build() {
 	c := g.cfg
 	e := g.e
-	project := c.Project.Name
 	registry := c.Project.Registry
-	ptype := c.projectType()
 	ver := c.versionString()
 	tag := ver + "-" + g.env
 	// All Docker resource names derive from the immutable resource prefix
@@ -61,7 +59,7 @@ func (g *gen) build() {
 	sep := "# " + strings.Repeat("=", 60)
 	g.line(sep)
 	g.line("# docker-compose.yml — " + g.env + " environment")
-	g.line("# Project : " + project + "  (type: " + ptype + ")")
+	g.line("# Project : " + c.Project.Name)
 	g.line("# Version : " + ver)
 	g.line("# Generated: " + g.now.Format("2006-01-02 15:04:05") + " UTC")
 	g.line("# Regenerate: ./run.sh refresh " + g.env)
@@ -87,13 +85,10 @@ func (g *gen) build() {
 	// ── Secrets (swarm only) ──
 	g.emitTopLevelSecrets()
 
-	if ptype == "image" {
-		g.buildImageStack(prefix, isSwarm)
-	} else {
-		// Pass the resource prefix (not the display name) as the image-name base so
-		// pushed image tags (registry/<prefix>-<service>) stay globally unique.
-		g.buildCustomStack(prefix, rp, registry, tag, isSwarm)
-	}
+	// ── Services (unified graph) + managed dependencies ──
+	// rp is the image-name base so pushed tags (registry/<prefix>-<service>) stay
+	// globally unique across workspaces.
+	g.buildStack(prefix, rp, registry, tag, isSwarm)
 }
 
 // ── Shared emit helpers (mirror lib.sh / compose-gen.sh helpers) ─────────────────

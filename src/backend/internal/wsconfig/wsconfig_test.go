@@ -82,9 +82,6 @@ func TestStrFromNumberAndString(t *testing.T) {
 	if prod.HTTPSPort.String() != "443" {
 		t.Errorf("HTTPSPort = %q, want 443", prod.HTTPSPort)
 	}
-	if prod.Replicas.Backend.String() != "3" {
-		t.Errorf("Replicas.Backend = %q, want 3", prod.Replicas.Backend)
-	}
 	// env_vars values: number renders without decimal, matching jq -r.
 	if prod.EnvVars["API_PORT"].String() != "8080" {
 		t.Errorf("env_vars API_PORT = %q, want 8080", prod.EnvVars["API_PORT"])
