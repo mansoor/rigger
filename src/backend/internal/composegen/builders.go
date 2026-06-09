@@ -73,7 +73,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 	} else {
 		g.healthcheck("php -r 'exit(0);' 2>/dev/null || exit 1", "30s", "5s", "3", "60s", "")
 	}
-	g.deployBlock(isSwarm, string(e.Replicas.Backend), "unless-stopped")
+	g.deployBlock(isSwarm, "backend", string(e.Replicas.Backend), "unless-stopped")
 	g.line("")
 
 	// ── Nginx ──
@@ -96,7 +96,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.portMapping(string(e.HTTPPort), "80")
 	}
 	g.healthcheck("curl -sf http://localhost/ -o /dev/null || exit 1", "30s", "5s", "3", "20s", "")
-	g.deployBlock(isSwarm, "1", "unless-stopped")
+	g.deployBlock(isSwarm, "nginx", "1", "unless-stopped")
 	g.line("")
 
 	// ── PostgreSQL ──
@@ -114,7 +114,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
 		g.healthcheck("pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}", "10s", "5s", "5", "30s", "")
-		g.deployBlock(isSwarm, "1", "unless-stopped")
+		g.deployBlock(isSwarm, "postgres", "1", "unless-stopped")
 		g.line("")
 	}
 
@@ -135,7 +135,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
 		g.healthcheck("mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
-		g.deployBlock(isSwarm, "1", "unless-stopped")
+		g.deployBlock(isSwarm, "mysql", "1", "unless-stopped")
 		g.line("")
 	}
 
@@ -151,7 +151,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
 		g.healthcheck("redis-cli ping | grep -q PONG || exit 1", "10s", "3s", "3", "10s", "")
-		g.deployBlock(isSwarm, "1", "unless-stopped")
+		g.deployBlock(isSwarm, "redis", "1", "unless-stopped")
 		g.line("")
 	}
 
@@ -170,7 +170,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
 		g.healthcheck("curl -sf http://localhost:3903/health -o /dev/null || exit 1", "30s", "5s", "3", "60s", "")
-		g.deployBlock(isSwarm, "1", "unless-stopped")
+		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
 		g.line("")
 
 		g.line(sectionComment("Garage WebUI", dashGarageWebUI))
@@ -184,7 +184,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 		g.line("      - " + prefix + "_garage")
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
-		g.deployBlock(isSwarm, "1", "unless-stopped")
+		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
 		g.line("")
 	}
 
@@ -201,7 +201,7 @@ func (g *gen) buildCustomStack(prefix, project, registry, tag string, isSwarm bo
 			g.line("      - " + e.TraefikNetwork)
 			g.traefikLabels(prefix+"_frontend", "app."+e.Domain, "3000")
 		}
-		g.deployBlock(isSwarm, string(e.Replicas.Frontend), "unless-stopped")
+		g.deployBlock(isSwarm, "frontend", string(e.Replicas.Frontend), "unless-stopped")
 		g.line("")
 	}
 }
@@ -379,7 +379,7 @@ func (g *gen) buildImageService(prefix string, img Image, images []Image, isSwar
 			string(hc.StartInterval))
 	}
 
-	g.deployBlock(isSwarm, "1", restart)
+	g.deployBlock(isSwarm, svc, "1", restart)
 
 	// extra_compose: service-level then env-level override.
 	g.emitExtraCompose(img.ExtraCompose)

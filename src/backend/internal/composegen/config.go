@@ -59,6 +59,10 @@ type Env struct {
 	Deployment       string                     `json:"deployment"`
 	Replicas         Replicas                   `json:"replicas"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides"`
+	// Swarm holds per-env Docker Swarm scheduling: env-level rolling-update/restart
+	// policy plus per-service replicas/placement overrides. Only consulted for swarm
+	// deployments; ignored for compose.
+	Swarm SwarmConfig `json:"swarm"`
 	// SecretKeys / SecretVersions drive Docker Swarm secret wiring (Phase 8).
 	// Only consulted for swarm deployments; ignored for compose.
 	SecretKeys     []string       `json:"secret_keys"`
@@ -68,6 +72,38 @@ type Env struct {
 type Replicas struct {
 	Backend  flexStr `json:"backend"`
 	Frontend flexStr `json:"frontend"`
+}
+
+// SwarmConfig is the per-env Docker Swarm deploy tuning. Empty fields fall back to
+// Rigger's defaults (which match the historical hardcoded output), so existing
+// configs and compose envs are unaffected.
+type SwarmConfig struct {
+	RestartPolicy  *RestartPolicy          `json:"restart_policy,omitempty"`
+	UpdateConfig   *UpdateConfig           `json:"update_config,omitempty"`
+	RollbackConfig *UpdateConfig           `json:"rollback_config,omitempty"`
+	Services       map[string]SwarmService `json:"services,omitempty"` // short svc name → overrides
+}
+
+// RestartPolicy maps to compose deploy.restart_policy.
+type RestartPolicy struct {
+	Condition   string  `json:"condition"` // any | on-failure | none
+	Delay       string  `json:"delay"`
+	MaxAttempts flexStr `json:"max_attempts"`
+	Window      string  `json:"window"`
+}
+
+// UpdateConfig maps to compose deploy.update_config (also reused for rollback_config).
+type UpdateConfig struct {
+	Parallelism   flexStr `json:"parallelism"`
+	Delay         string  `json:"delay"`
+	Order         string  `json:"order"`          // stop-first | start-first
+	FailureAction string  `json:"failure_action"` // pause | continue | rollback
+}
+
+// SwarmService is a per-service override: replica count and placement constraints.
+type SwarmService struct {
+	Replicas  flexStr  `json:"replicas"`
+	Placement []string `json:"placement"` // constraints, e.g. "node.role==manager"
 }
 
 type ServiceOverride struct {

@@ -466,6 +466,92 @@ function ImagesEditor({ images, onChange }) {
 
 // ── Environment editor ────────────────────────────────────────────────────────
 
+const SWARM_RESTART_COND = [{ value: 'on-failure', label: 'on-failure' }, { value: 'any', label: 'any' }, { value: 'none', label: 'none' }]
+const SWARM_ORDER = [{ value: '', label: 'order: default' }, { value: 'stop-first', label: 'stop-first' }, { value: 'start-first', label: 'start-first' }]
+const SWARM_FAILURE = [{ value: 'rollback', label: 'rollback' }, { value: 'pause', label: 'pause' }, { value: 'continue', label: 'continue' }]
+
+// SwarmSettings edits cfg.swarm: per-service replicas + placement, plus the
+// env-level restart/update/rollback policy. Numeric fields are stored as strings
+// (flexStr-tolerant); empty means "use Rigger's default" on generation.
+function SwarmSettings({ cfg, onChange, projectType, imageNames = [] }) {
+  const sw = cfg.swarm || {}
+  const updSwarm = (patch) => onChange({ ...cfg, swarm: { ...sw, ...patch } })
+  const updSvc = (svc, patch) => updSwarm({ services: { ...(sw.services || {}), [svc]: { ...((sw.services || {})[svc] || {}), ...patch } } })
+  const updPolicy = (key, patch) => updSwarm({ [key]: { ...(sw[key] || {}), ...patch } })
+  const [advOpen, setAdvOpen] = useState(false)
+
+  const services = projectType === 'image'
+    ? imageNames
+    : ['backend',
+       ...(cfg.frontend && cfg.frontend !== 'none' ? ['frontend'] : []),
+       ...(cfg.database && cfg.database !== 'none' ? [cfg.database] : []),
+       ...(cfg.redis_enabled ? ['redis'] : []),
+       ...(cfg.garage_enabled ? ['garage'] : [])]
+
+  const svcReplicas = (svc) => {
+    const o = sw.services?.[svc]
+    if (o?.replicas != null && o.replicas !== '') return o.replicas
+    if (svc === 'backend') return cfg.replicas?.backend ?? 1
+    if (svc === 'frontend') return cfg.replicas?.frontend ?? 1
+    return 1
+  }
+  const svcPlacement = (svc) => (sw.services?.[svc]?.placement || []).join(', ')
+  const setPlacement = (svc, str) => updSvc(svc, { placement: str.split(',').map(s => s.trim()).filter(Boolean) })
+
+  const rp = sw.restart_policy || {}, uc = sw.update_config || {}, rc = sw.rollback_config || {}
+
+  return (
+    <div className="space-y-4 pt-3 border-t border-border-strong/50">
+      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider flex items-center gap-2">
+        ⚓ Swarm settings <span className="text-content-faint normal-case font-normal tracking-normal">applied on next deploy</span>
+      </p>
+
+      <div className="space-y-1.5">
+        {services.length === 0 && <p className="text-xs text-content-subtle">No services to configure.</p>}
+        {services.map(svc => (
+          <div key={svc} className="grid grid-cols-[110px_80px_1fr] gap-2 items-center">
+            <span className="font-mono text-xs text-content-muted truncate" title={svc}>{svc}</span>
+            <Input type="number" value={svcReplicas(svc)} onChange={v => updSvc(svc, { replicas: v })} />
+            <Input value={svcPlacement(svc)} onChange={v => setPlacement(svc, v)} placeholder="placement, e.g. node.role==manager, node.labels.zone==a" />
+          </div>
+        ))}
+        <p className="text-[11px] text-content-faint">replicas · placement constraints (comma-separated). Pin stateful services (db) to a node; scale stateless ones.</p>
+      </div>
+
+      <div>
+        <Label>Restart policy</Label>
+        <div className="grid grid-cols-4 gap-2">
+          <Select value={rp.condition || 'on-failure'} onChange={v => updPolicy('restart_policy', { condition: v })} options={SWARM_RESTART_COND} />
+          <Input value={rp.delay || ''} onChange={v => updPolicy('restart_policy', { delay: v })} placeholder="delay 5s" />
+          <Input value={rp.max_attempts ?? ''} onChange={v => updPolicy('restart_policy', { max_attempts: v })} placeholder="attempts 3" />
+          <Input value={rp.window || ''} onChange={v => updPolicy('restart_policy', { window: v })} placeholder="window" />
+        </div>
+      </div>
+
+      <div>
+        <Label>Update config (rolling deploy)</Label>
+        <div className="grid grid-cols-4 gap-2">
+          <Input value={uc.parallelism ?? ''} onChange={v => updPolicy('update_config', { parallelism: v })} placeholder="parallel 1" />
+          <Input value={uc.delay || ''} onChange={v => updPolicy('update_config', { delay: v })} placeholder="delay 10s" />
+          <Select value={uc.order || ''} onChange={v => updPolicy('update_config', { order: v })} options={SWARM_ORDER} />
+          <Select value={uc.failure_action || 'rollback'} onChange={v => updPolicy('update_config', { failure_action: v })} options={SWARM_FAILURE} />
+        </div>
+      </div>
+
+      <button type="button" onClick={() => setAdvOpen(o => !o)} className="text-xs text-content-subtle hover:text-content transition-colors">
+        {advOpen ? '▾' : '▸'} Rollback config (advanced)
+      </button>
+      {advOpen && (
+        <div className="grid grid-cols-3 gap-2">
+          <Input value={rc.parallelism ?? ''} onChange={v => updPolicy('rollback_config', { parallelism: v })} placeholder="parallel 1" />
+          <Input value={rc.delay || ''} onChange={v => updPolicy('rollback_config', { delay: v })} placeholder="delay 0s" />
+          <Select value={rc.order || ''} onChange={v => updPolicy('rollback_config', { order: v })} options={SWARM_ORDER} />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [] }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -609,17 +695,26 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
             <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Backend replicas</Label>
-              <Input type="number" value={cfg.replicas?.backend ?? 1} onChange={v => updReplicas('backend', v)} />
+          {/* Replicas only take effect on Swarm; when Swarm is selected the
+              per-service Swarm settings below own them, so hide these here. */}
+          {cfg.deployment !== 'swarm' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Backend replicas</Label>
+                <Input type="number" value={cfg.replicas?.backend ?? 1} onChange={v => updReplicas('backend', v)} />
+              </div>
+              <div>
+                <Label>Frontend replicas</Label>
+                <Input type="number" value={cfg.replicas?.frontend ?? 1} onChange={v => updReplicas('frontend', v)} />
+              </div>
             </div>
-            <div>
-              <Label>Frontend replicas</Label>
-              <Input type="number" value={cfg.replicas?.frontend ?? 1} onChange={v => updReplicas('frontend', v)} />
-            </div>
-          </div>
+          )}
         </div>
+      )}
+
+      {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
+      {cfg.deployment === 'swarm' && (
+        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames} />
       )}
 
       {/* Git */}
