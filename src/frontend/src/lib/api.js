@@ -112,6 +112,18 @@ export const fetchMetricsConfig = ()         => api.get('/metrics/config').then(
 export const fetchActivity     = (ws, name)      => api.get(`${projBase(ws, name)}/activity`).then(r => r.data)
 export const fetchActionRuns   = (ws, name, limit = 100) => api.get(`${projBase(ws, name)}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (ws, name)      => api.delete(`${projBase(ws, name)}/action-runs`).then(r => r.data)
+// Phase 9: deployment pipelines (project-scoped).
+export const fetchPipelines    = (ws, name)           => api.get(`${projBase(ws, name)}/pipelines`).then(r => r.data)
+export const createPipeline    = (ws, name, body)     => api.post(`${projBase(ws, name)}/pipelines`, body).then(r => r.data)
+export const updatePipeline    = (ws, name, id, body) => api.put(`${projBase(ws, name)}/pipelines/${id}`, body).then(r => r.data)
+export const deletePipeline    = (ws, name, id)       => api.delete(`${projBase(ws, name)}/pipelines/${id}`).then(r => r.data)
+export const fetchPipelineRuns = (ws, name, id, limit = 30) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs`, { params: { limit } }).then(r => r.data)
+export const fetchPipelineRun  = (ws, name, id, runId) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}`).then(r => r.data)
+export const approvePipelineRun = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/approve`).then(r => r.data)
+export const rejectPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/reject`).then(r => r.data)
+export const fetchPipelineWebhooks = (ws, name, id) => api.get(`${projBase(ws, name)}/pipelines/${id}/webhooks`).then(r => r.data)
+export const createPipelineWebhook = (ws, name, id, body = {}) => api.post(`${projBase(ws, name)}/pipelines/${id}/webhooks`, body).then(r => r.data)
+export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projBase(ws, name)}/pipelines/${id}/webhooks/${whId}`).then(r => r.data)
 // Host-aware port-conflict check: host_ports = [{host_id, port, service}].
 export const checkPorts        = (hostPorts, excludeWorkspace = '') =>
   api.post('/port-check', { host_ports: hostPorts, exclude_workspace: excludeWorkspace }).then(r => r.data)
@@ -428,6 +440,18 @@ export function openActionSocket(workspace, name, command, env, extra = [], serv
     ws.send(JSON.stringify({ command, env, extra, services, token }))
   })
 
+  return ws
+}
+
+// WebSocket: run a deployment pipeline (streams stage output). Auth via token in
+// the first message, like openActionSocket.
+export function openPipelineSocket(workspace, name, id) {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const ws = new WebSocket(`${proto}://${window.location.host}/api/workspaces/${workspace}/projects/${name}/pipelines/${id}/run`)
+  ws.addEventListener('open', () => {
+    const token = useAuthStore.getState().token
+    ws.send(JSON.stringify({ token }))
+  })
   return ws
 }
 

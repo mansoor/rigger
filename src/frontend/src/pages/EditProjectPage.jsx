@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
 import VerticalTabs from '../components/VerticalTabs'
+import PipelinesTab from '../components/PipelinesTab'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -1172,6 +1173,7 @@ export default function EditProjectPage() {
             { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
             { id: 'host', label: 'Host', icon: '🖥' },
             { id: 'backup', label: 'Backup', icon: '💾' },
+            { id: 'pipelines', label: 'Pipelines', icon: '🚀' },
             { group: 'Project' },
             { id: 'danger', label: 'Danger Zone', icon: '⚠', danger: true },
           ]}
@@ -1307,6 +1309,9 @@ export default function EditProjectPage() {
 
         {/* Backup schedules — per environment (Phase 11) */}
         {tab === 'backup' && envs && <BackupSection workspaceName={name} envs={envs} updateEnv={updateEnv} />}
+
+        {/* Pipelines (Phase 9) */}
+        {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} />}
 
         {/* Danger zone */}
         {tab === 'danger' && <DangerZone name={name} />}

@@ -54,6 +54,8 @@ func (s *swarmRunner) run() (bool, error) {
 		return true, s.update()
 	case "refresh":
 		return true, s.refresh()
+	case "test":
+		return true, fmt.Errorf("pipeline 'test' stages are not supported on Swarm environments yet")
 	}
 	return false, nil
 }

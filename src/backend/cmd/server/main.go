@@ -763,6 +763,30 @@ func main() {
 		handler.RunAction(w, r)
 	})
 
+	// Phase 9: deployment pipelines (project-scoped). REST CRUD + run history are
+	// JWT-authed via middleware (per-project RBAC enforced in the handlers); the run
+	// endpoint is a WebSocket authed by a token in its first message (like /action).
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.ListPipelines)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.CreatePipeline)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.UpdatePipeline)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipeline)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineRuns)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve", authSvc.Middleware(http.HandlerFunc(handler.ApprovePipelineRun)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject", authSvc.Middleware(http.HandlerFunc(handler.RejectPipelineRun)))
+	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
+		handler.RunPipeline(w, r)
+	})
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineWebhooks)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePipelineWebhook)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks/{whId}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipelineWebhook)))
+
+	// PUBLIC pipeline webhook trigger — no JWT; authed by the URL token (+ optional
+	// HMAC signature). Registered as a specific pattern so it isn't shadowed.
+	mux.HandleFunc("POST /api/pipelines/hooks/{token}", func(w http.ResponseWriter, r *http.Request) {
+		handler.InboundWebhook(w, r)
+	})
+
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {
 		handler.Terminal(w, r)
