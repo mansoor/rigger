@@ -376,30 +376,39 @@ func containerCountsByProjectFor(ex executor.Executor) (total map[string]int, se
 	seen := make(map[string]map[string]struct{}) // project → service set
 
 	out, err := ex.DockerOutput(executor.Spec{Args: []string{"ps", "-a",
-		"--format", `{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}`}})
+		"--format", `{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}|{{.Label "com.docker.stack.namespace"}}|{{.Label "com.docker.swarm.service.name"}}`}})
 	if err != nil {
 		return total, services
 	}
 	scanner := bufio.NewScanner(strings.NewReader(string(out)))
 	for scanner.Scan() {
-		parts := strings.SplitN(scanner.Text(), "|", 2)
-		p := strings.TrimSpace(parts[0])
+		f := strings.SplitN(scanner.Text(), "|", 4)
+		for len(f) < 4 {
+			f = append(f, "")
+		}
+		// Compose carries project/service labels; Swarm tasks carry the stack
+		// namespace + swarm service name instead. Both project keys equal
+		// "{resource_prefix}_{env}".
+		p := strings.TrimSpace(f[0])
+		svc := strings.TrimSpace(f[1])
+		if p == "" {
+			p = strings.TrimSpace(f[2]) // stack namespace
+			svc = strings.TrimSpace(f[3])
+		}
 		if p == "" {
 			continue
 		}
 		total[p]++
-		if len(parts) < 2 {
-			continue
-		}
-		svc := strings.TrimSpace(parts[1])
 		if svc == "" {
 			continue
 		}
 		// Rigger names compose services with the project (workspace_env) prefix,
-		// e.g. project "test_dev" → service "test_dev_adminer". Strip it so the
-		// logical service name ("adminer") is consistent across a workspace's envs
-		// and a per-workspace union yields the distinct service count.
-		svc = strings.TrimPrefix(svc, p+"_")
+		// e.g. project "test_dev" → service "test_dev_adminer". Swarm service names
+		// double-prefix (<stack>_<composeKey>), so strip the prefix repeatedly to
+		// reach the logical short name ("adminer"), consistent across envs.
+		for strings.HasPrefix(svc, p+"_") {
+			svc = strings.TrimPrefix(svc, p+"_")
+		}
 		if seen[p] == nil {
 			seen[p] = make(map[string]struct{})
 		}
@@ -514,7 +523,31 @@ func RunningByProjectFor(ex executor.Executor) map[string]int {
 			result[p.Name] = count
 		}
 	}
+	// `docker compose ls` doesn't list Swarm stacks — count their running task
+	// containers by the stack-namespace label and merge (compose counts untouched).
+	mergeSwarmRunning(ex, result)
 	return result
+}
+
+// mergeSwarmRunning adds running Swarm task containers (keyed by their stack
+// namespace = {resource_prefix}_{env}) into result. Containers that already carry
+// a compose-project label are skipped (already counted via `compose ls`).
+func mergeSwarmRunning(ex executor.Executor, result map[string]int) {
+	out, err := ex.DockerOutput(executor.Spec{Args: []string{"ps",
+		"--format", `{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.stack.namespace"}}`}})
+	if err != nil {
+		return
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		parts := strings.SplitN(scanner.Text(), "|", 2)
+		if strings.TrimSpace(parts[0]) != "" || len(parts) < 2 {
+			continue // compose container — already counted
+		}
+		if ns := strings.TrimSpace(parts[1]); ns != "" {
+			result[ns]++
+		}
+	}
 }
 
 // parseRunningCount extracts the running container count from a docker compose ls status string.
