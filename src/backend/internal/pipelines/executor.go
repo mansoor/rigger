@@ -37,6 +37,9 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 		o.Trigger = "manual"
 		o.ScheduleID = "manual"
 		o.ScheduleName = "Pipeline backup"
+	case "push":
+		o.Command = "promote" // pull src image → retag/push → deploy dst (via registry)
+		o.Extra = []string{s.ToEnv}
 	case "test":
 		o.Command = "test" // sandboxed compose exec inside the service container
 		o.Extra = []string{s.Service, s.Command}
@@ -51,6 +54,8 @@ func stageLabel(s Stage) string {
 			return "gate: " + s.Command
 		}
 		return "manual gate"
+	case "push":
+		return "promote " + s.Env + " → " + s.ToEnv
 	case "test":
 		return fmt.Sprintf("test %s: %s", s.Service, s.Command)
 	case "backup":

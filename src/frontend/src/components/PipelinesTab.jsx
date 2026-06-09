@@ -18,9 +18,10 @@ const STAGE_TYPES = [
   { value: 'restart', label: 'Restart' },
   { value: 'backup',  label: 'Backup' },
   { value: 'test',    label: 'Test — exec in container' },
+  { value: 'push',    label: 'Promote — copy env → env (registry)' },
   { value: 'gate',    label: 'Gate — manual approval' },
 ]
-const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', gate: '⏸️' }
+const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', push: '📤', gate: '⏸️' }
 
 const blankStage = (env) => ({ type: 'deploy', env: env || '', service: '', command: '', on_failure: 'stop' })
 
@@ -104,6 +105,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
 function stageSummary(s) {
   if (s.type === 'gate') return 'gate'
   if (s.type === 'test') return `test ${s.service}`
+  if (s.type === 'push') return `promote ${s.env}→${s.to_env}`
   return `${s.type} ${s.env}`
 }
 
@@ -320,9 +322,18 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
         ) : (
           <>
             <select value={stage.env} onChange={e => onChange({ env: e.target.value })} className={inputCls}>
-              <option value="">— env —</option>
+              <option value="">{stage.type === 'push' ? '— from —' : '— env —'}</option>
               {envNames.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
+            {stage.type === 'push' && (
+              <>
+                <span className="text-content-faint">→</span>
+                <select value={stage.to_env || ''} onChange={e => onChange({ to_env: e.target.value })} className={inputCls}>
+                  <option value="">— to —</option>
+                  {envNames.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+              </>
+            )}
             {stage.type === 'backup' && (
               <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (optional)" className={`${inputCls} w-36`} />
             )}

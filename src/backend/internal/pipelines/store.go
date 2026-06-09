@@ -26,15 +26,17 @@ const (
 var stageTypes = map[string]bool{
 	"deploy": true, "update": true, "build": true,
 	"restart": true, "backup": true, "test": true,
+	"push": true, // promote src env → dst env (pull/tag/push via registry)
 	"gate": true, // manual approval pause (9d) — no env
 }
 
 // Stage is one step of a pipeline definition.
 type Stage struct {
-	Type      string `json:"type"`              // deploy|update|build|restart|backup|test
-	Env       string `json:"env"`               // target environment
+	Type      string `json:"type"`              // deploy|update|build|restart|backup|test|push|gate
+	Env       string `json:"env"`               // target env (source env for push)
+	ToEnv     string `json:"to_env,omitempty"`  // push only — destination env
 	Service   string `json:"service,omitempty"` // test (required) / backup (optional)
-	Command   string `json:"command,omitempty"` // test only — run inside the service container
+	Command   string `json:"command,omitempty"` // test command / gate note
 	OnFailure string `json:"on_failure"`        // stop | continue (default stop)
 }
 
@@ -94,6 +96,14 @@ func (p *Pipeline) Validate() error {
 		if s.Type == "test" {
 			if strings.TrimSpace(s.Service) == "" || strings.TrimSpace(s.Command) == "" {
 				return fmt.Errorf("stage %d (test): a service and command are required", i+1)
+			}
+		}
+		if s.Type == "push" {
+			if strings.TrimSpace(s.ToEnv) == "" {
+				return fmt.Errorf("stage %d (push): a destination environment is required", i+1)
+			}
+			if s.ToEnv == s.Env {
+				return fmt.Errorf("stage %d (push): source and destination must differ", i+1)
 			}
 		}
 		if s.OnFailure != "continue" {
