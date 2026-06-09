@@ -6,6 +6,7 @@ import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
 import AccessRequestsInbox from '../components/AccessRequestsInbox'
+import VerticalTabs from '../components/VerticalTabs'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
@@ -1690,15 +1691,16 @@ function SystemEmailTab() {
 // (Remote Hosts → Docker Registries → Backup Targets → Notifications → Alert
 // Rules) so the two settings surfaces feel consistent.
 const TABS = [
-  { id: 'general',        label: 'General' },
-  { id: 'users',          label: 'Users' },
-  { id: 'access-requests', label: 'Access Requests' },
-  { id: 'system-email',   label: 'System Email' },
-  { id: 'hosts',          label: 'Remote Hosts' },
-  { id: 'registries',     label: 'Docker Registries' },
-  { id: 'backup-targets', label: 'Backup Targets' },
-  { id: 'notifications',  label: 'Notifications' },
-  { id: 'alerts',         label: 'Alert Rules' },
+  { id: 'general',        label: 'General',          icon: '⚙' },
+  { id: 'users',          label: 'Users',            icon: '👤' },
+  { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
+  { id: 'system-email',   label: 'System Email',     icon: '✉' },
+  { group: 'Shared resources' },
+  { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
+  { id: 'registries',     label: 'Docker Registries', icon: '📦' },
+  { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
+  { id: 'notifications',  label: 'Notifications',    icon: '📣' },
+  { id: 'alerts',         label: 'Alert Rules',      icon: '🚨' },
 ]
 
 export default function SettingsPage() {
@@ -1706,40 +1708,25 @@ export default function SettingsPage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Page header */}
         <div className="mb-6">
           <h1 className="text-xl font-bold text-content-strong">Admin</h1>
           <p className="text-sm text-content-subtle mt-0.5">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</p>
         </div>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 border-b border-border mb-6">
-          {TABS.map(t => (
-            <button
-              key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                tab === t.id
-                  ? 'border-brand-500 text-brand-400'
-                  : 'border-transparent text-content-subtle hover:text-content'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Tab content */}
-        {tab === 'general'        && <GeneralTab />}
-        {tab === 'users'          && <UsersTab />}
-        {tab === 'access-requests' && <AccessRequestsInbox />}
-        {tab === 'system-email'   && <SystemEmailTab />}
-        {tab === 'appearance'     && <AppearanceTab />}
-        {tab === 'alerts'         && <RulesTab />}
-        {tab === 'notifications'  && <NotificationsTab />}
-        {tab === 'registries'     && <RegistriesTab />}
-        {tab === 'backup-targets' && <BackupTargetsTab />}
-        {tab === 'hosts'          && <HostsTab />}
+        <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
+          {tab === 'general'        && <GeneralTab />}
+          {tab === 'users'          && <UsersTab />}
+          {tab === 'access-requests' && <AccessRequestsInbox />}
+          {tab === 'system-email'   && <SystemEmailTab />}
+          {tab === 'appearance'     && <AppearanceTab />}
+          {tab === 'alerts'         && <RulesTab />}
+          {tab === 'notifications'  && <NotificationsTab />}
+          {tab === 'registries'     && <RegistriesTab />}
+          {tab === 'backup-targets' && <BackupTargetsTab />}
+          {tab === 'hosts'          && <HostsTab />}
+        </VerticalTabs>
       </div>
     </Layout>
   )

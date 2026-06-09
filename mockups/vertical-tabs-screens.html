@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vertical left tabs — across screens (mockup)</title>
+<style>
+  :root{
+    --canvas:#0a0e16; --surface:#0f172a; --surface2:#111c30; --raised:#1e293b; --overlay:#273449;
+    --border:#1f2937; --border2:#334155;
+    --txt:#cbd5e1; --strong:#f1f5f9; --muted:#94a3b8; --subtle:#64748b; --faint:#475569;
+    --brand:#6366f1; --brand2:#818cf8; --ok:#34d399; --warn:#fbbf24; --danger:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--txt);font:14px/1.5 'Inter',system-ui,Segoe UI,sans-serif;-webkit-font-smoothing:antialiased}
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+  .nav{height:48px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;gap:10px;padding:0 16px}
+  .logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#6366f1,#a855f7)}
+  .ws{display:flex;align-items:center;gap:8px;border:1px solid var(--border2);border-radius:8px;padding:5px 10px;font-size:13px}
+  .ws .k{font-size:10px;color:var(--subtle);text-transform:uppercase;letter-spacing:.08em}
+  .nav .right{margin-left:auto;display:flex;gap:6px;align-items:center;color:var(--muted)}
+  .pill{padding:5px 10px;border:1px solid var(--border2);border-radius:8px;font-size:13px}
+  .pill.on{background:var(--raised);color:var(--strong)}
+  /* screen switcher */
+  .switcher{display:flex;gap:8px;justify-content:center;padding:14px;border-bottom:1px solid var(--border);background:#10182a;flex-wrap:wrap}
+  .sbtn{padding:7px 14px;border-radius:8px;border:1px solid var(--border2);background:var(--raised);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer}
+  .sbtn.active{background:var(--brand);border-color:var(--brand);color:#fff}
+  .wrap{max-width:1280px;margin:0 auto;padding:24px}
+  h1{margin:0;font-size:23px;color:var(--strong)}
+  .crumb{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--subtle)}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .pagehead{margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .prefix{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--faint);background:var(--raised);border:1px solid var(--border2);border-radius:6px;padding:3px 7px}
+  /* layout */
+  .shell{display:grid;grid-template-columns:208px 1fr;gap:26px;align-items:start}
+  .rail{position:sticky;top:16px;display:flex;flex-direction:column;gap:2px}
+  .rail .group{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);padding:12px 12px 5px}
+  .vtab{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--muted);cursor:pointer;border:0;background:none;text-align:left;width:100%;border-left:2px solid transparent}
+  .vtab:hover{background:var(--surface);color:var(--txt)}
+  .vtab.active{background:var(--surface2);color:var(--strong);border-left-color:var(--brand)}
+  .vtab.danger.active{border-left-color:var(--danger);color:var(--danger)}
+  .vtab .ico{width:16px;text-align:center;opacity:.9}
+  .vtab .count{margin-left:auto;font-size:11px;color:var(--subtle);background:var(--raised);border-radius:9px;padding:1px 7px}
+  .vtab.active .count{background:var(--brand);color:#fff}
+  .vtab.warn .count{background:rgba(251,191,36,.18);color:var(--warn)}
+  .content{min-width:0}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:14px}
+  .card h2{margin:0 0 4px;font-size:15px;color:var(--strong)}
+  .card .desc{font-size:12px;color:var(--subtle);margin-bottom:14px}
+  .secbar{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
+  .secbar h2{margin:0;font-size:17px;color:var(--strong)}
+  .row{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}
+  .g5{grid-template-columns:repeat(5,1fr)}.span4{grid-column:span 4}.span1{grid-column:span 1}
+  label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:5px}
+  input,select{width:100%;padding:8px 11px;background:var(--raised);border:1px solid var(--border2);border-radius:8px;color:var(--strong);font-size:13px;font-family:inherit}
+  input.ro{background:rgba(30,41,59,.5);color:var(--muted)}
+  .hint{font-size:11px;color:var(--subtle);margin-top:5px}
+  .btn{padding:8px 15px;border-radius:8px;font-size:13px;font-weight:600;border:1px solid var(--border2);background:var(--raised);color:var(--txt);cursor:pointer}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.sm{padding:5px 11px;font-size:12px}
+  .btn.danger{background:#7f1d1d;border-color:#991b1b;color:#fff}
+  .btn.ghost{background:none}
+  .save{display:flex;gap:10px;align-items:center;margin-top:6px}
+  .lrow{display:flex;align-items:center;gap:12px;padding:13px 15px;border:1px solid var(--border);border-radius:10px;background:var(--surface);margin-bottom:10px}
+  .av{width:34px;height:34px;border-radius:50%;background:var(--raised);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;flex-shrink:0}
+  .who b{color:var(--strong)}.who .m{font-size:12px;color:var(--subtle)}
+  .lrow .actions{margin-left:auto;display:flex;gap:8px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--raised);color:var(--muted);border:1px solid var(--border2);white-space:nowrap}
+  .tag.role{background:rgba(99,102,241,.14);color:var(--brand2);border-color:rgba(99,102,241,.3)}
+  .tag.super{background:rgba(248,113,113,.14);color:var(--danger);border-color:rgba(248,113,113,.3)}
+  .tag.ok{background:rgba(52,211,153,.12);color:var(--ok);border-color:rgba(52,211,153,.3)}
+  .tag.you{background:var(--overlay);color:var(--muted)}
+  .note{background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.25);border-radius:10px;padding:11px 13px;font-size:12px;color:var(--muted);margin-bottom:14px}
+  .item{border:1px solid var(--border);border-radius:12px;margin-bottom:11px;overflow:hidden;background:var(--surface)}
+  .item>summary{list-style:none;cursor:pointer;padding:13px 16px;display:flex;align-items:center;gap:11px}
+  .item>summary::-webkit-details-marker{display:none}
+  .chev{color:var(--subtle);transition:transform .15s}
+  details[open]>summary .chev{transform:rotate(90deg)}
+  .dot{width:8px;height:8px;border-radius:50%}
+  .svc-ico{width:28px;height:28px;border-radius:8px;background:var(--raised);display:flex;align-items:center;justify-content:center;font-size:14px}
+  .item .meta{color:var(--subtle);font-size:12px}
+  .item .body{padding:4px 16px 16px;border-top:1px solid var(--border)}
+  .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px}
+  .kv:last-child{border-bottom:0}.kv .k{color:var(--muted)}
+  .dz{border:1px solid rgba(248,113,113,.35);border-radius:12px}
+  .dz .rowx{display:flex;justify-content:space-between;align-items:center;padding:16px 18px}
+  .dz .rowx+ .rowx{border-top:1px solid var(--border)}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--border)}
+  .toggle-row:last-child{border-bottom:0}
+  .toggle-row .t b{color:var(--strong);font-size:13px}.toggle-row .t div{font-size:12px;color:var(--subtle)}
+  .switch{width:38px;height:22px;border-radius:11px;background:var(--raised);border:1px solid var(--border2);position:relative;flex-shrink:0}
+  .switch.on{background:var(--brand);border-color:var(--brand)}
+  .switch i{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .switch.on i{left:18px}
+  /* storage bar */
+  .bar{display:flex;height:26px;border-radius:7px;overflow:hidden;border:1px solid var(--border2);margin:6px 0 12px}
+  .bar span{display:block}
+  .stat{display:flex;gap:10px;flex-wrap:wrap}
+  .stat .s{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .stat .s .n{font-size:20px;color:var(--strong);font-weight:700}
+  .stat .s .l{font-size:12px;color:var(--subtle)}
+  /* json editor */
+  .editor{display:grid;grid-template-columns:42px 1fr;border:1px solid var(--border2);border-radius:10px;overflow:hidden;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7}
+  .editor .ln{background:var(--surface2);color:var(--faint);text-align:right;padding:10px 8px;user-select:none}
+  .editor .code{padding:10px 12px;background:#0c1322;color:var(--txt);white-space:pre;overflow-x:auto}
+  .editor .code .key{color:var(--brand2)}.editor .code .str{color:var(--ok)}.editor .code .num{color:var(--warn)}
+  .hide{display:none}
+  .banner{font-size:12px;color:var(--subtle);text-align:center;padding:9px;border-bottom:1px solid var(--border);background:#10182a}
+  .callout{font-size:12px;color:var(--warn);background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.25);border-radius:8px;padding:9px 12px;margin-bottom:14px}
+</style>
+</head>
+<body>
+  <div class="banner">MOCKUP — vertical left tabs across screens (grouped · icons) · not wired to data</div>
+  <div class="nav">
+    <div class="logo"></div>
+    <div class="ws"><span class="k">WS</span><b style="color:var(--strong)">Mindware Consulting</b> <span style="color:var(--faint)">▾</span></div>
+    <div class="right"><span class="pill">Dashboard</span><span class="pill">Housekeeping</span><span class="pill">Tools</span><span class="pill on">Admin</span><span class="pill">◑</span><span class="pill">🔔</span><span class="pill">M ▾</span></div>
+  </div>
+
+  <div class="switcher">
+    <button class="sbtn active" data-s="admin">Admin</button>
+    <button class="sbtn" data-s="ws">Manage Workspace</button>
+    <button class="sbtn" data-s="edit">Edit Project</button>
+    <button class="sbtn" data-s="house">Housekeeping</button>
+    <button class="sbtn" data-s="tools">Tools</button>
+  </div>
+
+  <!-- ════════ ADMIN ════════ -->
+  <div class="wrap screen" data-screen="admin">
+    <div class="pagehead"><div><h1>Admin</h1><div class="sub">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</div></div></div>
+    <div class="shell">
+      <nav class="rail">
+        <button class="vtab active"><span class="ico">⚙</span>General</button>
+        <button class="vtab"><span class="ico">👤</span>Users<span class="count">3</span></button>
+        <button class="vtab warn"><span class="ico">🔑</span>Access Requests<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">✉</span>System Email</button>
+        <div class="group">Shared resources</div>
+        <button class="vtab"><span class="ico">🖥</span>Remote Hosts<span class="count">3</span></button>
+        <button class="vtab"><span class="ico">📦</span>Docker Registries<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">💾</span>Backup Targets<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">📣</span>Notifications<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">🚨</span>Alert Rules<span class="count">5</span></button>
+      </nav>
+      <div class="content">
+        <div class="card"><h2>General</h2><div class="desc">Control-plane basics used across every workspace.</div>
+          <div class="row g2"><div><label>Application URL</label><input value="https://rigger.mansoorslab.com"></div><div><label>Default key length</label><input value="8"></div></div>
+          <div class="row g2" style="margin-top:14px"><div><label>ACME email</label><input value="ssl@mindware.com"></div><div><label>Metrics interval (sec)</label><input value="30"></div></div>
+          <div class="save"><button class="btn primary">Save changes</button></div>
+        </div>
+        <div class="callout">Tip: each rail item swaps the panel on the right. Shown here: the General panel. Other panels mirror the current Admin tabs (Users list, SMTP form, resource lists, Alert Rules toggles).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ MANAGE WORKSPACE ════════ -->
+  <div class="wrap screen hide" data-screen="ws">
+    <div class="pagehead"><div><div class="crumb">Manage workspace</div><h1>Mindware Consulting</h1><div class="sub">Members, shared resources and defaults for this workspace.</div></div><span class="prefix">mcl</span></div>
+    <div class="shell">
+      <nav class="rail">
+        <button class="vtab active"><span class="ico">⚙</span>General</button>
+        <button class="vtab"><span class="ico">👥</span>Members<span class="count">4</span></button>
+        <button class="vtab warn"><span class="ico">🔑</span>Access Requests<span class="count">1</span></button>
+        <div class="group">Shared resources</div>
+        <button class="vtab"><span class="ico">🖥</span>Remote Hosts<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">📦</span>Docker Registries<span class="count">1</span></button>
+        <button class="vtab"><span class="ico">💾</span>Backup Targets<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">📣</span>Notifications<span class="count">1</span></button>
+        <button class="vtab"><span class="ico">🚨</span>Alert Rules<span class="count">3</span></button>
+        <div class="group">Workspace</div>
+        <button class="vtab danger"><span class="ico">⚠</span>Danger Zone</button>
+      </nav>
+      <div class="content">
+        <div class="card"><h2>SSL &amp; domain</h2><div class="desc">ACME email and base domain used for this workspace's projects.</div>
+          <div class="row g2"><div><label>ACME email</label><input value="ssl@mindware.com"></div><div><label>Base domain</label><input value="mindware.com"></div></div>
+        </div>
+        <div class="card"><h2>Default appearance</h2><div class="desc">New members inherit this unless they set their own.</div>
+          <div class="row g2"><div><label>Theme</label><select><option>System</option><option>Light</option><option>Dark</option></select></div><div></div></div>
+        </div>
+        <div class="card"><h2>Defaults for new projects</h2><div class="desc">Pre-selected host / registry / backup target in the New Project wizard.</div>
+          <div class="row g3"><div><label>Host</label><select><option>local-docker</option></select></div><div><label>Registry</label><select><option>ghcr.io/mindware</option></select></div><div><label>Backup target</label><select><option>s3-primary</option></select></div></div>
+          <div class="save"><button class="btn primary">Save defaults</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ EDIT PROJECT ════════ -->
+  <div class="wrap screen hide" data-screen="edit">
+    <div class="pagehead"><div><div class="crumb">Edit project · mcl</div><h1>Company Website</h1><div class="sub">3 services · 2 environments · custom stack</div></div><span class="prefix">mcl_web</span></div>
+    <div class="shell">
+      <nav class="rail">
+        <button class="vtab active"><span class="ico">📋</span>Project</button>
+        <button class="vtab"><span class="ico">🧱</span>Services<span class="count">3</span></button>
+        <button class="vtab"><span class="ico">🌱</span>Environments<span class="count">2</span></button>
+        <button class="vtab"><span class="ico">🖥</span>Host</button>
+        <button class="vtab"><span class="ico">💾</span>Backup</button>
+        <div class="group">Project</div>
+        <button class="vtab danger"><span class="ico">⚠</span>Danger Zone</button>
+      </nav>
+      <div class="content">
+        <div class="callout" style="color:var(--ok);background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.28)">Page widened to ~1280px — the rail (208px) is paid for by margin that was empty before. Content column here is ~1040px, wider than today's 768px Edit Project page.</div>
+        <div class="card"><h2>Project</h2>
+          <div class="row g5"><div class="span4"><label>Project name</label><input value="Company Website"><div class="hint">Display label — editable; may repeat across workspaces.</div></div><div class="span1"><label>Key</label><input class="ro mono" value="web" disabled></div></div>
+          <div class="row g2" style="margin-top:14px"><div><label>Resource prefix</label><input class="ro mono" value="mcl_web" disabled><div class="hint">Fixed after creation — Docker stack / volume / network prefix.</div></div><div><label>Registry</label><input value="ghcr.io/mindware"></div></div>
+          <div style="margin-top:14px"><label>Project folder</label><input class="ro mono" value="/srv/rigger/workspaces/mcl/projects/web" disabled></div>
+          <div class="save"><button class="btn primary">Save</button></div>
+        </div>
+        <div class="secbar" style="margin-top:4px"><div><h2 style="font-size:15px;color:var(--strong);margin:0">Services preview</h2><div class="sub">Shown to demonstrate the wider column — 3 fields sit comfortably side-by-side.</div></div></div>
+        <details class="item" open>
+          <summary><span class="chev">▶</span><span class="svc-ico">🌐</span><div><b style="color:var(--strong)">app</b> <span class="meta">· wordpress:6.5-php8.3</span></div><span class="tag" style="margin-left:auto">:8084 → 80</span><span class="tag ok">healthy</span></summary>
+          <div class="body">
+            <div class="row g3" style="margin-top:14px"><div><label>Image</label><input value="wordpress:6.5-php8.3"></div><div><label>Host port</label><input value="8084"></div><div><label>Container port</label><input value="80"></div></div>
+            <div class="row g2" style="margin-top:14px"><div><label>Volumes</label><input value="wp-content:/var/www/html/wp-content"></div><div><label>Healthcheck</label><input value="curl -f http://localhost/ || exit 1"></div></div>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ HOUSEKEEPING ════════ -->
+  <div class="wrap screen hide" data-screen="house">
+    <div class="pagehead"><div><h1>Housekeeping</h1><div class="sub">Disk health, safe cleanup, migration leftovers and automation.</div></div></div>
+    <div class="shell">
+      <nav class="rail">
+        <button class="vtab active"><span class="ico">📊</span>Dashboard</button>
+        <button class="vtab"><span class="ico">🛡</span>Safety Center</button>
+        <button class="vtab warn"><span class="ico">🚚</span>Migration Leftovers<span class="count">3</span></button>
+        <button class="vtab"><span class="ico">⚙</span>Automation &amp; Logs</button>
+      </nav>
+      <div class="content">
+        <div class="card"><h2>Docker Storage Breakdown</h2><div class="desc">Reclaimable space across images, containers, volumes and build cache.</div>
+          <div class="bar"><span style="width:46%;background:#3b82f6"></span><span style="width:18%;background:#a855f7"></span><span style="width:24%;background:#f59e0b"></span><span style="width:12%;background:#06b6d4"></span></div>
+          <div class="stat">
+            <div class="s"><div class="n">12.4 GB</div><div class="l">🐳 Images</div></div>
+            <div class="s"><div class="n">4.8 GB</div><div class="l">📦 Containers</div></div>
+            <div class="s"><div class="n">6.5 GB</div><div class="l">💾 Volumes</div></div>
+            <div class="s"><div class="n">3.2 GB</div><div class="l">⚙ Build cache</div></div>
+          </div>
+        </div>
+        <div class="card"><h2>Safe Quick Actions</h2><div class="desc">No approval required.</div>
+          <div class="save"><button class="btn">Prune dangling images</button><button class="btn">Prune networks</button><button class="btn">Prune build cache</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ TOOLS ════════ -->
+  <div class="wrap screen hide" data-screen="tools">
+    <div class="pagehead"><div><h1>Tools</h1><div class="sub">Project backup/restore and stack template authoring.</div></div></div>
+    <div class="shell">
+      <nav class="rail">
+        <button class="vtab active"><span class="ico">🧰</span>Project Tools</button>
+        <button class="vtab"><span class="ico">📝</span>Template Manager</button>
+      </nav>
+      <div class="content">
+        <div class="callout">Only 2 tabs here — a vertical rail is heavier than needed, and the Template Manager's JSON editor wants width. Worth deciding whether Tools keeps horizontal tabs for consistency-vs-fit.</div>
+        <div class="secbar"><div><h2>Template Manager</h2><div class="sub">Convert a compose file to a reusable stack template, then edit the JSON.</div></div><button class="btn primary sm">+ New template</button></div>
+        <div class="card">
+          <div class="row g2" style="margin-bottom:12px"><div><label>Template name</label><input value="wordpress-stack"></div><div><label>Display label</label><input value="WordPress Stack"></div></div>
+          <label>Template JSON</label>
+          <div class="editor">
+            <div class="ln">1<br>2<br>3<br>4<br>5<br>6<br>7</div>
+            <div class="code">{
+  <span class="key">"name"</span>: <span class="str">"wordpress-stack"</span>,
+  <span class="key">"services"</span>: {
+    <span class="key">"app"</span>: { <span class="key">"image"</span>: <span class="str">"wordpress:6.5"</span>, <span class="key">"port"</span>: <span class="num">8084</span> },
+    <span class="key">"db"</span>:  { <span class="key">"image"</span>: <span class="str">"mariadb:11"</span> }
+  }
+}</div>
+          </div>
+          <div class="save" style="margin-top:12px"><button class="btn primary">Save template</button><button class="btn">Validate</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // screen switcher
+  const sbtns=document.querySelectorAll('.sbtn');
+  const screens=document.querySelectorAll('.screen');
+  sbtns.forEach(b=>b.addEventListener('click',()=>{
+    sbtns.forEach(x=>x.classList.remove('active'));b.classList.add('active');
+    screens.forEach(s=>s.classList.toggle('hide',s.dataset.screen!==b.dataset.s));
+  }));
+  // vtab active state (per rail) — visual only in this mockup
+  document.querySelectorAll('.rail').forEach(rail=>{
+    const tabs=rail.querySelectorAll('.vtab');
+    tabs.forEach(t=>t.addEventListener('click',()=>{tabs.forEach(x=>x.classList.remove('active'));t.classList.add('active');}));
+  });
+</script>
+</body>
+</html>

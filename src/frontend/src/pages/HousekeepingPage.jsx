@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
+import VerticalTabs from '../components/VerticalTabs'
 import {
   fetchHousekeepingStatus, fetchHousekeepingLog,
   fetchHousekeepingImages, fetchStoppedContainers, fetchDanglingVolumes,
@@ -858,10 +859,10 @@ function AutomationTab({ hostPrivileged }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'dashboard', label: '📊 Dashboard' },
-  { id: 'safety',    label: '🛡 Safety Center' },
-  { id: 'migrations', label: '🚚 Migration Leftovers' },
-  { id: 'automation', label: '⚙ Automation & Logs' },
+  { id: 'dashboard',  label: 'Dashboard',           icon: '📊' },
+  { id: 'safety',     label: 'Safety Center',        icon: '🛡' },
+  { id: 'migrations', label: 'Migration Leftovers',  icon: '🚚' },
+  { id: 'automation', label: 'Automation & Logs',    icon: '⚙' },
 ]
 
 // MigrationLeftoversTab lists data/files left on source hosts after environment
@@ -968,7 +969,7 @@ export default function HousekeepingPage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         <div className="mb-6 flex items-start justify-between">
           <div>
             <h1 className="text-xl font-bold text-content-strong">Housekeeping</h1>
@@ -977,29 +978,18 @@ export default function HousekeepingPage() {
           {!isLoading && status && <StatusBadge status={status.health_status} />}
         </div>
 
-        {/* Tab bar */}
-        <div className="flex gap-1 border-b border-border mb-6">
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                tab === t.id ? 'border-brand-500 text-brand-400' : 'border-transparent text-content-subtle hover:text-content'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        {isLoading ? (
-          <div className="py-16 text-center text-content-subtle">Loading system status…</div>
-        ) : (
-          <>
-            {tab === 'dashboard'   && <DashboardTab status={status} />}
-            {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
-            {tab === 'migrations'  && <MigrationLeftoversTab />}
-            {tab === 'automation'  && <AutomationTab hostPrivileged={status?.host_privileged} />}
-          </>
-        )}
+        <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
+          {isLoading ? (
+            <div className="py-16 text-center text-content-subtle">Loading system status…</div>
+          ) : (
+            <>
+              {tab === 'dashboard'   && <DashboardTab status={status} />}
+              {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
+              {tab === 'migrations'  && <MigrationLeftoversTab />}
+              {tab === 'automation'  && <AutomationTab hostPrivileged={status?.host_privileged} />}
+            </>
+          )}
+        </VerticalTabs>
       </div>
     </Layout>
   )

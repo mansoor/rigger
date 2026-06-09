@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
+import VerticalTabs from '../components/VerticalTabs'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -172,6 +173,7 @@ const RESTART_OPTIONS = [
 // immediately filter out the empty new row and Add would appear broken.
 function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   const confirm = useConfirm()
+  const [open, setOpen] = useState(idx === 0) // collapsible — first service open
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
 
@@ -192,22 +194,29 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   const monoInput = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500'
 
   return (
-    <div className="bg-surface-raised/50 border border-border-strong rounded-xl p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">Service {idx + 1}</p>
-        {allImages.length > 1 && (
-          <button type="button"
-            onClick={async () => {
-              if (await confirm({
-                title: 'Remove service?',
-                message: `Remove "${img.name || `Service ${idx + 1}`}" from this project? It will be deleted when you save changes.`,
-                confirmLabel: 'Remove',
-              })) onRemove(idx)
-            }}
-            className="text-xs text-danger-fg hover:text-danger-fg transition-colors">Remove</button>
-        )}
+    <div className="bg-surface-raised/50 border border-border-strong rounded-xl overflow-hidden">
+      {/* Collapsible header */}
+      <div className="flex items-center gap-3 p-4 cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
+        <span className={`text-content-subtle text-xs transition-transform ${open ? 'rotate-90' : ''}`}>▸</span>
+        <span className="text-sm font-semibold text-content-strong">{img.name || `Service ${idx + 1}`}</span>
+        {(img.image || img.tag) && <span className="text-xs text-content-subtle font-mono truncate">{img.image}{img.tag ? `:${img.tag}` : ''}</span>}
+        <div className="ml-auto flex items-center gap-3">
+          {hostPortsFromConfig(img).length > 0 && <span className="text-[11px] px-2 py-0.5 rounded bg-surface-overlay/40 text-content-muted">{hostPortsFromConfig(img).join(', ')}</span>}
+          {allImages.length > 1 && (
+            <button type="button"
+              onClick={async (e) => {
+                e.stopPropagation()
+                if (await confirm({
+                  title: 'Remove service?',
+                  message: `Remove "${img.name || `Service ${idx + 1}`}" from this project? It will be deleted when you save changes.`,
+                  confirmLabel: 'Remove',
+                })) onRemove(idx)
+              }}
+              className="text-xs text-danger-fg hover:text-danger-fg transition-colors">Remove</button>
+          )}
+        </div>
       </div>
+      {open && (<div className="px-4 pb-4 space-y-4 border-t border-border-strong pt-4">
 
       {/* Identity */}
       <div className="grid grid-cols-3 gap-3">
@@ -417,13 +426,26 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
           />
         </div>
       </details>
+      </div>)}
     </div>
   )
 }
 
 function ImagesEditor({ images, onChange }) {
+  const addService = () => onChange([...images, {
+    name: '', image: '', tag: 'latest', port: 0, host_port: '',
+    volumes: [], depends_on: [], extra_ports: [],
+    restart: 'unless-stopped', extra_compose: '',
+  }])
   return (
     <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-content-subtle">Containers that make up the stack — click one to expand.</p>
+        <button type="button" onClick={addService}
+          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+          + Add service
+        </button>
+      </div>
       {images.map((img, i) => (
         <ServiceCard
           key={i}
@@ -437,25 +459,15 @@ function ImagesEditor({ images, onChange }) {
       <PortWarnings warnings={portConflicts(
         images.filter(i => i.name || i.image).map(img => ({ name: img.name, ports: hostPortsFromConfig(img) }))
       )} />
-      <button
-        type="button"
-        onClick={() => onChange([...images, {
-          name: '', image: '', tag: 'latest', port: 0, host_port: '',
-          volumes: [], depends_on: [], extra_ports: [],
-          restart: 'unless-stopped', extra_compose: '',
-        }])}
-        className="w-full py-2 border border-dashed border-border-strong text-content-muted hover:text-content hover:border-border-strong rounded-xl text-sm transition-colors"
-      >
-        + Add service
-      </button>
     </div>
   )
 }
 
 // ── Environment editor ────────────────────────────────────────────────────────
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [] }) {
   const confirm = useConfirm()
+  const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
   const updGit = (k, v) => onChange({ ...cfg, git: { ...(cfg.git || {}), [k]: v } })
   const updReplicas = (k, v) => onChange({ ...cfg, replicas: { ...(cfg.replicas || {}), [k]: parseInt(v) || 1 } })
@@ -465,10 +477,12 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
   })
 
   return (
-    <div className="bg-surface-raised/50 border border-border-strong rounded-xl p-5 space-y-4">
-      {/* Env name + remove */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 flex-1">
+    <div className="bg-surface-raised/50 border border-border-strong rounded-xl overflow-hidden">
+      {/* Collapsible header: chevron toggles; name input + remove are isolated */}
+      <div className="flex items-center justify-between gap-3 p-5">
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <button type="button" onClick={() => setOpen(o => !o)}
+            className={`text-content-subtle text-xs transition-transform shrink-0 ${open ? 'rotate-90' : ''}`} title={open ? 'Collapse' : 'Expand'}>▸</button>
           <div className="w-2 h-2 rounded-full bg-surface-overlay shrink-0" />
           {/* defaultValue (uncontrolled) — React never updates this input's DOM value
               while the user is typing, so focus is never lost. onBlur fires rename. */}
@@ -477,9 +491,14 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             defaultValue={envName}
             onBlur={e => { if (e.target.value !== envName) onRename(e.target.value) }}
             placeholder="prod"
-            className="bg-transparent text-content-strong font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32"
+            className="bg-transparent text-content-strong font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32 shrink-0"
           />
-          {isNew && <span className="text-xs text-brand-400 bg-brand-950 px-2 py-0.5 rounded-full">new</span>}
+          {isNew && <span className="text-xs text-brand-400 bg-brand-950 px-2 py-0.5 rounded-full shrink-0">new</span>}
+          {!open && (
+            <span className="text-xs text-content-subtle truncate cursor-pointer" onClick={() => setOpen(true)}>
+              {cfg.deployment || 'compose'}{cfg.domain ? ` · ${cfg.domain}` : ''}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -492,10 +511,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           }}
           disabled={isOnlyEnv}
           title={isOnlyEnv ? 'Cannot remove the only environment' : undefined}
-          className={`text-xs transition-colors ${isOnlyEnv ? 'text-content-faint cursor-not-allowed' : 'text-danger-fg hover:text-danger-fg'}`}
+          className={`text-xs transition-colors shrink-0 ${isOnlyEnv ? 'text-content-faint cursor-not-allowed' : 'text-danger-fg hover:text-danger-fg'}`}
         >Remove</button>
       </div>
 
+      {open && (<div className="px-5 pb-5 space-y-4 border-t border-border-strong/50 pt-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Domain</Label>
@@ -505,6 +525,19 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <Label>Deployment</Label>
           <Select value={cfg.deployment} onChange={v => upd('deployment', v)} options={DEPLOYMENT_OPTIONS} />
         </div>
+        {/* Host selection — only for a NEW env (matches the New Project wizard).
+            Existing envs change host in the Host tab. Bound on save (bind-only). */}
+        {isNew && (
+          <div>
+            <Label>Host</Label>
+            <Select
+              value={String(cfg._host_id || 0)}
+              onChange={v => upd('_host_id', Number(v))}
+              options={[{ value: '0', label: 'Local Docker' }, ...hosts.map(h => ({ value: String(h.id), label: `${h.name} — ${h.address}` }))]}
+            />
+            <p className="text-xs text-content-subtle mt-1">The stack starts here the first time you deploy this environment.</p>
+          </div>
+        )}
         {/* HTTP port — only relevant for custom stacks without Traefik (direct Nginx binding) */}
         {projectType !== 'image' && !cfg.traefik_enabled && (
           <div>
@@ -624,6 +657,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           onChange={updServiceOverride}
         />
       )}
+      </div>)}
     </div>
   )
 }
@@ -686,16 +720,28 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
 // Matches EnvVarsInline appearance: collapsible, show/hide values toggle.
 function NewEnvVarsEditor({ cfg, onChange }) {
   const vars = cfg._initial_vars || {}
+  const secretKeys = cfg._secret_keys || []
+  const secretSet = new Set(secretKeys)
+  const swarm = cfg.deployment === 'swarm'
   const [open, setOpen]     = useState(false)
   const [reveal, setReveal] = useState(false)
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
+  const [newSecret, setNewSecret] = useState(false)
 
   function setVar(k, v) { onChange({ ...cfg, _initial_vars: { ...vars, [k]: v } }) }
-  function removeVar(k) { const n = { ...vars }; delete n[k]; onChange({ ...cfg, _initial_vars: n }) }
+  function removeVar(k) {
+    const n = { ...vars }; delete n[k]
+    onChange({ ...cfg, _initial_vars: n, _secret_keys: secretKeys.filter(x => x !== k) })
+  }
+  function toggleSecret(k) {
+    onChange({ ...cfg, _secret_keys: secretSet.has(k) ? secretKeys.filter(x => x !== k) : [...secretKeys, k] })
+  }
   function addVar() {
     const k = newKey.trim(); if (!k) return
-    setVar(k, newVal); setNewKey(''); setNewVal('')
+    const nextSecret = newSecret && !secretSet.has(k) ? [...secretKeys, k] : secretKeys
+    onChange({ ...cfg, _initial_vars: { ...vars, [k]: newVal }, _secret_keys: nextSecret })
+    setNewKey(''); setNewVal(''); setNewSecret(false)
   }
 
   const entries = Object.entries(vars)
@@ -706,15 +752,15 @@ function NewEnvVarsEditor({ cfg, onChange }) {
         className="flex items-center gap-2 text-xs font-semibold text-content-muted uppercase tracking-wider hover:text-content transition-colors w-full">
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
-        {entries.length > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{entries.length} inherited</span>}
+        {entries.length > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{entries.length} inherited{secretKeys.length > 0 ? ` · ${secretKeys.length} 🔒` : ''}</span>}
         <span className="ml-auto text-content-faint normal-case font-normal">.env file</span>
       </button>
       {open && (
         <div className="mt-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-warning-fg/80 flex items-center gap-1">
-              <span>⚠</span> These will be written to <code className="font-mono">.env</code> on save.
-            </p>
+          <div className="flex items-center justify-between gap-3">
+            {swarm
+              ? <p className="text-xs text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) when this environment is deployed.</p>
+              : <p className="text-xs text-warning-fg/70">⚠ Compose keeps values plaintext in <code className="font-mono">.env</code> — flag secrets and deploy with Swarm for encryption at rest.</p>}
             <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
               <input type="checkbox" checked={reveal} onChange={e => setReveal(e.target.checked)}
                 className="w-3 h-3 accent-brand-500" />
@@ -722,21 +768,32 @@ function NewEnvVarsEditor({ cfg, onChange }) {
             </label>
           </div>
           <div className="space-y-1.5">
-            {entries.map(([k, v]) => (
-              <div key={k} className="flex items-center gap-2">
-                <span className="font-mono text-xs text-content w-44 shrink-0 truncate">{k}</span>
-                <input type={reveal ? 'text' : 'password'} value={v}
-                  onChange={e => setVar(k, e.target.value)}
-                  className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
-                <button type="button" onClick={() => removeVar(k)}
-                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
-              </div>
-            ))}
+            {entries.map(([k, v]) => {
+              const secret = secretSet.has(k)
+              return (
+                <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'}`}>
+                  <button type="button" onClick={() => toggleSecret(k)} title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
+                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+                    {secret ? '🔒' : '🔓'}
+                  </button>
+                  <span className="font-mono text-xs text-content w-40 shrink-0 truncate">{k}</span>
+                  <input type={secret && !reveal ? 'password' : 'text'} value={v}
+                    onChange={e => setVar(k, e.target.value)}
+                    className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+                  <button type="button" onClick={() => removeVar(k)}
+                    className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+                </div>
+              )
+            })}
           </div>
           <div className="flex gap-2 pt-1">
+            <button type="button" onClick={() => setNewSecret(s => !s)} title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
+              className={`shrink-0 w-7 h-7 flex items-center justify-center rounded text-xs ${newSecret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+              {newSecret ? '🔒' : '🔓'}
+            </button>
             <input type="text" placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
-              className="w-44 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+              className="w-40 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
             <input type="text" placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
@@ -820,13 +877,18 @@ function EnvVarsInline({ workspaceName, envName }) {
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 {Object.entries(vars || {}).map(([k, v]) => {
                   const marked = deletes.has(k)
+                  // Values arrive as { value, secret } objects; tolerate a bare
+                  // string too. Secrets stay masked even when revealing values.
+                  const val    = typeof v === 'string' ? v : (v?.value ?? '')
+                  const secret = typeof v === 'object' && !!v?.secret
+                  const show   = reveal && !secret
                   return (
                     <div key={k} className={`flex items-center gap-2 ${marked ? 'opacity-40' : ''}`}>
                       <span className="font-mono text-xs text-content-muted w-36 shrink-0 truncate" title={k}>{k}</span>
                       <input
-                        type={reveal ? 'text' : 'password'}
-                        placeholder={reveal ? v : '••••••••'}
-                        value={marked ? '' : (edits[k] ?? (reveal ? v : ''))}
+                        type={show ? 'text' : 'password'}
+                        placeholder={show ? val : '••••••••'}
+                        value={marked ? '' : (edits[k] ?? (show ? val : ''))}
                         disabled={marked}
                         onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
                         className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
@@ -899,6 +961,8 @@ export default function EditProjectPage() {
   })
   // Project (for env→host bindings) — used by the host-aware port check.
   const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
+  // Remote hosts available to this workspace — for host selection on a NEW env.
+  const { data: wsHosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -909,6 +973,7 @@ export default function EditProjectPage() {
   const [firstEnvVars, setFirstEnvVars] = useState({})
   const [baseline, setBaseline] = useState(null)        // serialized config at load
   const [confirmCancel, setConfirmCancel] = useState(false)
+  const [tab, setTab] = useState('project')             // tabbed layout (Prototype A)
 
   useEffect(() => {
     if (rawConfig && envs === null) {
@@ -952,9 +1017,17 @@ export default function EditProjectPage() {
       // UpdateEnvVars now creates the .env file if it doesn't exist.
       const newEnvNames = Object.keys(envs || {}).filter(e => !originalEnvNames.includes(e))
       for (const envName of newEnvNames) {
-        const initialVars = envs[envName]?._initial_vars || {}
-        if (Object.keys(initialVars).length > 0) {
-          try { await updateEnvVars(workspace, name, envName, initialVars) } catch { /* non-fatal */ }
+        const e = envs[envName] || {}
+        const initialVars = e._initial_vars || {}
+        const secretKeys = e._secret_keys || []
+        if (Object.keys(initialVars).length > 0 || secretKeys.length > 0) {
+          // Pass secret keys so swarm-flagged vars become Docker secrets (parity
+          // with the New Project wizard).
+          try { await updateEnvVars(workspace, name, envName, initialVars, [], secretKeys) } catch { /* non-fatal */ }
+        }
+        // Bind the chosen host (bind-only — nothing is deployed yet).
+        if (e._host_id) {
+          try { await setEnvHost(workspace, name, envName, Number(e._host_id), true) } catch { /* non-fatal */ }
         }
       }
     },
@@ -1013,7 +1086,14 @@ export default function EditProjectPage() {
         replicas: { backend: 1, frontend: 1 },
       })
     }
-    setEnvs(prev => ({ ...prev, [n]: { ...base, _id: `env-new-${newEnvCounter + 1}`, _initial_vars: { ...firstEnvVars } } }))
+    // firstEnvVars is the API shape { KEY: { value, secret } }; flatten it to the
+    // plain { KEY: value } map _initial_vars expects, and carry over secret flags.
+    const seedVars = {}, seedSecrets = []
+    for (const [k, v] of Object.entries(firstEnvVars)) {
+      seedVars[k] = typeof v === 'string' ? v : (v?.value ?? '')
+      if (typeof v === 'object' && v?.secret) seedSecrets.push(k)
+    }
+    setEnvs(prev => ({ ...prev, [n]: { ...base, _id: `env-new-${newEnvCounter + 1}`, _initial_vars: seedVars, _secret_keys: seedSecrets } }))
   }
 
   const originalEnvNames = rawConfig ? Object.keys(rawConfig.environments || {}) : []
@@ -1047,7 +1127,7 @@ export default function EditProjectPage() {
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -1084,7 +1164,23 @@ export default function EditProjectPage() {
           <div className="mb-5 px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">{saveError}</div>
         )}
 
+        {/* Vertical tab rail (Prototype A — combined view per tab) */}
+        <VerticalTabs
+          tabs={[
+            { id: 'project', label: 'Project', icon: '📋' },
+            ...(project?.type === 'image' ? [{ id: 'services', label: 'Services', icon: '🧱', count: (images || []).length }] : []),
+            { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
+            { id: 'host', label: 'Host', icon: '🖥' },
+            { id: 'backup', label: 'Backup', icon: '💾' },
+            { group: 'Project' },
+            { id: 'danger', label: 'Danger Zone', icon: '⚠', danger: true },
+          ]}
+          active={tab}
+          onChange={setTab}
+        >
+
         {/* Project settings */}
+        {tab === 'project' && (
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-content mb-3">Project</h2>
           <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
@@ -1146,9 +1242,10 @@ export default function EditProjectPage() {
             </div>
           </div>
         </section>
+        )}
 
-        {/* Images (image stacks only) */}
-        {project?.type === 'image' && (
+        {/* Services (image stacks only) */}
+        {tab === 'services' && project?.type === 'image' && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages} />
@@ -1158,23 +1255,28 @@ export default function EditProjectPage() {
         )}
 
         {/* Environments */}
+        {tab === 'envs' && (<>
         <section className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-content">Environments</h2>
+          <div className="flex items-center justify-between gap-3 mb-3">
             <p className="text-xs text-content-subtle">
-              {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''}
+              {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
               {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
-                <span className="ml-2 text-brand-400">· new environments will need bootstrapping after save</span>
+                <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
               )}
             </p>
+            <button type="button" onClick={addEnv}
+              className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+              + Add environment
+            </button>
           </div>
 
-          <div className="space-y-4">
-            {Object.entries(envs || {}).map(([envName, cfg]) => (
+          <div className="space-y-3">
+            {Object.entries(envs || {}).map(([envName, cfg], i) => (
               <EnvEditor
                 key={cfg._id || envName}
                 envName={envName}
                 cfg={cfg}
+                defaultOpen={i === 0}
                 onChange={(updated) => updateEnv(envName, updated)}
                 onRename={(newName) => renameEnv(envName, newName)}
                 onRemove={() => removeEnv(envName)}
@@ -1182,17 +1284,11 @@ export default function EditProjectPage() {
                 isOnlyEnv={Object.keys(envs || {}).length === 1}
                 projectType={project?.type || 'custom'}
                 workspaceName={name}
+                hosts={wsHosts}
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
               />
             ))}
           </div>
-
-          <button
-            type="button" onClick={addEnv}
-            className="mt-4 w-full py-2.5 border border-dashed border-border-strong text-content-muted hover:text-content hover:border-border-strong rounded-xl text-sm transition-colors"
-          >
-            + Add environment
-          </button>
         </section>
 
         {/* After-save hint for new envs */}
@@ -1201,18 +1297,20 @@ export default function EditProjectPage() {
             After saving, go to the project and click <strong>Init</strong> for each new environment to generate its compose file and .env.
           </div>
         )}
+        </>)}
 
-        {/* Per-environment hosts (Phase 7) */}
-        <EnvHostsSection name={name} />
-
-        {/* Move the whole workspace to another host (Phase 7) */}
-        <MigrateSection name={name} />
+        {/* Host — per-environment binding + whole-project migrate (Phase 7) */}
+        {tab === 'host' && (<>
+          <EnvHostsSection name={name} />
+          <MigrateSection name={name} />
+        </>)}
 
         {/* Backup schedules — per environment (Phase 11) */}
-        {envs && <BackupSection workspaceName={name} envs={envs} updateEnv={updateEnv} />}
+        {tab === 'backup' && envs && <BackupSection workspaceName={name} envs={envs} updateEnv={updateEnv} />}
 
         {/* Danger zone */}
-        <DangerZone name={name} />
+        {tab === 'danger' && <DangerZone name={name} />}
+        </VerticalTabs>
       </div>
 
       {/* Discard-changes confirmation */}

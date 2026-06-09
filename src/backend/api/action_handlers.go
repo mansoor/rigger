@@ -181,6 +181,7 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 	pkey := h.resourcePrefix(wsName, name)
 	var body struct {
 		TargetHostID int64 `json:"host_id"`
+		BindOnly     bool  `json:"bind_only"` // record the binding without a migration (for new, not-yet-deployed envs)
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "host_id is required"})
@@ -194,6 +195,18 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "that host is not available to this workspace"})
 			return
 		}
+	}
+
+	// Bind-only: just record the (env → host) binding, no migration. Used when an
+	// environment is first created in Edit Project — there's nothing deployed to
+	// migrate yet; the stack starts on this host the first time it's deployed.
+	if body.BindOnly {
+		if err := settings.SetEnvHost(h.db, pkey, env, body.TargetHostID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "bound"})
+		return
 	}
 
 	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {

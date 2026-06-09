@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import Layout from '../components/Layout'
+import VerticalTabs from '../components/VerticalTabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft,
@@ -1410,12 +1411,14 @@ const TOOLS = [
   {
     id: 'workspace-backup',
     label: 'Project Tools',
+    icon: '🧰',
     description: 'Snapshot or roll back project configuration, and create/restore full project backups (config + data).',
     component: WorkspaceBackup,
   },
   {
     id: 'compose-to-template',
     label: 'Template Manager',
+    icon: '📝',
     description: 'Convert a docker-compose.yml, or upload an existing template, then edit, validate and save it as a reusable Rigger prebuilt template.',
     component: ComposeToTemplate,
   },
@@ -1433,25 +1436,11 @@ export default function ToolsPage() {
           <p className="text-sm text-content-subtle mt-0.5">Utilities for working with Rigger projects and templates.</p>
         </div>
 
-        {/* Tool tabs */}
-        <div className="flex items-center gap-1 mb-6 border-b border-border pb-0">
-          {TOOLS.map(tool => (
-            <button
-              key={tool.id}
-              onClick={() => setActiveTool(tool.id)}
-              className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors border-b-2 -mb-px ${
-                activeTool === tool.id
-                  ? 'border-brand-500 text-content-strong bg-surface'
-                  : 'border-transparent text-content-subtle hover:text-content hover:bg-surface-raised/50'
-              }`}
-            >{tool.label}</button>
-          ))}
-        </div>
-
-        {/* Active tool */}
-        <div className="bg-surface border border-border rounded-2xl p-6">
-          {ActiveComponent && <ActiveComponent />}
-        </div>
+        <VerticalTabs tabs={TOOLS} active={activeTool} onChange={setActiveTool}>
+          <div className="bg-surface border border-border rounded-2xl p-6">
+            {ActiveComponent && <ActiveComponent />}
+          </div>
+        </VerticalTabs>
       </div>
     </Layout>
   )

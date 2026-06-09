@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,7 +31,7 @@ func (d *DB) migrate() error {
 	_, err := d.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
-			username   TEXT    NOT NULL UNIQUE,
+			username   TEXT    NOT NULL,
 			password   TEXT    NOT NULL,
 			role       TEXT    NOT NULL DEFAULT 'admin',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -373,6 +374,13 @@ func (d *DB) migrate() error {
 	d.addColumn("users", "appearance_prefs TEXT NOT NULL DEFAULT ''")             // per-user theme/typography override (W7)
 	// Unique email among accounts that have one (empty allowed for legacy/pre-email rows).
 	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`) //nolint:errcheck
+	// Drop the legacy UNIQUE constraint on users.username. Email is now the login
+	// identity (idx_users_email); username is just the display name shown in the
+	// Users list, so two people may share one (e.g. "Mansoor"). The old constraint
+	// also surfaced username clashes as a misleading "email already exists" error.
+	if err := d.dropUsernameUnique(); err != nil {
+		return err
+	}
 	// Global-role rework: the JWT/global role is now superadmin|user (workspace
 	// access comes from membership). Migrate legacy global roles in place —
 	// idempotent, so safe to run every boot.
@@ -460,6 +468,61 @@ func (d *DB) migrate() error {
 	d.Exec(`DELETE FROM global_backup_target_grants WHERE target_id NOT IN (SELECT id FROM backup_targets)`)      //nolint:errcheck
 	d.Exec(`DELETE FROM global_notification_channel_grants WHERE channel_id NOT IN (SELECT id FROM notification_channels)`) //nolint:errcheck
 	return nil
+}
+
+// dropUsernameUnique rebuilds the users table without the legacy UNIQUE
+// constraint on `username`. It is idempotent: it only acts while the stored DDL
+// still carries a UNIQUE keyword (fresh databases are already created without
+// it), and runs after addColumn() so every column exists for the copy. Foreign
+// keys are toggled off around the rebuild because DROP TABLE with FKs enabled
+// performs an implicit row delete that would cascade into child tables; the
+// statement runs on the single pooled connection (SetMaxOpenConns(1)), so the
+// PRAGMA reliably scopes the rebuild.
+func (d *DB) dropUsernameUnique() error {
+	var ddl string
+	if err := d.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='users'`).Scan(&ddl); err != nil {
+		return nil // no users table yet — nothing to rebuild
+	}
+	if !strings.Contains(strings.ToUpper(ddl), "UNIQUE") {
+		return nil // already rebuilt without the constraint
+	}
+
+	if _, err := d.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer d.Exec(`PRAGMA foreign_keys=ON`) //nolint:errcheck
+
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	stmts := []string{
+		`CREATE TABLE users_new (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			username         TEXT    NOT NULL,
+			password         TEXT    NOT NULL,
+			role             TEXT    NOT NULL DEFAULT 'admin',
+			created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_login_at    DATETIME,
+			email            TEXT    NOT NULL DEFAULT '',
+			phone            TEXT    NOT NULL DEFAULT '',
+			email_verified   INTEGER NOT NULL DEFAULT 0,
+			status           TEXT    NOT NULL DEFAULT 'active',
+			appearance_prefs TEXT    NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO users_new (id, username, password, role, created_at, last_login_at, email, phone, email_verified, status, appearance_prefs)
+		 SELECT id, username, password, role, created_at, last_login_at, email, phone, email_verified, status, appearance_prefs FROM users`,
+		`DROP TABLE users`,
+		`ALTER TABLE users_new RENAME TO users`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return fmt.Errorf("drop username unique: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // addColumn adds a column to an existing table, ignoring the error raised when
