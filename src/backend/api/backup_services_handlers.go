@@ -32,13 +32,11 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg struct {
-		Project struct {
-			Type string `json:"type"`
-		} `json:"project"`
-		Images []struct {
-			Name  string `json:"name"`
-			Image string `json:"image"`
-		} `json:"images"`
+		Services []struct {
+			Name  string          `json:"name"`
+			Image string          `json:"image"`
+			Build json.RawMessage `json:"build"`
+		} `json:"services"`
 		Environments map[string]struct {
 			Database      string `json:"database"`
 			GarageEnabled bool   `json:"garage_enabled"`
@@ -46,29 +44,42 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.Unmarshal(raw, &cfg)
 
+	e := cfg.Environments[env]
 	var out []backupServiceInfo
-	if cfg.Project.Type == "image" {
-		for _, img := range cfg.Images {
-			info := backupServiceInfo{ID: img.Name, Label: img.Name, Kind: "service", Hint: "Container volumes (if any)"}
-			switch low := strings.ToLower(img.Image); {
-			case strings.Contains(low, "postgres"):
-				info.Kind, info.Hint = "database", "PostgreSQL — SQL dump"
-			case strings.Contains(low, "mariadb"):
-				info.Kind, info.Hint = "database", "MariaDB — SQL dump"
-			case strings.Contains(low, "mysql"):
-				info.Kind, info.Hint = "database", "MySQL — SQL dump"
-			}
-			out = append(out, info)
+	hasBuild := false
+
+	// The managed database (env toggle) backs up as a SQL dump.
+	if e.Database != "" && e.Database != "none" {
+		out = append(out, backupServiceInfo{ID: "database", Label: "Database", Kind: "database", Hint: e.Database + " — SQL dump"})
+	}
+
+	// Pull-image services that look like a database are dump candidates too.
+	for _, s := range cfg.Services {
+		if len(s.Build) > 0 {
+			hasBuild = true
+			continue
 		}
-	} else {
-		e := cfg.Environments[env]
-		if e.Database != "" && e.Database != "none" {
-			out = append(out, backupServiceInfo{ID: "database", Label: "Database", Kind: "database", Hint: e.Database + " — SQL dump"})
+		if s.Image == "" {
+			continue
 		}
+		info := backupServiceInfo{ID: s.Name, Label: s.Name, Kind: "service", Hint: "Container volumes (if any)"}
+		switch low := strings.ToLower(s.Image); {
+		case strings.Contains(low, "postgres"):
+			info.Kind, info.Hint = "database", "PostgreSQL — SQL dump"
+		case strings.Contains(low, "mariadb"):
+			info.Kind, info.Hint = "database", "MariaDB — SQL dump"
+		case strings.Contains(low, "mysql"):
+			info.Kind, info.Hint = "database", "MySQL — SQL dump"
+		}
+		out = append(out, info)
+	}
+
+	// App build services typically have an uploads volume worth capturing.
+	if hasBuild {
 		out = append(out, backupServiceInfo{ID: "uploads", Label: "App uploads", Kind: "volume", Hint: "Uploads volume"})
-		if e.GarageEnabled {
-			out = append(out, backupServiceInfo{ID: "garage", Label: "Garage S3 data", Kind: "volume", Hint: "Garage object-store volumes"})
-		}
+	}
+	if e.GarageEnabled {
+		out = append(out, backupServiceInfo{ID: "garage", Label: "Garage S3 data", Kind: "volume", Hint: "Garage object-store volumes"})
 	}
 	if out == nil {
 		out = []backupServiceInfo{}

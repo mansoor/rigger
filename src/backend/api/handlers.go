@@ -899,10 +899,10 @@ func configEnvDeployments(data []byte) map[string]string {
 }
 
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
-// processNameOK reports whether a worker/process name is a safe Docker service
+// serviceNameOK reports whether a service name is a safe Docker service/alias
 // suffix: 1–30 chars of lowercase letters, digits or hyphens, not starting or
 // ending with a hyphen.
-func processNameOK(s string) bool {
+func serviceNameOK(s string) bool {
 	if len(s) == 0 || len(s) > 30 || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
 	}
@@ -914,47 +914,87 @@ func processNameOK(s string) bool {
 	return true
 }
 
-// validateConfigProcesses checks the custom-app extra processes (queue workers,
-// scheduler, etc.) in a config.json payload. Returns a user-facing message on the
-// first problem, or "" if all good. Names must be dns-safe, unique per env, and
-// not collide with the fixed service suffixes; commands required; a frontend
-// source needs the frontend enabled.
-func validateConfigProcesses(content []byte) string {
-	reserved := map[string]bool{
-		"backend": true, "frontend": true, "nginx": true, "postgres": true,
-		"mysql": true, "redis": true, "garage": true, "garage_webui": true,
-	}
+// validateConfigServices checks the unified services[] graph in a config.json
+// payload. Returns a user-facing message on the first problem, or "" if all good:
+// names dns-safe + unique + not colliding with a managed dependency; exactly one
+// source per service; image_from/depends_on must reference a real service (or, for
+// depends_on, an enabled managed dependency).
+func validateConfigServices(content []byte) string {
+	reserved := map[string]bool{"postgres": true, "mysql": true, "redis": true, "garage": true, "garage_webui": true}
 	var doc struct {
+		Services []struct {
+			Name      string          `json:"name"`
+			Build     json.RawMessage `json:"build"`
+			Image     string          `json:"image"`
+			ImageFrom string          `json:"image_from"`
+			DependsOn []string        `json:"depends_on"`
+		} `json:"services"`
 		Environments map[string]struct {
-			FrontendEnabled bool `json:"frontend_enabled"`
-			Processes       []struct {
-				Name    string `json:"name"`
-				Command string `json:"command"`
-				Source  string `json:"source"`
-			} `json:"processes"`
+			Database      string `json:"database"`
+			RedisEnabled  bool   `json:"redis_enabled"`
+			GarageEnabled bool   `json:"garage_enabled"`
 		} `json:"environments"`
 	}
 	if err := json.Unmarshal(content, &doc); err != nil {
 		return "" // malformed JSON is reported by the caller's own parse check
 	}
-	for env, ec := range doc.Environments {
-		seen := map[string]bool{}
-		for _, p := range ec.Processes {
-			switch {
-			case p.Name == "" || p.Command == "":
-				return fmt.Sprintf("environment %q: each process needs a name and a command", env)
-			case !processNameOK(p.Name):
-				return fmt.Sprintf("environment %q: process name %q must be 1–30 chars of lowercase letters, digits or hyphens", env, p.Name)
-			case reserved[p.Name]:
-				return fmt.Sprintf("environment %q: process name %q is reserved for a built-in service", env, p.Name)
-			case seen[p.Name]:
-				return fmt.Sprintf("environment %q: duplicate process name %q", env, p.Name)
-			case p.Source != "" && p.Source != "backend" && p.Source != "frontend":
-				return fmt.Sprintf("environment %q: process %q source must be \"backend\" or \"frontend\"", env, p.Name)
-			case p.Source == "frontend" && !ec.FrontendEnabled:
-				return fmt.Sprintf("environment %q: process %q uses the frontend image but the frontend is disabled", env, p.Name)
+	names := map[string]bool{}
+	for _, s := range doc.Services {
+		switch {
+		case s.Name == "":
+			return "each service needs a name"
+		case !serviceNameOK(s.Name):
+			return fmt.Sprintf("service name %q must be 1–30 chars of lowercase letters, digits or hyphens", s.Name)
+		case reserved[s.Name]:
+			return fmt.Sprintf("service name %q is reserved for a managed dependency", s.Name)
+		case names[s.Name]:
+			return fmt.Sprintf("duplicate service name %q", s.Name)
+		}
+		sources := 0
+		if len(s.Build) > 0 && string(s.Build) != "null" {
+			sources++
+		}
+		if s.Image != "" {
+			sources++
+		}
+		if s.ImageFrom != "" {
+			sources++
+		}
+		if sources != 1 {
+			return fmt.Sprintf("service %q must have exactly one source (build, image, or image_from)", s.Name)
+		}
+		names[s.Name] = true
+	}
+	// managedDep reports whether name is an enabled managed dependency in any env
+	// (services are project-level, so a depends_on can reference one enabled anywhere).
+	managedDep := func(name string) bool {
+		for _, ec := range doc.Environments {
+			switch name {
+			case "postgres", "mysql":
+				if ec.Database == name {
+					return true
+				}
+			case "redis":
+				if ec.RedisEnabled {
+					return true
+				}
+			case "garage":
+				if ec.GarageEnabled {
+					return true
+				}
 			}
-			seen[p.Name] = true
+		}
+		return false
+	}
+	for _, s := range doc.Services {
+		if s.ImageFrom != "" && !names[s.ImageFrom] {
+			return fmt.Sprintf("service %q reuses the image of unknown service %q", s.Name, s.ImageFrom)
+		}
+		for _, d := range s.DependsOn {
+			if d == "" || names[d] || managedDep(d) {
+				continue
+			}
+			return fmt.Sprintf("service %q depends_on unknown service %q", s.Name, d)
 		}
 	}
 	return ""
@@ -977,7 +1017,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	if msg := validateConfigProcesses([]byte(body.Content)); msg != "" {
+	if msg := validateConfigServices([]byte(body.Content)); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
