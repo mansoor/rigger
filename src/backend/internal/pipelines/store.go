@@ -24,13 +24,13 @@ const (
 // (or, for `test`, a sandboxed compose-exec) in executor.go. `push`/promote is a
 // two-environment operation and is deferred to a later iteration.
 var stageTypes = map[string]bool{
-	"deploy": true, "build": true,
+	"deploy": true, "update": true, "build": true,
 	"restart": true, "backup": true, "test": true,
 }
 
 // Stage is one step of a pipeline definition.
 type Stage struct {
-	Type      string `json:"type"`              // deploy|build|restart|backup|test
+	Type      string `json:"type"`              // deploy|update|build|restart|backup|test
 	Env       string `json:"env"`               // target environment
 	Service   string `json:"service,omitempty"` // test (required) / backup (optional)
 	Command   string `json:"command,omitempty"` // test only — run inside the service container

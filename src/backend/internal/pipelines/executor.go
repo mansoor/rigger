@@ -22,7 +22,9 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 	o := shell.RunOptions{Workspace: workspace, Project: project, Env: s.Env}
 	switch s.Type {
 	case "deploy":
-		o.Command = "update" // pull latest images + recreate
+		o.Command = "start" // compose up -d on current/just-built images (no pull)
+	case "update":
+		o.Command = "update" // pull latest images from the registry, then recreate
 	case "build":
 		o.Command = "build" // build all service images for the env (no push)
 	case "restart":

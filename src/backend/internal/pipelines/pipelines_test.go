@@ -112,7 +112,8 @@ func TestStageRunOptionsMapping(t *testing.T) {
 		command string
 		extra   []string
 	}{
-		{Stage{Type: "deploy", Env: "prod"}, "update", nil},
+		{Stage{Type: "deploy", Env: "prod"}, "start", nil},
+		{Stage{Type: "update", Env: "prod"}, "update", nil},
 		{Stage{Type: "build", Env: "prod"}, "build", nil},
 		{Stage{Type: "restart", Env: "prod"}, "restart", nil},
 		{Stage{Type: "backup", Env: "prod", Service: "db"}, "backup", []string{"db"}},

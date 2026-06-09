@@ -10,13 +10,14 @@ import {
 // or a sandboxed `test` (command run inside a service container). Runs stream live.
 
 const STAGE_TYPES = [
-  { value: 'deploy',  label: 'Deploy — pull + recreate' },
-  { value: 'build',   label: 'Build images' },
+  { value: 'deploy',  label: 'Deploy — up (current/built images)' },
+  { value: 'update',  label: 'Update — pull latest + recreate' },
+  { value: 'build',   label: 'Build images (custom apps)' },
   { value: 'restart', label: 'Restart' },
   { value: 'backup',  label: 'Backup' },
   { value: 'test',    label: 'Test — exec in container' },
 ]
-const STAGE_ICON = { deploy: '🚀', build: '🧱', restart: '🔄', backup: '💾', test: '🧪' }
+const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪' }
 
 const blankStage = (env) => ({ type: 'deploy', env: env || '', service: '', command: '', on_failure: 'stop' })
 

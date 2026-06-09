@@ -259,10 +259,10 @@ func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
 		FinishedAt: time.Now().UnixMilli(),
 	})
 
-	// A deploy stage pulls fresh images; invalidate the image-check cache for each
-	// deployed env so the next poll re-checks (matches RunAction's update path).
+	// An update/deploy stage changes running images; invalidate the image-check
+	// cache for each affected env so the next poll re-checks (matches RunAction).
 	for _, s := range p.Stages {
-		if s.Type == "deploy" {
+		if s.Type == "update" || s.Type == "deploy" {
 			h.imgCache.Invalidate(ws, name, s.Env)
 		}
 	}
