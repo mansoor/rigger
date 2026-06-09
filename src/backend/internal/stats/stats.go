@@ -160,9 +160,11 @@ func WorkspaceDiskMB(wsPath string) float64 {
 	return kb / 1024.0
 }
 
-// projectByContainerID maps each running container's ID to its compose project
-// label (com.docker.compose.project), used to attribute `docker stats` rows to
-// a workspace_env stack.
+// projectByContainerID maps each running container's ID to its stack key, used to
+// attribute `docker stats` rows to a workspace_env stack. Compose containers carry
+// com.docker.compose.project; Swarm tasks instead carry com.docker.stack.namespace.
+// Both equal "{resource_prefix}_{env}" in Rigger, so either label attributes a
+// container to the same stack (compose label preferred when both are present).
 func projectByContainerID(ex executor.Executor) map[string]string {
 	projectByID := make(map[string]string)
 	psOut, err := ex.DockerOutput(executor.Spec{Args: []string{"ps", "--format", "{{.ID}} {{.Labels}}"}, Timeout: sampleTimeout})
@@ -176,11 +178,19 @@ func projectByContainerID(ex executor.Executor) map[string]string {
 			continue
 		}
 		id := parts[0]
+		var composeProj, swarmNs string
 		for _, kv := range strings.Split(parts[1], ",") {
 			kv = strings.TrimSpace(kv)
-			if strings.HasPrefix(kv, "com.docker.compose.project=") {
-				projectByID[id] = strings.TrimPrefix(kv, "com.docker.compose.project=")
+			if v, ok := strings.CutPrefix(kv, "com.docker.compose.project="); ok {
+				composeProj = v
+			} else if v, ok := strings.CutPrefix(kv, "com.docker.stack.namespace="); ok {
+				swarmNs = v
 			}
+		}
+		if composeProj != "" {
+			projectByID[id] = composeProj
+		} else if swarmNs != "" {
+			projectByID[id] = swarmNs
 		}
 	}
 	return projectByID
