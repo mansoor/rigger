@@ -6,12 +6,17 @@
 package gitsync
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
+
+// timeout bounds each git operation so a hung clone/fetch can't block forever.
+const timeout = 3 * time.Minute
 
 // SrcDir returns the source checkout directory for an environment.
 func SrcDir(envDir string) string { return filepath.Join(envDir, "_src") }
@@ -30,7 +35,9 @@ func Sync(envDir, repo, branch string, out io.Writer) (string, error) {
 	}
 	src := SrcDir(envDir)
 	run := func(args ...string) error {
-		cmd := exec.Command("git", args...)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Stdout, cmd.Stderr = out, out
 		return cmd.Run()
 	}

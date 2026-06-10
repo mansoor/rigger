@@ -27,6 +27,7 @@ type CreateRequest struct {
 	Registry     string            `json:"registry"`
 	SourceRepo   string            `json:"source_repo"`   // project-level git repo (one per project)
 	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
+	Services     []map[string]any  `json:"services"`      // unified services[] (repo-scan path); else seeded from legacy fields
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
 	Images       []ImageDef        `json:"images"`       // populated from template or manual entry
@@ -327,9 +328,15 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	if req.ProjectRootDir != "" {
 		project["project_root_dir"] = req.ProjectRootDir
 	}
+	// Services come straight from the wizard when the repo scanner (or manual
+	// editor) produced them; otherwise seed from the legacy wizard fields.
+	services := req.Services
+	if len(services) == 0 {
+		services = seedServices(req)
+	}
 	cfg := map[string]any{
 		"project":      project,
-		"services":     seedServices(req),
+		"services":     services,
 		"versions":     versions,
 		"environments": environments,
 	}
