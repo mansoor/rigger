@@ -156,6 +156,9 @@ export const fetchTemplateDraft = (ws, name, env) =>
   api.get(`${projBase(ws, name)}/template-draft${env ? `?env=${encodeURIComponent(env)}` : ''}`).then(r => r.data)
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
+// Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
+export const scanRepo          = (repo, branch) =>
+  api.post('/scan-repo', { repo, branch }).then(r => r.data)
 
 // ── Workspace backup / restore ────────────────────────────────────────────────
 export const startWorkspaceBackup    = (workspace, project, name) =>
