@@ -1172,9 +1172,11 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-// serializeConfig builds the same config object that Save writes, stringified —
-// used to detect unsaved changes by comparing against the loaded baseline.
-function serializeConfig(project, envs, images, rawConfig) {
+// buildConfigObject assembles the config.json object that Save writes. Both the
+// Save mutation AND the unsaved-changes check go through this single builder so
+// they can never drift — a past bug wrote `services` in the dirty-check but not
+// in the actual save, so service edits (ports, etc.) silently reverted on reload.
+function buildConfigObject(project, envs, images, rawConfig) {
   const cleanEnvs = {}
   for (const [k, v] of Object.entries(envs || {})) {
     const { _initial_vars, _id, ...rest } = v // eslint-disable-line no-unused-vars
@@ -1182,7 +1184,12 @@ function serializeConfig(project, envs, images, rawConfig) {
   }
   const updated = { ...rawConfig, project, environments: cleanEnvs, services: images }
   delete updated.images // legacy field, fully replaced by services[]
-  return JSON.stringify(updated)
+  return updated
+}
+
+// serializeConfig stringifies the built config (compact) for baseline comparison.
+function serializeConfig(project, envs, images, rawConfig) {
+  return JSON.stringify(buildConfigObject(project, envs, images, rawConfig))
 }
 
 export default function EditProjectPage() {
@@ -1233,19 +1240,11 @@ export default function EditProjectPage() {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      // Strip _initial_vars from the config before saving — it's a UI-only field
-      const cleanEnvs = {}
-      for (const [k, v] of Object.entries(envs || {})) {
-        // eslint-disable-next-line no-unused-vars
-        const { _initial_vars: _iv, _id: _id2, ...rest } = v
-        cleanEnvs[k] = rest
-      }
-      const updated = {
-        ...rawConfig,
-        project,
-        environments: cleanEnvs,
-        ...(project?.type === 'image' && { images }),
-      }
+      // Use the shared builder so the saved payload always matches the
+      // unsaved-changes check — including the edited services[] (ports, env,
+      // sources). Previously this wrote `images` only for image-type projects,
+      // dropping every service edit on custom projects.
+      const updated = buildConfigObject(project, envs, images, rawConfig)
       await putConfig(workspace, name, JSON.stringify(updated, null, 2))
 
       // Write initial env vars for new environments.

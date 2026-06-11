@@ -56,6 +56,23 @@ func (f DBFacts) jdbc() string {
 
 func (r RedisFacts) url() string { return fmt.Sprintf("redis://%s:%s", r.Host, r.Port) }
 
+// httpHealth builds a healthcheck that probes an HTTP endpoint, trying wget then
+// curl — many official images ship only one (or, like node-slim, neither, which
+// is why node stacks use nodeHealth instead). Runs under compose's CMD-SHELL.
+func httpHealth(port, path string) string {
+	url := "http://localhost:" + port + path
+	return "wget -qO- " + url + " >/dev/null 2>&1 || curl -fsS " + url + " >/dev/null 2>&1"
+}
+
+// nodeHealth builds a healthcheck using node itself — the one interpreter
+// guaranteed present in a node image (node-slim has neither wget nor curl, so
+// the wget probe silently fails and marks the container unhealthy though it
+// serves fine). Single quotes inside the -e arg avoid CMD-SHELL quote nesting.
+func nodeHealth(port string) string {
+	return "node -e \"require('http').get('http://localhost:" + port +
+		"/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""
+}
+
 // Blueprint is one stack's defaults.
 type Blueprint struct {
 	ID       string // "laravel", "nodejs", "spring", …
@@ -187,13 +204,13 @@ var registry = map[string]Blueprint{
 	},
 	"nodejs": {
 		ID: "nodejs", Label: "Node.js (API)", Language: "node",
-		Port: "3000", Healthcheck: "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1",
+		Port: "3000", Healthcheck: nodeHealth("3000"),
 		WebRouted: true, Template: "nodejs",
 		EnvVars: envURL,
 	},
 	"nextjs": {
 		ID: "nextjs", Label: "Next.js (SSR)", Language: "node",
-		Port: "3000", Healthcheck: "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1",
+		Port: "3000", Healthcheck: nodeHealth("3000"),
 		WebRouted: true, Template: "nextjs",
 		EnvVars: envURL,
 		// Next.js standalone binds to $HOSTNAME, which Docker sets to the
@@ -202,37 +219,37 @@ var registry = map[string]Blueprint{
 	},
 	"static": {
 		ID: "static", Label: "Static SPA", Language: "static",
-		Port: "80", Healthcheck: "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1",
+		Port: "80", Healthcheck: httpHealth("80", "/"),
 		WebRouted: true, Template: "react",
 		// Static SPAs have no server-side DB access; nothing to wire.
 	},
 	"spring": {
 		ID: "spring", Label: "Spring Boot (Java)", Language: "java",
-		Port: "8080", Healthcheck: "wget -qO- http://localhost:8080/actuator/health >/dev/null 2>&1 || exit 1",
+		Port: "8080", Healthcheck: httpHealth("8080", "/actuator/health"),
 		WebRouted: true, Template: "spring",
 		EnvVars: envSpring,
 	},
 	"django": {
 		ID: "django", Label: "Django / FastAPI (Python)", Language: "python",
-		Port: "8000", Healthcheck: "wget -qO- http://localhost:8000/ >/dev/null 2>&1 || exit 1",
+		Port: "8000", Healthcheck: httpHealth("8000", "/"),
 		WebRouted: true, Template: "django",
 		EnvVars: envURL,
 	},
 	"go": {
 		ID: "go", Label: "Go", Language: "go",
-		Port: "8080", Healthcheck: "wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1",
+		Port: "8080", Healthcheck: httpHealth("8080", "/"),
 		WebRouted: true, Template: "go",
 		EnvVars: envURL, // Go has no std convention; DATABASE_URL is the common pick.
 	},
 	"dotnet": {
 		ID: "dotnet", Label: ".NET (C#)", Language: "dotnet",
-		Port: "8080", Healthcheck: "wget -qO- http://localhost:8080/ >/dev/null 2>&1 || exit 1",
+		Port: "8080", Healthcheck: httpHealth("8080", "/"),
 		WebRouted: true, Template: "dotnet",
 		EnvVars: envDotnet,
 	},
 	"rails": {
 		ID: "rails", Label: "Ruby on Rails", Language: "ruby",
-		Port: "3000", Healthcheck: "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1",
+		Port: "3000", Healthcheck: httpHealth("3000", "/"),
 		WebRouted: true, Template: "rails",
 		EnvVars: envRails,
 	},

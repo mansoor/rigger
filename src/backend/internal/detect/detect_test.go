@@ -3,6 +3,7 @@ package detect
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -144,6 +145,10 @@ func TestDetectNextjsHostnameEnv(t *testing.T) {
 	}
 	if web.EnvVars["HOSTNAME"] != "0.0.0.0" {
 		t.Errorf("manifest path: web HOSTNAME = %q, want 0.0.0.0 (env %v)", web.EnvVars["HOSTNAME"], web.EnvVars)
+	}
+	// node stacks must use a node-based healthcheck (node images may lack wget).
+	if !strings.Contains(web.Healthcheck, "node -e") {
+		t.Errorf("nextjs healthcheck = %q, want a node -e probe", web.Healthcheck)
 	}
 
 	compose := repo(t, map[string]string{
