@@ -793,6 +793,8 @@ func main() {
 
 	// Phase 2b: repo scanner — clone + static-detect a stack into a draft service graph.
 	mux.Handle("POST /api/scan-repo", authSvc.Middleware(http.HandlerFunc(handler.ScanRepo)))
+	// Stack blueprints for the no-repo "start from a template" picker.
+	mux.Handle("GET /api/blueprints", authSvc.Middleware(http.HandlerFunc(handler.Blueprints)))
 
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, fetchBlueprints } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -144,11 +144,52 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
 // ── Step 2: Stack ─────────────────────────────────────────────────────────────
 
 const STACK_TYPES = [
-  { id: 'scan',     label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
-  { id: 'prebuilt', label: 'Pre-built template',  desc: 'Pick from curated stacks — NPM, WordPress, Vaultwarden, Uptime Kuma…' },
-  { id: 'image',    label: 'Image stack',          desc: 'Deploy any Docker images — specify your own image names, tags, and ports.' },
-  { id: 'custom',   label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
+  { id: 'scan',      label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
+  { id: 'blueprint', label: 'Start from a stack template', desc: 'No repo yet — pick a stack (Laravel, Spring, Django, Go, .NET…); Rigger scaffolds a starter Dockerfile + services.' },
+  { id: 'prebuilt',  label: 'Pre-built template',  desc: 'Pick from curated stacks — NPM, WordPress, Vaultwarden, Uptime Kuma…' },
+  { id: 'image',     label: 'Image stack',          desc: 'Deploy any Docker images — specify your own image names, tags, and ports.' },
+  { id: 'custom',    label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
 ]
+
+// BlueprintStack: pick a stack template (no repo). The selected blueprint's
+// seeded service graph (from GET /api/blueprints) becomes the project's
+// services[]; the user fine-tunes each in Edit Project after creation.
+function BlueprintStack({ data, onChange }) {
+  const { data: blueprints = [], isLoading, error } = useQuery({
+    queryKey: ['blueprints'], queryFn: fetchBlueprints, staleTime: 5 * 60_000,
+  })
+  const pick = (bp) => {
+    onChange('blueprintId', bp.id)
+    onChange('blueprintServices', bp.services || [])
+  }
+  return (
+    <div className="space-y-3">
+      {isLoading && <p className="text-sm text-content-subtle">Loading stacks…</p>}
+      {error && <p className="text-sm text-danger-fg">Couldn’t load stack templates.</p>}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {blueprints.map(bp => (
+          <button key={bp.id} type="button" onClick={() => pick(bp)}
+            className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+              data.blueprintId === bp.id
+                ? 'border-brand-600 bg-brand-600/10'
+                : 'border-border hover:border-border-strong bg-surface'}`}>
+            <div className="text-sm font-semibold text-content-strong">{bp.label}</div>
+            <div className="text-[11px] text-content-faint mt-0.5">
+              {bp.language}{bp.port ? ` · :${bp.port}` : ''}{bp.needs_nginx ? ' · +nginx' : ''}
+            </div>
+          </button>
+        ))}
+      </div>
+      {data.blueprintId && (
+        <div className="bg-surface border border-border rounded-xl p-3 text-xs text-content-subtle">
+          Seeds {(data.blueprintServices || []).length} service{(data.blueprintServices || []).length !== 1 ? 's' : ''}:{' '}
+          <span className="font-mono text-content">{(data.blueprintServices || []).map(s => s.name).join(', ')}</span>.
+          Rigger scaffolds a starter Dockerfile you replace with your code — fine-tune everything in <strong>Edit Project → Services</strong>.
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ScanStack: enter a repo, scan it, review the detected service graph. The user
 // fine-tunes each service in Edit Project after creation.
@@ -611,12 +652,15 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       </div>
 
       {/* Container registry — build stacks (custom + scan) need it to tag/push images */}
-      {(data.stackType === 'custom' || data.stackType === 'scan') && (
+      {(data.stackType === 'custom' || data.stackType === 'scan' || data.stackType === 'blueprint') && (
         <RegistryField data={data} onChange={onChange} errors={errors} workspace={workspace} defaultRegistryId={defaultRegistryId} />
       )}
 
       {/* Repo scan */}
       {data.stackType === 'scan' && <ScanStack data={data} onChange={onChange} />}
+
+      {/* No-repo stack template picker */}
+      {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
 
       {/* Image stack: custom image list + env vars */}
       {data.stackType === 'image' && (
@@ -1277,6 +1321,17 @@ function Step4({ data, onChange }) {
         </div>
       )}
 
+      {/* Blueprint stacks: services were seeded from the template in the Stack step */}
+      {data.stackType === 'blueprint' && (
+        <div className="px-4 py-3 bg-surface-raised/40 border border-border-strong/50 rounded-xl">
+          <p className="text-sm text-content font-medium mb-1">{(data.blueprintServices || []).length} service{(data.blueprintServices || []).length !== 1 ? 's' : ''} seeded from the <span className="font-mono">{data.blueprintId}</span> template</p>
+          <p className="text-xs text-content-subtle">
+            Rigger scaffolds a starter Dockerfile per build service — replace it with your code,
+            then fine-tune each service in <strong>Edit Project → Services</strong>.
+          </p>
+        </div>
+      )}
+
       {/* Extra named volumes — only named volumes, not bind mounts */}
       <details className="group">
         <summary className="text-xs text-content-subtle cursor-pointer hover:text-content transition-colors select-none list-none flex items-center gap-1">
@@ -1397,10 +1452,12 @@ function Step6({ data }) {
     ? `Image stack: ${data.images.filter(i => i.name).map(i => `${i.name} (${i.image}:${i.tag || 'latest'})`).join(', ') || '(no services)'}`
     : data.stackType === 'scan'
     ? `Scanned repo (${data.scanDraft?.detected || 'detected'}): ${(data.scanDraft?.services || []).map(s => s.name).join(', ') || '(no services)'}`
+    : data.stackType === 'blueprint'
+    ? `Template (${data.blueprintId || 'none'}): ${(data.blueprintServices || []).map(s => s.name).join(', ') || '(no services)'}`
     : `Custom: ${[data.backend, data.frontend !== 'none' && data.frontend, data.database !== 'none' && data.database].filter(Boolean).join(' · ')}`
 
   const reviewImages = data.images.filter(i => i.name && i.image)
-  const buildLike = data.stackType === 'custom' || data.stackType === 'scan'
+  const buildLike = data.stackType === 'custom' || data.stackType === 'scan' || data.stackType === 'blueprint'
   const dupWarnings = buildLike ? [] :
     portConflicts(reviewImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) })))
   const hostChecks = []
@@ -1669,6 +1726,10 @@ export default function NewProjectPage() {
       if (!(data.source_repo || '').trim()) e.source_repo = 'Enter a repository URL'
       else if (!data.scanDraft) e.source_repo = 'Click Scan to detect the stack first'
     }
+    if (step === 2 && data.stackType === 'blueprint') {
+      if (!data.registry.trim()) e.registry = 'Required'
+      if (!data.blueprintId) e.blueprint = 'Pick a stack template'
+    }
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'
     if (step === 2 && data.stackType === 'image' && data.images.every(img => !img.name || !img.image)) e.images = 'Add at least one service with a name and image'
     // Steps 3/4 are Services then Environments (swapped to match Edit workspace).
@@ -1688,18 +1749,20 @@ export default function NewProjectPage() {
 
   function buildPayload() {
     const isScan = data.stackType === 'scan'
-    const isImage = !isScan && (data.stackType === 'prebuilt' || data.stackType === 'image')
+    const isBlueprint = data.stackType === 'blueprint'
+    const isImage = !isScan && !isBlueprint && (data.stackType === 'prebuilt' || data.stackType === 'image')
     return {
       workspace: workspace, // parent-tier workspace KEY
       name: data.name.trim(), // free-form display name
       key: data.key,          // project key (resource_prefix = {workspace}_{key})
-      // Registry tags/pushes built images (custom + scan build stacks). Image and
-      // prebuilt stacks pull directly, so send empty.
-      registry: (data.stackType === 'custom' || isScan) ? data.registry.trim() : '',
+      // Registry tags/pushes built images (custom + scan + blueprint build stacks).
+      // Image and prebuilt stacks pull directly, so send empty.
+      registry: (data.stackType === 'custom' || isScan || isBlueprint) ? data.registry.trim() : '',
       type: isImage ? 'image' : 'custom',
       template: data.stackType === 'prebuilt' ? data.template : '',
-      // Repo-scan path: send the reviewed service graph + the project source repo.
-      services: isScan ? (data.scanDraft?.services || []) : [],
+      // Repo-scan sends the detected graph; blueprint sends the seeded graph.
+      // Blueprint has no repo — Dockerfiles scaffold from the template on bootstrap.
+      services: isScan ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
       source_repo: isScan ? (data.source_repo || '').trim() : '',
       source_branch: isScan ? (data.source_branch || '').trim() : '',
       images: data.stackType === 'image'

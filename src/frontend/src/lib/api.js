@@ -159,6 +159,8 @@ export const saveToolTemplate  = (name, content, force = false) =>
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
 export const scanRepo          = (repo, branch) =>
   api.post('/scan-repo', { repo, branch }).then(r => r.data)
+// Stack blueprints for the no-repo "start from a template" picker (incl. seeded services[]).
+export const fetchBlueprints   = () => api.get('/blueprints').then(r => r.data)
 
 // ── Workspace backup / restore ────────────────────────────────────────────────
 export const startWorkspaceBackup    = (workspace, project, name) =>
