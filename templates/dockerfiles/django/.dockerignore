@@ -1,0 +1,20 @@
+# Python local cruft — keep the build context lean.
+.git
+.gitignore
+*.md
+Dockerfile*
+.dockerignore*
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+db.sqlite3
+.env
+.env.*
+.idea/
+.vscode/
+staticfiles/

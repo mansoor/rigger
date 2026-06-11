@@ -1,0 +1,15 @@
+# .NET local cruft — keep the build context lean.
+.git
+.gitignore
+*.md
+Dockerfile*
+.dockerignore*
+bin/
+obj/
+out/
+.vs/
+.idea/
+.vscode/
+.env
+.env.*
+*.user
