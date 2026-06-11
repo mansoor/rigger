@@ -84,6 +84,14 @@ type Blueprint struct {
 	// standard convention (the user maps it via per-service env vars). This is
 	// where the per-framework env contract lives, keeping envgen language-agnostic.
 	EnvVars func(db *DBFacts, redis *RedisFacts) map[string]string
+
+	// ServiceEnv is static, per-service environment the framework needs to run
+	// correctly in a container — seeded onto the service itself (its compose
+	// `environment:`), NOT the shared .env, so it never leaks to other services.
+	// e.g. Next.js standalone reads $HOSTNAME as the bind address, and Docker
+	// defaults it to the container id → the server fails with getaddrinfo
+	// EAI_AGAIN; forcing HOSTNAME=0.0.0.0 makes it bind all interfaces.
+	ServiceEnv map[string]string
 }
 
 // ── Per-framework env contracts ──────────────────────────────────────────────
@@ -188,6 +196,9 @@ var registry = map[string]Blueprint{
 		Port: "3000", Healthcheck: "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1",
 		WebRouted: true, Template: "nextjs",
 		EnvVars: envURL,
+		// Next.js standalone binds to $HOSTNAME, which Docker sets to the
+		// container id; force 0.0.0.0 so the server starts.
+		ServiceEnv: map[string]string{"HOSTNAME": "0.0.0.0"},
 	},
 	"static": {
 		ID: "static", Label: "Static SPA", Language: "static",

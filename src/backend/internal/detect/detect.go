@@ -32,10 +32,28 @@ type Service struct {
 	Subdomain      string   `json:"subdomain,omitempty"`
 	Healthcheck    string   `json:"healthcheck,omitempty"`
 	EnvFile        bool     `json:"env_file,omitempty"`
-	DependsOn      []string `json:"depends_on,omitempty"`
-	Volumes        []string `json:"volumes,omitempty"`
-	Restart        string   `json:"restart,omitempty"`
-	ConfigTemplate string   `json:"config_template,omitempty"`
+	DependsOn      []string          `json:"depends_on,omitempty"`
+	Volumes        []string          `json:"volumes,omitempty"`
+	Restart        string            `json:"restart,omitempty"`
+	ConfigTemplate string            `json:"config_template,omitempty"`
+	EnvVars        map[string]string `json:"env_vars,omitempty"`
+}
+
+// applyBlueprintServiceEnv copies a blueprint's static per-service env onto the
+// service (e.g. Next.js HOSTNAME=0.0.0.0) so it lands in the service's own
+// compose environment.
+func applyBlueprintServiceEnv(s *Service, bp blueprints.Blueprint) {
+	if len(bp.ServiceEnv) == 0 {
+		return
+	}
+	if s.EnvVars == nil {
+		s.EnvVars = map[string]string{}
+	}
+	for k, v := range bp.ServiceEnv {
+		if _, ok := s.EnvVars[k]; !ok {
+			s.EnvVars[k] = v
+		}
+	}
 }
 
 // Build is a build service's source spec.
@@ -136,6 +154,9 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 			// doesn't tell us the stack; the manifests in the context dir do.
 			if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
 				s.Build.Template = id
+				if bp, ok := blueprints.Get(id); ok {
+					applyBlueprintServiceEnv(&s, bp)
+				}
 			}
 		} else if cs.Image != "" {
 			s.Image, s.Tag = splitImage(cs.Image)
@@ -217,6 +238,7 @@ func addFrameworkService(repoDir, contextRel, name, id string, d *Draft) {
 		s.Port = bp.Port
 		s.Healthcheck = bp.Healthcheck
 		s.WebRouted = bp.WebRouted && !bp.NeedsNginx
+		applyBlueprintServiceEnv(&s, bp)
 	} else {
 		s.WebRouted = true // unknown framework: assume it serves HTTP; user edits
 	}

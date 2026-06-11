@@ -129,6 +129,37 @@ func TestDetectLaravelAddsNginx(t *testing.T) {
 	}
 }
 
+// TestDetectNextjsHostnameEnv guards the Next.js standalone footgun: the service
+// must be seeded with HOSTNAME=0.0.0.0 (Docker otherwise sets HOSTNAME to the
+// container id and Next's standalone server fails to bind). Covers both the
+// Dockerfile/manifest path and the compose path.
+func TestDetectNextjsHostnameEnv(t *testing.T) {
+	manifest := repo(t, map[string]string{
+		"apps/web/Dockerfile":   "FROM node:20\nEXPOSE 3000\n",
+		"apps/web/package.json": `{"dependencies":{"next":"14.2.5"}}`,
+	})
+	web := svcByName(Detect(manifest), "web")
+	if web == nil || web.Build == nil || web.Build.Template != "nextjs" {
+		t.Fatalf("expected a nextjs web service, got %+v", web)
+	}
+	if web.EnvVars["HOSTNAME"] != "0.0.0.0" {
+		t.Errorf("manifest path: web HOSTNAME = %q, want 0.0.0.0 (env %v)", web.EnvVars["HOSTNAME"], web.EnvVars)
+	}
+
+	compose := repo(t, map[string]string{
+		"docker-compose.yml":      "services:\n  web:\n    build: ./web\n    ports:\n      - \"3000:3000\"\n",
+		"web/Dockerfile":          "FROM node:20\n",
+		"web/package.json":        `{"dependencies":{"next":"14.2.5"}}`,
+	})
+	cweb := svcByName(Detect(compose), "web")
+	if cweb == nil || cweb.Build == nil || cweb.Build.Template != "nextjs" {
+		t.Fatalf("compose path: expected nextjs web service, got %+v", cweb)
+	}
+	if cweb.EnvVars["HOSTNAME"] != "0.0.0.0" {
+		t.Errorf("compose path: web HOSTNAME = %q, want 0.0.0.0 (env %v)", cweb.EnvVars["HOSTNAME"], cweb.EnvVars)
+	}
+}
+
 func TestDetectProcfileWorkers(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"package.json": `{"dependencies":{"express":"4","ioredis":"5"}}`,
