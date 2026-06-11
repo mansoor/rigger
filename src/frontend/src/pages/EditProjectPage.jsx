@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo } from '../lib/api'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
@@ -503,7 +503,182 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   )
 }
 
-function ImagesEditor({ images, onChange }) {
+// ── Re-scan repo (2b-4): advisory diff/merge against the live service graph ────
+
+// Service fields that define the graph (excludes UI-only/derived keys). Used to
+// decide whether a detected service differs from the current one.
+const SVC_DIFF_FIELDS = [
+  'build', 'image', 'image_from', 'tag', 'command', 'port', 'host_port',
+  'extra_ports', 'web_routed', 'subdomain', 'healthcheck', 'env_file',
+  'depends_on', 'volumes', 'restart', 'config_template', 'env_vars',
+]
+
+// stable serialises a value with object keys sorted at every depth, so two
+// equivalent services compare equal regardless of key order.
+function stable(v) {
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']'
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}'
+  }
+  return JSON.stringify(v === undefined ? null : v)
+}
+
+// changedFields returns the diff-field names whose value differs between two
+// services (treating absent / empty-string / 0 as the same "unset").
+function changedFields(a, b) {
+  const norm = (x) => (x === undefined || x === '' || x === 0 ? null : x)
+  return SVC_DIFF_FIELDS.filter(k => stable(norm(a?.[k])) !== stable(norm(b?.[k])))
+}
+
+// diffServices buckets detected services against the current graph by name.
+function diffServices(current, detected) {
+  const byName = new Map((current || []).map(s => [s.name, s]))
+  const added = [], changed = [], unchanged = []
+  for (const d of (detected || [])) {
+    const c = byName.get(d.name)
+    if (!c) added.push(d)
+    else if (changedFields(c, d).length) changed.push({ name: d.name, current: c, detected: d, fields: changedFields(c, d) })
+    else unchanged.push(d.name)
+  }
+  const detNames = new Set((detected || []).map(s => s.name))
+  const onlyLocal = (current || []).filter(s => s.name && !detNames.has(s.name)).map(s => s.name)
+  return { added, changed, unchanged, onlyLocal }
+}
+
+// ScanRepoModal re-scans the project's git repo and proposes changes to the live
+// service graph. It is ADVISORY: nothing is applied until the user picks items
+// and confirms. New services default to checked; changed services default to
+// UNCHECKED so a re-scan never silently overwrites a service the user has tuned.
+function ScanRepoModal({ gitRepo, gitBranch, images, onApply, onClose }) {
+  const [busy, setBusy] = useState(true)
+  const [err, setErr] = useState('')
+  const [draft, setDraft] = useState(null)
+  const [picked, setPicked] = useState(() => new Set())
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const d = await scanRepo((gitRepo || '').trim(), (gitBranch || '').trim())
+        if (!alive) return
+        setDraft(d)
+        // Pre-check the additive (safe) proposals only.
+        setPicked(new Set(diffServices(images, d.services || []).added.map(s => s.name)))
+      } catch (e) {
+        if (alive) setErr(e?.response?.data?.error || 'Scan failed')
+      } finally {
+        if (alive) setBusy(false)
+      }
+    })()
+    return () => { alive = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const diff = draft ? diffServices(images, draft.services || []) : null
+  const toggle = (name) => setPicked(p => { const n = new Set(p); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  function apply() {
+    if (!draft) return
+    const detByName = new Map((draft.services || []).map(s => [s.name, s]))
+    let next = [...images]
+    // Replace changed (picked), keyed by name.
+    next = next.map(s => (picked.has(s.name) && detByName.has(s.name)) ? detByName.get(s.name) : s)
+    // Append added (picked).
+    for (const a of diff.added) if (picked.has(a.name)) next.push(a)
+    onApply(next)
+    onClose()
+  }
+
+  const pickedCount = picked.size
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface-raised border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <h3 className="text-base font-semibold text-content-strong">Re-scan repository</h3>
+          <p className="text-xs text-content-subtle mt-0.5 font-mono truncate">{gitRepo || '(no repo set)'}{gitBranch ? ` @ ${gitBranch}` : ''}</p>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto space-y-4 text-sm">
+          {busy && <p className="text-content-subtle">Cloning &amp; detecting…</p>}
+          {err && <p className="text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+
+          {diff && (
+            <>
+              {diff.added.length === 0 && diff.changed.length === 0 && (
+                <p className="text-success-fg">No changes — the detected graph matches your services.</p>
+              )}
+
+              {diff.added.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">New services</p>
+                  {diff.added.map(s => (
+                    <label key={s.name} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface border border-border cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={picked.has(s.name)} onChange={() => toggle(s.name)} />
+                      <span className="text-xs">
+                        <span className="font-mono text-content">{s.name}</span>{' '}
+                        <span className="text-content-faint">{svcKindLabel(s)}</span>
+                        {s.port ? <span className="text-content-subtle"> :{s.port}</span> : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {diff.changed.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Changed services <span className="normal-case font-normal text-content-faint">— check to overwrite your version</span></p>
+                  {diff.changed.map(c => (
+                    <label key={c.name} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface border border-amber-600/40 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={picked.has(c.name)} onChange={() => toggle(c.name)} />
+                      <span className="text-xs">
+                        <span className="font-mono text-content">{c.name}</span>{' '}
+                        <span className="text-content-faint">differs in: {c.fields.join(', ')}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {diff.unchanged.length > 0 && (
+                <p className="text-xs text-content-subtle">{diff.unchanged.length} service{diff.unchanged.length !== 1 ? 's' : ''} unchanged.</p>
+              )}
+              {diff.onlyLocal.length > 0 && (
+                <p className="text-xs text-content-subtle">Kept (not in scan): <span className="font-mono">{diff.onlyLocal.join(', ')}</span></p>
+              )}
+
+              {(draft.database !== 'none' || draft.redis || draft.garage) && (
+                <p className="text-xs text-content-muted">Detected managed deps: {[draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.garage && 'garage'].filter(Boolean).join(', ')} — toggle these per environment below if needed.</p>
+              )}
+              {(draft.notes || []).length > 0 && (
+                <ul className="text-xs text-content-subtle list-disc pl-4 space-y-0.5">
+                  {draft.notes.map((n, i) => <li key={i}>{n}</li>)}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content">Cancel</button>
+          <button type="button" onClick={apply} disabled={busy || !!err || pickedCount === 0}
+            className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+            Merge {pickedCount > 0 ? pickedCount : ''} selected
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// svcKindLabel summarises a service's source for compact lists.
+function svcKindLabel(s) {
+  if (s.build) return `build${s.build.template ? ` · ${s.build.template}` : ''}${s.build.context && s.build.context !== '.' ? ` (${s.build.context})` : ''}`
+  if (s.image_from) return `worker → ${s.image_from}`
+  return `image ${s.image || ''}${s.tag ? `:${s.tag}` : ''}`
+}
+
+function ImagesEditor({ images, onChange, gitRepo, gitBranch }) {
+  const [scanning, setScanning] = useState(false)
   const addService = () => onChange([...images, {
     name: '', image: '', tag: 'latest', port: 0, host_port: '',
     volumes: [], depends_on: [], extra_ports: [],
@@ -513,11 +688,23 @@ function ImagesEditor({ images, onChange }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-content-subtle">Containers that make up the stack — click one to expand.</p>
-        <button type="button" onClick={addService}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-          + Add service
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {gitRepo && (
+            <button type="button" onClick={() => setScanning(true)} title="Re-detect the stack from the source repository"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content-subtle hover:text-content hover:border-brand-600 transition-colors">
+              ⟳ Scan repo
+            </button>
+          )}
+          <button type="button" onClick={addService}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+            + Add service
+          </button>
+        </div>
       </div>
+      {scanning && (
+        <ScanRepoModal gitRepo={gitRepo} gitBranch={gitBranch} images={images}
+          onApply={onChange} onClose={() => setScanning(false)} />
+      )}
       {images.map((img, i) => (
         <ServiceCard
           key={i}
@@ -1491,7 +1678,8 @@ export default function EditProjectPage() {
         {tab === 'services' && (
           <section className="mb-6">
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
-            <ImagesEditor images={images || []} onChange={setImages} />
+            <ImagesEditor images={images || []} onChange={setImages}
+              gitRepo={project?.git_repo} gitBranch={project?.git_branch} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
