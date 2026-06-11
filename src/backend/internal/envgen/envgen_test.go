@@ -155,6 +155,117 @@ func TestCustomPostgresEnv(t *testing.T) {
 	}
 }
 
+// TestAppURLNoDomain guards the empty-domain case: APP_URL must stay a valid
+// absolute URI (not the malformed "http://", which crashes Laravel artisan with
+// "Invalid URI"). With no domain it falls back to localhost + the HTTP port.
+func TestAppURLNoDomain(t *testing.T) {
+	withPort := cfg(t, `{
+      "project": { "name": "app", "registry": "r" },
+      "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(withPort, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ParseEnv([]byte(env))["APP_URL"]; got != "http://localhost:8080" {
+		t.Errorf("APP_URL = %q, want http://localhost:8080 (empty domain + port)", got)
+	}
+
+	port80 := cfg(t, `{
+      "project": { "name": "app", "registry": "r" },
+      "environments": { "dev": { "http_port": 80, "deployment": "compose" } }
+    }`)
+	env2, _, err := Generate(port80, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ParseEnv([]byte(env2))["APP_URL"]; got != "http://localhost" {
+		t.Errorf("APP_URL = %q, want http://localhost (empty domain, port 80)", got)
+	}
+}
+
+// TestFrameworkEnvContract verifies the blueprint-declared env contract: a
+// Laravel build service must get DB_*/REDIS_* keys wired from the managed deps
+// (so an app reading standard Laravel env vars connects without hand-mapping),
+// DB identifiers come from the dns-safe prefix (no display-name spaces), and the
+// .env.example masks the generated DB_PASSWORD.
+func TestFrameworkEnvContract(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "weather dashboard app", "registry": "r",
+        "resource_prefix": "mcl_wda" },
+      "services": [
+        {"name":"backend","build":{"context":"./backend","template":"laravel"}},
+        {"name":"worker","image_from":"backend","command":"php artisan queue:work"}
+      ],
+      "environments": { "dev": {
+        "http_port": 8080, "database": "mysql", "redis_enabled": true,
+        "deployment": "compose"
+      } }
+    }`)
+
+	env, example, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+
+	want := map[string]string{
+		"DB_CONNECTION":  "mysql",
+		"DB_HOST":        "mcl_wda_dev_mysql",
+		"DB_PORT":        "3306",
+		"DB_DATABASE":    "mcl_wda_dev",      // prefix-derived, NOT "weather dashboard app_dev"
+		"DB_USERNAME":    "mcl_wda_user",     // must match the provisioned MYSQL_USER
+		"REDIS_HOST":     "mcl_wda_dev_redis",
+		"REDIS_PORT":     "6379",
+		"MYSQL_DATABASE": "mcl_wda_dev", // mysql container provisioning vars stay
+		"MYSQL_USER":     "mcl_wda_user",
+	}
+	for k, v := range want {
+		if m[k] != v {
+			t.Errorf("%s = %q, want %q", k, m[k], v)
+		}
+	}
+	// DB_PASSWORD must equal the same secret as MYSQL_PASSWORD (one source).
+	if m["DB_PASSWORD"] == "" || m["DB_PASSWORD"] != m["MYSQL_PASSWORD"] {
+		t.Errorf("DB_PASSWORD = %q, want = MYSQL_PASSWORD %q", m["DB_PASSWORD"], m["MYSQL_PASSWORD"])
+	}
+	// Identifier-class values must never contain a space (would break dotenv).
+	for k, v := range m {
+		if (strings.HasPrefix(k, "DB_") || strings.HasPrefix(k, "MYSQL_") ||
+			strings.HasPrefix(k, "REDIS_") || strings.HasPrefix(k, "POSTGRES_")) &&
+			strings.Contains(v, " ") {
+			t.Errorf("identifier env %s=%q contains a space", k, v)
+		}
+	}
+	// .env.example masks the generated DB_PASSWORD.
+	ex := ParseEnv([]byte(example))
+	if !strings.HasPrefix(ex["DB_PASSWORD"], "CHANGE_ME") {
+		t.Errorf("example DB_PASSWORD = %q, want CHANGE_ME*", ex["DB_PASSWORD"])
+	}
+}
+
+// TestFrameworkEnvURLRedaction verifies a DATABASE_URL framework value carries
+// real credentials in .env but is redacted in .env.example.
+func TestFrameworkEnvURLRedaction(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "api", "registry": "r", "resource_prefix": "ws_api" },
+      "services": [ {"name":"app","build":{"context":".","template":"nodejs"}} ],
+      "environments": { "prod": { "database": "postgres", "deployment": "compose" } }
+    }`)
+	env, example, err := Generate(c, "prod", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ParseEnv([]byte(env))["DATABASE_URL"]
+	if !strings.HasPrefix(got, "postgresql://ws_api_user:") || !strings.Contains(got, "@ws_api_prod_postgres:5432/ws_api_prod") {
+		t.Errorf("DATABASE_URL = %q, want postgresql://ws_api_user:<pass>@ws_api_prod_postgres:5432/ws_api_prod", got)
+	}
+	exURL := ParseEnv([]byte(example))["DATABASE_URL"]
+	if !strings.Contains(exURL, ":CHANGE_ME@") {
+		t.Errorf("example DATABASE_URL = %q, want password redacted to CHANGE_ME", exURL)
+	}
+}
+
 func TestCustomDevAndMysqlAndGarage(t *testing.T) {
 	c := cfg(t, `{
       "project": { "name": "app", "type": "custom", "registry": "reg",

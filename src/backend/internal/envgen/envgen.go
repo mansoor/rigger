@@ -18,9 +18,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/blueprints"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 )
 
@@ -36,6 +38,28 @@ func CryptoRand(n int) []byte {
 		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return b
+}
+
+// identSafe lowercases a name and collapses every run of non-alphanumeric
+// characters into a single underscore, trimming leading/trailing underscores —
+// turning a free-form value (e.g. "weather dashboard app") into one safe to use
+// as a SQL database/user identifier ("weather_dashboard_app"). Already-safe
+// values like a resource prefix ("mcl_wda") pass through unchanged.
+func identSafe(s string) string {
+	var b strings.Builder
+	pendingSep := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if pendingSep && b.Len() > 0 {
+				b.WriteByte('_')
+			}
+			pendingSep = false
+			b.WriteRune(r)
+		} else {
+			pendingSep = true
+		}
+	}
+	return b.String()
 }
 
 func hexN(r Rand, n int) string    { return hex.EncodeToString(r(n)) }
@@ -73,6 +97,48 @@ func isSkipKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// frameworkEnv unions the blueprint-declared env contracts of every build
+// service in the config, resolved against the active env's managed-dep facts
+// (db engine/host/credentials, redis). Build services carry their framework via
+// build.template (set by the detector or the blueprint picker); services without
+// a recognised blueprint contribute nothing. On a key clash between two
+// frameworks the first service's value wins.
+func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword string) map[string]string {
+	// User must match the account the managed-db container provisions, which
+	// envgen writes as MYSQL_USER/POSTGRES_USER = "<dbBase>_user".
+	dbUser := dbBase + "_user"
+	var db *blueprints.DBFacts
+	switch e.Database {
+	case "mysql":
+		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_mysql", Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+	case "postgres":
+		db = &blueprints.DBFacts{Engine: "postgres", Host: prefix + "_postgres", Port: "5432", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+	}
+	var redis *blueprints.RedisFacts
+	if e.RedisEnabled {
+		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
+	}
+
+	out := map[string]string{}
+	seen := map[string]bool{}
+	for _, svc := range cfg.Services {
+		if svc.Build == nil || svc.Build.Template == "" || seen[svc.Build.Template] {
+			continue
+		}
+		seen[svc.Build.Template] = true
+		bp, ok := blueprints.Get(svc.Build.Template)
+		if !ok || bp.EnvVars == nil {
+			continue
+		}
+		for k, v := range bp.EnvVars(db, redis) {
+			if _, exists := out[k]; !exists {
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 // isSecretKey reports keys whose placeholder should be replaced with a generated
@@ -209,18 +275,23 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 
 	p("# ── Database ───────────────────────────────────────────────\n")
 	p("DATABASE=%s\n", e.Database)
+	// DB identifiers must be valid (no spaces/punctuation), so derive them from
+	// the dns-safe resource prefix — NOT cfg.Project.Name, which is a free-form
+	// display name that can contain spaces (e.g. "weather dashboard app" would
+	// yield the invalid identifier "weather dashboard app_dev").
+	dbBase := identSafe(imgBase)
 	switch e.Database {
 	case "postgres":
 		p("POSTGRES_HOST=%s_postgres\n", prefix)
 		p("POSTGRES_PORT=5432\n")
-		p("POSTGRES_DB=%s_%s\n", project, env)
-		p("POSTGRES_USER=%s_user\n", project)
+		p("POSTGRES_DB=%s_%s\n", dbBase, env)
+		p("POSTGRES_USER=%s_user\n", dbBase)
 		p("POSTGRES_PASSWORD=%s\n", dbPassword)
 	case "mysql":
 		p("MYSQL_HOST=%s_mysql\n", prefix)
 		p("MYSQL_PORT=3306\n")
-		p("MYSQL_DATABASE=%s_%s\n", project, env)
-		p("MYSQL_USER=%s_user\n", project)
+		p("MYSQL_DATABASE=%s_%s\n", dbBase, env)
+		p("MYSQL_USER=%s_user\n", dbBase)
 		p("MYSQL_PASSWORD=%s\n", dbPassword)
 		p("MYSQL_ROOT_PASSWORD=%s\n", dbRootPassword)
 	}
@@ -233,7 +304,17 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	} else {
 		p("APP_DEBUG=false\n")
 	}
-	p("APP_URL=http://%s\n", e.Domain)
+	// APP_URL must be a valid absolute URI; an empty domain would yield the
+	// malformed "http://" which crashes framework consoles (e.g. Laravel's
+	// artisan throws "Invalid URI"). Fall back to localhost (+ the published
+	// HTTP port when it isn't the default 80) so dev/local envs boot.
+	if e.Domain != "" {
+		p("APP_URL=http://%s\n", e.Domain)
+	} else if hp := string(e.HTTPPort); hp != "" && hp != "80" {
+		p("APP_URL=http://localhost:%s\n", hp)
+	} else {
+		p("APP_URL=http://localhost\n")
+	}
 	p("APP_KEY=%s\n\n", appKey)
 
 	p("# ── Redis ──────────────────────────────────────────────────\n")
@@ -255,10 +336,32 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("GARAGE_ADMIN_TOKEN=%s\n", garageAdminToken)
 		p("GARAGE_KEY_ID=%s\n", garageKeyID)
 		p("GARAGE_SECRET_KEY=%s\n", garageSecretKey)
-		p("GARAGE_BUCKET=%s-%s\n", project, env)
+		// S3 bucket names allow lowercase + hyphens only — derive from the safe
+		// prefix, not the free-form display name.
+		p("GARAGE_BUCKET=%s-%s\n", strings.ReplaceAll(dbBase, "_", "-"), env)
 		p("GARAGE_ENDPOINT=http://%s_garage:3901\n", prefix)
 	}
 	p("\n")
+
+	// ── Framework env contract (blueprint-declared) ──────────────────────────
+	// Each build service's blueprint declares the env keys its framework reads
+	// (Laravel → DB_*, Rails → DATABASE_URL, Spring → SPRING_DATASOURCE_*, …).
+	// Emit them from the active managed-dep facts so an app built from an
+	// arbitrary scanned repo wires up to the db/redis without the user hand-
+	// mapping Rigger's MYSQL_*/POSTGRES_* onto the framework's keys. The keys
+	// stay language-specific in the blueprint; envgen stays generic.
+	if fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword); len(fe) > 0 {
+		p("# ── Framework env contract (blueprint-declared) ────────────\n")
+		keys := make([]string, 0, len(fe))
+		for k := range fe {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p("%s=%s\n", k, fe[k])
+		}
+		p("\n")
+	}
 
 	p("# ── Mail (fill in per-environment) ─────────────────────────\n")
 	p("MAIL_DRIVER=smtp\n")
@@ -266,7 +369,11 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("MAIL_PORT=1025\n")
 	p("MAIL_USERNAME=\n")
 	p("MAIL_PASSWORD=\n")
-	p("MAIL_FROM_ADDRESS=noreply@%s\n", e.Domain)
+	mailDomain := e.Domain
+	if mailDomain == "" {
+		mailDomain = "localhost"
+	}
+	p("MAIL_FROM_ADDRESS=noreply@%s\n", mailDomain)
 	p("MAIL_FROM_NAME=\"%s\"\n\n", project)
 
 	p("# ── Node.js specific ───────────────────────────────────────\n")
@@ -298,13 +405,30 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 // examplePlaceholder is the per-key placeholder used in .env.example for the
 // structured secret keys; other secret keys mask to a generic CHANGE_ME.
 var examplePlaceholder = map[string]string{
-	"POSTGRES_PASSWORD":   "CHANGE_ME_DB_PASSWORD",
-	"MYSQL_PASSWORD":      "CHANGE_ME_DB_PASSWORD",
-	"MYSQL_ROOT_PASSWORD": "CHANGE_ME_ROOT_PASSWORD",
+	"POSTGRES_PASSWORD":          "CHANGE_ME_DB_PASSWORD",
+	"MYSQL_PASSWORD":             "CHANGE_ME_DB_PASSWORD",
+	"MYSQL_ROOT_PASSWORD":        "CHANGE_ME_ROOT_PASSWORD",
+	"DB_PASSWORD":                "CHANGE_ME_DB_PASSWORD",
+	"SPRING_DATASOURCE_PASSWORD": "CHANGE_ME_DB_PASSWORD",
 	"APP_KEY":             "base64:CHANGE_ME",
 	"GARAGE_ADMIN_TOKEN":  "CHANGE_ME_GARAGE_TOKEN",
 	"GARAGE_KEY_ID":       "CHANGE_ME_KEY_ID",
 	"GARAGE_SECRET_KEY":   "CHANGE_ME_SECRET_KEY",
+}
+
+// urlCredRE matches the password in a URL userinfo (scheme://user:PASS@host).
+var urlCredRE = regexp.MustCompile(`(://[^:/@\s]+:)[^@/\s]+(@)`)
+
+// connStrPassRE matches a Password=… field in an ADO.NET connection string.
+var connStrPassRE = regexp.MustCompile(`(?i)(Password=)[^;]+`)
+
+// redactInlineSecrets replaces credentials embedded inside a value (URL userinfo
+// passwords, connection-string passwords) with CHANGE_ME so the masked
+// .env.example never leaks a real secret carried by a non-secret-named key.
+func redactInlineSecrets(v string) string {
+	v = urlCredRE.ReplaceAllString(v, "${1}CHANGE_ME${2}")
+	v = connStrPassRE.ReplaceAllString(v, "${1}CHANGE_ME")
+	return v
 }
 
 // maskExample produces the .env.example by masking secret VALUES key-by-key. This
@@ -323,7 +447,10 @@ func maskExample(env string) string {
 		case isSecretKey(key) && !IsPlaceholder(v):
 			b.WriteString(key + "=CHANGE_ME")
 		default:
-			b.WriteString(line)
+			// Framework env values can embed credentials inline (e.g.
+			// DATABASE_URL=mysql://user:pass@host, ConnectionStrings=…;Password=…;).
+			// Redact those so .env.example never carries a real secret.
+			b.WriteString(key + "=" + redactInlineSecrets(v))
 		}
 		b.WriteByte('\n')
 	}

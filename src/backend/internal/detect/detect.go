@@ -128,7 +128,15 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 		}
 		s := Service{Name: dnsName(name), Restart: "unless-stopped", EnvFile: true}
 		if !cs.Build.IsZero() {
-			s.Build = &Build{Context: composeBuildContext(cs.Build)}
+			ctx := composeBuildContext(cs.Build)
+			s.Build = &Build{Context: ctx}
+			// Identify the framework in the build context so the service carries
+			// its blueprint id (build.template) — envgen reads that to emit the
+			// framework's env contract (DB_*/DATABASE_URL/…). Compose alone
+			// doesn't tell us the stack; the manifests in the context dir do.
+			if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
+				s.Build.Template = id
+			}
 		} else if cs.Image != "" {
 			s.Image, s.Tag = splitImage(cs.Image)
 			s.EnvFile = false
