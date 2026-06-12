@@ -337,24 +337,41 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
         </div>
       )}
 
-      {/* Command + web routing + env file */}
-      <div className="grid grid-cols-2 gap-3">
-        <div><Label>Command <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-          <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" /></div>
+      {/* Command — full width */}
+      <div><Label>Command <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+        <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" /></div>
+
+      {/* .env handling — process-env toggle + optional physical-file path (related) */}
+      <div className="grid grid-cols-2 gap-3 items-end">
         <div className="flex items-end pb-1">
           <Toggle label="Mount .env (env_file)" checked={img.env_file !== false && serviceSource(img) !== 'image'} onChange={v => upd('env_file', v)} />
         </div>
+        {serviceSource(img) !== 'image' && (
+          <div><Label>Mount .env as a file <span className="font-normal normal-case text-content-faint">(optional path)</span></Label>
+            <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env" />
+            <p className="text-xs text-content-subtle mt-1">
+              For apps that read a physical <code className="font-mono text-xs">.env</code> from disk (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>). The same vars are injected as process env; set a path to also write them to a file (read-only).
+            </p></div>
+        )}
       </div>
-      {serviceSource(img) !== 'image' && (
-        <div><Label>Mount .env as a file <span className="font-normal normal-case text-content-faint">(optional path)</span></Label>
-          <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env" />
-          <p className="text-xs text-content-subtle mt-1">
-            For apps that read a physical <code className="font-mono text-xs">.env</code> from disk (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>, which ignores process env). The same vars are always injected as process env; set a path here to also write them to a file (read-only).
-          </p></div>
-      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="flex items-end pb-1">
-          <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={v => upd('web_routed', v)} />
+          <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
+            if (v) {
+              const sub = (img.subdomain || '').trim()
+              const clash = allImages.find((m, j) => j !== idx && m.web_routed && (m.subdomain || '').trim() === sub)
+              if (clash) {
+                const host = sub ? `the "${sub}" subdomain` : 'the apex domain'
+                const ok = await confirm({
+                  title: 'Another service already routes here',
+                  message: `"${clash.name || 'another service'}" is already the web entry on ${host}. Two services on the same host collide in Traefik — give one a distinct subdomain to run both. Enable anyway?`,
+                  confirmLabel: 'Enable anyway',
+                })
+                if (!ok) return
+              }
+            }
+            upd('web_routed', v)
+          }} />
         </div>
         {img.web_routed && (
           <div><Label>Subdomain <span className="font-normal normal-case text-content-faint">(blank = apex domain)</span></Label>
@@ -1776,17 +1793,18 @@ export default function EditProjectPage() {
         {tab === 'envs' && (<>
         <section className="mb-6">
           <div className="flex items-center justify-between gap-3 mb-3">
-            <p className="text-xs text-content-subtle">
-              {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
-              {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
-                <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
-              )}
-            </p>
+            <h2 className="text-sm font-semibold text-content">Environments</h2>
             <button type="button" onClick={addEnv}
               className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
               + Add environment
             </button>
           </div>
+          <p className="text-xs text-content-subtle mb-3">
+            {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
+            {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
+              <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
+            )}
+          </p>
 
           <div className="space-y-3">
             {Object.entries(envs || {}).map(([envName, cfg], i) => (

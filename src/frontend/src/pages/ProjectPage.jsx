@@ -1904,7 +1904,10 @@ export default function ProjectPage() {
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
-            {canOp && type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
+            {canOp && type !== 'image' && (
+              <BuildMenu version={version}
+                onBuild={part => runAction('build', envs[0], undefined, part ? ['--bump', part] : [])} />
+            )}
           </div>
         </div>
 
@@ -1989,5 +1992,53 @@ function HeaderBtn({ label, onClick, primary }) {
     >
       <span className="text-xs opacity-60">○</span> {label}
     </button>
+  )
+}
+
+// BuildMenu is a split-button: the main action builds the CURRENT version
+// (re-tags the same image), and the caret opens version-bump options that pass
+// `--bump <part>` so the project's semver is incremented before the build. Each
+// option previews the resulting version so the choice is explicit.
+function BuildMenu({ version, onBuild }) {
+  const [open, setOpen] = useState(false)
+  const v = version || { major: 0, minor: 0, patch: 0, build: 0 }
+  const cur = `${v.major}.${v.minor}.${v.patch}-build.${v.build}`
+  const next = {
+    build: `${v.major}.${v.minor}.${v.patch}-build.${v.build + 1}`,
+    patch: `${v.major}.${v.minor}.${v.patch + 1}-build.0`,
+    minor: `${v.major}.${v.minor + 1}.0-build.0`,
+    major: `${v.major + 1}.0.0-build.0`,
+  }
+  const item = 'w-full flex items-center justify-between gap-4 px-3 py-2 text-left hover:bg-surface-raised transition-colors'
+  return (
+    <div className="relative">
+      <div className="flex">
+        <button onClick={() => onBuild(null)}
+          className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-l-lg border border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+          <span className="text-xs opacity-60">○</span> Build ↗
+        </button>
+        <button onClick={() => setOpen(o => !o)} title="Build with a version bump"
+          className="px-2 py-1.5 rounded-r-lg border border-l-0 border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors text-xs">
+          ▾
+        </button>
+      </div>
+      {open && (<>
+        <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+        <div className="absolute right-0 mt-1 z-20 w-72 bg-surface border border-border rounded-lg shadow-lg py-1 text-sm overflow-hidden">
+          <button onClick={() => { setOpen(false); onBuild(null) }} className={item}>
+            <span>Build current</span>
+            <span className="font-mono text-xs text-content-subtle">{cur}</span>
+          </button>
+          <div className="border-t border-border my-1" />
+          <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build &amp; bump</div>
+          {['build', 'patch', 'minor', 'major'].map(part => (
+            <button key={part} onClick={() => { setOpen(false); onBuild(part) }} className={item}>
+              <span className="capitalize">{part}</span>
+              <span className="font-mono text-xs text-content-subtle">{next[part]}</span>
+            </button>
+          ))}
+        </div>
+      </>)}
+    </div>
   )
 }

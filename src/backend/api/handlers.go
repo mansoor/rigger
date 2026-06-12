@@ -951,6 +951,8 @@ func validateConfigServices(content []byte) string {
 			ImageFrom    string   `json:"image_from"`
 			DependsOn    []string `json:"depends_on"`
 			EnvFileMount string   `json:"env_file_mount"`
+			WebRouted    bool     `json:"web_routed"`
+			Subdomain    string   `json:"subdomain"`
 		} `json:"services"`
 		Environments map[string]struct {
 			Database      string `json:"database"`
@@ -1029,6 +1031,24 @@ func validateConfigServices(content []byte) string {
 			}
 			return fmt.Sprintf("service %q depends_on unknown service %q", s.Name, d)
 		}
+	}
+	// Web-entry host collisions: two web_routed services with the same subdomain
+	// (empty = apex) would emit conflicting Traefik routers, so one silently wins.
+	// Multiple web entries are fine as long as each claims a distinct host.
+	seenHost := map[string]string{} // subdomain → first service that claimed it
+	for _, s := range doc.Services {
+		if !s.WebRouted {
+			continue
+		}
+		sub := strings.TrimSpace(s.Subdomain)
+		if prev, ok := seenHost[sub]; ok {
+			host := "the apex domain"
+			if sub != "" {
+				host = fmt.Sprintf("subdomain %q", sub)
+			}
+			return fmt.Sprintf("services %q and %q are both web entries on %s — give one a distinct subdomain", prev, s.Name, host)
+		}
+		seenHost[sub] = s.Name
 	}
 	return ""
 }
