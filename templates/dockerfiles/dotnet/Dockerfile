@@ -9,8 +9,9 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
 
 WORKDIR /src
 
-# Restore layer (cache on project files)
-COPY *.sln ./
+# Copy the whole project and restore. (We intentionally don't pre-copy only
+# *.csproj/*.sln for a cache layer: a glob that matches nothing fails the build,
+# and single-project apps often have no .sln.)
 COPY . .
 RUN dotnet restore
 
