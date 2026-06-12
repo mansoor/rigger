@@ -212,6 +212,36 @@ func mustNotContain(t *testing.T, s, bad string) {
 	}
 }
 
+// Auto-derived route: Traefik on + blank domain → {prefix}-{env}.localhost (HTTP),
+// and with a base domain → {prefix}-{env}.{base} over Let's Encrypt.
+func TestServicesAutoRoute(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"weather app","resource_prefix":"mcl_wda","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"nginx","image":"nginx","tag":"alpine","web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+
+	// Local default: *.localhost over HTTP, no host-port binding.
+	local, err := GenerateAt(cfg, "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(local), "mcl_wda_dev_nginx")
+	mustContain(t, app, "Host(`mcl-wda-dev.localhost`)") // underscores → hyphens
+	mustContain(t, app, "entrypoints=web")
+	mustNotContain(t, app, "ports:") // routed, not host-bound
+
+	// With a workspace base domain: real host + Let's Encrypt.
+	prod, err := GenerateRouted(cfg, "dev", RouteOpts{BaseDomain: "apps.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app = svcBlock(t, string(prod), "mcl_wda_dev_nginx")
+	mustContain(t, app, "Host(`mcl-wda-dev.apps.example.com`)")
+	mustContain(t, app, "entrypoints=websecure")
+	mustContain(t, app, "certresolver=letsencrypt")
+}
+
 // Swarm secrets still wire through deployBlock for a build service.
 func TestServicesSwarmSecrets(t *testing.T) {
 	cfg := `{

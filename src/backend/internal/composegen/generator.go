@@ -9,12 +9,30 @@ import (
 
 // Generate produces docker-compose.yml content for one environment from
 // config.json bytes. Byte-for-byte replacement for scripts/compose-gen.sh.
+// RouteOpts carries the env-routing context that lives OUTSIDE config.json: the
+// workspace's apps base domain (DB setting) and whether local *.localhost envs
+// should use self-signed HTTPS. Zero value = local HTTP on *.localhost.
+type RouteOpts struct {
+	BaseDomain string // e.g. "apps.example.com"; "" → local *.localhost
+	LocalTLS   bool   // serve the local *.localhost route over self-signed HTTPS
+}
+
 func Generate(configJSON []byte, env string) ([]byte, error) {
-	return GenerateAt(configJSON, env, time.Now().UTC())
+	return generate(configJSON, env, RouteOpts{}, time.Now().UTC())
 }
 
 // GenerateAt is Generate with an injectable timestamp (for tests / determinism).
 func GenerateAt(configJSON []byte, env string, now time.Time) ([]byte, error) {
+	return generate(configJSON, env, RouteOpts{}, now)
+}
+
+// GenerateRouted is Generate with explicit routing context (the deploy path
+// passes the workspace base domain + the project's local-TLS preference).
+func GenerateRouted(configJSON []byte, env string, ro RouteOpts) ([]byte, error) {
+	return generate(configJSON, env, ro, time.Now().UTC())
+}
+
+func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byte, error) {
 	cfg, err := parseConfig(configJSON)
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -23,9 +41,33 @@ func GenerateAt(configJSON []byte, env string, now time.Time) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown environment %q", env)
 	}
+	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
 	g := &gen{cfg: cfg, env: env, e: e, now: now}
 	g.build()
 	return []byte(g.b.String()), nil
+}
+
+// resolveRoute derives an env's domain + TLS mode when the user enabled Traefik
+// routing but left the domain blank (the Render-style "just give it a URL" case).
+// Activation is the existing traefik_enabled toggle, so envs that host-bind
+// (Traefik off) and envs with an explicit domain are untouched. Derived host:
+//   - base domain set → {prefix}-{env}.{base}, HTTPS via Let's Encrypt
+//   - no base domain  → {prefix}-{env}.localhost, HTTP (or self-signed if LocalTLS)
+// Underscores in the prefix become hyphens (valid DNS label).
+func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
+	if !e.TraefikEnabled || e.Domain != "" {
+		return
+	}
+	label := strings.ReplaceAll(rp, "_", "-") + "-" + env
+	if ro.BaseDomain != "" {
+		e.Domain = label + "." + ro.BaseDomain
+		e.SSLEnabled = true
+		e.SSLSelfSigned = false
+	} else {
+		e.Domain = label + ".localhost"
+		e.SSLEnabled = ro.LocalTLS
+		e.SSLSelfSigned = ro.LocalTLS
+	}
 }
 
 type gen struct {
