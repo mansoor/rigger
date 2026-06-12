@@ -79,7 +79,7 @@ services:
   # to forward ports 80 and 443 to this server. Set Cloudflare to "Full" SSL
   # mode if used, so the HTTP-01 challenge on port 80 can reach Traefik.
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.4
     container_name: rigger-traefik
     restart: unless-stopped
     ports:
@@ -90,8 +90,13 @@ services:
       - --entrypoints.web.address=:80
       - --entrypoints.websecure.address=:443
       # ── Docker provider ──
-      # Watches all containers on traefik_net for label changes.
+      # Watches all containers on traefik_net for label changes. Talks to Docker
+      # through the socket-proxy over TCP (NOT the raw socket): Docker Desktop
+      # proxies the mounted socket and its proxy breaks Traefik's direct API
+      # calls; the socket-proxy re-exposes a clean, allowlisted API. Also more
+      # secure (Traefik never touches the socket) and works on plain dockerd.
       - --providers.docker=true
+      - --providers.docker.endpoint=tcp://socket-proxy:2375
       - --providers.docker.network=traefik_net
       - --providers.docker.exposedbydefault=false
       # ── Let's Encrypt ACME (HTTP-01 challenge) ──
@@ -108,10 +113,26 @@ services:
       # To enable: change to --api.dashboard=true and add labels to this service.
       - --api.dashboard=false
     volumes:
-      # Docker socket — read-only; Traefik only watches, never modifies
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       # Certificate storage — mount a named volume so certs survive restarts
       - traefik-certs:/certs
+    networks:
+      - traefik_net
+    depends_on:
+      - socket-proxy
+
+  # ── Docker socket proxy (API-version rewriter) ──
+  # Traefik hardcodes Docker API v1.24, but Docker 29+ daemons set
+  # MinAPIVersion=1.40 and reject /v1.24/* with HTTP 400 — so Traefik's provider
+  # can't read containers. This nginx rewrites the version prefix to a supported
+  # one, then forwards to the read-only socket. Also keeps Traefik off the raw
+  # socket (security).
+  socket-proxy:
+    image: nginx:1.27-alpine
+    container_name: rigger-socket-proxy
+    restart: unless-stopped
+    volumes:
+      - ./docker-proxy.nginx.conf:/etc/nginx/nginx.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - traefik_net
 
