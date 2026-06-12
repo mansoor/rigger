@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings } from '../lib/api'
+import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
@@ -873,7 +874,7 @@ function ProcessesSettings({ cfg, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
@@ -926,8 +927,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {open && (<div className="px-5 pb-5 space-y-4 border-t border-border-strong/50 pt-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>Domain</Label>
-          <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="example.com" />
+          <Label>Domain <span className="font-normal normal-case text-content-faint">(optional override)</span></Label>
+          <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder={cfg.traefik_enabled ? 'auto — leave blank' : 'example.com'} />
+          {cfg.traefik_enabled && !cfg.domain && (
+            <p className="text-xs text-content-subtle mt-1">Blank → auto-derived from {baseDomain ? <>the workspace base domain</> : <>localhost</>}.</p>
+          )}
         </div>
         <div>
           <Label>Deployment</Label>
@@ -958,14 +962,23 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
 
       <div className="space-y-3 pt-3 border-t border-border-strong/50">
         <Toggle
-          label="Traefik reverse proxy"
-          hint="Route via Traefik instead of direct port binding"
+          label="Expose via domain (Traefik)"
+          hint="Route through the shared Traefik proxy by hostname instead of binding a host port (avoids port conflicts; gives the env a URL)."
           checked={!!cfg.traefik_enabled}
           onChange={v => {
             upd('traefik_enabled', v)
             if (!v) onChange({ ...cfg, traefik_enabled: false, ssl_enabled: false })
           }}
         />
+        {(() => {
+          const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS)
+          return route ? (
+            <p className="text-xs text-content-subtle">
+              Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+              {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
+            </p>
+          ) : null
+        })()}
         {cfg.traefik_enabled && (
           <>
             <div>
@@ -1392,6 +1405,9 @@ export default function EditProjectPage() {
   const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
   // Remote hosts available to this workspace — for host selection on a NEW env.
   const { data: wsHosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
+  // Workspace apps base domain — drives env auto-routing URLs ({proj}-{env}.{base}).
+  const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
+  const baseDomain = (wsSettings?.domain || '').trim()
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -1642,6 +1658,16 @@ export default function EditProjectPage() {
               </div>
             </div>
 
+            {/* Local HTTPS for domain-routed envs without a workspace base domain. */}
+            <Toggle
+              label="Local HTTPS (self-signed)"
+              hint={baseDomain
+                ? `Not used — this workspace has a base domain (${baseDomain}); domain-routed envs use Let's Encrypt.`
+                : "Serve domain-routed *.localhost envs over HTTPS with Traefik's self-signed cert (for apps that require HTTPS, e.g. Vaultwarden). Default is plain HTTP."}
+              checked={!!project?.local_tls}
+              onChange={v => setProject(p => ({ ...p, local_tls: v }))}
+            />
+
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
             <div>
               <Label>Resource prefix</Label>
@@ -1717,6 +1743,9 @@ export default function EditProjectPage() {
                 workspaceName={name}
                 hosts={wsHosts}
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
+                resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
+                baseDomain={baseDomain}
+                localTLS={!!project?.local_tls}
               />
             ))}
           </div>
