@@ -15,6 +15,12 @@ import (
 type RouteOpts struct {
 	BaseDomain string // e.g. "apps.example.com"; "" → local *.localhost
 	LocalTLS   bool   // serve the local *.localhost route over self-signed HTTPS
+	// EnvFile is the env's generated .env content. When a service sets
+	// env_file_mount, the generator embeds this verbatim as a compose `config`
+	// (content:) and mounts it at the target path. Delivered as inline content —
+	// not a host bind — because Rigger runs in a container and the host daemon
+	// can't resolve Rigger's bind paths. Empty ⇒ no .env file mount is emitted.
+	EnvFile string
 }
 
 func Generate(configJSON []byte, env string) ([]byte, error) {
@@ -75,7 +81,7 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 		ro.LocalTLS = true
 	}
 	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
-	g := &gen{cfg: cfg, env: env, e: e, now: now}
+	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
 	return []byte(g.b.String()), nil
 }
@@ -109,6 +115,10 @@ type gen struct {
 	e   Env
 	now time.Time
 	b   strings.Builder
+	// envFile is the env's .env content, embedded as a compose config when a
+	// service sets env_file_mount; envCfgUsed records whether any service did.
+	envFile    string
+	envCfgUsed bool
 }
 
 // line appends s followed by a newline (echo "s").
@@ -164,6 +174,18 @@ func (g *gen) build() {
 	// rp is the image-name base so pushed tags (registry/<prefix>-<service>) stay
 	// globally unique across workspaces.
 	g.buildStack(prefix, rp, registry, tag, isSwarm)
+
+	// ── Configs ── the env's .env, embedded inline for services that opted into
+	// a physical .env mount (env_file_mount). Set during buildStack.
+	if g.envCfgUsed {
+		g.line("")
+		g.line("configs:")
+		g.line("  " + prefix + "_dotenv:")
+		g.line("    content: |")
+		for _, ln := range strings.Split(strings.TrimRight(g.envFile, "\n"), "\n") {
+			g.line("      " + ln)
+		}
+	}
 }
 
 // ── Shared emit helpers (mirror lib.sh / compose-gen.sh helpers) ─────────────────

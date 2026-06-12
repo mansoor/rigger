@@ -327,30 +327,55 @@ func TestServicesEmpty(t *testing.T) {
 	}
 }
 
-// EnvFileMount binds the env's generated .env as a physical file in the app
-// workdir (read-only) for frameworks that re-read .env from disk — e.g.
-// Laravel's `php artisan serve`. Absent ⇒ no mount (byte-identical to today).
+// EnvFileMount delivers the env's generated .env as a physical file in the app
+// workdir for frameworks that re-read .env from disk (e.g. Laravel `php artisan
+// serve`). It's emitted as an inline compose `config` (content:), NOT a host
+// bind — Rigger runs in a container and the host daemon can't resolve a
+// Rigger-side bind path. Absent mount OR absent content ⇒ nothing emitted.
 func TestServicesEnvFileMount(t *testing.T) {
 	cfg := `{
 		"project": {"name":"app","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
 		"services": [{"name":"backend","build":{},"env_file":true,"env_file_mount":"/var/www/html/.env"}],
 		"environments": {"dev": {"deployment":"compose"}}
 	}`
-	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	out, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{EnvFile: "DB_HOST=mysql\nDB_PORT=3306\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Service references the config at its target path.
 	app := svcBlock(t, string(out), "app_dev_backend")
-	if !strings.Contains(app, "volumes:") || !strings.Contains(app, "- ./.env:/var/www/html/.env:ro") {
-		t.Errorf("expected .env bind-mount under volumes\n---\n%s", app)
+	for _, want := range []string{"configs:", "- source: app_dev_dotenv", "target: /var/www/html/.env"} {
+		if !strings.Contains(app, want) {
+			t.Errorf("service block missing %q\n---\n%s", want, app)
+		}
 	}
-	// Unset ⇒ nothing emitted.
+	// Top-level config carries the .env content inline (indented under content:).
+	for _, want := range []string{"configs:\n  app_dev_dotenv:\n    content: |", "      DB_HOST=mysql", "      DB_PORT=3306"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("top-level config missing %q\n---\n%s", want, out)
+		}
+	}
+	// No host bind path (the broken approach) anywhere.
+	if strings.Contains(string(out), "./.env:") {
+		t.Errorf("must not emit a host bind for .env\n%s", out)
+	}
+
+	// env_file_mount unset ⇒ no configs at all.
 	cfg2 := strings.Replace(cfg, `,"env_file_mount":"/var/www/html/.env"`, "", 1)
-	out2, err := GenerateAt([]byte(cfg2), "dev", time.Unix(0, 0).UTC())
+	out2, err := GenerateRouted([]byte(cfg2), "dev", RouteOpts{EnvFile: "DB_HOST=mysql\n"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(out2), "./.env:") {
-		t.Errorf("no .env mount expected when env_file_mount unset\n%s", out2)
+	if strings.Contains(string(out2), "configs:") {
+		t.Errorf("no configs expected when env_file_mount unset\n%s", out2)
+	}
+
+	// mount set but no content supplied ⇒ gracefully skipped.
+	out3, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out3), "configs:") {
+		t.Errorf("no configs expected when EnvFile content is empty\n%s", out3)
 	}
 }

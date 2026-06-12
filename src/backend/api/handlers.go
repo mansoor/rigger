@@ -1167,7 +1167,8 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain})
+		envContent, _ := os.ReadFile(filepath.Join(wsRoot, "envs", envName, ".env"))
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
@@ -1667,9 +1668,11 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	// Regenerate this env's compose so the secrets wiring (or its removal) is
 	// reflected immediately, without waiting for a Refresh.
 	if cfgData, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name)); rerr == nil {
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName)}
+		envDir := wspath.EnvDir(h.workspacesDir, wsName, name, env)
+		envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgData, env, ro); gerr == nil {
-			outPath := filepath.Join(wspath.EnvDir(h.workspacesDir, wsName, name, env), "docker-compose.yml")
+			outPath := filepath.Join(envDir, "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
 		}
 	}

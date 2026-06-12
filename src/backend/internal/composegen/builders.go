@@ -132,17 +132,19 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 			g.line("      - " + vol)
 		}
 	}
-	// Optionally bind the env's generated .env as a physical file in the app's
-	// workdir. Some frameworks re-read .env from disk and ignore process env —
-	// notably Laravel's `php artisan serve`, whose request subprocess only sees
-	// keys present in a .env file. The same vars are always injected as process
-	// env via env_file; this just also materialises them on disk (read-only).
-	if svc.EnvFileMount != "" {
-		if firstVol {
-			g.line("    volumes:")
-			firstVol = false
-		}
-		g.line("      - ./.env:" + svc.EnvFileMount + ":ro")
+	// Optionally materialise the env's generated .env as a physical file in the
+	// app's workdir. Some frameworks re-read .env from disk and ignore process
+	// env — notably Laravel's `php artisan serve`, whose request subprocess only
+	// sees keys present in a .env file. The vars are always injected as process
+	// env via env_file; this also delivers them on disk (read-only) via a compose
+	// `config` carrying the .env content inline. Inline content (not a host bind)
+	// because Rigger runs in a container and the host daemon can't resolve a
+	// Rigger-side bind path. Skipped when no .env content was supplied.
+	if svc.EnvFileMount != "" && g.envFile != "" {
+		g.line("    configs:")
+		g.line("      - source: " + prefix + "_dotenv")
+		g.line("        target: " + svc.EnvFileMount)
+		g.envCfgUsed = true
 	}
 
 	// Environment (keys sorted for deterministic output).

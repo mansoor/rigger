@@ -62,7 +62,10 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	}
 
 	writeCompose := func() error {
-		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain})
+		// Read the just-written .env so services that set env_file_mount get it
+		// embedded as a compose config (best-effort; missing ⇒ no mount).
+		envContent, _ := os.ReadFile(envFile)
+		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
 		if err != nil {
 			return fmt.Errorf("generate compose: %w", err)
 		}

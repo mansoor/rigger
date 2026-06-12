@@ -116,7 +116,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain})
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, EnvFile: readDotenv(envDir)})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -374,7 +374,7 @@ func (r *runner) logs() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain})
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, EnvFile: readDotenv(filepath.Dir(r.composePath))})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}
@@ -403,6 +403,17 @@ func (r *runner) test() error {
 	}
 	r.success("Test passed")
 	return nil
+}
+
+// readDotenv returns the env's generated .env content ("" if absent), passed to
+// the generator so services that set env_file_mount get it embedded as a compose
+// config. Best-effort: a missing .env just means no mount is emitted.
+func readDotenv(envDir string) string {
+	b, err := os.ReadFile(filepath.Join(envDir, ".env"))
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // writeFile writes compose content, creating the parent dir if needed.
