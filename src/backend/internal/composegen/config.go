@@ -104,7 +104,8 @@ type Service struct {
 	Volumes           []string           `json:"volumes,omitempty"`
 	DependsOn         []string           `json:"depends_on,omitempty"` // short service / managed-dep names
 	Restart           string             `json:"restart,omitempty"`
-	EnvFile           bool               `json:"env_file,omitempty"` // mount the env's .env (build/app services)
+	EnvFile           bool               `json:"env_file,omitempty"`            // inject the env's .env as process env (env_file:)
+	EnvFileMount      string             `json:"env_file_mount,omitempty"`      // also bind the env's .env as a physical file at this container path (ro)
 	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
 	ExtraCompose      string             `json:"extra_compose,omitempty"`
 	Replicas          flexStr            `json:"replicas,omitempty"` // default; per-env override via Swarm.Services

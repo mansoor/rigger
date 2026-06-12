@@ -947,9 +947,10 @@ func validateConfigServices(content []byte) string {
 			Build *struct {
 				Args map[string]string `json:"args"`
 			} `json:"build"`
-			Image     string   `json:"image"`
-			ImageFrom string   `json:"image_from"`
-			DependsOn []string `json:"depends_on"`
+			Image        string   `json:"image"`
+			ImageFrom    string   `json:"image_from"`
+			DependsOn    []string `json:"depends_on"`
+			EnvFileMount string   `json:"env_file_mount"`
 		} `json:"services"`
 		Environments map[string]struct {
 			Database      string `json:"database"`
@@ -991,6 +992,9 @@ func validateConfigServices(content []byte) string {
 					return fmt.Sprintf("service %q build arg %q must be a valid identifier (letters, digits, underscores; not starting with a digit)", s.Name, k)
 				}
 			}
+		}
+		if m := s.EnvFileMount; m != "" && !strings.HasPrefix(m, "/") {
+			return fmt.Sprintf("service %q .env mount path %q must be absolute (e.g. /var/www/html/.env)", s.Name, m)
 		}
 		names[s.Name] = true
 	}

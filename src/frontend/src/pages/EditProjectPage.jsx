@@ -345,6 +345,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
           <Toggle label="Mount .env (env_file)" checked={img.env_file !== false && serviceSource(img) !== 'image'} onChange={v => upd('env_file', v)} />
         </div>
       </div>
+      {serviceSource(img) !== 'image' && (
+        <div><Label>Mount .env as a file <span className="font-normal normal-case text-content-faint">(optional path)</span></Label>
+          <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env" />
+          <p className="text-xs text-content-subtle mt-1">
+            For apps that read a physical <code className="font-mono text-xs">.env</code> from disk (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>, which ignores process env). The same vars are always injected as process env; set a path here to also write them to a file (read-only).
+          </p></div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="flex items-end pb-1">
           <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={v => upd('web_routed', v)} />
@@ -565,7 +572,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
 const SVC_DIFF_FIELDS = [
   'build', 'image', 'image_from', 'tag', 'command', 'port', 'host_port',
   'extra_ports', 'web_routed', 'subdomain', 'healthcheck', 'env_file',
-  'depends_on', 'volumes', 'restart', 'config_template', 'env_vars',
+  'env_file_mount', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars',
 ]
 
 // stable serialises a value with object keys sorted at every depth, so two

@@ -326,3 +326,31 @@ func TestServicesEmpty(t *testing.T) {
 		t.Errorf("expected a services: header even when empty\n%s", out)
 	}
 }
+
+// EnvFileMount binds the env's generated .env as a physical file in the app
+// workdir (read-only) for frameworks that re-read .env from disk — e.g.
+// Laravel's `php artisan serve`. Absent ⇒ no mount (byte-identical to today).
+func TestServicesEnvFileMount(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"backend","build":{},"env_file":true,"env_file_mount":"/var/www/html/.env"}],
+		"environments": {"dev": {"deployment":"compose"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(out), "app_dev_backend")
+	if !strings.Contains(app, "volumes:") || !strings.Contains(app, "- ./.env:/var/www/html/.env:ro") {
+		t.Errorf("expected .env bind-mount under volumes\n---\n%s", app)
+	}
+	// Unset ⇒ nothing emitted.
+	cfg2 := strings.Replace(cfg, `,"env_file_mount":"/var/www/html/.env"`, "", 1)
+	out2, err := GenerateAt([]byte(cfg2), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out2), "./.env:") {
+		t.Errorf("no .env mount expected when env_file_mount unset\n%s", out2)
+	}
+}
