@@ -30,6 +30,10 @@ type Project struct {
 	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
 	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
 	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// LocalTLS: when an env auto-routes on *.localhost (no workspace base domain),
+	// serve it over Traefik's self-signed cert instead of plain HTTP — for apps
+	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.
+	LocalTLS bool `json:"local_tls,omitempty"`
 }
 
 type Version struct {

@@ -41,6 +41,11 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	if !ok {
 		return nil, fmt.Errorf("unknown environment %q", env)
 	}
+	// local-TLS is a project setting; OR it into the route context so callers only
+	// need to supply the (DB-sourced) base domain.
+	if cfg.Project.LocalTLS {
+		ro.LocalTLS = true
+	}
 	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
 	g := &gen{cfg: cfg, env: env, e: e, now: now}
 	g.build()

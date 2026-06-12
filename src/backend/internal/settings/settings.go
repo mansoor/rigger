@@ -427,6 +427,21 @@ func GetWorkspaceSettings(d *db.DB, wsKey string) (map[string]string, error) {
 	return out, rows.Err()
 }
 
+// WorkspaceBaseDomain returns the workspace's apps base domain (the `domain`
+// setting) used to derive env routes ({prefix}-{env}.{base}). Returns "" when
+// the db is nil (local-only mode) or no base domain is set — callers then fall
+// back to the local *.localhost default.
+func WorkspaceBaseDomain(d *db.DB, wsKey string) string {
+	if d == nil {
+		return ""
+	}
+	vals, err := GetWorkspaceSettings(d, wsKey)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(vals["domain"])
+}
+
 // SetWorkspaceSetting upserts one workspace-scoped setting.
 func SetWorkspaceSetting(d *db.DB, wsKey, key, value string) error {
 	_, err := d.Exec(

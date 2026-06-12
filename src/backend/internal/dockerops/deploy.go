@@ -48,6 +48,11 @@ type Options struct {
 	Stdout        io.Writer
 	Stderr        io.Writer
 
+	// BaseDomain is the workspace's apps base domain (DB-sourced), used to derive
+	// env routes when Traefik is on and the env has no explicit domain. Empty ⇒
+	// local *.localhost default.
+	BaseDomain string
+
 	// Exec runs the docker commands. nil → local daemon (executor.Local). Set to
 	// a remotehost executor for cross-host operations (Phase 7).
 	Exec executor.Executor
@@ -111,7 +116,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.Generate(cfgBytes, opts.Env)
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -369,7 +374,7 @@ func (r *runner) logs() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.Generate(r.cfgBytes, r.opts.Env)
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}

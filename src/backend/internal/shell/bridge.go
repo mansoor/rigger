@@ -1067,6 +1067,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
+			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
 		}
 		if rt != nil {
 			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)

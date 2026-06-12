@@ -242,6 +242,25 @@ func TestServicesAutoRoute(t *testing.T) {
 	mustContain(t, app, "certresolver=letsencrypt")
 }
 
+// project.local_tls makes an auto-routed *.localhost env use self-signed HTTPS.
+func TestServicesLocalTLS(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"vault","resource_prefix":"ws_vault","registry":"reg","local_tls":true,
+			"version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	out, err := GenerateAt(cfg, "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(out), "ws_vault_dev_app")
+	mustContain(t, app, "Host(`ws-vault-dev.localhost`)")
+	mustContain(t, app, "entrypoints=websecure")
+	mustContain(t, app, "tls=true")
+	mustNotContain(t, app, "certresolver") // self-signed, not Let's Encrypt
+}
+
 // Swarm secrets still wire through deployBlock for a build service.
 func TestServicesSwarmSecrets(t *testing.T) {
 	cfg := `{
