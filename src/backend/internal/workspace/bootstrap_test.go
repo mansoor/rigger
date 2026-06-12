@@ -27,7 +27,7 @@ func TestBootstrapImageStack(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, &out); err != nil {
+	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, "", &out); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestBootstrapPreservesEnvWithoutRegen(t *testing.T) {
 	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(imageConfig), 0o644) //nolint:errcheck
 	os.WriteFile(filepath.Join(envDir, ".env"), []byte("SENTINEL=keepme\n"), 0o644) //nolint:errcheck
 
-	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, nil); err != nil {
+	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(envDir, ".env"))

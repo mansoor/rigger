@@ -170,7 +170,7 @@ func (b *Bridge) Migrate(workspaceName, project string, targetHostID int64, out 
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("migration requires multi-host support")
 	}
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
@@ -707,7 +707,7 @@ func (b *Bridge) ExecForEnv(workspaceName, project, env string) (executor.Execut
 // encrypted at rest in its Raft store. Idempotent (a no-op if it already
 // exists, since Swarm secrets are immutable).
 func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value string, version int) (string, error) {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return "", err
 	}
@@ -725,7 +725,7 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value strin
 // RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
 // fails if the secret is still referenced by a running service).
 func (b *Bridge) RemoveSwarmSecret(workspaceName, project, env, key string, version int) error {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return err
 	}
@@ -804,7 +804,8 @@ func (b *Bridge) Bootstrap(workspaceName, project, env string, stdout, stderr io
 
 func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, out io.Writer) error {
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
-	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, out)
+	baseDomain := settings.WorkspaceBaseDomain(b.db, workspaceName)
+	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, out)
 }
 
 // runScript runs a one-off tool container for a pipeline `script` stage, injecting

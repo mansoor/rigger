@@ -261,6 +261,34 @@ func TestServicesLocalTLS(t *testing.T) {
 	mustNotContain(t, app, "certresolver") // self-signed, not Let's Encrypt
 }
 
+// EnvRouteURL resolves the display URL the same way deploy routing does.
+func TestEnvRouteURL(t *testing.T) {
+	mk := func(traefik bool, domain, ssl string) []byte {
+		return []byte(`{
+			"project": {"name":"x","resource_prefix":"ws_app"},
+			"services": [{"name":"app","build":{},"web_routed":true,"port":"80"}],
+			"environments": {"dev": {"deployment":"compose","traefik_enabled":` + boolStr(traefik) +
+			`,"traefik_network":"traefik_net","domain":"` + domain + `","ssl_enabled":` + ssl + `}}
+		}`)
+	}
+	// Traefik off → not routed.
+	if u, routed := EnvRouteURL(mk(false, "", "false"), "dev", ""); routed {
+		t.Errorf("traefik off should not route, got %q", u)
+	}
+	// Auto localhost.
+	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", ""); !routed || u != "http://ws-app-dev.localhost" {
+		t.Errorf("auto localhost = %q,%v; want http://ws-app-dev.localhost,true", u, routed)
+	}
+	// Auto base domain → HTTPS.
+	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", "apps.example.com"); !routed || u != "https://ws-app-dev.apps.example.com" {
+		t.Errorf("auto base = %q,%v; want https://ws-app-dev.apps.example.com,true", u, routed)
+	}
+	// Explicit domain wins.
+	if u, routed := EnvRouteURL(mk(true, "my.host", "true"), "dev", "apps.example.com"); !routed || u != "https://my.host" {
+		t.Errorf("explicit = %q,%v; want https://my.host,true", u, routed)
+	}
+}
+
 // Swarm secrets still wire through deployBlock for a build service.
 func TestServicesSwarmSecrets(t *testing.T) {
 	cfg := `{

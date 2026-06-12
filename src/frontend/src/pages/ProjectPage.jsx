@@ -103,10 +103,13 @@ function envAccess(cfg, ws, envName) {
   const httpPort = access.http_port || String(cfg?.http_port || '')
   const images   = (access.images  || []).length > 0 ? access.images : (ws?.config?.services || [])
 
-  const domainUrl = domain ? `${ssl ? 'https' : 'http'}://${domain}` : null
+  // access.url is the server-resolved Traefik route URL, including the
+  // auto-derived {prefix}-{env}.{base|localhost} when no explicit domain is set.
+  const routedUrl = access.url || (domain ? `${ssl ? 'https' : 'http'}://${domain}` : null)
+  const domainUrl = routedUrl
 
   if (traefik) {
-    if (domain) return { url: domainUrl, port: null, links: [], viaTraefik: true, domainUrl }
+    if (routedUrl) return { url: routedUrl, port: null, links: [], viaTraefik: true, domainUrl: routedUrl }
     return empty
   }
 
@@ -312,8 +315,10 @@ function BackupStatsLine({ name, envName }) {
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   const { workspace } = useParams() // parent-tier workspace (from the route)
-  // Use server-resolved domain (${VAR} already substituted) for display
-  const domain     = ws?.env_access?.[envName]?.domain || cfg?.domain || '—'
+  // Use server-resolved domain (${VAR} already substituted) for display; fall
+  // back to the auto-derived route host when there's no explicit domain.
+  const _ea        = ws?.env_access?.[envName]
+  const domain     = _ea?.domain || (_ea?.url ? _ea.url.replace(/^https?:\/\//, '') : '') || cfg?.domain || '—'
   const gitBranch  = cfg?.git?.branch || ''
   const deployment = cfg?.deployment || 'compose'
   const isImage    = ws?.config?.project?.type === 'image'

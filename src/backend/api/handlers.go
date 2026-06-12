@@ -1467,7 +1467,7 @@ func (h *Handler) resourcePrefix(wsName, name string) string {
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	ws, err := workspace.Get(h.workspacesDir, wsName, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
@@ -1543,7 +1543,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		body.Updates = map[string]string{}
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, wsName, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

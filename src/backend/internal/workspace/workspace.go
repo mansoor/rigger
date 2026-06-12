@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
@@ -132,9 +133,10 @@ type ConfigImage struct {
 // EnvAccessInfo holds resolved (${VAR}-substituted) access values for one environment.
 // Computed server-side from config.json + .env so the frontend never has to parse raw strings.
 type EnvAccessInfo struct {
-	Domain    string            `json:"domain"`     // resolved domain, empty if not configured
-	HTTPPort  string            `json:"http_port"`  // resolved http_port for custom stacks
-	Images    []ImageAccessInfo `json:"images"`     // per-service resolved ports
+	Domain   string            `json:"domain"`        // resolved domain, empty if not configured
+	URL      string            `json:"url,omitempty"` // full Traefik route URL (incl. auto-derived); empty when host-bound
+	HTTPPort string            `json:"http_port"`     // resolved http_port for custom stacks
+	Images   []ImageAccessInfo `json:"images"`        // per-service resolved ports
 }
 
 // ImageAccessInfo holds the resolved host port and link ports for one image service.
@@ -241,7 +243,7 @@ func ListProjects(workspacesDir, workspaceName string) ([]Workspace, error) {
 		if !e.IsDir() {
 			continue
 		}
-		ws, err := load(workspacesDir, workspaceName, e.Name())
+		ws, err := load(workspacesDir, workspaceName, e.Name(), "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "workspace: skipping %s/%s: %v\n", workspaceName, e.Name(), err)
 			continue
@@ -269,11 +271,14 @@ func List(workspacesDir string) ([]Workspace, error) {
 }
 
 // Get returns a single project within a workspace.
-func Get(workspacesDir, workspaceName, project string) (Workspace, error) {
-	return load(workspacesDir, workspaceName, project)
+// Get loads a project's workspace detail. baseDomain (the workspace apps base
+// domain) is used to resolve each env's Traefik route URL for display; pass ""
+// when routing URLs aren't needed.
+func Get(workspacesDir, workspaceName, project, baseDomain string) (Workspace, error) {
+	return load(workspacesDir, workspaceName, project, baseDomain)
 }
 
-func load(workspacesDir, workspaceName, name string) (Workspace, error) {
+func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, error) {
 	wsPath := filepath.Join(workspacesDir, workspaceName, "projects", name)
 	cfgPath := filepath.Join(wsPath, "config.json")
 
@@ -329,6 +334,11 @@ func load(workspacesDir, workspaceName, name string) (Workspace, error) {
 		if ec, ok := cfg.Environments[envName]; ok {
 			info.Domain   = resolve(ec.Domain)
 			info.HTTPPort = resolve(fmt.Sprintf("%v", ec.HTTPPort))
+			// Full Traefik route URL — incl. the auto-derived {prefix}-{env}.
+			// {base|localhost} when Traefik is on and no explicit domain is set.
+			if url, routed := composegen.EnvRouteURL(data, envName, baseDomain); routed {
+				info.URL = url
+			}
 		}
 
 		for _, img := range cfg.Images {

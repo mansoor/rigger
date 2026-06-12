@@ -32,6 +32,34 @@ func GenerateRouted(configJSON []byte, env string, ro RouteOpts) ([]byte, error)
 	return generate(configJSON, env, ro, time.Now().UTC())
 }
 
+// EnvRouteURL returns the URL an environment is reachable at when it routes
+// through Traefik, and whether it routes at all (false ⇒ host-port binding, no
+// single URL). baseDomain is the workspace's apps base domain. Mirrors
+// resolveRoute so the UI shows exactly what gets deployed.
+func EnvRouteURL(configJSON []byte, env, baseDomain string) (string, bool) {
+	cfg, err := parseConfig(configJSON)
+	if err != nil {
+		return "", false
+	}
+	e, ok := cfg.Environments[env]
+	if !ok {
+		return "", false
+	}
+	ro := RouteOpts{BaseDomain: baseDomain}
+	if cfg.Project.LocalTLS {
+		ro.LocalTLS = true
+	}
+	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
+	if !e.TraefikEnabled || e.Domain == "" {
+		return "", false // host-port binding, or no route
+	}
+	scheme := "http"
+	if e.SSLEnabled {
+		scheme = "https"
+	}
+	return scheme + "://" + e.Domain, true
+}
+
 func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byte, error) {
 	cfg, err := parseConfig(configJSON)
 	if err != nil {

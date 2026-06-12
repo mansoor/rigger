@@ -23,7 +23,7 @@ import (
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
-func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, out io.Writer) error {
+func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -62,7 +62,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	}
 
 	writeCompose := func() error {
-		content, err := composegen.Generate(data, env)
+		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain})
 		if err != nil {
 			return fmt.Errorf("generate compose: %w", err)
 		}
