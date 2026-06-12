@@ -29,6 +29,9 @@ type Options struct {
 	Env           string
 	Extra         []string
 	EnvVars       []string // child-process environment
+	// BaseDomain is the workspace's apps base domain (DB-sourced). Used to resolve
+	// the ${ROUTE_URL} build-arg token to the env's public route at build time.
+	BaseDomain string
 	Stdout        io.Writer
 	Stderr        io.Writer
 

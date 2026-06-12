@@ -182,6 +182,24 @@ function volumeRowsToArray(rows) {
   return rows.map(serializeVolumeRow).filter(Boolean)
 }
 
+// Build args round-trip between the build.args object and editable key/value rows.
+// One trailing blank row is kept so the + behaviour matches ports/volumes.
+function imgToArgRows(img) {
+  const args = img.build?.args || {}
+  const rows = Object.keys(args).map(k => ({ key: k, val: args[k] }))
+  if (!rows.length) return [{ key: '', val: '' }]
+  return rows
+}
+
+function argRowsToObject(rows) {
+  const out = {}
+  for (const r of rows) {
+    const k = (r.key || '').trim()
+    if (k) out[k] = r.val ?? ''
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 // ── Image stack editor ────────────────────────────────────────────────────────
 
 const RESTART_OPTIONS = [
@@ -199,6 +217,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   const [open, setOpen] = useState(idx === 0) // collapsible — first service open
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
+  const [argRows,    setArgRows]    = useState(() => imgToArgRows(img))
 
   function syncPorts(rows) {
     setPortRows(rows)
@@ -207,6 +226,10 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   function syncVolumes(rows) {
     setVolumeRows(rows)
     onUpdate(idx, { ...img, volumes: volumeRowsToArray(rows) })
+  }
+  function syncArgs(rows) {
+    setArgRows(rows)
+    onUpdate(idx, { ...img, build: { ...(img.build || {}), args: argRowsToObject(rows) } })
   }
   function upd(field, val) {
     onUpdate(idx, { ...img, [field]: val })
@@ -266,6 +289,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
         </div>
       )}
       {serviceSource(img) === 'build' && (
+        <>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Dockerfile template</Label>
             <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={BUILD_TEMPLATES} />
@@ -273,6 +297,36 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
           <div><Label>Build context</Label>
             <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
         </div>
+
+        {/* Build args — passed as --build-arg KEY=VALUE at image build time. */}
+        <div>
+          <Label>Build args</Label>
+          <p className="text-xs text-content-subtle mb-2">
+            Passed to <code className="font-mono text-xs">docker build --build-arg</code> (for values baked at build time, e.g. a Next.js
+            <code className="font-mono text-xs"> next.config</code> rewrite target). Values may use{' '}
+            <code className="font-mono text-xs">${'{ENV}'}</code>, <code className="font-mono text-xs">${'{VERSION}'}</code>, and{' '}
+            <code className="font-mono text-xs">${'{ROUTE_URL}'}</code> (the env's public URL).
+          </p>
+          <div className="space-y-1.5">
+            {argRows.map((row, ri) => (
+              <div key={ri} className="flex items-center gap-2">
+                <input type="text" value={row.key}
+                  onChange={e => { const r = argRows.map((x,j)=>j===ri?{...x,key:e.target.value}:x); syncArgs(r) }}
+                  placeholder="NEXT_PUBLIC_API_URL" className={`flex-1 ${monoInput}`} />
+                <span className="text-content-subtle font-bold shrink-0">=</span>
+                <input type="text" value={row.val}
+                  onChange={e => { const r = argRows.map((x,j)=>j===ri?{...x,val:e.target.value}:x); syncArgs(r) }}
+                  placeholder="${ROUTE_URL}/api" className={`flex-[2] ${monoInput}`} />
+                <button type="button" title="Remove build arg"
+                  onClick={() => { const r = argRows.filter((_,j)=>j!==ri); syncArgs(r.length ? r : [{ key:'', val:'' }]) }}
+                  className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => syncArgs([...argRows, { key:'', val:'' }])}
+            className="mt-2 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add build arg</button>
+        </div>
+        </>
       )}
       {serviceSource(img) === 'image_from' && (
         <div>

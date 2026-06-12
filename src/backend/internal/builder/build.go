@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
@@ -121,10 +124,15 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	// Run with the build context as the working dir and relative paths, so the
 	// remote executor can translate the dir to the host and build against the
 	// pushed context on the remote daemon (local behaviour is identical).
-	if err := o.dockerRunInDir(ctxDir,
+	args := []string{
 		"build",
-		"--build-arg", "BUILD_ENV="+o.Env,
-		"--build-arg", "VERSION="+ver,
+		"--build-arg", "BUILD_ENV=" + o.Env,
+		"--build-arg", "VERSION=" + ver,
+	}
+	for _, kv := range o.serviceBuildArgs(svc, ver) {
+		args = append(args, "--build-arg", kv)
+	}
+	args = append(args,
 		"--label", "project="+cfg.Project.Name,
 		"--label", "environment="+o.Env,
 		"--label", "version="+ver,
@@ -132,7 +140,8 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 		"-t", imgTag,
 		"-f", dockerfile,
 		".",
-	); err != nil {
+	)
+	if err := o.dockerRunInDir(ctxDir, args...); err != nil {
 		return err
 	}
 	o.success("Built: %s", imgTag)
@@ -145,4 +154,54 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 		o.success("Pushed: %s", imgTag)
 	}
 	return nil
+}
+
+// serviceBuildArgs resolves a build service's custom --build-arg values into
+// sorted "KEY=VALUE" strings (sorted for deterministic argv). Values may embed
+// build-time tokens, substituted here:
+//
+//	${ENV}       → the target environment name
+//	${VERSION}   → the full version string (e.g. 1.2.3-build.4)
+//	${ROUTE_URL} → the env's public Traefik route (e.g. https://app.example.com);
+//	               empty when the env isn't web-routed
+//
+// ${ROUTE_URL} is the one that needs the config + base domain, so it's resolved
+// lazily (only when actually referenced) to avoid an unnecessary file read.
+func (o Options) serviceBuildArgs(svc wsconfig.Service, ver string) []string {
+	if svc.Build == nil || len(svc.Build.Args) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(svc.Build.Args))
+	for k := range svc.Build.Args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	routeURL, routeResolved := "", false
+	resolveRoute := func() string {
+		if !routeResolved {
+			routeResolved = true
+			if data, err := os.ReadFile(o.configPath()); err == nil {
+				if url, ok := composegen.EnvRouteURL(data, o.Env, o.BaseDomain); ok {
+					routeURL = url
+				}
+			}
+		}
+		return routeURL
+	}
+
+	expand := func(v string) string {
+		v = strings.ReplaceAll(v, "${ENV}", o.Env)
+		v = strings.ReplaceAll(v, "${VERSION}", ver)
+		if strings.Contains(v, "${ROUTE_URL}") {
+			v = strings.ReplaceAll(v, "${ROUTE_URL}", resolveRoute())
+		}
+		return v
+	}
+
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+expand(svc.Build.Args[k]))
+	}
+	return out
 }

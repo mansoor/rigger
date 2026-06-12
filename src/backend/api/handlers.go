@@ -914,6 +914,26 @@ func serviceNameOK(s string) bool {
 	return true
 }
 
+// buildArgKeyOK reports whether s is a valid Docker build-arg name: a C-style
+// identifier (letters, digits, underscores; not starting with a digit). This is
+// the safe subset that maps cleanly to a Dockerfile ARG.
+func buildArgKeyOK(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, c := range s {
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
 // validateConfigServices checks the unified services[] graph in a config.json
 // payload. Returns a user-facing message on the first problem, or "" if all good:
 // names dns-safe + unique + not colliding with a managed dependency; exactly one
@@ -923,11 +943,13 @@ func validateConfigServices(content []byte) string {
 	reserved := map[string]bool{"postgres": true, "mysql": true, "redis": true, "garage": true, "garage_webui": true}
 	var doc struct {
 		Services []struct {
-			Name      string          `json:"name"`
-			Build     json.RawMessage `json:"build"`
-			Image     string          `json:"image"`
-			ImageFrom string          `json:"image_from"`
-			DependsOn []string        `json:"depends_on"`
+			Name  string `json:"name"`
+			Build *struct {
+				Args map[string]string `json:"args"`
+			} `json:"build"`
+			Image     string   `json:"image"`
+			ImageFrom string   `json:"image_from"`
+			DependsOn []string `json:"depends_on"`
 		} `json:"services"`
 		Environments map[string]struct {
 			Database      string `json:"database"`
@@ -951,7 +973,7 @@ func validateConfigServices(content []byte) string {
 			return fmt.Sprintf("duplicate service name %q", s.Name)
 		}
 		sources := 0
-		if len(s.Build) > 0 && string(s.Build) != "null" {
+		if s.Build != nil {
 			sources++
 		}
 		if s.Image != "" {
@@ -962,6 +984,13 @@ func validateConfigServices(content []byte) string {
 		}
 		if sources != 1 {
 			return fmt.Sprintf("service %q must have exactly one source (build, image, or image_from)", s.Name)
+		}
+		if s.Build != nil {
+			for k := range s.Build.Args {
+				if !buildArgKeyOK(k) {
+					return fmt.Sprintf("service %q build arg %q must be a valid identifier (letters, digits, underscores; not starting with a digit)", s.Name, k)
+				}
+			}
 		}
 		names[s.Name] = true
 	}

@@ -1033,6 +1033,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
+			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
 		}
 		if rt != nil {
 			// Remote build/promote runs docker on the host's own daemon (so the
