@@ -185,6 +185,15 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 	g.emitServiceSecrets()
 }
 
+// traefikLabels emits the routing labels for a web service. Three modes by
+// (SSLEnabled, SSLSelfSigned):
+//   - HTTP only           → a single `web` (:80) router.
+//   - HTTPS + Let's Encrypt → `websecure` (:443) router with the letsencrypt
+//     resolver, plus a companion `web` router that redirects http→https.
+//   - HTTPS + self-signed   → same as above but no certresolver (Traefik serves
+//     its default cert) — for local *.localhost envs that need HTTPS.
+// The per-router redirect replaces Traefik's old global web→websecure redirect,
+// so HTTP-only (local) envs are no longer forced onto a cert-less HTTPS.
 func (g *gen) traefikLabels(router, host, port string) {
 	if !g.e.TraefikEnabled {
 		return
@@ -192,15 +201,24 @@ func (g *gen) traefikLabels(router, host, port string) {
 	if port == "" {
 		port = "80"
 	}
+	rule := "Host(`" + host + "`)"
 	g.line("    labels:")
 	g.line("      - \"traefik.enable=true\"")
-	g.line("      - \"traefik.http.routers." + router + ".rule=Host(`" + host + "`)\"")
 	if g.e.SSLEnabled {
+		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=websecure\"")
 		g.line("      - \"traefik.http.routers." + router + ".tls=true\"")
-		g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=letsencrypt\"")
+		if !g.e.SSLSelfSigned {
+			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=letsencrypt\"")
+		}
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
+		// Companion HTTP router → redirect to HTTPS (per-router, not global).
+		g.line("      - \"traefik.http.routers." + router + "_web.rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + router + "_web.entrypoints=web\"")
+		g.line("      - \"traefik.http.routers." + router + "_web.middlewares=" + router + "_redirect\"")
+		g.line("      - \"traefik.http.middlewares." + router + "_redirect.redirectscheme.scheme=https\"")
 	} else {
+		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=web\"")
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
 	}

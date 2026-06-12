@@ -145,6 +145,73 @@ func TestServicesSubdomainRoute(t *testing.T) {
 	}
 }
 
+// Traefik routing modes: HTTP-only, HTTPS+Let's Encrypt, HTTPS+self-signed.
+func TestServicesTraefikModes(t *testing.T) {
+	mk := func(ssl, selfSigned bool) string {
+		return `{
+			"project": {"name":"api","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+			"services": [{"name":"app","build":{},"web_routed":true,"port":"8080","env_file":true}],
+			"environments": {"prod": {"deployment":"compose","domain":"api.example.com",
+				"traefik_enabled":true,"traefik_network":"traefik_net",
+				"ssl_enabled":` + boolStr(ssl) + `,"ssl_self_signed":` + boolStr(selfSigned) + `}}
+		}`
+	}
+
+	// HTTP-only: web entrypoint, no TLS, no redirect.
+	httpOut, err := GenerateAt([]byte(mk(false, false)), "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(httpOut), "api_prod_app")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=web")
+	mustNotContain(t, app, "websecure")
+	mustNotContain(t, app, "redirectscheme")
+	mustNotContain(t, app, "certresolver")
+
+	// HTTPS + Let's Encrypt: websecure + letsencrypt + companion http→https redirect.
+	leOut, err := GenerateAt([]byte(mk(true, false)), "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app = svcBlock(t, string(leOut), "api_prod_app")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=websecure")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.tls.certresolver=letsencrypt")
+	mustContain(t, app, "traefik.http.routers.api_prod_app_web.entrypoints=web")
+	mustContain(t, app, "traefik.http.middlewares.api_prod_app_redirect.redirectscheme.scheme=https")
+
+	// HTTPS + self-signed: websecure + tls=true but NO certresolver (default cert).
+	ssOut, err := GenerateAt([]byte(mk(true, true)), "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app = svcBlock(t, string(ssOut), "api_prod_app")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=websecure")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.tls=true")
+	mustNotContain(t, app, "certresolver")
+	mustContain(t, app, "redirectscheme.scheme=https") // still redirects http→https
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+func mustContain(t *testing.T, s, want string) {
+	t.Helper()
+	if !strings.Contains(s, want) {
+		t.Errorf("missing %q\n---\n%s", want, s)
+	}
+}
+
+func mustNotContain(t *testing.T, s, bad string) {
+	t.Helper()
+	if strings.Contains(s, bad) {
+		t.Errorf("unexpected %q\n---\n%s", bad, s)
+	}
+}
+
 // Swarm secrets still wire through deployBlock for a build service.
 func TestServicesSwarmSecrets(t *testing.T) {
 	cfg := `{

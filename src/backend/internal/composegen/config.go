@@ -55,7 +55,11 @@ type Env struct {
 	TraefikEnabled bool    `json:"traefik_enabled"`
 	TraefikNetwork string  `json:"traefik_network"`
 	SSLEnabled     bool    `json:"ssl_enabled"`
-	Deployment     string  `json:"deployment"`
+	// SSLSelfSigned routes HTTPS through Traefik's default (self-signed) cert
+	// instead of Let's Encrypt — used for local *.localhost envs that need HTTPS
+	// (e.g. Vaultwarden) but can't get a public cert. Ignored unless SSLEnabled.
+	SSLSelfSigned bool   `json:"ssl_self_signed,omitempty"`
+	Deployment    string `json:"deployment"`
 	// ServiceOverrides appends per-service YAML for THIS env (keyed by service name).
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides"`
 	// Swarm holds per-env Docker Swarm scheduling: env-level rolling-update/restart
