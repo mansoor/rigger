@@ -305,3 +305,35 @@ func TestCustomDevAndMysqlAndGarage(t *testing.T) {
 		t.Error("REDIS_HOST present but redis disabled")
 	}
 }
+
+// A free-form project display name with spaces must be quoted in the .env so a
+// strict dotenv parser (phpdotenv, when the .env is mounted via env_file_mount)
+// doesn't choke on "unexpected whitespace". Docker's env_file stays happy too.
+func TestProjectNameQuotedWhenSpaced(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "weather dashboard app", "type": "custom", "registry": "reg",
+        "version": { "major": 0, "minor": 1, "patch": 0, "build": 0 } },
+      "environments": { "dev": { "domain": "dev.app", "database": "none",
+        "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(env, `PROJECT_NAME="weather dashboard app"`) {
+		t.Errorf("PROJECT_NAME with spaces must be quoted:\n%s", env)
+	}
+	// A plain name stays unquoted (no churn for the common case).
+	c2 := cfg(t, `{
+      "project": { "name": "app", "type": "custom", "registry": "reg",
+        "version": { "major": 0, "minor": 1, "patch": 0, "build": 0 } },
+      "environments": { "dev": { "domain": "dev.app", "database": "none", "deployment": "compose" } }
+    }`)
+	env2, _, err := Generate(c2, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(env2, "PROJECT_NAME=app\n") {
+		t.Errorf("plain PROJECT_NAME should be unquoted:\n%s", env2)
+	}
+}

@@ -62,6 +62,23 @@ func identSafe(s string) string {
 	return b.String()
 }
 
+// envQuote double-quotes v when it contains characters a strict dotenv parser
+// treats as significant — whitespace, '#', or quotes. Docker's env_file is
+// lenient (the whole value after '=' is taken literally), but a physical .env
+// mounted via env_file_mount is parsed strictly (e.g. Laravel's phpdotenv:
+// "Encountered unexpected whitespace"), so a free-form value like a project
+// display name ("weather dashboard app") must be quoted. Plain values (the
+// common KEY=value case) pass through unchanged, so existing output is stable.
+// Both docker compose and phpdotenv strip the surrounding quotes on read.
+func envQuote(v string) string {
+	if v == "" || !strings.ContainsAny(v, " \t\r\n\"'#") {
+		return v
+	}
+	esc := strings.ReplaceAll(v, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	return `"` + esc + `"`
+}
+
 func hexN(r Rand, n int) string    { return hex.EncodeToString(r(n)) }
 func base64N(r Rand, n int) string { return base64.StdEncoding.EncodeToString(r(n)) }
 
@@ -253,7 +270,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 
 	p("# ── Project ────────────────────────────────────────────────\n")
 	p("COMPOSE_PROJECT_NAME=%s\n", prefix)
-	p("PROJECT_NAME=%s\n", project)
+	p("PROJECT_NAME=%s\n", envQuote(project))
 	p("ENV=%s\n\n", env)
 
 	p("# ── Image tags (one per build service) ─────────────────────\n")
