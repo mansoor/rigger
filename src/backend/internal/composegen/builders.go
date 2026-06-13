@@ -144,8 +144,12 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		}
 		if host := volHost(vol); isNamedVolume(host) {
 			g.line("      - " + prefix + "_" + host + ":" + volRest(vol))
+		} else if strings.HasPrefix(host, ".") {
+			// Relative bind mount (e.g. a scanned repo's ./mosquitto/mosquitto.conf):
+			// rewrite the source so the HOST daemon can resolve it (see bindSource).
+			g.line("      - " + g.bindSource(host) + ":" + volRest(vol))
 		} else {
-			g.line("      - " + vol)
+			g.line("      - " + vol) // absolute path or ${VAR} — pass through unchanged
 		}
 	}
 	// Optionally materialise the env's generated .env as a physical file in the
@@ -464,7 +468,9 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_garage_data:/data")
 		g.line("      - " + prefix + "_garage_meta:/meta")
-		g.line("      - ./garage.toml:/etc/garage.toml:ro")
+		// garage.toml is Rigger-generated in the env dir root (not _src), so root it
+		// at ${RIGGER_BIND_ROOT} directly so the host daemon can resolve it.
+		g.line("      - ${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro")
 		g.line("    environment:")
 		g.line(g.dbEnvLine("GARAGE_ADMIN_TOKEN"))
 		g.line("    networks:")
@@ -511,6 +517,27 @@ func volRest(vol string) string {
 // mount path or env-var path).
 func isNamedVolume(host string) bool {
 	return !strings.HasPrefix(host, ".") && !strings.HasPrefix(host, "/") && !strings.HasPrefix(host, "$")
+}
+
+// bindSource rewrites a RELATIVE host bind-mount source so the host Docker daemon
+// can resolve it. Rigger runs `docker compose` inside its own container, but the
+// daemon resolves bind sources against the HOST filesystem — a Rigger-local path
+// like /toolkit/workspaces/… doesn't exist there, so the daemon silently creates an
+// empty dir and the mount fails. We root the source at ${RIGGER_BIND_ROOT}, which
+// the deploy layer sets to the env dir's host-visible absolute path (see
+// Bridge.hostBindRoot); it is left unset for a non-containerised or remote Rigger,
+// where the default `.` resolves correctly against the compose project dir.
+//
+// For a source-repo (scanned) project the referenced files live in the checkout at
+// envs/{env}/_src, so a repo-relative source ("./mosquitto/mosquitto.conf") is
+// re-rooted there ("${RIGGER_BIND_ROOT:-.}/_src/mosquitto/mosquitto.conf").
+func (g *gen) bindSource(host string) string {
+	rel := strings.TrimPrefix(host, "./")
+	base := "${RIGGER_BIND_ROOT:-.}"
+	if g.cfg.Project.GitRepo != "" {
+		return base + "/_src/" + rel
+	}
+	return base + "/" + rel
 }
 
 func strOr(f flexStr, def string) string {

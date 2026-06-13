@@ -37,6 +37,32 @@ const shopCfg = `{
 	"environments": {"dev": {"deployment":"compose","http_port":"8080","database":"postgres","redis_enabled":true}}
 }`
 
+// A scanned project (git_repo set) re-roots repo-relative bind sources at the
+// env's _src checkout AND wraps them in ${RIGGER_BIND_ROOT} so the host Docker
+// daemon can resolve them when Rigger runs containerised.
+func TestBindSourceScannedRootedAtSrc(t *testing.T) {
+	cfg := `{
+		"project": {"name":"kyt","git_repo":"https://example.com/kyt.git","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [
+			{"name":"proxy","image":"caddy:2-alpine","port":"80","web_routed":true,
+			 "volumes":["./Caddyfile:/etc/caddy/Caddyfile:ro","data:/data"]}
+		],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := svcBlock(t, string(out), "proxy")
+	if want := "      - ${RIGGER_BIND_ROOT:-.}/_src/Caddyfile:/etc/caddy/Caddyfile:ro"; !strings.Contains(proxy, want) {
+		t.Errorf("scanned bind not rooted at _src; want %q\n---\n%s", want, proxy)
+	}
+	// Named volumes are still prefixed (not rewritten as binds).
+	if want := "      - kyt_dev_data:/data"; !strings.Contains(proxy, want) {
+		t.Errorf("named volume mishandled; want %q\n---\n%s", want, proxy)
+	}
+}
+
 func TestServicesCustomShape(t *testing.T) {
 	out, err := GenerateAt([]byte(shopCfg), "dev", time.Unix(0, 0).UTC())
 	if err != nil {
@@ -68,7 +94,9 @@ func TestServicesCustomShape(t *testing.T) {
 		"image: nginx:1.25-alpine",
 		"    ports:\n      - \"8080:80\"",                                          // web-routed, no traefik → bind env HTTP port
 		"    depends_on:\n      app:\n        condition: service_healthy", // app has a healthcheck
-		"      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+		// Relative bind sources are rooted at ${RIGGER_BIND_ROOT} so the host daemon
+		// can resolve them when Rigger runs containerised (no git_repo here → no _src).
+		"      - ${RIGGER_BIND_ROOT:-.}/nginx.conf:/etc/nginx/conf.d/default.conf:ro",
 	} {
 		if !strings.Contains(nginx, want) {
 			t.Errorf("nginx block missing %q\n---\n%s", want, nginx)
