@@ -161,7 +161,9 @@ function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDele
   const { data: latest = [] } = useQuery({
     queryKey: ['pipeline-runs', workspace, name, pipeline.id],
     queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
-    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 2500 : false,
+    // Fast while active; slow baseline when idle so a webhook-started run is picked
+    // up without a manual interaction (a bare `false` froze this until reload).
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 2500 : 15_000,
   })
   const latestRun = latest[0]
   const active = latestRun && (latestRun.status === 'running' || latestRun.status === 'awaiting')
@@ -316,7 +318,9 @@ function RunHistory({ workspace, name, pipeline }) {
   const { data: runs = [], isLoading } = useQuery({
     queryKey: ['pipeline-runs', workspace, name, pipelineId],
     queryFn: () => fetchPipelineRuns(workspace, name, pipelineId, 20),
-    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : false,
+    // Slow baseline when idle so a webhook-started run appears in history without a
+    // manual interaction; fast while one is in flight.
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : 15_000,
   })
   const approveMut = useMutation({
     mutationFn: (runId) => approvePipelineRun(workspace, name, pipelineId, runId),
