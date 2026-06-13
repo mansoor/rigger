@@ -37,6 +37,9 @@ type Project struct {
 	// EnvOrder is the explicit deploy-tier order of this project's environments
 	// (low→high). Empty ⇒ order auto-guessed from env names. See internal/envorder.
 	EnvOrder []string `json:"env_order,omitempty"`
+	// BuildPipelineID, when >0, makes the project's Build button run that pipeline
+	// instead of a plain build (lets ops override the default build behaviour).
+	BuildPipelineID int64 `json:"build_pipeline_id,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the

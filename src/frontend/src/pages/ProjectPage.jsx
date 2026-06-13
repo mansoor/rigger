@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline } from '../lib/api'
 import { RunConsole, STAGE_ICON, stageSummary, statusChipCls } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
@@ -1940,9 +1940,21 @@ export default function ProjectPage() {
   const [termModal, setTermModal]         = useState(null) // {env}
   const [logModal, setLogModal]           = useState(null) // {env, service}
 
+  const qcMain = useQueryClient()
   const { data: ws, isLoading, error } = useQuery({
     queryKey: ['workspace', workspace, name],
     queryFn: () => fetchWorkspace(workspace, name),
+  })
+  // Pipelines for the Build button's "runs" picker (shared key → dedup with the
+  // ReleasePipeline widget).
+  const { data: headerPipelines = [] } = useQuery({
+    queryKey: ['pipelines', workspace, name],
+    queryFn: () => fetchPipelines(workspace, name),
+  })
+  const [headerRun, setHeaderRun] = useState(null) // pipeline launched from the Build button
+  const linkMut = useMutation({
+    mutationFn: (id) => setBuildPipeline(workspace, name, id),
+    onSuccess: () => qcMain.invalidateQueries({ queryKey: ['workspace', workspace, name] }),
   })
   // Role gating: developers+ run Env Card actions; operators+ edit project config;
   // admins manage the workspace.
@@ -2013,10 +2025,19 @@ export default function ProjectPage() {
             {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
             {canOp && type !== 'image' && (
               <BuildMenu version={version}
+                pipelines={headerPipelines}
+                linkedId={cfg?.project?.build_pipeline_id}
+                onSetLink={(id) => linkMut.mutate(id)}
+                onRunPipeline={(p) => setHeaderRun(p)}
                 onBuild={part => runAction('build', envs[0], undefined, part ? ['--bump', part] : [])} />
             )}
           </div>
         </div>
+
+        {headerRun && (
+          <RunConsole workspace={workspace} name={name} pipeline={headerRun}
+            onClose={() => { setHeaderRun(null); qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, headerRun.id] }) }} />
+        )}
 
         {/* Environment cards — left-aligned 3-column proportional grid:
             each card targets one third of the row (minus the two gaps) and never
@@ -2102,11 +2123,12 @@ function HeaderBtn({ label, onClick, primary }) {
   )
 }
 
-// BuildMenu is a split-button: the main action builds the CURRENT version
-// (re-tags the same image), and the caret opens version-bump options that pass
-// `--bump <part>` so the project's semver is incremented before the build. Each
-// option previews the resulting version so the choice is explicit.
-function BuildMenu({ version, onBuild }) {
+// BuildMenu is a split-button. By default the main action builds the CURRENT
+// version and the caret opens version-bump options (`--bump <part>`). It can also
+// be LINKED to a pipeline (project.build_pipeline_id): then the main action runs
+// that pipeline instead, with the raw build/bump options still available in the
+// dropdown. The "Build button runs" section picks what the button does.
+function BuildMenu({ version, onBuild, pipelines = [], linkedId, onSetLink, onRunPipeline }) {
   const [open, setOpen] = useState(false)
   const v = version || { major: 0, minor: 0, patch: 0, build: 0 }
   const cur = `${v.major}.${v.minor}.${v.patch}-build.${v.build}`
@@ -2117,14 +2139,21 @@ function BuildMenu({ version, onBuild }) {
     major: `${v.major + 1}.0.0-build.0`,
   }
   const item = 'w-full flex items-center justify-between gap-4 px-3 py-2 text-left hover:bg-surface-raised transition-colors'
+  const linked = pipelines.find(p => p.id === linkedId)
+  const primaryCls = 'flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-l-lg border border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors max-w-[14rem] truncate'
   return (
     <div className="relative">
       <div className="flex">
-        <button onClick={() => onBuild(null)}
-          className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-l-lg border border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-          <span className="text-xs opacity-60">○</span> Build ↗
-        </button>
-        <button onClick={() => setOpen(o => !o)} title="Build with a version bump"
+        {linked ? (
+          <button onClick={() => onRunPipeline(linked)} className={primaryCls} title={`Run pipeline "${linked.name}"`}>
+            ▶ <span className="truncate">{linked.name}</span>
+          </button>
+        ) : (
+          <button onClick={() => onBuild(null)} className={primaryCls}>
+            <span className="text-xs opacity-60">○</span> Build ↗
+          </button>
+        )}
+        <button onClick={() => setOpen(o => !o)} title="Build options"
           className="px-2 py-1.5 rounded-r-lg border border-l-0 border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors text-xs">
           ▾
         </button>
@@ -2132,11 +2161,16 @@ function BuildMenu({ version, onBuild }) {
       {open && (<>
         <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
         <div className="absolute right-0 mt-1 z-20 w-72 bg-surface border border-border rounded-lg shadow-lg py-1 text-sm overflow-hidden">
+          {linked && (<>
+            <button onClick={() => { setOpen(false); onRunPipeline(linked) }} className={item}>
+              <span className="truncate">▶ Run {linked.name}</span>
+            </button>
+            <div className="border-t border-border my-1" />
+          </>)}
           <button onClick={() => { setOpen(false); onBuild(null) }} className={item}>
-            <span>Build current</span>
+            <span>Build current{linked ? ' (raw)' : ''}</span>
             <span className="font-mono text-xs text-content-subtle">{cur}</span>
           </button>
-          <div className="border-t border-border my-1" />
           <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build &amp; bump</div>
           {['build', 'patch', 'minor', 'major'].map(part => (
             <button key={part} onClick={() => { setOpen(false); onBuild(part) }} className={item}>
@@ -2144,6 +2178,18 @@ function BuildMenu({ version, onBuild }) {
               <span className="font-mono text-xs text-content-subtle">{next[part]}</span>
             </button>
           ))}
+          {onSetLink && pipelines.length > 0 && (<>
+            <div className="border-t border-border my-1" />
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build button runs</div>
+            <button onClick={() => { setOpen(false); onSetLink(0) }} className={item}>
+              <span>Build (raw)</span>{!linkedId && <span className="text-xs text-brand-400">✓</span>}
+            </button>
+            {pipelines.map(p => (
+              <button key={p.id} onClick={() => { setOpen(false); onSetLink(p.id) }} className={item}>
+                <span className="truncate">{p.name}</span>{linkedId === p.id && <span className="text-xs text-brand-400">✓</span>}
+              </button>
+            ))}
+          </>)}
         </div>
       </>)}
     </div>

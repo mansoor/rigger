@@ -119,6 +119,7 @@ export const clearActionRuns   = (ws, name)      => api.delete(`${projBase(ws, n
 // Release pipeline #4: explicit env deploy-tier order.
 export const fetchEnvOrder     = (ws, name)        => api.get(`${projBase(ws, name)}/env-order`).then(r => r.data)
 export const putEnvOrder       = (ws, name, order) => api.put(`${projBase(ws, name)}/env-order`, { order }).then(r => r.data)
+export const setBuildPipeline  = (ws, name, id)    => api.put(`${projBase(ws, name)}/build-pipeline`, { pipeline_id: id || 0 }).then(r => r.data)
 // Phase 9: deployment pipelines (project-scoped).
 export const fetchPipelines    = (ws, name)           => api.get(`${projBase(ws, name)}/pipelines`).then(r => r.data)
 export const createPipeline    = (ws, name, body)     => api.post(`${projBase(ws, name)}/pipelines`, body).then(r => r.data)

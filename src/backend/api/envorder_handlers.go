@@ -127,3 +127,53 @@ func (h *Handler) PutEnvOrder(w http.ResponseWriter, r *http.Request) {
 		Explicit:  len(clean) > 0,
 	})
 }
+
+// PUT /api/workspaces/{workspace}/projects/{name}/build-pipeline  Body: { pipeline_id }
+// Links the project's Build button to a pipeline (0 = default plain build),
+// stored on project.build_pipeline_id. Same raw-document edit as env-order so all
+// other config.json fields are preserved.
+func (h *Handler) SetBuildPipeline(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	var body struct {
+		PipelineID int64 `json:"pipeline_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	cfgPath := wspath.ConfigPath(h.workspacesDir, ws, name)
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	proj, _ := doc["project"].(map[string]any)
+	if proj == nil {
+		proj = map[string]any{}
+		doc["project"] = proj
+	}
+	if body.PipelineID > 0 {
+		proj["build_pipeline_id"] = body.PipelineID
+	} else {
+		delete(proj, "build_pipeline_id")
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := os.WriteFile(cfgPath, out, 0o644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write config: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int64{"pipeline_id": body.PipelineID})
+}
