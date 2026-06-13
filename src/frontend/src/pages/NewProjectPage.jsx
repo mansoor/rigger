@@ -1828,7 +1828,7 @@ export default function NewProjectPage() {
       {/* Wizard body */}
       <div className="flex-1 flex items-start justify-center p-8">
         <div className="w-full max-w-2xl">
-          <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} skipStep={depsApplies ? 0 : 3} />
+          <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} />
 
           <div className="bg-surface border border-border rounded-2xl p-8">
             {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} defaultHostId={defaultHostId} />}
