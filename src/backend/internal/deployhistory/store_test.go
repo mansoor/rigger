@@ -56,8 +56,9 @@ func writeConfig(t *testing.T, root, ws, proj, body string) {
 func TestResolveCustom(t *testing.T) {
 	root := t.TempDir()
 	writeConfig(t, root, "mcl", "web", `{
-	  "project": {"name":"web","type":"custom","registry":"ghcr.io/mw","resource_prefix":"mcl_web","version":{"major":1,"minor":2,"patch":3,"build":4}},
-	  "environments": {"dev": {"frontend_enabled": true}}
+	  "project": {"name":"web","registry":"ghcr.io/mw","resource_prefix":"mcl_web","version":{"major":1,"minor":2,"patch":3,"build":4}},
+	  "services": [{"name":"backend","build":{}},{"name":"frontend","build":{}}],
+	  "environments": {"dev": {}}
 	}`)
 	// .env pins a custom backend image (override) but not the frontend.
 	envDir := wspath.EnvDir(root, "mcl", "web", "dev")

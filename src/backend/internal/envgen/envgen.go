@@ -18,9 +18,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/blueprints"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 )
 
@@ -36,6 +38,45 @@ func CryptoRand(n int) []byte {
 		panic("crypto/rand unavailable: " + err.Error())
 	}
 	return b
+}
+
+// identSafe lowercases a name and collapses every run of non-alphanumeric
+// characters into a single underscore, trimming leading/trailing underscores —
+// turning a free-form value (e.g. "weather dashboard app") into one safe to use
+// as a SQL database/user identifier ("weather_dashboard_app"). Already-safe
+// values like a resource prefix ("mcl_wda") pass through unchanged.
+func identSafe(s string) string {
+	var b strings.Builder
+	pendingSep := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if pendingSep && b.Len() > 0 {
+				b.WriteByte('_')
+			}
+			pendingSep = false
+			b.WriteRune(r)
+		} else {
+			pendingSep = true
+		}
+	}
+	return b.String()
+}
+
+// envQuote double-quotes v when it contains characters a strict dotenv parser
+// treats as significant — whitespace, '#', or quotes. Docker's env_file is
+// lenient (the whole value after '=' is taken literally), but a physical .env
+// mounted via env_file_mount is parsed strictly (e.g. Laravel's phpdotenv:
+// "Encountered unexpected whitespace"), so a free-form value like a project
+// display name ("weather dashboard app") must be quoted. Plain values (the
+// common KEY=value case) pass through unchanged, so existing output is stable.
+// Both docker compose and phpdotenv strip the surrounding quotes on read.
+func envQuote(v string) string {
+	if v == "" || !strings.ContainsAny(v, " \t\r\n\"'#") {
+		return v
+	}
+	esc := strings.ReplaceAll(v, `\`, `\\`)
+	esc = strings.ReplaceAll(esc, `"`, `\"`)
+	return `"` + esc + `"`
 }
 
 func hexN(r Rand, n int) string    { return hex.EncodeToString(r(n)) }
@@ -73,6 +114,51 @@ func isSkipKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// frameworkEnv unions the blueprint-declared env contracts of every build
+// service in the config, resolved against the active env's managed-dep facts
+// (db engine/host/credentials, redis). Build services carry their framework via
+// build.template (set by the detector or the blueprint picker); services without
+// a recognised blueprint contribute nothing. On a key clash between two
+// frameworks the first service's value wins.
+func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword string) map[string]string {
+	// User must match the account the managed-db container provisions, which
+	// envgen writes as MYSQL_USER/POSTGRES_USER = "<dbBase>_user".
+	dbUser := dbBase + "_user"
+	engine := cfg.EffDatabase(e)
+	var db *blueprints.DBFacts
+	switch engine {
+	case "mysql", "mariadb":
+		// MariaDB is wire-compatible with MySQL — frameworks use the mysql driver;
+		// only the host (container/alias) differs ({prefix}_mysql vs {prefix}_mariadb).
+		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_" + engine, Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+	case "postgres":
+		db = &blueprints.DBFacts{Engine: "postgres", Host: prefix + "_postgres", Port: "5432", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+	}
+	var redis *blueprints.RedisFacts
+	if cfg.EffRedis(e) {
+		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
+	}
+
+	out := map[string]string{}
+	seen := map[string]bool{}
+	for _, svc := range cfg.Services {
+		if svc.Build == nil || svc.Build.Template == "" || seen[svc.Build.Template] {
+			continue
+		}
+		seen[svc.Build.Template] = true
+		bp, ok := blueprints.Get(svc.Build.Template)
+		if !ok || bp.EnvVars == nil {
+			continue
+		}
+		for k, v := range bp.EnvVars(db, redis) {
+			if _, exists := out[k]; !exists {
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 // isSecretKey reports keys whose placeholder should be replaced with a generated
@@ -131,6 +217,13 @@ func ResolveImageValue(key, value string, existing map[string]string, r Rand) st
 
 // ── Generation ──────────────────────────────────────────────────────────────────
 
+// imageEnvVar maps a build service name to its image-override env var
+// (api → API_IMAGE). Mirrors composegen's imageEnvVar so the .env value and the
+// compose `${NAME_IMAGE:-…}` default line up.
+func imageEnvVar(name string) string {
+	return strings.ReplaceAll(strings.ToUpper(name), "-", "_") + "_IMAGE"
+}
+
 // Generate produces the .env and .env.example contents for one environment.
 // existing is the parsed current .env (may be nil) used to preserve secrets.
 func Generate(cfg *wsconfig.Config, env string, existing map[string]string, r Rand) (envOut, exampleOut string, err error) {
@@ -141,45 +234,10 @@ func Generate(cfg *wsconfig.Config, env string, existing map[string]string, r Ra
 	if !ok {
 		return "", "", fmt.Errorf("unknown environment %q", env)
 	}
-	if cfg.ProjectType() == "image" {
-		return generateImage(cfg, env, e, existing, r)
-	}
-	return generateCustom(cfg, env, e, existing, r)
+	return generate(cfg, env, e, existing, r)
 }
 
-func generateImage(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[string]string, r Rand) (string, string, error) {
-	var b, ex strings.Builder
-	header := fmt.Sprintf(""+
-		"# ============================================================\n"+
-		"# Auto-generated by Rigger — environment: %s | project: %s (type: image)\n"+
-		"# Edit this file to update secrets. DO NOT COMMIT.\n"+
-		"# Regenerate (resets values): re-bootstrap with regen-env\n"+
-		"# ============================================================\n\n", env, cfg.Project.Name)
-	b.WriteString(header)
-	ex.WriteString(header)
-
-	keys := make([]string, 0, len(e.EnvVars))
-	for k := range e.EnvVars {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		raw := e.EnvVars[k].String()
-		final := ResolveImageValue(k, raw, existing, r)
-		fmt.Fprintf(&b, "%s=%s\n", k, final)
-
-		// .env.example masks generated secret values.
-		exVal := final
-		if isSecretKey(k) && !IsPlaceholder(final) {
-			exVal = "CHANGE_ME"
-		}
-		fmt.Fprintf(&ex, "%s=%s\n", k, exVal)
-	}
-	return b.String(), ex.String(), nil
-}
-
-func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[string]string, r Rand) (string, string, error) {
+func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[string]string, r Rand) (string, string, error) {
 	project := cfg.Project.Name
 	// imgBase is the immutable Docker resource prefix (matches composegen container
 	// names and builder image tags); project (display name) stays for DB
@@ -215,15 +273,21 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 
 	p("# ── Project ────────────────────────────────────────────────\n")
 	p("COMPOSE_PROJECT_NAME=%s\n", prefix)
-	p("PROJECT_NAME=%s\n", project)
+	p("PROJECT_NAME=%s\n", envQuote(project))
 	p("ENV=%s\n\n", env)
 
-	p("# ── Image tags ─────────────────────────────────────────────\n")
+	p("# ── Image tags (one per build service) ─────────────────────\n")
 	p("REGISTRY=%s\n", registry)
 	p("IMAGE_TAG=%s\n", tag)
-	p("BACKEND_IMAGE=%s/%s-backend:%s\n", registry, imgBase, tag)
-	if e.FrontendEnabled {
-		p("FRONTEND_IMAGE=%s/%s-frontend:%s\n", registry, imgBase, tag)
+	for _, svc := range cfg.BuildServices() {
+		// Omit the "{registry}/" prefix when there's no registry (local-only build) —
+		// a leading slash is an invalid image reference. Must match wsconfig.ImageTag
+		// and composegen.serviceImageRef so the built tag and the .env pointer agree.
+		img := fmt.Sprintf("%s-%s:%s", imgBase, svc.Name, tag)
+		if registry != "" {
+			img = registry + "/" + img
+		}
+		p("%s=%s\n", imageEnvVar(svc.Name), img)
 	}
 	p("\n")
 
@@ -233,30 +297,44 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 	p("HTTPS_PORT=%s\n\n", e.HTTPSPort)
 
 	p("# ── Stack config ────────────────────────────────────────────\n")
-	p("BACKEND=%s\n", e.Backend)
-	p("FRONTEND=%s\n", e.Frontend)
-	p("FRONTEND_ENABLED=%t\n", e.FrontendEnabled)
 	p("DEPLOYMENT=%s\n", e.Deployment)
-	p("TRAEFIK_ENABLED=%t\n", e.TraefikEnabled)
-	p("BACKEND_REPLICAS=%s\n", e.Replicas.Backend)
-	p("FRONTEND_REPLICAS=%s\n\n", e.Replicas.Frontend)
+	p("TRAEFIK_ENABLED=%t\n\n", e.TraefikEnabled)
 
 	p("# ── Database ───────────────────────────────────────────────\n")
-	p("DATABASE=%s\n", e.Database)
-	switch e.Database {
+	// Managed deps are project-level (Eff* falls back to the legacy per-env value);
+	// only DBExternal (host-port exposure) stays per-env.
+	engine := cfg.EffDatabase(e)
+	p("DATABASE=%s\n", engine)
+	// DB identifiers must be valid (no spaces/punctuation), so derive them from
+	// the dns-safe resource prefix — NOT cfg.Project.Name, which is a free-form
+	// display name that can contain spaces (e.g. "weather dashboard app" would
+	// yield the invalid identifier "weather dashboard app_dev").
+	dbBase := identSafe(imgBase)
+	switch engine {
 	case "postgres":
 		p("POSTGRES_HOST=%s_postgres\n", prefix)
 		p("POSTGRES_PORT=5432\n")
-		p("POSTGRES_DB=%s_%s\n", project, env)
-		p("POSTGRES_USER=%s_user\n", project)
+		p("POSTGRES_DB=%s_%s\n", dbBase, env)
+		p("POSTGRES_USER=%s_user\n", dbBase)
 		p("POSTGRES_PASSWORD=%s\n", dbPassword)
-	case "mysql":
-		p("MYSQL_HOST=%s_mysql\n", prefix)
+	case "mysql", "mariadb":
+		// MariaDB reuses the MYSQL_* contract; only the host (container) differs.
+		p("MYSQL_HOST=%s_%s\n", prefix, engine)
 		p("MYSQL_PORT=3306\n")
-		p("MYSQL_DATABASE=%s_%s\n", project, env)
-		p("MYSQL_USER=%s_user\n", project)
+		p("MYSQL_DATABASE=%s_%s\n", dbBase, env)
+		p("MYSQL_USER=%s_user\n", dbBase)
 		p("MYSQL_PASSWORD=%s\n", dbPassword)
 		p("MYSQL_ROOT_PASSWORD=%s\n", dbRootPassword)
+	}
+	// When the DB is published externally, expose the host port (overridable) so the
+	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.
+	// DBExternal is per-environment (expose on dev, keep prod private).
+	if engine != "" && engine != "none" && e.DBExternal {
+		port := "5432"
+		if engine != "postgres" {
+			port = "3306"
+		}
+		p("DB_EXTERNAL_PORT=%s\n", port)
 	}
 	p("\n")
 
@@ -267,21 +345,33 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 	} else {
 		p("APP_DEBUG=false\n")
 	}
-	p("APP_URL=http://%s\n", e.Domain)
+	// APP_URL must be a valid absolute URI; an empty domain would yield the
+	// malformed "http://" which crashes framework consoles (e.g. Laravel's
+	// artisan throws "Invalid URI"). Fall back to localhost (+ the published
+	// HTTP port when it isn't the default 80) so dev/local envs boot.
+	if e.Domain != "" {
+		p("APP_URL=http://%s\n", e.Domain)
+	} else if hp := string(e.HTTPPort); hp != "" && hp != "80" {
+		p("APP_URL=http://localhost:%s\n", hp)
+	} else {
+		p("APP_URL=http://localhost\n")
+	}
 	p("APP_KEY=%s\n\n", appKey)
 
+	redisOn := cfg.EffRedis(e)
 	p("# ── Redis ──────────────────────────────────────────────────\n")
-	p("REDIS_ENABLED=%t\n", e.RedisEnabled)
-	if e.RedisEnabled {
+	p("REDIS_ENABLED=%t\n", redisOn)
+	if redisOn {
 		p("REDIS_HOST=%s_redis\n", prefix)
 		p("REDIS_PORT=6379\n")
 		p("REDIS_PASSWORD=\n")
 	}
 	p("\n")
 
+	garageOn := cfg.EffGarage(e)
 	p("# ── Garage (S3-compatible storage) ─────────────────────────\n")
-	p("GARAGE_ENABLED=%t\n", e.GarageEnabled)
-	if e.GarageEnabled {
+	p("GARAGE_ENABLED=%t\n", garageOn)
+	if garageOn {
 		p("GARAGE_HOST=%s_garage\n", prefix)
 		p("GARAGE_API_PORT=3900\n")
 		p("GARAGE_S3_PORT=3901\n")
@@ -289,10 +379,32 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 		p("GARAGE_ADMIN_TOKEN=%s\n", garageAdminToken)
 		p("GARAGE_KEY_ID=%s\n", garageKeyID)
 		p("GARAGE_SECRET_KEY=%s\n", garageSecretKey)
-		p("GARAGE_BUCKET=%s-%s\n", project, env)
+		// S3 bucket names allow lowercase + hyphens only — derive from the safe
+		// prefix, not the free-form display name.
+		p("GARAGE_BUCKET=%s-%s\n", strings.ReplaceAll(dbBase, "_", "-"), env)
 		p("GARAGE_ENDPOINT=http://%s_garage:3901\n", prefix)
 	}
 	p("\n")
+
+	// ── Framework env contract (blueprint-declared) ──────────────────────────
+	// Each build service's blueprint declares the env keys its framework reads
+	// (Laravel → DB_*, Rails → DATABASE_URL, Spring → SPRING_DATASOURCE_*, …).
+	// Emit them from the active managed-dep facts so an app built from an
+	// arbitrary scanned repo wires up to the db/redis without the user hand-
+	// mapping Rigger's MYSQL_*/POSTGRES_* onto the framework's keys. The keys
+	// stay language-specific in the blueprint; envgen stays generic.
+	if fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword); len(fe) > 0 {
+		p("# ── Framework env contract (blueprint-declared) ────────────\n")
+		keys := make([]string, 0, len(fe))
+		for k := range fe {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			p("%s=%s\n", k, fe[k])
+		}
+		p("\n")
+	}
 
 	p("# ── Mail (fill in per-environment) ─────────────────────────\n")
 	p("MAIL_DRIVER=smtp\n")
@@ -300,7 +412,11 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 	p("MAIL_PORT=1025\n")
 	p("MAIL_USERNAME=\n")
 	p("MAIL_PASSWORD=\n")
-	p("MAIL_FROM_ADDRESS=noreply@%s\n", e.Domain)
+	mailDomain := e.Domain
+	if mailDomain == "" {
+		mailDomain = "localhost"
+	}
+	p("MAIL_FROM_ADDRESS=noreply@%s\n", mailDomain)
 	p("MAIL_FROM_NAME=\"%s\"\n\n", project)
 
 	p("# ── Node.js specific ───────────────────────────────────────\n")
@@ -311,7 +427,8 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 	}
 	p("PORT=3000\n")
 
-	// Append extra env_vars from config (wizard-collected).
+	// Append extra env_vars from config, auto-resolving placeholder secrets (the
+	// former image-stack secret generation) and preserving any existing values.
 	if len(e.EnvVars) > 0 {
 		keys := make([]string, 0, len(e.EnvVars))
 		for k := range e.EnvVars {
@@ -320,23 +437,67 @@ func generateCustom(cfg *wsconfig.Config, env string, e wsconfig.Env, existing m
 		sort.Strings(keys)
 		p("\n# ── Extra variables (from config.json env_vars) ───────────────────\n")
 		for _, k := range keys {
-			p("%s=%s\n", k, e.EnvVars[k])
+			p("%s=%s\n", k, ResolveImageValue(k, e.EnvVars[k].String(), existing, r))
 		}
 	}
 
 	envOut := b.String()
+	return envOut, maskExample(envOut), nil
+}
 
-	// .env.example: mask real secrets.
-	replacer := strings.NewReplacer(
-		dbPassword, "CHANGE_ME_DB_PASSWORD",
-		dbRootPassword, "CHANGE_ME_ROOT_PASSWORD",
-		appKey, "base64:CHANGE_ME",
-		garageAdminToken, "CHANGE_ME_GARAGE_TOKEN",
-		garageKeyID, "CHANGE_ME_KEY_ID",
-		garageSecretKey, "CHANGE_ME_SECRET_KEY",
-	)
-	exampleOut := replacer.Replace(envOut)
-	return envOut, exampleOut, nil
+// examplePlaceholder is the per-key placeholder used in .env.example for the
+// structured secret keys; other secret keys mask to a generic CHANGE_ME.
+var examplePlaceholder = map[string]string{
+	"POSTGRES_PASSWORD":          "CHANGE_ME_DB_PASSWORD",
+	"MYSQL_PASSWORD":             "CHANGE_ME_DB_PASSWORD",
+	"MYSQL_ROOT_PASSWORD":        "CHANGE_ME_ROOT_PASSWORD",
+	"DB_PASSWORD":                "CHANGE_ME_DB_PASSWORD",
+	"SPRING_DATASOURCE_PASSWORD": "CHANGE_ME_DB_PASSWORD",
+	"APP_KEY":             "base64:CHANGE_ME",
+	"GARAGE_ADMIN_TOKEN":  "CHANGE_ME_GARAGE_TOKEN",
+	"GARAGE_KEY_ID":       "CHANGE_ME_KEY_ID",
+	"GARAGE_SECRET_KEY":   "CHANGE_ME_SECRET_KEY",
+}
+
+// urlCredRE matches the password in a URL userinfo (scheme://user:PASS@host).
+var urlCredRE = regexp.MustCompile(`(://[^:/@\s]+:)[^@/\s]+(@)`)
+
+// connStrPassRE matches a Password=… field in an ADO.NET connection string.
+var connStrPassRE = regexp.MustCompile(`(?i)(Password=)[^;]+`)
+
+// redactInlineSecrets replaces credentials embedded inside a value (URL userinfo
+// passwords, connection-string passwords) with CHANGE_ME so the masked
+// .env.example never leaks a real secret carried by a non-secret-named key.
+func redactInlineSecrets(v string) string {
+	v = urlCredRE.ReplaceAllString(v, "${1}CHANGE_ME${2}")
+	v = connStrPassRE.ReplaceAllString(v, "${1}CHANGE_ME")
+	return v
+}
+
+// maskExample produces the .env.example by masking secret VALUES key-by-key. This
+// is collision-free, unlike value replacement (distinct keys can share a value
+// when secrets are generated from a non-random source, e.g. in tests).
+func maskExample(env string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(env, "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		key := strings.TrimSpace(k)
+		switch {
+		case !ok || strings.HasPrefix(strings.TrimSpace(line), "#"):
+			b.WriteString(line)
+		case examplePlaceholder[key] != "":
+			b.WriteString(key + "=" + examplePlaceholder[key])
+		case isSecretKey(key) && !IsPlaceholder(v):
+			b.WriteString(key + "=CHANGE_ME")
+		default:
+			// Framework env values can embed credentials inline (e.g.
+			// DATABASE_URL=mysql://user:pass@host, ConnectionStrings=…;Password=…;).
+			// Redact those so .env.example never carries a real secret.
+			b.WriteString(key + "=" + redactInlineSecrets(v))
+		}
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // ParseEnv parses .env content into a key→value map, ignoring comments and blank
@@ -355,4 +516,60 @@ func ParseEnv(content []byte) map[string]string {
 		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}
 	return out
+}
+
+// RebaseImageRegistry rewrites a .env's REGISTRY line and the "{registry}/" prefix
+// of every "{SVC}_IMAGE" pointer to match `registry` (the project's configured
+// registry; "" = local-only). Only the registry prefix changes — the local image
+// portion ("{prefix}-{svc}:{tag}", including any pinned version) is preserved.
+//
+// The image pointers are DERIVED from the registry at generation time, but nothing
+// else re-derives them when the project's registry config later changes. Without
+// this, changing (or clearing) the registry was silently ignored: stale
+// "{SVC}_IMAGE=oldregistry/…" values kept compose pulling/denying the wrong image.
+// Called on every config save so a registry change always propagates. Returns the
+// (possibly unchanged) content and whether anything changed.
+func RebaseImageRegistry(content []byte, registry, prefix string) ([]byte, bool) {
+	if len(content) == 0 || prefix == "" {
+		return content, false
+	}
+	marker := prefix + "-"
+	lines := strings.Split(string(content), "\n")
+	changed := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 {
+			continue
+		}
+		rawKey, val := line[:eq], line[eq+1:]
+		key := strings.TrimSpace(rawKey)
+
+		if key == "REGISTRY" {
+			if nl := rawKey + "=" + registry; nl != line {
+				lines[i] = nl
+				changed = true
+			}
+			continue
+		}
+		if !strings.HasSuffix(key, "_IMAGE") {
+			continue
+		}
+		idx := strings.Index(val, marker)
+		if idx < 0 {
+			continue // not one of our prefixed build-image pointers — leave it
+		}
+		local := val[idx:] // "{prefix}-{svc}:{tag}"
+		nv := local
+		if registry != "" {
+			nv = registry + "/" + local
+		}
+		if nl := rawKey + "=" + nv; nl != line {
+			lines[i] = nl
+			changed = true
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), changed
 }

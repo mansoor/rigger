@@ -2,6 +2,7 @@ package pipelines
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -20,15 +21,46 @@ type BridgeRunner interface {
 // Exported for unit testing.
 func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 	o := shell.RunOptions{Workspace: workspace, Project: project, Env: s.Env}
+	// Build/deploy/update/restart/refresh act on the whole env by default; a
+	// Service scopes them to one service (microservices). The underlying commands
+	// take a single-service target via Extra[0] (start/stop/restart/update/refresh
+	// resolve it with firstExtra; build treats a non-flag arg as the target).
 	switch s.Type {
 	case "deploy":
 		o.Command = "start" // compose up -d on current/just-built images (no pull)
+		if s.Service != "" {
+			o.Extra = []string{s.Service}
+		}
+	case "refresh":
+		o.Command = "refresh" // regenerate docker-compose.yml from config/.env, then up -d
+		if s.Service != "" {
+			o.Extra = []string{s.Service}
+		}
 	case "update":
 		o.Command = "update" // pull latest images from the registry, then recreate
+		if s.Service != "" {
+			o.Extra = []string{s.Service}
+		}
 	case "build":
-		o.Command = "build" // build all service images for the env (no push)
+		o.Command = "build" // build service images for the env (all, or one via Service)
+		if s.Service != "" {
+			o.Extra = append(o.Extra, s.Service) // build only this service (target arg)
+		}
+		if s.Part != "" {
+			// Bump the version as part of the build, BEFORE the image is tagged — so
+			// the build owns the version change and its image-pointer advance reads the
+			// correct pre-bump version (a separate `version` stage desyncs that). This
+			// mirrors the project Build button (`--bump <part>`).
+			o.Extra = append(o.Extra, "--bump", s.Part)
+		}
+		if s.Push {
+			o.Extra = append(o.Extra, "--push") // also push to the registry (required before a later promote)
+		}
 	case "restart":
 		o.Command = "restart"
+		if s.Service != "" {
+			o.Extra = []string{s.Service}
+		}
 	case "backup":
 		o.Command = "backup"
 		if s.Service != "" {
@@ -76,16 +108,33 @@ func stageLabel(s Stage) string {
 			return fmt.Sprintf("backup %s (%s)", s.Env, s.Service)
 		}
 		return "backup " + s.Env
+	case "build":
+		label := "build " + s.Env
+		if s.Service != "" {
+			label += "/" + s.Service
+		}
+		if s.Part != "" {
+			label += " ↑" + s.Part
+		}
+		if s.Push {
+			label += " (+push)"
+		}
+		return label
 	default:
-		return s.Type + " " + s.Env
+		label := s.Type + " " + s.Env
+		if s.Service != "" {
+			label += "/" + s.Service
+		}
+		return label
 	}
 }
 
 // Outcome values returned by Execute.
 const (
-	OutcomeOK       = "ok"
-	OutcomeFail     = "fail"
-	OutcomeAwaiting = "awaiting" // paused at a manual gate; resume with Execute(startIdx)
+	OutcomeOK        = "ok"
+	OutcomeFail      = "fail"
+	OutcomeAwaiting  = "awaiting"  // paused at a manual gate; resume with Execute(startIdx)
+	OutcomeCancelled = "cancelled" // cancelled by the user (or interrupted) mid-run
 )
 
 // Execute runs a pipeline's stages from startIdx, streaming output to out, and
@@ -98,10 +147,47 @@ const (
 //
 // startIdx is 0 for a fresh run; for a resume it is the number of stages already
 // recorded (so the gate slot is consumed and execution continues after it).
-func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int) (results []StageResult, outcome string) {
+//
+// progress, if non-nil, is invoked as the run advances — when a stage starts
+// (status "running"), periodically as its output streams, and when it settles
+// (ok/fail) — with the current segment results. Callers persist this so a polling
+// client (or a reopened log window) can track where the pipeline is right now,
+// independent of any live socket. The slice is reused between calls; copy it if
+// you retain it past the callback.
+// ctx, when non-nil, makes the run cancellable: cancelling it both stops the
+// loop between stages and kills the in-flight stage's docker process (the context
+// is threaded down to the executor). A cancelled run returns OutcomeCancelled with
+// the interrupted stage marked "cancelled" and the rest "skipped".
+func Execute(ctx context.Context, bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int, progress func(results []StageResult)) (results []StageResult, outcome string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	results = []StageResult{}
 	outcome = OutcomeOK
+	emit := func() {
+		if progress != nil {
+			progress(results)
+		}
+	}
+	// cancelTail marks the stage at index i (and every later stage) cancelled/skipped
+	// and returns the OutcomeCancelled result. Called when the context is cancelled.
+	cancelTail := func(i int, curRunning bool) ([]StageResult, string) {
+		if curRunning && len(results) > 0 {
+			results[len(results)-1].Status = OutcomeCancelled
+		}
+		for j := i + 1; j < len(p.Stages); j++ {
+			sk := p.Stages[j]
+			results = append(results, StageResult{Type: sk.Type, Env: sk.Env, Label: stageLabel(sk), Status: "skipped"})
+		}
+		fmt.Fprintf(out, "\n\033[33m■ Pipeline cancelled.\033[0m\n")
+		emit()
+		return results, OutcomeCancelled
+	}
 	for i := startIdx; i < len(p.Stages); i++ {
+		// Cancelled before this stage even started → stop cleanly.
+		if ctx.Err() != nil {
+			return cancelTail(i-1, false)
+		}
 		s := p.Stages[i]
 		label := stageLabel(s)
 
@@ -109,26 +195,47 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int) (resu
 		if s.Type == "gate" {
 			fmt.Fprintf(out, "\n\033[1;33m⏸ Stage %d/%d: %s — awaiting approval\033[0m\n", i+1, len(p.Stages), label)
 			results = append(results, StageResult{Type: "gate", Label: label, Status: OutcomeAwaiting})
+			emit()
 			return results, OutcomeAwaiting
 		}
 
 		fmt.Fprintf(out, "\n\033[1;36m━━ Stage %d/%d: %s ━━\033[0m\n", i+1, len(p.Stages), label)
-		cap := &capWriter{cap: maxOutputBytes}
-		mw := io.MultiWriter(out, cap)
+
+		// Record the stage as running and publish progress before it executes, so
+		// the UI shows the current step pulsing immediately.
+		results = append(results, StageResult{Type: s.Type, Env: s.Env, Label: label, Status: "running"})
+		cur := &results[len(results)-1]
+		emit()
+
+		cw := &capWriter{cap: maxOutputBytes}
+		// progressWriter flushes the in-flight stage's captured tail to the run
+		// record at most ~once a second, so a long stage streams into the polled
+		// log view instead of only appearing once it finishes.
+		pw := &progressWriter{cap: cw, onFlush: func() { cur.Output = cw.String(); emit() }}
+		mw := io.MultiWriter(out, pw)
 		opts := StageRunOptions(p.Workspace, p.Project, s)
 		opts.Stdout = mw
 		opts.Stderr = mw
+		opts.Context = ctx // cancellable: a Cancel kills this stage's docker process
 
 		start := time.Now()
 		err := bridge.Run(opts)
-		res := StageResult{Type: s.Type, Env: s.Env, Label: label, MS: time.Since(start).Milliseconds()}
+		cur.MS = time.Since(start).Milliseconds()
+
+		// If the run was cancelled, the stage error is just the killed process —
+		// classify it as cancelled (not a real failure) and stop here.
+		if ctx.Err() != nil {
+			fmt.Fprintf(mw, "\n\033[33m✗ %s cancelled\033[0m\n", label)
+			cur.Output = cw.String()
+			return cancelTail(i, true)
+		}
 
 		if err != nil {
 			fmt.Fprintf(mw, "\n\033[31m✗ %s failed: %s\033[0m\n", label, err.Error())
-			res.Status = "fail"
-			res.Output = cap.String()
-			results = append(results, res)
+			cur.Status = "fail"
+			cur.Output = cw.String()
 			outcome = OutcomeFail
+			emit()
 			if s.OnFailure != "continue" {
 				for j := i + 1; j < len(p.Stages); j++ {
 					sk := p.Stages[j]
@@ -137,17 +244,37 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int) (resu
 					})
 				}
 				fmt.Fprintf(out, "\n\033[33m■ Pipeline halted after stage %d (on_failure=stop).\033[0m\n", i+1)
+				emit()
 				return results, OutcomeFail
 			}
 			continue
 		}
 
 		fmt.Fprintf(mw, "\033[32m✓ %s ok\033[0m\n", label)
-		res.Status = "ok"
-		res.Output = cap.String()
-		results = append(results, res)
+		cur.Status = "ok"
+		cur.Output = cw.String()
+		emit()
 	}
 	return results, outcome
+}
+
+// progressWriter wraps a capWriter and throttles a flush callback to ~once a
+// second as bytes stream in, so the in-flight stage's captured output is
+// published to the run record while it runs (not only at completion). It never
+// returns a short write, so it is safe inside an io.MultiWriter.
+type progressWriter struct {
+	cap     *capWriter
+	onFlush func()
+	last    time.Time
+}
+
+func (w *progressWriter) Write(b []byte) (int, error) {
+	n, _ := w.cap.Write(b)
+	if time.Since(w.last) >= time.Second {
+		w.last = time.Now()
+		w.onFlush()
+	}
+	return n, nil
 }
 
 // capWriter captures written bytes for the recorded history, bounded to ~cap bytes

@@ -1,7 +1,7 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,11 +10,59 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gorilla/websocket"
-
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/pipelines"
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
+
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/suggest
+// Returns a DRAFT pipeline (not persisted) generated from the project's ordered
+// environments. The UI loads it into the editor; saving goes through Create.
+func (h *Handler) SuggestPipeline(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	var body struct {
+		Template   string `json:"template"`
+		BumpPart   string `json:"bump_part"`
+		Gate       bool   `json:"gate"`
+		HotfixFrom string `json:"hotfix_from"`
+		HotfixTo   string `json:"hotfix_to"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, ws, name))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	if len(cfg.BuildServices()) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no build services — release pipelines build & promote images; this project pulls prebuilt images"})
+		return
+	}
+	envs := envorder.Resolve(cfg.EnvNames(), cfg.Project.EnvOrder, h.tierNames(ws))
+	if len(envs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project has no environments"})
+		return
+	}
+	if body.Template == "hotfix" && len(envs) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hotfix needs at least two environments"})
+		return
+	}
+	gname, stages := pipelines.Generate(pipelines.GenerateOptions{
+		Template: body.Template, Envs: envs, BumpPart: body.BumpPart, Gate: body.Gate,
+		HotfixFrom: body.HotfixFrom, HotfixTo: body.HotfixTo,
+	})
+	writeJSON(w, http.StatusOK, pipelines.Pipeline{
+		Workspace: ws, Project: name, Name: gname, Stages: stages, Enabled: true,
+	})
+}
 
 // Phase 9 — Deployment Pipelines. Pipelines are project-scoped (workspace +
 // project keys) and surfaced in the Edit Project "Pipelines" tab. Viewing needs
@@ -169,85 +217,41 @@ func (h *Handler) ownedPipeline(w http.ResponseWriter, r *http.Request, ws, proj
 	return id, true
 }
 
-// RunPipeline executes a pipeline over a WebSocket, streaming stage output live and
-// recording the run. Mirrors RunAction: auth via the first WS message token, then
-// operator+ RBAC. GET .../pipelines/{id}/run.
-func (h *Handler) RunPipeline(w http.ResponseWriter, r *http.Request) {
+// StartPipelineRun triggers a run in the BACKGROUND and returns its id immediately,
+// so the caller can open (and later reopen) a polling log/status view bound to the
+// run without holding a socket open. This is the uniform path used by the project
+// page, the Edit-Project pipelines tab, and webhooks — closing the log window never
+// affects the run. POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run.
+func (h *Handler) StartPipelineRun(w http.ResponseWriter, r *http.Request) {
 	ws, name := r.PathValue("workspace"), r.PathValue("name")
-	pkey := h.resourcePrefix(ws, name)
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
 		return
 	}
-	defer conn.Close()
-
-	var req struct {
-		Token string `json:"token"`
-	}
-	if err := conn.ReadJSON(&req); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: invalid request\n")) //nolint:errcheck
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
 		return
 	}
-	claims, err := h.auth.ValidateToken(req.Token)
-	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: unauthorized\n")) //nolint:errcheck
+	p, _ := pipelines.Get(h.db, id)
+	if p == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "pipeline not found"})
 		return
 	}
-	eff := h.auth.EffectiveRole(claims.UserID, claims.Role, ws, name)
-	if !auth.AtLeast(eff, auth.RoleOperator) {
-		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: operator role required to run pipelines\033[0m\n")) //nolint:errcheck
-		return
+	username := "system"
+	var uid int64
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		username, uid = claims.Username, claims.UserID
 	}
-
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: invalid id\n")) //nolint:errcheck
-		return
-	}
-	p, err := pipelines.Get(h.db, id)
-	if err != nil || p == nil || p.Workspace != ws || p.Project != name {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: pipeline not found\n")) //nolint:errcheck
-		return
-	}
-
+	runID, _ := pipelines.CreateRun(h.db, pipelines.Run{
+		PipelineID: p.ID, Workspace: ws, Project: name, Trigger: "manual",
+		Username: username, Status: "running", StartedAt: time.Now().UnixMilli(),
+	})
 	h.db.Exec( //nolint:errcheck
 		"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
-		claims.UserID, claims.Username, pkey, "pipeline:"+p.Name, "",
+		uid, username, h.resourcePrefix(ws, name), "pipeline:"+p.Name, "",
 	)
-	conn.WriteMessage(websocket.TextMessage, []byte("\033[1mRunning pipeline \""+p.Name+"\"…\033[0m\n")) //nolint:errcheck
-
-	// Stream stage output to the socket via a pipe (same pattern as RunAction).
-	pr, pw := io.Pipe()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := pr.Read(buf)
-			if n > 0 {
-				conn.WriteMessage(websocket.TextMessage, buf[:n]) //nolint:errcheck
-			}
-			if readErr != nil {
-				break
-			}
-		}
-	}()
-
-	outcome := h.executePipelineRun(p, "manual", claims.Username, pw)
-	pw.Close()
-	<-done
-
-	var marker bytes.Buffer
-	switch outcome {
-	case pipelines.OutcomeOK:
-		marker.WriteString("\n\033[32m✓ Pipeline \"" + p.Name + "\" completed successfully.\033[0m\n")
-	case pipelines.OutcomeAwaiting:
-		marker.WriteString("\n\033[33m⏸ Pipeline \"" + p.Name + "\" is awaiting approval — approve it from the run history to continue.\033[0m\n")
-	default:
-		marker.WriteString("\n\033[31m✗ Pipeline \"" + p.Name + "\" failed.\033[0m\n")
-	}
-	conn.WriteMessage(websocket.TextMessage, marker.Bytes()) //nolint:errcheck
+	go h.continueRun(runID, p, nil, 0, io.Discard)
+	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
 }
 
 // ── Webhooks (9a) ─────────────────────────────────────────────────────────────
@@ -365,8 +369,54 @@ func (h *Handler) executePipelineRun(p *pipelines.Pipeline, trigger, username st
 		PipelineID: p.ID, Workspace: p.Workspace, Project: p.Project, Trigger: trigger,
 		Username: username, Status: "running", StartedAt: time.Now().UnixMilli(),
 	})
-	results, outcome := pipelines.Execute(h.bridge, *p, out, 0)
-	h.finalizeRun(runID, p, results, outcome)
+	return h.continueRun(runID, p, nil, 0, out)
+}
+
+// ── Live-run cancel registry ──────────────────────────────────────────────────
+
+// registerRun creates a cancellable context for a run and stores its cancel func
+// so CancelPipelineRun can stop it. The caller must defer unregisterRun(id).
+func (h *Handler) registerRun(id int64) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	h.runMu.Lock()
+	h.runCancels[id] = cancel
+	h.runMu.Unlock()
+	return ctx
+}
+
+func (h *Handler) unregisterRun(id int64) {
+	h.runMu.Lock()
+	delete(h.runCancels, id)
+	h.runMu.Unlock()
+}
+
+// cancelRun signals a live run to stop (killing its in-flight docker process).
+// Returns false if the run isn't currently executing in this process.
+func (h *Handler) cancelRun(id int64) bool {
+	h.runMu.Lock()
+	cancel, ok := h.runCancels[id]
+	h.runMu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
+// continueRun executes stages from startIdx, persisting per-stage progress LIVE
+// (running → ok/fail, with throttled in-flight output) so a polling client or a
+// reopened log window can track the run independent of any socket, then finalizes.
+// prior is the already-recorded stages (gate resume); nil for a fresh run. The run
+// is registered for cancellation for the lifetime of this call.
+func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipelines.StageResult, startIdx int, out io.Writer) string {
+	ctx := h.registerRun(runID)
+	defer h.unregisterRun(runID)
+	progress := func(seg []pipelines.StageResult) {
+		all := append(append([]pipelines.StageResult{}, prior...), seg...)
+		pipelines.UpdateRunProgress(h.db, runID, all) //nolint:errcheck
+	}
+	results, outcome := pipelines.Execute(ctx, h.bridge, *p, out, startIdx, progress)
+	all := append(append([]pipelines.StageResult{}, prior...), results...)
+	h.finalizeRun(runID, p, all, outcome)
 	return outcome
 }
 
@@ -395,9 +445,7 @@ func (h *Handler) resumePipelineRun(run *pipelines.Run, p *pipelines.Pipeline) {
 	if n := len(run.Stages); n > 0 && run.Stages[n-1].Status == pipelines.OutcomeAwaiting {
 		run.Stages[n-1].Status = "ok"
 	}
-	newRes, outcome := pipelines.Execute(h.bridge, *p, io.Discard, len(run.Stages))
-	all := append(run.Stages, newRes...)
-	h.finalizeRun(run.ID, p, all, outcome)
+	h.continueRun(run.ID, p, run.Stages, len(run.Stages), io.Discard)
 }
 
 // POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve
@@ -465,4 +513,52 @@ func (h *Handler) awaitingRun(w http.ResponseWriter, r *http.Request, ws, name s
 		return nil, nil, false
 	}
 	return p, run, true
+}
+
+// CancelPipelineRun force-stops a running pipeline: it signals the run's context
+// (which kills the in-flight stage's docker process), and the run's goroutine then
+// finalizes it as "cancelled". If the run isn't executing in this process (e.g. it
+// was already orphaned by a restart), the record is marked cancelled directly so
+// the UI never shows a stranded "running". Operator+.
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/cancel
+func (h *Handler) CancelPipelineRun(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
+		return
+	}
+	runID, _ := strconv.ParseInt(r.PathValue("runId"), 10, 64)
+	run, err := pipelines.GetRun(h.db, runID)
+	if err != nil || run == nil || run.PipelineID != id {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	if run.Status != "running" && run.Status != pipelines.OutcomeAwaiting {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not active"})
+		return
+	}
+	pname := ""
+	if p, _ := pipelines.Get(h.db, id); p != nil {
+		pname = p.Name
+	}
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec( //nolint:errcheck
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+			claims.UserID, claims.Username, h.resourcePrefix(ws, name), "pipeline-cancel:"+pname, "",
+		)
+	}
+	// Live run: signal it and let its goroutine finalize the record (kills the
+	// in-flight docker process via the threaded context).
+	if h.cancelRun(runID) {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "cancelling"})
+		return
+	}
+	// Not live here (orphaned, or awaiting with no goroutine) — mark it directly so
+	// the UI clears, flipping any non-terminal stage to cancelled/skipped.
+	pipelines.MarkRunCancelled(h.db, run, time.Now().UnixMilli()) //nolint:errcheck
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }

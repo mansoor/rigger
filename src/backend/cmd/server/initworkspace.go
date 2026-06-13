@@ -97,7 +97,7 @@ func runInitWorkspace(args []string) int {
 	failed := false
 	for _, env := range envs {
 		fmt.Printf("\nBootstrapping environment: %s\n", env)
-		if err := workspace.Bootstrap(workspacesDir, templatesDir, *workspaceName, *name, env, false, os.Stdout); err != nil {
+		if err := workspace.Bootstrap(workspacesDir, templatesDir, *workspaceName, *name, env, false, "", os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "✗ bootstrap %s: %v\n", env, err)
 			failed = true
 		}

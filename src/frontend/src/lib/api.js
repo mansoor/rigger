@@ -59,6 +59,11 @@ export const checkKey   = (type, key, workspace = '') =>
 export const fetchProjects        = (ws)    => api.get(`/workspaces/${ws}/projects`).then(r => r.data)
 export const fetchWorkspace    = (ws, name)      => api.get(projBase(ws, name)).then(r => r.data)
 export const fetchEnvVars      = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/vars${reveal ? '?reveal=true' : ''}`).then(r => r.data)
+// Managed-database connection info for an env (Phase 5). reveal=true (operator+) returns the password.
+export const fetchDatabaseInfo = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/database${reveal ? '?reveal=true' : ''}`).then(r => r.data)
+// Phase 6 — safe DB management: list schemas/databases (+ table count/size) and create one.
+export const fetchDatabaseSchemas = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/database/schemas`).then(r => r.data)
+export const createDatabaseSchema = (ws, name, env, schemaName) => api.post(`${projBase(ws, name)}/envs/${env}/database/schemas`, { name: schemaName }).then(r => r.data)
 export const fetchEnvStatus    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/status`).then(r => r.data)
 export const fetchImageUpdates  = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/image-updates`).then(r => r.data)
 export const fetchContainers    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/containers`).then(r => r.data)
@@ -112,17 +117,28 @@ export const fetchMetricsConfig = ()         => api.get('/metrics/config').then(
 export const fetchActivity     = (ws, name)      => api.get(`${projBase(ws, name)}/activity`).then(r => r.data)
 export const fetchDeployHistory = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/deploy-history`).then(r => r.data)
 export const rollbackEnv        = (ws, name, env, toId)  => api.post(`${projBase(ws, name)}/envs/${env}/rollback`, { to_id: toId }).then(r => r.data)
+export const fetchImageStatus   = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/image-status`).then(r => r.data)
+export const trackLatest        = (ws, name, env)        => api.post(`${projBase(ws, name)}/envs/${env}/track-latest`).then(r => r.data)
 export const fetchActionRuns   = (ws, name, limit = 100) => api.get(`${projBase(ws, name)}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (ws, name)      => api.delete(`${projBase(ws, name)}/action-runs`).then(r => r.data)
+// Release pipeline #4: explicit env deploy-tier order.
+export const fetchEnvOrder     = (ws, name)        => api.get(`${projBase(ws, name)}/env-order`).then(r => r.data)
+export const putEnvOrder       = (ws, name, order) => api.put(`${projBase(ws, name)}/env-order`, { order }).then(r => r.data)
+export const setBuildPipeline  = (ws, name, id)    => api.put(`${projBase(ws, name)}/build-pipeline`, { pipeline_id: id || 0 }).then(r => r.data)
 // Phase 9: deployment pipelines (project-scoped).
 export const fetchPipelines    = (ws, name)           => api.get(`${projBase(ws, name)}/pipelines`).then(r => r.data)
 export const createPipeline    = (ws, name, body)     => api.post(`${projBase(ws, name)}/pipelines`, body).then(r => r.data)
+export const suggestPipeline   = (ws, name, opts)     => api.post(`${projBase(ws, name)}/pipelines/suggest`, opts).then(r => r.data)
 export const updatePipeline    = (ws, name, id, body) => api.put(`${projBase(ws, name)}/pipelines/${id}`, body).then(r => r.data)
 export const deletePipeline    = (ws, name, id)       => api.delete(`${projBase(ws, name)}/pipelines/${id}`).then(r => r.data)
+// Trigger a run in the background; returns { run_id } so the UI can open a
+// poll-based log/status view without holding a socket open.
+export const startPipelineRun = (ws, name, id) => api.post(`${projBase(ws, name)}/pipelines/${id}/run`).then(r => r.data)
 export const fetchPipelineRuns = (ws, name, id, limit = 30) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs`, { params: { limit } }).then(r => r.data)
 export const fetchPipelineRun  = (ws, name, id, runId) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}`).then(r => r.data)
 export const approvePipelineRun = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/approve`).then(r => r.data)
 export const rejectPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/reject`).then(r => r.data)
+export const cancelPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/cancel`).then(r => r.data)
 export const fetchPipelineWebhooks = (ws, name, id) => api.get(`${projBase(ws, name)}/pipelines/${id}/webhooks`).then(r => r.data)
 export const createPipelineWebhook = (ws, name, id, body = {}) => api.post(`${projBase(ws, name)}/pipelines/${id}/webhooks`, body).then(r => r.data)
 export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projBase(ws, name)}/pipelines/${id}/webhooks/${whId}`).then(r => r.data)
@@ -156,6 +172,13 @@ export const fetchTemplateDraft = (ws, name, env) =>
   api.get(`${projBase(ws, name)}/template-draft${env ? `?env=${encodeURIComponent(env)}` : ''}`).then(r => r.data)
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
+// Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
+export const scanRepo          = (repo, branch) =>
+  api.post('/scan-repo', { repo, branch }).then(r => r.data)
+// Stack blueprints for the no-repo "start from a template" picker (incl. seeded services[]).
+export const fetchBlueprints   = () => api.get('/blueprints').then(r => r.data)
+// Managed database catalog (engines + selectable versions) for the DB picker.
+export const fetchDatabases    = () => api.get('/databases').then(r => r.data)
 
 // ── Workspace backup / restore ────────────────────────────────────────────────
 export const startWorkspaceBackup    = (workspace, project, name) =>
@@ -321,6 +344,8 @@ export const createWorkspaceRegistry  = (ws, body)   => api.post(`/workspaces/${
 export const updateWorkspaceRegistry  = (ws, id, body) => api.put(`/workspaces/${ws}/registries/${id}`, body).then(r => r.data)
 export const deleteWorkspaceRegistry  = (ws, id)     => api.delete(`/workspaces/${ws}/registries/${id}`)
 export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${ws}/registries/${id}/test`).then(r => r.data)
+// Test ad-hoc credentials before they're saved (project registry picker).
+export const testRegistryCredentials  = (ws, body)   => api.post(`/workspaces/${ws}/registries/test-credentials`, body).then(r => r.data)
 
 // Workspace membership + per-project overrides (Phase 5.2).
 export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)
@@ -445,18 +470,6 @@ export function openActionSocket(workspace, name, command, env, extra = [], serv
     ws.send(JSON.stringify({ command, env, extra, services, token }))
   })
 
-  return ws
-}
-
-// WebSocket: run a deployment pipeline (streams stage output). Auth via token in
-// the first message, like openActionSocket.
-export function openPipelineSocket(workspace, name, id) {
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-  const ws = new WebSocket(`${proto}://${window.location.host}/api/workspaces/${workspace}/projects/${name}/pipelines/${id}/run`)
-  ws.addEventListener('open', () => {
-    const token = useAuthStore.getState().token
-    ws.send(JSON.stringify({ token }))
-  })
   return ws
 }
 

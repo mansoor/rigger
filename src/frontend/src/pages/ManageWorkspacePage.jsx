@@ -97,14 +97,15 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   })
   const [acme, setAcme] = useState('')
   const [domain, setDomain] = useState('')
+  const [tiers, setTiers] = useState('')
   const [seeded, setSeeded] = useState(false)
-  if (!seeded && saved) { setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setSeeded(true) }
+  if (!seeded && saved) { setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setTiers(saved.env_tier_names || ''); setSeeded(true) }
 
   const mut = useMutation({
-    mutationFn: () => updateWorkspaceSettings(workspace, { acme_email: acme.trim(), domain: domain.trim() }),
+    mutationFn: () => updateWorkspaceSettings(workspace, { acme_email: acme.trim(), domain: domain.trim(), env_tier_names: tiers.trim() }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
-  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || ''))
+  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '') || tiers.trim() !== (saved.env_tier_names || ''))
 
   return (
     <section>
@@ -117,12 +118,19 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
           <p className="text-xs text-content-subtle mt-1">Let's Encrypt registration email for this workspace's certificates.</p>
         </div>
         <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Default domain</label>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Apps base domain</label>
           <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="apps.example.com"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Base domain new environments in this workspace default to.</p>
+          <p className="text-xs text-content-subtle mt-1">Domain-routed environments (Traefik on, no explicit domain) get a URL of <code className="font-mono">{'{project}-{env}'}.{domain.trim() || 'apps.example.com'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to route locally on <code className="font-mono">*.localhost</code>. Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || 'apps.example.com'}</code> → this host).</p>
         </div>
-        <p className="text-xs text-content-faint">Stored now; full per-workspace SSL automation arrives with a later phase (today Traefik reads the global <code className="font-mono">ACME_EMAIL</code>).</p>
+        <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
+        <div className="pt-2 border-t border-border">
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1 mt-2">Environment tier order</label>
+          <textarea value={tiers} onChange={e => setTiers(e.target.value)} rows={2}
+            placeholder="dev, staging, qa, uat, preprod, prod"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+          <p className="text-xs text-content-subtle mt-1">Tier names from lowest to highest (comma or newline). Used to auto-guess each project's deploy order (dev → prod) for the release pipeline. A project can override with an explicit order. Leave blank for the built-in default.</p>
+        </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
             className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">

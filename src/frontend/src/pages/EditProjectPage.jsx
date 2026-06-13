@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings } from '../lib/api'
+import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
+import RegistryPicker from '../components/RegistryPicker'
+import DatabaseSelect from '../components/DatabaseSelect'
+import ManagedServices, { enabledDependsOnTargets } from '../components/ManagedServices'
+import EnvReorderModal from '../components/EnvReorderModal'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -64,9 +69,29 @@ function Select({ value, onChange, options }) {
 }
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
-const BACKEND_OPTIONS    = [{ value: 'laravel', label: 'Laravel (PHP-FPM)' }, { value: 'nodejs', label: 'Node.js' }]
-const FRONTEND_OPTIONS   = [{ value: 'none', label: 'None (API only)' }, { value: 'nextjs', label: 'Next.js' }, { value: 'react', label: 'React / Vite' }]
-const DB_OPTIONS         = [{ value: 'none', label: 'None' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'mysql', label: 'MySQL' }]
+
+// Unified service model (Phase 2a): a service is built, pulled, or reuses another
+// service's image (a worker). Build services scaffold a Dockerfile from a template.
+const SERVICE_SOURCE = [
+  { value: 'image', label: 'Pull image' },
+  { value: 'build', label: 'Build from source' },
+  { value: 'image_from', label: 'Reuse a service’s image (worker)' },
+]
+const BUILD_TEMPLATES = [
+  { value: '', label: 'Custom Dockerfile (no scaffold)' },
+  { value: 'laravel', label: 'Laravel (PHP-FPM)' },
+  { value: 'nodejs', label: 'Node.js' },
+  { value: 'nextjs', label: 'Next.js' },
+  { value: 'react', label: 'React / Vite' },
+]
+// Managed-dependency service names a service may depend_on.
+const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'garage']
+
+function serviceSource(s) {
+  if (s.build) return 'build'
+  if (s.image_from) return 'image_from'
+  return 'image'
+}
 
 // ── Helpers: port rows ↔ img fields ──────────────────────────────────────────
 
@@ -160,6 +185,24 @@ function volumeRowsToArray(rows) {
   return rows.map(serializeVolumeRow).filter(Boolean)
 }
 
+// Build args round-trip between the build.args object and editable key/value rows.
+// One trailing blank row is kept so the + behaviour matches ports/volumes.
+function imgToArgRows(img) {
+  const args = img.build?.args || {}
+  const rows = Object.keys(args).map(k => ({ key: k, val: args[k] }))
+  if (!rows.length) return [{ key: '', val: '' }]
+  return rows
+}
+
+function argRowsToObject(rows) {
+  const out = {}
+  for (const r of rows) {
+    const k = (r.key || '').trim()
+    if (k) out[k] = r.val ?? ''
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
 // ── Image stack editor ────────────────────────────────────────────────────────
 
 const RESTART_OPTIONS = [
@@ -172,11 +215,12 @@ const RESTART_OPTIONS = [
 // ServiceCard keeps local row state so empty rows added by + buttons survive
 // until the user types into them. Without local state, portRowsToFields() would
 // immediately filter out the empty new row and Add would appear broken.
-function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
+function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = [] }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(idx === 0) // collapsible — first service open
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
+  const [argRows,    setArgRows]    = useState(() => imgToArgRows(img))
 
   function syncPorts(rows) {
     setPortRows(rows)
@@ -186,11 +230,25 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
     setVolumeRows(rows)
     onUpdate(idx, { ...img, volumes: volumeRowsToArray(rows) })
   }
+  function syncArgs(rows) {
+    setArgRows(rows)
+    onUpdate(idx, { ...img, build: { ...(img.build || {}), args: argRowsToObject(rows) } })
+  }
   function upd(field, val) {
     onUpdate(idx, { ...img, [field]: val })
   }
+  // Switch a service's source, clearing the other source fields.
+  function setSource(s) {
+    const base = { ...img, build: undefined, image: undefined, tag: undefined, image_from: undefined }
+    if (s === 'build') onUpdate(idx, { ...base, build: img.build || { template: '' }, env_file: true })
+    else if (s === 'image_from') onUpdate(idx, { ...base, image_from: img.image_from || (otherNames[0] || ''), env_file: true })
+    else onUpdate(idx, { ...base, image: img.image || '', tag: img.tag || 'latest' })
+  }
 
   const otherNames = allImages.map((m, j) => j !== idx ? m.name : null).filter(Boolean)
+  // Only offer the managed services actually enabled on this project (not the full
+  // static list) so depends_on can't reference a dependency that won't exist.
+  const depOptions = [...otherNames, ...managedDeps]
 
   const monoInput = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500'
 
@@ -219,14 +277,111 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       </div>
       {open && (<div className="px-4 pb-4 space-y-4 border-t border-border-strong pt-4">
 
-      {/* Identity */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Identity + source */}
+      <div className="grid grid-cols-2 gap-3">
         <div><Label required>Service name</Label>
-          <Input value={img.name} onChange={v => upd('name', v)} placeholder="app" /></div>
-        <div><Label required>Image</Label>
-          <Input value={img.image} onChange={v => upd('image', v)} placeholder="nginx" /></div>
-        <div><Label>Tag</Label>
-          <Input value={img.tag} onChange={v => upd('tag', v)} placeholder="latest" /></div>
+          <Input value={img.name} onChange={v => upd('name', v)} placeholder="api" /></div>
+        <div><Label>Source</Label>
+          <Select value={serviceSource(img)} onChange={setSource} options={SERVICE_SOURCE} /></div>
+      </div>
+
+      {serviceSource(img) === 'image' && (
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label required>Image</Label>
+            <Input value={img.image} onChange={v => upd('image', v)} placeholder="nginx" /></div>
+          <div><Label>Tag</Label>
+            <Input value={img.tag} onChange={v => upd('tag', v)} placeholder="latest" /></div>
+        </div>
+      )}
+      {serviceSource(img) === 'build' && (
+        <>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>Dockerfile template</Label>
+            <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={BUILD_TEMPLATES} />
+            <p className="text-xs text-content-subtle mt-1">Scaffolds a starter Dockerfile; replace with your own via repo sync.</p></div>
+          <div><Label>Build context</Label>
+            <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
+        </div>
+
+        {/* Build args — passed as --build-arg KEY=VALUE at image build time. */}
+        <div>
+          <Label>Build args</Label>
+          <p className="text-xs text-content-subtle mb-2">
+            Passed to <code className="font-mono text-xs">docker build --build-arg</code> (for values baked at build time, e.g. a Next.js
+            <code className="font-mono text-xs"> next.config</code> rewrite target). Values may use{' '}
+            <code className="font-mono text-xs">${'{ENV}'}</code>, <code className="font-mono text-xs">${'{VERSION}'}</code>, and{' '}
+            <code className="font-mono text-xs">${'{ROUTE_URL}'}</code> (the env's public URL).
+          </p>
+          <div className="space-y-1.5">
+            {argRows.map((row, ri) => (
+              <div key={ri} className="flex items-center gap-2">
+                <input type="text" value={row.key}
+                  onChange={e => { const r = argRows.map((x,j)=>j===ri?{...x,key:e.target.value}:x); syncArgs(r) }}
+                  placeholder="NEXT_PUBLIC_API_URL" className={`flex-1 ${monoInput}`} />
+                <span className="text-content-subtle font-bold shrink-0">=</span>
+                <input type="text" value={row.val}
+                  onChange={e => { const r = argRows.map((x,j)=>j===ri?{...x,val:e.target.value}:x); syncArgs(r) }}
+                  placeholder="${ROUTE_URL}/api" className={`flex-[2] ${monoInput}`} />
+                <button type="button" title="Remove build arg"
+                  onClick={() => { const r = argRows.filter((_,j)=>j!==ri); syncArgs(r.length ? r : [{ key:'', val:'' }]) }}
+                  className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={() => syncArgs([...argRows, { key:'', val:'' }])}
+            className="mt-2 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add build arg</button>
+        </div>
+        </>
+      )}
+      {serviceSource(img) === 'image_from' && (
+        <div>
+          <Label required>Reuse image of</Label>
+          <Select value={img.image_from || ''} onChange={v => upd('image_from', v)}
+            options={[{ value: '', label: '— pick a service —' }, ...otherNames.map(n => ({ value: n, label: n }))]} />
+          <p className="text-xs text-content-subtle mt-1">A worker/scheduler that runs another service's built image with a custom command.</p>
+        </div>
+      )}
+
+      {/* Command — full width */}
+      <div><Label>Command <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+        <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" /></div>
+
+      {/* .env handling — process-env toggle + optional physical-file path (related) */}
+      <div className="grid grid-cols-2 gap-3 items-end">
+        <div className="flex items-end pb-1">
+          <Toggle label="Mount .env (env_file)" checked={img.env_file !== false && serviceSource(img) !== 'image'} onChange={v => upd('env_file', v)} />
+        </div>
+        {serviceSource(img) !== 'image' && (
+          <div><Label>Mount .env as a file <span className="font-normal normal-case text-content-faint">(optional path)</span></Label>
+            <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env" />
+            <p className="text-xs text-content-subtle mt-1">
+              For apps that read a physical <code className="font-mono text-xs">.env</code> from disk (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>). The same vars are injected as process env; set a path to also write them to a file (read-only).
+            </p></div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex items-end pb-1">
+          <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
+            if (v) {
+              const sub = (img.subdomain || '').trim()
+              const clash = allImages.find((m, j) => j !== idx && m.web_routed && (m.subdomain || '').trim() === sub)
+              if (clash) {
+                const host = sub ? `the "${sub}" subdomain` : 'the apex domain'
+                const ok = await confirm({
+                  title: 'Another service already routes here',
+                  message: `"${clash.name || 'another service'}" is already the web entry on ${host}. Two services on the same host collide in Traefik — give one a distinct subdomain to run both. Enable anyway?`,
+                  confirmLabel: 'Enable anyway',
+                })
+                if (!ok) return
+              }
+            }
+            upd('web_routed', v)
+          }} />
+        </div>
+        {img.web_routed && (
+          <div><Label>Subdomain <span className="font-normal normal-case text-content-faint">(blank = apex domain)</span></Label>
+            <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="app" /></div>
+        )}
       </div>
 
       {/* Port mappings */}
@@ -373,15 +528,15 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
       </div>
 
       {/* depends_on */}
-      {otherNames.length > 0 && (
+      {depOptions.length > 0 && (
         <div>
           <Label>Depends on</Label>
           <p className="text-xs text-content-subtle mb-2">
-            This service waits for selected services before starting.
-            Compose waits for healthy status if the dependency has a healthcheck.
+            This service waits for selected services (and enabled managed dependencies)
+            before starting. Compose waits for healthy status when available.
           </p>
           <div className="flex flex-wrap gap-3">
-            {otherNames.map(svcName => {
+            {depOptions.map(svcName => {
               const checked = (img.depends_on || []).includes(svcName)
               return (
                 <label key={svcName} className="flex items-center gap-1.5 cursor-pointer select-none">
@@ -432,7 +587,182 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   )
 }
 
-function ImagesEditor({ images, onChange }) {
+// ── Re-scan repo (2b-4): advisory diff/merge against the live service graph ────
+
+// Service fields that define the graph (excludes UI-only/derived keys). Used to
+// decide whether a detected service differs from the current one.
+const SVC_DIFF_FIELDS = [
+  'build', 'image', 'image_from', 'tag', 'command', 'port', 'host_port',
+  'extra_ports', 'web_routed', 'subdomain', 'healthcheck', 'env_file',
+  'env_file_mount', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars',
+]
+
+// stable serialises a value with object keys sorted at every depth, so two
+// equivalent services compare equal regardless of key order.
+function stable(v) {
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']'
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}'
+  }
+  return JSON.stringify(v === undefined ? null : v)
+}
+
+// changedFields returns the diff-field names whose value differs between two
+// services (treating absent / empty-string / 0 as the same "unset").
+function changedFields(a, b) {
+  const norm = (x) => (x === undefined || x === '' || x === 0 ? null : x)
+  return SVC_DIFF_FIELDS.filter(k => stable(norm(a?.[k])) !== stable(norm(b?.[k])))
+}
+
+// diffServices buckets detected services against the current graph by name.
+function diffServices(current, detected) {
+  const byName = new Map((current || []).map(s => [s.name, s]))
+  const added = [], changed = [], unchanged = []
+  for (const d of (detected || [])) {
+    const c = byName.get(d.name)
+    if (!c) added.push(d)
+    else if (changedFields(c, d).length) changed.push({ name: d.name, current: c, detected: d, fields: changedFields(c, d) })
+    else unchanged.push(d.name)
+  }
+  const detNames = new Set((detected || []).map(s => s.name))
+  const onlyLocal = (current || []).filter(s => s.name && !detNames.has(s.name)).map(s => s.name)
+  return { added, changed, unchanged, onlyLocal }
+}
+
+// ScanRepoModal re-scans the project's git repo and proposes changes to the live
+// service graph. It is ADVISORY: nothing is applied until the user picks items
+// and confirms. New services default to checked; changed services default to
+// UNCHECKED so a re-scan never silently overwrites a service the user has tuned.
+function ScanRepoModal({ gitRepo, gitBranch, images, onApply, onClose }) {
+  const [busy, setBusy] = useState(true)
+  const [err, setErr] = useState('')
+  const [draft, setDraft] = useState(null)
+  const [picked, setPicked] = useState(() => new Set())
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const d = await scanRepo((gitRepo || '').trim(), (gitBranch || '').trim())
+        if (!alive) return
+        setDraft(d)
+        // Pre-check the additive (safe) proposals only.
+        setPicked(new Set(diffServices(images, d.services || []).added.map(s => s.name)))
+      } catch (e) {
+        if (alive) setErr(e?.response?.data?.error || 'Scan failed')
+      } finally {
+        if (alive) setBusy(false)
+      }
+    })()
+    return () => { alive = false }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const diff = draft ? diffServices(images, draft.services || []) : null
+  const toggle = (name) => setPicked(p => { const n = new Set(p); n.has(name) ? n.delete(name) : n.add(name); return n })
+
+  function apply() {
+    if (!draft) return
+    const detByName = new Map((draft.services || []).map(s => [s.name, s]))
+    let next = [...images]
+    // Replace changed (picked), keyed by name.
+    next = next.map(s => (picked.has(s.name) && detByName.has(s.name)) ? detByName.get(s.name) : s)
+    // Append added (picked).
+    for (const a of diff.added) if (picked.has(a.name)) next.push(a)
+    onApply(next)
+    onClose()
+  }
+
+  const pickedCount = picked.size
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface-raised border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <h3 className="text-base font-semibold text-content-strong">Re-scan repository</h3>
+          <p className="text-xs text-content-subtle mt-0.5 font-mono truncate">{gitRepo || '(no repo set)'}{gitBranch ? ` @ ${gitBranch}` : ''}</p>
+        </div>
+
+        <div className="px-5 py-4 overflow-y-auto space-y-4 text-sm">
+          {busy && <p className="text-content-subtle">Cloning &amp; detecting…</p>}
+          {err && <p className="text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+
+          {diff && (
+            <>
+              {diff.added.length === 0 && diff.changed.length === 0 && (
+                <p className="text-success-fg">No changes — the detected graph matches your services.</p>
+              )}
+
+              {diff.added.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">New services</p>
+                  {diff.added.map(s => (
+                    <label key={s.name} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface border border-border cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={picked.has(s.name)} onChange={() => toggle(s.name)} />
+                      <span className="text-xs">
+                        <span className="font-mono text-content">{s.name}</span>{' '}
+                        <span className="text-content-faint">{svcKindLabel(s)}</span>
+                        {s.port ? <span className="text-content-subtle"> :{s.port}</span> : null}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {diff.changed.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Changed services <span className="normal-case font-normal text-content-faint">— check to overwrite your version</span></p>
+                  {diff.changed.map(c => (
+                    <label key={c.name} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-surface border border-amber-600/40 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={picked.has(c.name)} onChange={() => toggle(c.name)} />
+                      <span className="text-xs">
+                        <span className="font-mono text-content">{c.name}</span>{' '}
+                        <span className="text-content-faint">differs in: {c.fields.join(', ')}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {diff.unchanged.length > 0 && (
+                <p className="text-xs text-content-subtle">{diff.unchanged.length} service{diff.unchanged.length !== 1 ? 's' : ''} unchanged.</p>
+              )}
+              {diff.onlyLocal.length > 0 && (
+                <p className="text-xs text-content-subtle">Kept (not in scan): <span className="font-mono">{diff.onlyLocal.join(', ')}</span></p>
+              )}
+
+              {(draft.database !== 'none' || draft.redis || draft.garage) && (
+                <p className="text-xs text-content-muted">Detected managed deps: {[draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.garage && 'garage'].filter(Boolean).join(', ')} — toggle these per environment below if needed.</p>
+              )}
+              {(draft.notes || []).length > 0 && (
+                <ul className="text-xs text-content-subtle list-disc pl-4 space-y-0.5">
+                  {draft.notes.map((n, i) => <li key={i}>{n}</li>)}
+                </ul>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content">Cancel</button>
+          <button type="button" onClick={apply} disabled={busy || !!err || pickedCount === 0}
+            className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+            Merge {pickedCount > 0 ? pickedCount : ''} selected
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// svcKindLabel summarises a service's source for compact lists.
+function svcKindLabel(s) {
+  if (s.build) return `build${s.build.template ? ` · ${s.build.template}` : ''}${s.build.context && s.build.context !== '.' ? ` (${s.build.context})` : ''}`
+  if (s.image_from) return `worker → ${s.image_from}`
+  return `image ${s.image || ''}${s.tag ? `:${s.tag}` : ''}`
+}
+
+function ImagesEditor({ images, onChange, gitRepo, gitBranch, managedDeps = [] }) {
+  const [scanning, setScanning] = useState(false)
   const addService = () => onChange([...images, {
     name: '', image: '', tag: 'latest', port: 0, host_port: '',
     volumes: [], depends_on: [], extra_ports: [],
@@ -442,17 +772,30 @@ function ImagesEditor({ images, onChange }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-content-subtle">Containers that make up the stack — click one to expand.</p>
-        <button type="button" onClick={addService}
-          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-          + Add service
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {gitRepo && (
+            <button type="button" onClick={() => setScanning(true)} title="Re-detect the stack from the source repository"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content-subtle hover:text-content hover:border-brand-600 transition-colors">
+              ⟳ Scan repo
+            </button>
+          )}
+          <button type="button" onClick={addService}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+            + Add service
+          </button>
+        </div>
       </div>
+      {scanning && (
+        <ScanRepoModal gitRepo={gitRepo} gitBranch={gitBranch} images={images}
+          onApply={onChange} onClose={() => setScanning(false)} />
+      )}
       {images.map((img, i) => (
         <ServiceCard
           key={i}
           img={img}
           idx={i}
           allImages={images}
+          managedDeps={managedDeps}
           onUpdate={(idx, updated) => onChange(images.map((m, j) => j === idx ? updated : m))}
           onRemove={idx => onChange(images.filter((_, j) => j !== idx))}
         />
@@ -473,26 +816,19 @@ const SWARM_FAILURE = [{ value: 'rollback', label: 'rollback' }, { value: 'pause
 // SwarmSettings edits cfg.swarm: per-service replicas + placement, plus the
 // env-level restart/update/rollback policy. Numeric fields are stored as strings
 // (flexStr-tolerant); empty means "use Rigger's default" on generation.
-function SwarmSettings({ cfg, onChange, projectType, imageNames = [] }) {
+function SwarmSettings({ cfg, onChange, projectType, imageNames = [], managedDeps = [] }) {
   const sw = cfg.swarm || {}
   const updSwarm = (patch) => onChange({ ...cfg, swarm: { ...sw, ...patch } })
   const updSvc = (svc, patch) => updSwarm({ services: { ...(sw.services || {}), [svc]: { ...((sw.services || {})[svc] || {}), ...patch } } })
   const updPolicy = (key, patch) => updSwarm({ [key]: { ...(sw[key] || {}), ...patch } })
   const [advOpen, setAdvOpen] = useState(false)
 
-  const services = projectType === 'image'
-    ? imageNames
-    : ['backend',
-       ...(cfg.frontend && cfg.frontend !== 'none' ? ['frontend'] : []),
-       ...(cfg.database && cfg.database !== 'none' ? [cfg.database] : []),
-       ...(cfg.redis_enabled ? ['redis'] : []),
-       ...(cfg.garage_enabled ? ['garage'] : [])]
+  // Managed deps (DB/Redis/Garage) are project-level now — passed in.
+  const services = [...imageNames, ...managedDeps]
 
   const svcReplicas = (svc) => {
     const o = sw.services?.[svc]
     if (o?.replicas != null && o.replicas !== '') return o.replicas
-    if (svc === 'backend') return cfg.replicas?.backend ?? 1
-    if (svc === 'frontend') return cfg.replicas?.frontend ?? 1
     return 1
   }
   const svcPlacement = (svc) => (sw.services?.[svc]?.placement || []).join(', ')
@@ -620,7 +956,7 @@ function ProcessesSettings({ cfg, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
@@ -673,8 +1009,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {open && (<div className="px-5 pb-5 space-y-4 border-t border-border-strong/50 pt-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>Domain</Label>
-          <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="example.com" />
+          <Label>Domain <span className="font-normal normal-case text-content-faint">(optional override)</span></Label>
+          <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder={cfg.traefik_enabled ? 'auto — leave blank' : 'example.com'} />
+          {cfg.traefik_enabled && !cfg.domain && (
+            <p className="text-xs text-content-subtle mt-1">Blank → auto-derived from {baseDomain ? <>the workspace base domain</> : <>localhost</>}.</p>
+          )}
         </div>
         <div>
           <Label>Deployment</Label>
@@ -705,14 +1044,23 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
 
       <div className="space-y-3 pt-3 border-t border-border-strong/50">
         <Toggle
-          label="Traefik reverse proxy"
-          hint="Route via Traefik instead of direct port binding"
+          label="Expose via domain (Traefik)"
+          hint="Route through the shared Traefik proxy by hostname instead of binding a host port (avoids port conflicts; gives the env a URL)."
           checked={!!cfg.traefik_enabled}
           onChange={v => {
             upd('traefik_enabled', v)
             if (!v) onChange({ ...cfg, traefik_enabled: false, ssl_enabled: false })
           }}
         />
+        {(() => {
+          const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS)
+          return route ? (
+            <p className="text-xs text-content-subtle">
+              Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+              {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
+            </p>
+          ) : null
+        })()}
         {cfg.traefik_enabled && (
           <>
             <div>
@@ -741,53 +1089,30 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
       </div>
 
-      {/* Custom-stack-only fields */}
-      {projectType === 'custom' && (
-        <div className="space-y-4 pt-3 border-t border-border-strong/50">
-          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Application stack</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <Label>Backend</Label>
-              <Select value={cfg.backend} onChange={v => upd('backend', v)} options={BACKEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Frontend</Label>
-              <Select value={cfg.frontend} onChange={v => upd('frontend', v)} options={FRONTEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Database</Label>
-              <Select value={cfg.database} onChange={v => upd('database', v)} options={DB_OPTIONS} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
-            <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
-          </div>
-          {/* Replicas only take effect on Swarm; when Swarm is selected the
-              per-service Swarm settings below own them, so hide these here. */}
-          {cfg.deployment !== 'swarm' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Backend replicas</Label>
-                <Input type="number" value={cfg.replicas?.backend ?? 1} onChange={v => updReplicas('backend', v)} />
-              </div>
-              <div>
-                <Label>Frontend replicas</Label>
-                <Input type="number" value={cfg.replicas?.frontend ?? 1} onChange={v => updReplicas('frontend', v)} />
-              </div>
-            </div>
-          )}
+      {/* Database access — per-environment external-port exposure. The DB engine /
+          version themselves are project-level (Services tab → Project dependencies). */}
+      {projectDatabase && projectDatabase !== 'none' && (
+        <div className="space-y-2 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Database access</p>
+          <Toggle
+            label="Expose database on a host port"
+            hint={`Publish ${projectDatabase} on this environment's host so external clients can connect — typically dev only; keep prod private. Override the port via DB_EXTERNAL_PORT in env vars.`}
+            checked={!!cfg.db_external}
+            onChange={v => upd('db_external', v)}
+          />
+          <p className="text-xs text-content-subtle">
+            The managed {projectDatabase} (and any Redis / Garage) is provisioned project-wide — configure it in the{' '}
+            <strong>Services</strong> tab → <em>Project dependencies</em>.
+          </p>
         </div>
       )}
 
       {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
       {cfg.deployment === 'swarm' && (
-        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames} />
-      )}
-
-      {/* Workers / processes — custom apps only (image stacks add extra services as images). */}
-      {projectType !== 'image' && (
-        <ProcessesSettings cfg={cfg} onChange={onChange} />
+        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames}
+          managedDeps={projectDatabase && projectDatabase !== 'none'
+            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]
+            : [...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]} />
       )}
 
       {/* Git */}
@@ -1133,16 +1458,24 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-// serializeConfig builds the same config object that Save writes, stringified —
-// used to detect unsaved changes by comparing against the loaded baseline.
-function serializeConfig(project, envs, images, rawConfig) {
+// buildConfigObject assembles the config.json object that Save writes. Both the
+// Save mutation AND the unsaved-changes check go through this single builder so
+// they can never drift — a past bug wrote `services` in the dirty-check but not
+// in the actual save, so service edits (ports, etc.) silently reverted on reload.
+function buildConfigObject(project, envs, images, rawConfig) {
   const cleanEnvs = {}
   for (const [k, v] of Object.entries(envs || {})) {
     const { _initial_vars, _id, ...rest } = v // eslint-disable-line no-unused-vars
     cleanEnvs[k] = rest
   }
-  const updated = { ...rawConfig, project, environments: cleanEnvs, ...(project?.type === 'image' && { images }) }
-  return JSON.stringify(updated)
+  const updated = { ...rawConfig, project, environments: cleanEnvs, services: images }
+  delete updated.images // legacy field, fully replaced by services[]
+  return updated
+}
+
+// serializeConfig stringifies the built config (compact) for baseline comparison.
+function serializeConfig(project, envs, images, rawConfig) {
+  return JSON.stringify(buildConfigObject(project, envs, images, rawConfig))
 }
 
 export default function EditProjectPage() {
@@ -1158,6 +1491,9 @@ export default function EditProjectPage() {
   const { data: ws } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name) })
   // Remote hosts available to this workspace — for host selection on a NEW env.
   const { data: wsHosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
+  // Workspace apps base domain — drives env auto-routing URLs ({proj}-{env}.{base}).
+  const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
+  const baseDomain = (wsSettings?.domain || '').trim()
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -1165,6 +1501,7 @@ export default function EditProjectPage() {
   const [images, setImages]   = useState(null)
   const [newEnvCounter, setNewEnvCounter] = useState(0)
   const [saveError, setSaveError] = useState('')
+  const [reorderOpen, setReorderOpen] = useState(false)
   const [firstEnvVars, setFirstEnvVars] = useState({})
   const [baseline, setBaseline] = useState(null)        // serialized config at load
   const [confirmCancel, setConfirmCancel] = useState(false)
@@ -1179,8 +1516,8 @@ export default function EditProjectPage() {
       })
       setEnvs(withIds)
       setProject(rawConfig.project || {})
-      setImages(rawConfig.images || [])
-      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.images || [], rawConfig))
+      setImages(rawConfig.services || [])
+      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.services || [], rawConfig))
       // Pre-load vars from first env for use when adding new environments
       const firstEnvName = Object.keys(rawConfig.environments || {})[0]
       if (firstEnvName) {
@@ -1193,19 +1530,11 @@ export default function EditProjectPage() {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      // Strip _initial_vars from the config before saving — it's a UI-only field
-      const cleanEnvs = {}
-      for (const [k, v] of Object.entries(envs || {})) {
-        // eslint-disable-next-line no-unused-vars
-        const { _initial_vars: _iv, _id: _id2, ...rest } = v
-        cleanEnvs[k] = rest
-      }
-      const updated = {
-        ...rawConfig,
-        project,
-        environments: cleanEnvs,
-        ...(project?.type === 'image' && { images }),
-      }
+      // Use the shared builder so the saved payload always matches the
+      // unsaved-changes check — including the edited services[] (ports, env,
+      // sources). Previously this wrote `images` only for image-type projects,
+      // dropping every service edit on custom projects.
+      const updated = buildConfigObject(project, envs, images, rawConfig)
       await putConfig(workspace, name, JSON.stringify(updated, null, 2))
 
       // Write initial env vars for new environments.
@@ -1260,7 +1589,6 @@ export default function EditProjectPage() {
   function addEnv() {
     const n = `new-env-${newEnvCounter + 1}`
     setNewEnvCounter(c => c + 1)
-    const isImage = project?.type === 'image'
     const firstEnv = Object.values(envs || {})[0] || {}
     const base = {
       domain: '',
@@ -1270,16 +1598,11 @@ export default function EditProjectPage() {
       traefik_network: 'traefik_net',
       ssl_enabled: false,
       git: { enabled: false, repo: '', branch: '' },
-    }
-    if (!isImage) {
-      Object.assign(base, {
-        backend: firstEnv.backend || 'laravel',
-        frontend: firstEnv.frontend || 'none',
-        database: firstEnv.database || 'none',
-        redis_enabled: false,
-        garage_enabled: false,
-        replicas: { backend: 1, frontend: 1 },
-      })
+      // Managed-dependency toggles inherit from the first env (services are
+      // project-level and shared across envs).
+      database: firstEnv.database || 'none',
+      redis_enabled: !!firstEnv.redis_enabled,
+      garage_enabled: !!firstEnv.garage_enabled,
     }
     // firstEnvVars is the API shape { KEY: { value, secret } }; flatten it to the
     // plain { KEY: value } map _initial_vars expects, and carry over secret flags.
@@ -1363,7 +1686,7 @@ export default function EditProjectPage() {
         <VerticalTabs
           tabs={[
             { id: 'project', label: 'Project', icon: '📋' },
-            ...(project?.type === 'image' ? [{ id: 'services', label: 'Services', icon: '🧱', count: (images || []).length }] : []),
+            { id: 'services', label: 'Services', icon: '🧱', count: (images || []).length },
             { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
             { id: 'host', label: 'Host', icon: '🖥' },
             { id: 'backup', label: 'Backup', icon: '💾' },
@@ -1399,14 +1722,43 @@ export default function EditProjectPage() {
                 <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
               </div>
             </div>
-            {/* Registry only applies to custom (build) stacks — image stacks pull
-                images directly, so hide it (matches the New Project wizard). */}
-            {project?.type !== 'image' && (
-              <div className="sm:max-w-[50%]">
+            {/* Registry only applies to stacks that BUILD images. Pull-only stacks
+                (image/prebuilt) and database-hosting stacks don't push, so hide it. */}
+            {(images || []).some(s => s.build) && (
+              <div className="sm:max-w-[60%]">
                 <Label>Registry</Label>
-                <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+                <p className="text-xs text-content-subtle mb-2">Built images are tagged and pushed here. Pick a saved registry or add one with credentials so the build can authenticate.</p>
+                <RegistryPicker
+                  workspace={workspace}
+                  value={project?.registry}
+                  onChange={v => setProject(p => ({ ...p, registry: v }))}
+                />
               </div>
             )}
+
+            {/* Source repository — one repo per project; build services build from
+                a subdir of it (cloned into the build context before build). */}
+            <div className="grid sm:grid-cols-[1fr_auto] gap-4">
+              <div>
+                <Label>Source repository <span className="font-normal normal-case text-content-faint">(for build services)</span></Label>
+                <Input value={project?.git_repo} onChange={v => setProject(p => ({ ...p, git_repo: v }))} placeholder="https://github.com/org/repo.git" />
+                <p className="text-xs text-content-subtle mt-1">One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL.</p>
+              </div>
+              <div className="sm:w-40">
+                <Label>Default branch</Label>
+                <Input value={project?.git_branch} onChange={v => setProject(p => ({ ...p, git_branch: v }))} placeholder="main" />
+              </div>
+            </div>
+
+            {/* Local HTTPS for domain-routed envs without a workspace base domain. */}
+            <Toggle
+              label="Local HTTPS (self-signed)"
+              hint={baseDomain
+                ? `Not used — this workspace has a base domain (${baseDomain}); domain-routed envs use Let's Encrypt.`
+                : "Serve domain-routed *.localhost envs over HTTPS with Traefik's self-signed cert (for apps that require HTTPS, e.g. Vaultwarden). Default is plain HTTP."}
+              checked={!!project?.local_tls}
+              onChange={v => setProject(p => ({ ...p, local_tls: v }))}
+            />
 
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
             <div>
@@ -1440,13 +1792,28 @@ export default function EditProjectPage() {
         </section>
         )}
 
-        {/* Services (image stacks only) */}
-        {tab === 'services' && project?.type === 'image' && (
+        {/* Services — the unified service graph (build / pull / worker) +
+            project-level managed dependencies (DB / Redis / Garage). */}
+        {tab === 'services' && (
           <section className="mb-6">
+            {/* Managed services (project-level). Hidden for image / pre-built stacks
+                — they bring their own data services as images (matches the wizard). */}
+            {project?.type !== 'image' && (
+              <div className="mb-5">
+                <ManagedServices
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, garage: project?.garage_enabled }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, garage_enabled: !!v.garage }))}
+                  resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
+                />
+              </div>
+            )}
+
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
-            <ImagesEditor images={images || []} onChange={setImages} />
+            <ImagesEditor images={images || []} onChange={setImages}
+              gitRepo={project?.git_repo} gitBranch={project?.git_branch}
+              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, garage: project?.garage_enabled })} />
             <PortWarnings warnings={hostWarnings} />
-            <p className="text-xs text-content-subtle mt-2">After saving, redeploy each environment to pick up image changes.</p>
+            <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
         )}
 
@@ -1454,17 +1821,34 @@ export default function EditProjectPage() {
         {tab === 'envs' && (<>
         <section className="mb-6">
           <div className="flex items-center justify-between gap-3 mb-3">
-            <p className="text-xs text-content-subtle">
-              {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
-              {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
-                <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
+            <h2 className="text-sm font-semibold text-content">Environments</h2>
+            <div className="flex items-center gap-2 shrink-0">
+              {currentEnvNames.length > 1 && (
+                <button type="button" onClick={() => setReorderOpen(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content hover:bg-surface-raised transition-colors">
+                  ⇅ Reorder
+                </button>
               )}
-            </p>
-            <button type="button" onClick={addEnv}
-              className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-              + Add environment
-            </button>
+              <button type="button" onClick={addEnv}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                + Add environment
+              </button>
+            </div>
           </div>
+          {reorderOpen && (
+            <EnvReorderModal
+              workspace={workspace} name={name}
+              envNames={ws?.envs || currentEnvNames}
+              onClose={() => setReorderOpen(false)}
+              onSaved={() => { qc.invalidateQueries({ queryKey: ['workspace', workspace, name] }); qc.invalidateQueries({ queryKey: ['config', workspace, name] }) }}
+            />
+          )}
+          <p className="text-xs text-content-subtle mb-3">
+            {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
+            {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
+              <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
+            )}
+          </p>
 
           <div className="space-y-3">
             {Object.entries(envs || {}).map(([envName, cfg], i) => (
@@ -1482,6 +1866,12 @@ export default function EditProjectPage() {
                 workspaceName={name}
                 hosts={wsHosts}
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
+                resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
+                baseDomain={baseDomain}
+                localTLS={!!project?.local_tls}
+                projectDatabase={project?.database || ''}
+                projectRedis={!!project?.redis_enabled}
+                projectGarage={!!project?.garage_enabled}
               />
             ))}
           </div>
@@ -1505,7 +1895,7 @@ export default function EditProjectPage() {
         {tab === 'backup' && envs && <BackupSection workspaceName={name} envs={envs} updateEnv={updateEnv} />}
 
         {/* Pipelines (Phase 9) */}
-        {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} />}
+        {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} serviceNames={(images || []).map(img => img.name).filter(Boolean)} />}
 
         {/* Danger zone */}
         {tab === 'danger' && <DangerZone name={name} />}

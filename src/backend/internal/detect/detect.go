@@ -1,0 +1,821 @@
+// Package detect statically inspects a checked-out source repository and drafts a
+// unified service graph (the same shape config.json services[] uses) for the user
+// to review and edit. It NEVER executes repo code — pure file reads. Detection is
+// advisory: Rigger proposes, the user approves.
+//
+// Signals, strongest first: an existing docker-compose.yml, then Dockerfile(s)
+// (monorepo-aware), then language manifests (mapped to internal/blueprints),
+// then a Procfile (workers), then dependency/env hints for managed dependencies.
+package detect
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/blueprints"
+	yaml "go.yaml.in/yaml/v3"
+)
+
+// Service mirrors a config.json services[] entry (the unified model). JSON tags
+// match composegen's Service so the draft flows straight into config.json and the
+// generated compose (extra_ports, healthcheck_config, build args/dockerfile, …).
+type Service struct {
+	Name              string             `json:"name"`
+	Build             *Build             `json:"build,omitempty"`
+	Image             string             `json:"image,omitempty"`
+	ImageFrom         string             `json:"image_from,omitempty"`
+	Tag               string             `json:"tag,omitempty"`
+	Command           string             `json:"command,omitempty"`
+	Port              string             `json:"port,omitempty"`
+	HostPort          string             `json:"host_port,omitempty"`
+	ExtraPorts        []string           `json:"extra_ports,omitempty"`
+	WebRouted         bool               `json:"web_routed,omitempty"`
+	Subdomain         string             `json:"subdomain,omitempty"`
+	Healthcheck       string             `json:"healthcheck,omitempty"`
+	HealthcheckConfig *HealthcheckConfig `json:"healthcheck_config,omitempty"`
+	EnvFile           bool               `json:"env_file,omitempty"`
+	DependsOn         []string           `json:"depends_on,omitempty"`
+	Volumes           []string           `json:"volumes,omitempty"`
+	Restart           string             `json:"restart,omitempty"`
+	ConfigTemplate    string             `json:"config_template,omitempty"`
+	EnvVars           map[string]string  `json:"env_vars,omitempty"`
+}
+
+// HealthcheckConfig mirrors composegen's per-service healthcheck timing.
+type HealthcheckConfig struct {
+	Interval    string `json:"interval,omitempty"`
+	Timeout     string `json:"timeout,omitempty"`
+	Retries     string `json:"retries,omitempty"`
+	StartPeriod string `json:"start_period,omitempty"`
+}
+
+// applyBlueprintServiceEnv copies a blueprint's static per-service env onto the
+// service (e.g. Next.js HOSTNAME=0.0.0.0) so it lands in the service's own
+// compose environment.
+func applyBlueprintServiceEnv(s *Service, bp blueprints.Blueprint) {
+	if len(bp.ServiceEnv) == 0 {
+		return
+	}
+	if s.EnvVars == nil {
+		s.EnvVars = map[string]string{}
+	}
+	for k, v := range bp.ServiceEnv {
+		if _, ok := s.EnvVars[k]; !ok {
+			s.EnvVars[k] = v
+		}
+	}
+}
+
+// Build is a build service's source spec.
+type Build struct {
+	Context    string            `json:"context,omitempty"`
+	Dockerfile string            `json:"dockerfile,omitempty"`
+	Template   string            `json:"template,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`
+}
+
+// Draft is the detection result the wizard pre-fills from.
+type Draft struct {
+	Services  []Service         `json:"services"`
+	Database  string            `json:"database"`             // none | postgres | mysql
+	DBVersion string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
+	Redis     bool              `json:"redis"`
+	Garage    bool              `json:"garage"`
+	Detected  string            `json:"detected"`            // primary stack label, for display
+	Notes     []string          `json:"notes"`               // human-readable detection notes
+	EnvVars   map[string]string `json:"env_vars,omitempty"`  // seeded from .env.example for the env's .env
+}
+
+// Detect scans a repo directory and returns a draft service graph.
+func Detect(repoDir string) Draft {
+	d := Draft{Services: []Service{}, Database: "none", Notes: []string{}}
+	// Seed env vars from .env.example so the env's .env carries the app's expected
+	// keys (and ${VAR:-default} refs in compose `environment:` resolve at deploy).
+	d.EnvVars = parseDotenv(repoDir)
+
+	// 1. An existing compose file is authoritative.
+	if cf := findFirst(repoDir, "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"); cf != "" {
+		if fromCompose(repoDir, cf, &d) {
+			d.Detected = "docker-compose"
+			d.Notes = append([]string{"Detected " + filepath.Base(cf) + " — mapped its services."}, d.Notes...)
+			detectManagedDeps(repoDir, &d)
+			return d
+		}
+	}
+
+	// 2. Dockerfile(s) — root and common monorepo subdirs → one build service each.
+	dfDirs := findDockerfileDirs(repoDir)
+	if len(dfDirs) > 0 {
+		for _, rel := range dfDirs {
+			addBuildService(repoDir, rel, &d, true)
+		}
+		d.Detected = "Dockerfile" + plural(len(dfDirs))
+		d.Notes = append(d.Notes, noteCount(len(dfDirs), "Dockerfile"))
+	} else if id, ok := identify(repoDir); ok {
+		// 3. No Dockerfile — identify the framework from manifests at the root.
+		addFrameworkService(repoDir, ".", "app", id, &d)
+		if bp, ok := blueprints.Get(id); ok {
+			d.Detected = bp.Label
+			d.Notes = append(d.Notes, "Detected "+bp.Label+" from project manifests (no Dockerfile — a starter will be scaffolded).")
+		}
+	} else {
+		d.Notes = append(d.Notes, "Couldn't identify a stack automatically — add services manually.")
+	}
+
+	// 4. Procfile → worker/scheduler services that reuse the primary app image.
+	detectProcfile(repoDir, &d)
+
+	// 5. Managed-dependency hints.
+	detectManagedDeps(repoDir, &d)
+	return d
+}
+
+// ── Compose ──────────────────────────────────────────────────────────────────
+
+type composeFile struct {
+	Services map[string]composeSvc `yaml:"services"`
+}
+type composeSvc struct {
+	Image       string    `yaml:"image"`
+	Build       yaml.Node `yaml:"build"`
+	Command     yaml.Node `yaml:"command"`
+	Ports       []string  `yaml:"ports"`
+	DependsOn   yaml.Node `yaml:"depends_on"`
+	Volumes     []string  `yaml:"volumes"`
+	Environment yaml.Node `yaml:"environment"`
+	Healthcheck yaml.Node `yaml:"healthcheck"`
+	Profiles    []string  `yaml:"profiles"`
+}
+
+func fromCompose(repoDir, path string, d *Draft) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var cf composeFile
+	if yaml.Unmarshal(raw, &cf) != nil || len(cf.Services) == 0 {
+		return false
+	}
+	var skippedProfiles []string
+	for _, name := range sortedKeys(cf.Services) {
+		cs := cf.Services[name]
+		// Profile-gated services aren't started by a default `docker compose up`
+		// (e.g. an optional geocoder) — skip them, note for the user.
+		if len(cs.Profiles) > 0 {
+			skippedProfiles = append(skippedProfiles, name)
+			continue
+		}
+		// Recognised data services become managed-dependency toggles, not services.
+		// Capture the image tag so the catalog uses the same version (e.g. 16-alpine).
+		if role := dbRole(cs.Image); role != "" {
+			applyManagedDep(role, d)
+			if _, tag := splitImage(cs.Image); tag != "" && tag != "latest" && d.DBVersion == "" {
+				d.DBVersion = tag
+			}
+			continue
+		}
+		s := Service{Name: dnsName(name), Restart: "unless-stopped", EnvFile: true}
+		// Environment (map or list form) — kept literal so ${VAR:-default} still
+		// interpolates at deploy against the seeded .env. Copied first so compose
+		// values win over any blueprint defaults applied below.
+		for k, v := range nodeToEnvMap(cs.Environment) {
+			if s.EnvVars == nil {
+				s.EnvVars = map[string]string{}
+			}
+			s.EnvVars[k] = v
+		}
+		if !cs.Build.IsZero() {
+			ctx, dockerfile, args := composeBuild(cs.Build)
+			s.Build = &Build{Context: ctx, Dockerfile: dockerfile, Args: args}
+			// Identify the framework in the build context so the service carries
+			// its blueprint id (build.template) — envgen reads that to emit the
+			// framework's env contract (DB_*/DATABASE_URL/…). Compose alone
+			// doesn't tell us the stack; the manifests in the context dir do.
+			if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
+				s.Build.Template = id
+				if bp, ok := blueprints.Get(id); ok {
+					applyBlueprintServiceEnv(&s, bp) // fills only keys compose didn't set
+				}
+			}
+		} else if cs.Image != "" {
+			s.Image, s.Tag = splitImage(cs.Image)
+			s.EnvFile = false
+		}
+		if c := scalarOrJoin(cs.Command); c != "" {
+			s.Command = c
+		}
+		// Ports: first container port → Port (+HostPort); the rest → ExtraPorts (raw).
+		if ports := normalizePorts(cs.Ports); len(ports) > 0 {
+			hp, cp := splitPort(ports[0])
+			s.Port = cp
+			if hp != "" {
+				s.HostPort = hp
+			}
+			s.ExtraPorts = append(s.ExtraPorts, ports[1:]...)
+		}
+		if hc, hcfg := parseHealthcheck(cs.Healthcheck); hc != "" {
+			s.Healthcheck = hc
+			s.HealthcheckConfig = hcfg
+		}
+		s.Volumes = cs.Volumes
+		s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), cf.Services)
+		d.Services = append(d.Services, s)
+	}
+	if len(skippedProfiles) > 0 {
+		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default).")
+	}
+	pickWebEntry(d)
+	return len(d.Services) > 0
+}
+
+// ── Dockerfiles ──────────────────────────────────────────────────────────────
+
+// findDockerfileDirs returns repo-relative dirs that contain a Dockerfile: the
+// root, then one level of common monorepo parents (apps/*, services/*, …).
+func findDockerfileDirs(repoDir string) []string {
+	var out []string
+	if fileExists(filepath.Join(repoDir, "Dockerfile")) {
+		out = append(out, ".")
+	}
+	for _, parent := range []string{"apps", "services", "packages", "cmd", "src"} {
+		entries, err := os.ReadDir(filepath.Join(repoDir, parent))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() && fileExists(filepath.Join(repoDir, parent, e.Name(), "Dockerfile")) {
+				out = append(out, parent+"/"+e.Name())
+			}
+		}
+	}
+	// Also common single-service dirs at the root.
+	for _, parent := range []string{"backend", "frontend", "api", "web", "server", "app"} {
+		if fileExists(filepath.Join(repoDir, parent, "Dockerfile")) {
+			out = append(out, parent)
+		}
+	}
+	return dedup(out)
+}
+
+// addBuildService adds a build service for a Dockerfile-bearing dir, enriching
+// port/healthcheck/web-routing from the framework identified in that dir.
+func addBuildService(repoDir, rel string, d *Draft, fromDockerfile bool) {
+	name := serviceNameFor(rel)
+	id, _ := identify(filepath.Join(repoDir, rel))
+	addFrameworkService(repoDir, rel, name, id, d)
+	// Override the port from the Dockerfile's EXPOSE when present.
+	if fromDockerfile {
+		if p := dockerfileExpose(filepath.Join(repoDir, rel, "Dockerfile")); p != "" {
+			d.Services[len(d.Services)-1].Port = p
+		}
+	}
+}
+
+// addFrameworkService appends a build service shaped by the blueprint for id (or
+// a generic build service when id is unknown). When the framework needs an nginx
+// front (php-fpm), a paired nginx service is added.
+func addFrameworkService(repoDir, contextRel, name, id string, d *Draft) {
+	bp, ok := blueprints.Get(id)
+	s := Service{
+		Name:    dnsName(name),
+		Build:   &Build{Context: contextRel},
+		EnvFile: true,
+		Restart: "unless-stopped",
+	}
+	if id != "" {
+		s.Build.Template = id
+	}
+	if ok {
+		s.Port = bp.Port
+		s.Healthcheck = bp.Healthcheck
+		s.WebRouted = bp.WebRouted && !bp.NeedsNginx
+		applyBlueprintServiceEnv(&s, bp)
+	} else {
+		s.WebRouted = true // unknown framework: assume it serves HTTP; user edits
+	}
+	d.Services = append(d.Services, s)
+
+	if ok && bp.NeedsNginx {
+		d.Services = append(d.Services, Service{
+			Name:           dnsName(name + "-nginx"),
+			Image:          "nginx",
+			Tag:            "1.25-alpine",
+			WebRouted:      true,
+			Port:           "80",
+			DependsOn:      []string{dnsName(name)},
+			ConfigTemplate: bp.NginxConf,
+			Volumes:        []string{"./nginx.conf:/etc/nginx/conf.d/default.conf:ro"},
+			Restart:        "unless-stopped",
+		})
+		d.Notes = append(d.Notes, bp.Label+" uses PHP-FPM — added an nginx front service.")
+	}
+}
+
+// ── Procfile (worker/scheduler) ──────────────────────────────────────────────
+
+var procLineRE = regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+):\s*(.+)$`)
+
+func detectProcfile(repoDir string, d *Draft) {
+	raw, err := os.ReadFile(filepath.Join(repoDir, "Procfile"))
+	if err != nil {
+		return
+	}
+	app := firstBuildServiceName(d)
+	if app == "" {
+		return
+	}
+	for _, m := range procLineRE.FindAllStringSubmatch(string(raw), -1) {
+		kind, cmd := strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+		if kind == "web" || kind == "release" {
+			continue // web = the app service already; release = a one-off
+		}
+		d.Services = append(d.Services, Service{
+			Name: dnsName(kind), ImageFrom: app, Command: cmd, EnvFile: true, Restart: "unless-stopped",
+		})
+	}
+	if len(procLineRE.FindAllString(string(raw), -1)) > 0 {
+		d.Notes = append(d.Notes, "Procfile detected — added worker/scheduler services reusing the app image.")
+	}
+}
+
+// ── Managed dependencies ─────────────────────────────────────────────────────
+
+func detectManagedDeps(repoDir string, d *Draft) {
+	blob := strings.ToLower(readAny(repoDir,
+		".env.example", ".env.sample", ".env", "docker-compose.yml", "compose.yaml",
+		"composer.json", "package.json", "requirements.txt", "go.mod", "Gemfile", "pom.xml"))
+	if d.Database == "none" {
+		switch {
+		case strings.Contains(blob, "postgres") || strings.Contains(blob, "psycopg") || strings.Contains(blob, "pgx") || strings.Contains(blob, "pg_"):
+			d.Database = "postgres"
+			d.Notes = append(d.Notes, "Postgres reference found — suggested the Postgres managed dependency.")
+		case strings.Contains(blob, "mysql") || strings.Contains(blob, "mariadb"):
+			d.Database = "mysql"
+			d.Notes = append(d.Notes, "MySQL/MariaDB reference found — suggested the MySQL managed dependency.")
+		}
+	}
+	if !d.Redis && (strings.Contains(blob, "redis") || strings.Contains(blob, "ioredis")) {
+		d.Redis = true
+		d.Notes = append(d.Notes, "Redis reference found — suggested the Redis managed dependency.")
+	}
+}
+
+func applyManagedDep(role string, d *Draft) {
+	switch role {
+	case "postgres", "mysql":
+		if d.Database == "none" {
+			d.Database = role
+		}
+	case "redis":
+		d.Redis = true
+	}
+}
+
+// dbRole classifies a compose service image as a managed dependency, or "".
+func dbRole(image string) string {
+	l := strings.ToLower(image)
+	switch {
+	case strings.Contains(l, "postgres"):
+		return "postgres"
+	case strings.Contains(l, "mysql"), strings.Contains(l, "mariadb"):
+		return "mysql"
+	case strings.Contains(l, "redis"):
+		return "redis"
+	}
+	return ""
+}
+
+// ── Framework identification ─────────────────────────────────────────────────
+
+func identify(dir string) (string, bool) {
+	switch {
+	case fileExists(filepath.Join(dir, "artisan")) || (fileExists(filepath.Join(dir, "composer.json")) && strings.Contains(readFile(filepath.Join(dir, "composer.json")), "laravel")):
+		return "laravel", true
+	case fileExists(filepath.Join(dir, "package.json")):
+		pkg := strings.ToLower(readFile(filepath.Join(dir, "package.json")))
+		switch {
+		case strings.Contains(pkg, `"next"`):
+			return "nextjs", true
+		case (strings.Contains(pkg, "vite") || strings.Contains(pkg, "react-scripts") || strings.Contains(pkg, "@angular/core") || strings.Contains(pkg, `"vue"`)) &&
+			!strings.Contains(pkg, "express") && !strings.Contains(pkg, "fastify") && !strings.Contains(pkg, "@nestjs"):
+			return "static", true
+		default:
+			return "nodejs", true
+		}
+	case fileExists(filepath.Join(dir, "pom.xml")) || fileExists(filepath.Join(dir, "build.gradle")) || fileExists(filepath.Join(dir, "build.gradle.kts")):
+		return "spring", true
+	case fileExists(filepath.Join(dir, "manage.py")) || fileExists(filepath.Join(dir, "pyproject.toml")) || fileExists(filepath.Join(dir, "requirements.txt")):
+		return "django", true
+	case fileExists(filepath.Join(dir, "go.mod")):
+		return "go", true
+	case globExists(dir, "*.csproj") || globExists(dir, "*.sln"):
+		return "dotnet", true
+	case fileExists(filepath.Join(dir, "Gemfile")):
+		return "rails", true
+	}
+	return "", false
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+var exposeRE = regexp.MustCompile(`(?mi)^\s*EXPOSE\s+(\d+)`)
+
+func dockerfileExpose(path string) string {
+	if m := exposeRE.FindStringSubmatch(readFile(path)); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+func serviceNameFor(rel string) string {
+	if rel == "." || rel == "" {
+		return "app"
+	}
+	return filepath.Base(rel)
+}
+
+func firstBuildServiceName(d *Draft) string {
+	for _, s := range d.Services {
+		if s.Build != nil {
+			return s.Name
+		}
+	}
+	return ""
+}
+
+var nonDNS = regexp.MustCompile(`[^a-z0-9-]+`)
+
+func dnsName(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, "_", "-")
+	s = nonDNS.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		s = "svc"
+	}
+	if len(s) > 30 {
+		s = strings.Trim(s[:30], "-")
+	}
+	return s
+}
+
+func splitImage(ref string) (image, tag string) {
+	// Split on the last colon that isn't part of a registry host:port.
+	if i := strings.LastIndex(ref, ":"); i >= 0 && !strings.Contains(ref[i:], "/") {
+		return ref[:i], ref[i+1:]
+	}
+	return ref, "latest"
+}
+
+func firstPort(ports []string) (host, container string) {
+	for _, p := range ports {
+		p = strings.Trim(p, `"' `)
+		parts := strings.Split(p, ":")
+		switch len(parts) {
+		case 1:
+			return "", parts[0]
+		case 2:
+			return parts[0], parts[1]
+		default: // ip:host:container
+			return parts[len(parts)-2], parts[len(parts)-1]
+		}
+	}
+	return "", ""
+}
+
+// composeBuild extracts context/dockerfile/args from a compose `build:` node, which
+// is either a scalar ("./api") or a map ({context, dockerfile, args}).
+func composeBuild(n yaml.Node) (context, dockerfile string, args map[string]string) {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value, "", nil
+	}
+	var m struct {
+		Context    string    `yaml:"context"`
+		Dockerfile string    `yaml:"dockerfile"`
+		Args       yaml.Node `yaml:"args"`
+	}
+	_ = n.Decode(&m)
+	context = m.Context
+	if context == "" {
+		context = "."
+	}
+	if a := nodeToEnvMap(m.Args); len(a) > 0 {
+		args = a
+	}
+	return context, m.Dockerfile, args
+}
+
+// nodeToEnvMap parses a compose `environment:`/build `args:` node — either map form
+// (KEY: value) or list form (- KEY=value) — into a string map. Non-string scalars
+// (numbers, bools) are stringified; values are kept literal (incl. ${VAR:-default}).
+func nodeToEnvMap(n yaml.Node) map[string]string {
+	out := map[string]string{}
+	if n.IsZero() {
+		return out
+	}
+	var m map[string]interface{}
+	if n.Decode(&m) == nil && len(m) > 0 {
+		for k, v := range m {
+			if v == nil {
+				out[k] = ""
+			} else {
+				out[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return out
+	}
+	var list []string
+	if n.Decode(&list) == nil {
+		for _, item := range list {
+			if i := strings.IndexByte(item, '='); i > 0 {
+				out[strings.TrimSpace(item[:i])] = item[i+1:]
+			} else if t := strings.TrimSpace(item); t != "" {
+				out[t] = ""
+			}
+		}
+	}
+	return out
+}
+
+// parseHealthcheck maps a compose healthcheck node to the bare test command (which
+// composegen re-wraps in CMD-SHELL) plus its timing. Returns "" when absent/disabled.
+func parseHealthcheck(n yaml.Node) (string, *HealthcheckConfig) {
+	if n.IsZero() {
+		return "", nil
+	}
+	var hc struct {
+		Test        yaml.Node `yaml:"test"`
+		Interval    string    `yaml:"interval"`
+		Timeout     string    `yaml:"timeout"`
+		Retries     int       `yaml:"retries"`
+		StartPeriod string    `yaml:"start_period"`
+		Disable     bool      `yaml:"disable"`
+	}
+	if n.Decode(&hc) != nil || hc.Disable {
+		return "", nil
+	}
+	test := healthcheckTest(hc.Test)
+	if test == "" {
+		return "", nil
+	}
+	cfg := &HealthcheckConfig{Interval: hc.Interval, Timeout: hc.Timeout, StartPeriod: hc.StartPeriod}
+	if hc.Retries > 0 {
+		cfg.Retries = itoa(hc.Retries)
+	}
+	return test, cfg
+}
+
+// healthcheckTest unwraps the test field: a scalar string, or a list like
+// ["CMD-SHELL", "<cmd>"] / ["CMD", "<bin>", "<arg>"…]. "NONE" disables it.
+func healthcheckTest(n yaml.Node) string {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value
+	}
+	var list []string
+	if n.Decode(&list) == nil && len(list) > 0 {
+		switch list[0] {
+		case "NONE":
+			return ""
+		case "CMD-SHELL", "CMD":
+			if len(list) > 1 {
+				return strings.Join(list[1:], " ")
+			}
+		}
+		return strings.Join(list, " ")
+	}
+	return ""
+}
+
+// normalizePorts trims quotes/whitespace and drops empties.
+func normalizePorts(ports []string) []string {
+	var out []string
+	for _, p := range ports {
+		if p = strings.Trim(p, `"' `); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// splitPort returns (hostPort, containerPort) from "h:c", "ip:h:c", or "c".
+func splitPort(p string) (host, container string) {
+	parts := strings.Split(strings.Trim(p, `"' `), ":")
+	switch len(parts) {
+	case 1:
+		return "", parts[0]
+	case 2:
+		return parts[0], parts[1]
+	default:
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+}
+
+var ingressImageRE = regexp.MustCompile(`nginx|caddy|traefik|httpd|haproxy`)
+
+// pickWebEntry chooses a web entry when none was already marked (compose imports
+// rarely set one): the service publishing 80/443, else an ingress-like image, else
+// the first build service. The user can change it in the wizard / Edit Project.
+func pickWebEntry(d *Draft) {
+	for _, s := range d.Services {
+		if s.WebRouted {
+			return
+		}
+	}
+	idx := -1
+	for i, s := range d.Services {
+		if portsInclude(s, "80") || portsInclude(s, "443") {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		for i, s := range d.Services {
+			if s.Image != "" && ingressImageRE.MatchString(strings.ToLower(s.Image)) {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		for i, s := range d.Services {
+			if s.Build != nil {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx >= 0 {
+		d.Services[idx].WebRouted = true
+		if d.Services[idx].Port == "" {
+			d.Services[idx].Port = "80"
+		}
+		d.Notes = append(d.Notes, "Set "+d.Services[idx].Name+" as the web entry — change it on the next step if wrong.")
+	}
+}
+
+func portsInclude(s Service, container string) bool {
+	if s.Port == container {
+		return true
+	}
+	for _, e := range s.ExtraPorts {
+		if _, c := splitPort(e); c == container {
+			return true
+		}
+	}
+	return false
+}
+
+// parseDotenv reads .env.example / .env.sample into a KEY→VALUE map (best-effort)
+// to seed the environment's .env so ${VAR} refs resolve and secret-fill applies.
+func parseDotenv(repoDir string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(readFile(findFirst(repoDir, ".env.example", ".env.sample")), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		if i := strings.IndexByte(line, '='); i > 0 {
+			k := strings.TrimSpace(line[:i])
+			v := strings.Trim(strings.TrimSpace(line[i+1:]), `"'`)
+			if k != "" {
+				out[k] = v
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func scalarOrJoin(n yaml.Node) string {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value
+	}
+	var list []string
+	if n.Decode(&list) == nil {
+		return strings.Join(list, " ")
+	}
+	return ""
+}
+
+func nodeToStrings(n yaml.Node) []string {
+	var list []string
+	if n.Decode(&list) == nil {
+		return list
+	}
+	var m map[string]any
+	if n.Decode(&m) == nil {
+		out := make([]string, 0, len(m))
+		for k := range m {
+			out = append(out, k)
+		}
+		return out
+	}
+	return nil
+}
+
+// filterDeps drops compose dependencies that map to managed deps and resolves to
+// dns-safe names of app services that survived.
+func filterDeps(deps []string, all map[string]composeSvc) []string {
+	var out []string
+	for _, dep := range deps {
+		if cs, ok := all[dep]; ok && dbRole(cs.Image) != "" {
+			continue // managed dep — referenced via env, not depends_on here
+		}
+		out = append(out, dnsName(dep))
+	}
+	return out
+}
+
+func findFirst(dir string, names ...string) string {
+	for _, n := range names {
+		if p := filepath.Join(dir, n); fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func readAny(dir string, names ...string) string {
+	var b strings.Builder
+	for _, n := range names {
+		b.WriteString(readFile(filepath.Join(dir, n)))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func readFile(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
+func globExists(dir, pattern string) bool {
+	m, _ := filepath.Glob(filepath.Join(dir, pattern))
+	return len(m) > 0
+}
+
+func dedup(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func sortedKeys(m map[string]composeSvc) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	// simple insertion sort to avoid importing sort for one use is overkill; use sort.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j-1] > out[j]; j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	return out
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func noteCount(n int, what string) string {
+	if n == 1 {
+		return "Detected a " + what + " — added a build service."
+	}
+	return "Detected " + itoa(n) + " " + what + "s — added a build service each (monorepo)."
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}

@@ -6,36 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/composegen"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
-
-// envOrder ranks environment names by their conventional deployment-pipeline
-// position so cards render in a stable, intuitive order (dev → stage → prod)
-// rather than the random order of a Go map. Unknown names sort last,
-// alphabetically.
-func envRank(name string) int {
-	switch strings.ToLower(name) {
-	case "dev", "develop", "development":
-		return 0
-	case "test", "testing":
-		return 1
-	case "qa":
-		return 2
-	case "stage", "staging":
-		return 3
-	case "uat":
-		return 4
-	case "preprod", "pre-prod", "preproduction":
-		return 5
-	case "prod", "production", "live":
-		return 6
-	default:
-		return 100
-	}
-}
 
 type Version struct {
 	Major int `json:"major"`
@@ -58,6 +34,19 @@ type Project struct {
 	// at creation so the UI can show where it lives without a runtime docker
 	// inspect. May be empty for projects created before this was added.
 	ProjectRootDir string `json:"project_root_dir,omitempty"`
+	// EnvOrder is the explicit deploy-tier order of this project's environments
+	// (low→high). Empty ⇒ order auto-guessed from env names. See internal/envorder.
+	EnvOrder []string `json:"env_order,omitempty"`
+	// BuildPipelineID, when >0, makes the project's Build button run that pipeline
+	// instead of a plain build (lets ops override the default build behaviour).
+	BuildPipelineID int64 `json:"build_pipeline_id,omitempty"`
+	// Managed dependencies are project-level (consistent across envs). The frontend
+	// reads these to render the dependency picker + derived service rows. Only the
+	// per-env DBExternal (host-port exposure) lives on EnvConfig.
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the
@@ -86,6 +75,13 @@ type EnvConfig struct {
 	Backend         string                      `json:"backend"`
 	Frontend        string                      `json:"frontend"`
 	Database        string                      `json:"database"`
+	// DBExternal is the per-env toggle that publishes the managed DB's port on the
+	// host (expose on dev, keep prod private). The engine/version live project-level.
+	DBExternal      bool                        `json:"db_external,omitempty"`
+	// RedisEnabled/GarageEnabled are the legacy per-env managed-dep toggles, kept so
+	// pre-move configs still resolve the derived service rows (fallback).
+	RedisEnabled    bool                        `json:"redis_enabled,omitempty"`
+	GarageEnabled   bool                        `json:"garage_enabled,omitempty"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides,omitempty"`
 	// SecretKeys are env-var names flagged as secrets (Phase 8). For swarm
 	// deployments their values live in Docker Swarm secrets (encrypted at rest),
@@ -115,6 +111,67 @@ type Config struct {
 	Project      Project              `json:"project"`
 	Environments map[string]EnvConfig `json:"environments"`
 	Images       []ConfigImage        `json:"images"`
+	Services     []ConfigService      `json:"services"`
+}
+
+// managedDepServices returns synthetic (managed) service rows for the project's
+// active managed dependencies, so the DB/Redis/Garage appear in the Services list.
+// Engine/redis/garage are project-level; for configs written before the move they
+// fall back to any environment's legacy per-env value. Rows are skipped when a real
+// service of the same name already exists (e.g. an image-stack postgres).
+func managedDepServices(c *Config) []ConfigService {
+	have := map[string]bool{}
+	for _, s := range c.Services {
+		have[s.Name] = true
+	}
+	engine := c.Project.Database
+	redis := c.Project.Redis
+	garage := c.Project.Garage
+	for _, ec := range c.Environments { // legacy per-env fallback
+		if engine == "" && ec.Database != "" && ec.Database != "none" {
+			engine = ec.Database
+		}
+		redis = redis || ec.RedisEnabled
+		garage = garage || ec.GarageEnabled
+	}
+	var out []ConfigService
+	add := func(name, kind string) {
+		if name == "" || name == "none" || have[name] {
+			return
+		}
+		have[name] = true
+		out = append(out, ConfigService{Name: name, Managed: true, Engine: kind})
+	}
+	if engine != "" && engine != "none" {
+		add(engine, engine) // postgres | mysql | mariadb
+	}
+	if redis {
+		add("redis", "redis")
+	}
+	if garage {
+		add("garage", "garage")
+		add("garage_webui", "garage")
+	}
+	return out
+}
+
+// ConfigService is the read view of a unified services[] entry needed for
+// env-access resolution: which service is the web entry and its published port.
+type ConfigService struct {
+	Name      string `json:"name"`
+	WebRouted bool   `json:"web_routed"`
+	Subdomain string `json:"subdomain"`
+	HostPort  string `json:"host_port"`
+	// Build is the raw build block (passed through) so the UI can tell which
+	// services build images — drives whether Build / Release-pipeline show. Absent
+	// for pull-only (image / database) services.
+	Build json.RawMessage `json:"build,omitempty"`
+	// Managed marks a synthetic row derived from a project-level managed dependency
+	// (database/redis/garage). The UI lists these alongside real services but hides
+	// the delete affordance — they're removed by unchecking the dependency. Until the
+	// full service-graph fold, these are NOT persisted to config.json services[].
+	Managed bool   `json:"managed,omitempty"`
+	Engine  string `json:"engine,omitempty"` // managed rows: the dependency kind (postgres|redis|garage|…)
 }
 
 // ConfigImage is the read-only view of an image service as stored in config.json.
@@ -132,9 +189,10 @@ type ConfigImage struct {
 // EnvAccessInfo holds resolved (${VAR}-substituted) access values for one environment.
 // Computed server-side from config.json + .env so the frontend never has to parse raw strings.
 type EnvAccessInfo struct {
-	Domain    string            `json:"domain"`     // resolved domain, empty if not configured
-	HTTPPort  string            `json:"http_port"`  // resolved http_port for custom stacks
-	Images    []ImageAccessInfo `json:"images"`     // per-service resolved ports
+	Domain   string            `json:"domain"`        // resolved domain, empty if not configured
+	URL      string            `json:"url,omitempty"` // full Traefik route URL (incl. auto-derived); empty when host-bound
+	HTTPPort string            `json:"http_port"`     // resolved http_port for custom stacks
+	Images   []ImageAccessInfo `json:"images"`        // per-service resolved ports
 }
 
 // ImageAccessInfo holds the resolved host port and link ports for one image service.
@@ -241,7 +299,7 @@ func ListProjects(workspacesDir, workspaceName string) ([]Workspace, error) {
 		if !e.IsDir() {
 			continue
 		}
-		ws, err := load(workspacesDir, workspaceName, e.Name())
+		ws, err := load(workspacesDir, workspaceName, e.Name(), "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "workspace: skipping %s/%s: %v\n", workspaceName, e.Name(), err)
 			continue
@@ -269,11 +327,14 @@ func List(workspacesDir string) ([]Workspace, error) {
 }
 
 // Get returns a single project within a workspace.
-func Get(workspacesDir, workspaceName, project string) (Workspace, error) {
-	return load(workspacesDir, workspaceName, project)
+// Get loads a project's workspace detail. baseDomain (the workspace apps base
+// domain) is used to resolve each env's Traefik route URL for display; pass ""
+// when routing URLs aren't needed.
+func Get(workspacesDir, workspaceName, project, baseDomain string) (Workspace, error) {
+	return load(workspacesDir, workspaceName, project, baseDomain)
 }
 
-func load(workspacesDir, workspaceName, name string) (Workspace, error) {
+func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, error) {
 	wsPath := filepath.Join(workspacesDir, workspaceName, "projects", name)
 	cfgPath := filepath.Join(wsPath, "config.json")
 
@@ -286,6 +347,11 @@ func load(workspacesDir, workspaceName, name string) (Workspace, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Workspace{}, fmt.Errorf("parse config.json: %w", err)
 	}
+	// Surface project-level managed dependencies as synthetic (managed) service rows
+	// so the DB/Redis/Garage appear in the Services list. They are NOT written back to
+	// config.json — removal is done by unchecking the dependency. Until the full
+	// service-graph fold (backlog), this derived view is how deps "are" services.
+	cfg.Services = append(cfg.Services, managedDepServices(&cfg)...)
 
 	// Collect environment names: union of envs/ subdirectories on disk AND
 	// keys in config.json environments. This ensures a newly-added environment
@@ -303,19 +369,14 @@ func load(workspacesDir, workspaceName, name string) (Workspace, error) {
 	for envName := range cfg.Environments {
 		envSet[envName] = true
 	}
-	var envs []string
+	var rawEnvs []string
 	for k := range envSet {
-		envs = append(envs, k)
+		rawEnvs = append(rawEnvs, k)
 	}
-	// Stable, pipeline-style order (dev → stage → prod → others) so cards don't
-	// shuffle between loads.
-	sort.Slice(envs, func(i, j int) bool {
-		ri, rj := envRank(envs[i]), envRank(envs[j])
-		if ri != rj {
-			return ri < rj
-		}
-		return envs[i] < envs[j]
-	})
+	// Effective deploy-tier order: explicit project order, else auto-guess from
+	// env names (DefaultTiers here; GetWorkspace refines with the workspace's
+	// env_tier_names setting). Keeps cards from shuffling between loads.
+	envs := envorder.Resolve(rawEnvs, cfg.Project.EnvOrder, nil)
 
 	// Build per-environment resolved access info.
 	// Best-effort: missing .env files result in empty/raw values, never an error.
@@ -329,6 +390,20 @@ func load(workspacesDir, workspaceName, name string) (Workspace, error) {
 		if ec, ok := cfg.Environments[envName]; ok {
 			info.Domain   = resolve(ec.Domain)
 			info.HTTPPort = resolve(fmt.Sprintf("%v", ec.HTTPPort))
+			// An apex web service that sets its own host_port publishes on THAT port
+			// (composegen prefers it over the env HTTP port), so the access URL must
+			// use it too. Mirrors emitServicePorts' "host_port wins" rule.
+			for _, svc := range cfg.Services {
+				if svc.WebRouted && svc.Subdomain == "" && svc.HostPort != "" {
+					info.HTTPPort = resolve(svc.HostPort)
+					break
+				}
+			}
+			// Full Traefik route URL — incl. the auto-derived {prefix}-{env}.
+			// {base|localhost} when Traefik is on and no explicit domain is set.
+			if url, routed := composegen.EnvRouteURL(data, envName, baseDomain); routed {
+				info.URL = url
+			}
 		}
 
 		for _, img := range cfg.Images {

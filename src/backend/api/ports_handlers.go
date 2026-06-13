@@ -142,13 +142,30 @@ func (h *Handler) portsInUseForHost(hostID int64, excludeWs string) map[int]stri
 	return inUse
 }
 
-// wsPortConfig is the minimal slice of config.json needed for port checks.
+// flexPort parses a host port that config.json may store as a string ("3000")
+// or a number (3000); non-numeric values (blank, ${VAR}, ranges) become 0.
+type flexPort int
+
+func (f *flexPort) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+		*f = flexPort(n)
+	} else {
+		*f = 0
+	}
+	return nil
+}
+
+// wsPortConfig is the minimal slice of config.json needed for port checks. Host
+// ports live on the unified services[] graph (the legacy images[] field was
+// removed in the 2a cutover — reading it here is what previously broke
+// cross-project conflict detection).
 type wsPortConfig struct {
 	Environments map[string]json.RawMessage `json:"environments"`
-	Images       []struct {
-		HostPort   string   `json:"host_port"`
+	Services     []struct {
+		HostPort   flexPort `json:"host_port"`
 		ExtraPorts []string `json:"extra_ports"`
-	} `json:"images"`
+	} `json:"services"`
 }
 
 func readWsPortConfig(path string) (*wsPortConfig, error) {
@@ -166,11 +183,11 @@ func readWsPortConfig(path string) (*wsPortConfig, error) {
 // hostPorts returns every declared host port (host_port + extra_ports' host side).
 func (c *wsPortConfig) hostPorts() []int {
 	out := []int{}
-	for _, img := range c.Images {
-		if p, e := strconv.Atoi(strings.TrimSpace(img.HostPort)); e == nil {
-			out = append(out, p)
+	for _, svc := range c.Services {
+		if svc.HostPort > 0 {
+			out = append(out, int(svc.HostPort))
 		}
-		for _, ep := range img.ExtraPorts {
+		for _, ep := range svc.ExtraPorts {
 			if p, e := strconv.Atoi(strings.TrimSpace(strings.SplitN(ep, ":", 2)[0])); e == nil {
 				out = append(out, p)
 			}

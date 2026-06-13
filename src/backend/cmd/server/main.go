@@ -18,6 +18,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/metrics"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/pipelines"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
@@ -37,6 +38,13 @@ func main() {
 	database, err := db.Open(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("db: %v", err)
+	}
+
+	// Any pipeline run left "running" was stranded by a previous shutdown (its
+	// goroutine died before finalizing). Sweep them to cancelled so the UI never
+	// shows a stranded in-flight run.
+	if n, rerr := pipelines.ReconcileRunning(database, time.Now().UnixMilli()); rerr == nil && n > 0 {
+		log.Printf("pipelines: reconciled %d orphaned running run(s) → cancelled", n)
 	}
 
 	// ── Services ──────────────────────────────────────────────────────────────
@@ -265,6 +273,8 @@ func main() {
 			switch {
 			case r.Method == "GET" && id == "":
 				handler.ListWorkspaceRegistries(w, r)
+			case r.Method == "POST" && id == "test-credentials":
+				handler.TestRegistryCredentials(w, r)
 			case r.Method == "POST" && id == "":
 				handler.CreateWorkspaceRegistry(w, r)
 			case r.Method == "POST" && sub == "test":
@@ -766,7 +776,12 @@ func main() {
 	// Phase 9: deployment pipelines (project-scoped). REST CRUD + run history are
 	// JWT-authed via middleware (per-project RBAC enforced in the handlers); the run
 	// endpoint is a WebSocket authed by a token in its first message (like /action).
+	// Release-pipeline #4: explicit env deploy-tier order (drives auto-seeded pipelines).
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.GetEnvOrder)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.PutEnvOrder)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/build-pipeline", authSvc.Middleware(http.HandlerFunc(handler.SetBuildPipeline)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.ListPipelines)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/suggest", authSvc.Middleware(http.HandlerFunc(handler.SuggestPipeline)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.CreatePipeline)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.UpdatePipeline)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipeline)))
@@ -774,9 +789,10 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve", authSvc.Middleware(http.HandlerFunc(handler.ApprovePipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject", authSvc.Middleware(http.HandlerFunc(handler.RejectPipelineRun)))
-	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
-		handler.RunPipeline(w, r)
-	})
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/cancel", authSvc.Middleware(http.HandlerFunc(handler.CancelPipelineRun)))
+	// POST triggers a run in the background and returns its id; the UI then opens a
+	// poll-based log/status view bound to that run (closeable + reopenable).
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", authSvc.Middleware(http.HandlerFunc(handler.StartPipelineRun)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineWebhooks)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePipelineWebhook)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks/{whId}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipelineWebhook)))
@@ -790,6 +806,19 @@ func main() {
 	// Phase 9e: per-env deploy history + rollback (authed; per-project RBAC inside).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/rollback", authSvc.Middleware(http.HandlerFunc(handler.RollbackEnv)))
+	// Build-image lifecycle (#): per-env pointer status + catch-up to latest.
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database", authSvc.Middleware(http.HandlerFunc(handler.GetDatabaseInfo)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseSchemas)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseSchema)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/image-status", authSvc.Middleware(http.HandlerFunc(handler.GetImageStatus)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/track-latest", authSvc.Middleware(http.HandlerFunc(handler.TrackLatest)))
+
+	// Phase 2b: repo scanner — clone + static-detect a stack into a draft service graph.
+	mux.Handle("POST /api/scan-repo", authSvc.Middleware(http.HandlerFunc(handler.ScanRepo)))
+	// Stack blueprints for the no-repo "start from a template" picker.
+	mux.Handle("GET /api/blueprints", authSvc.Middleware(http.HandlerFunc(handler.Blueprints)))
+	// Managed database catalog (engines + selectable versions) for the DB picker.
+	mux.Handle("GET /api/databases", authSvc.Middleware(http.HandlerFunc(handler.Databases)))
 
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {

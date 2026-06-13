@@ -23,7 +23,7 @@ import (
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
-func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, out io.Writer) error {
+func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -62,7 +62,10 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	}
 
 	writeCompose := func() error {
-		content, err := composegen.Generate(data, env)
+		// Read the just-written .env so services that set env_file_mount get it
+		// embedded as a compose config (best-effort; missing ⇒ no mount).
+		envContent, _ := os.ReadFile(envFile)
+		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
 		if err != nil {
 			return fmt.Errorf("generate compose: %w", err)
 		}
@@ -73,56 +76,50 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		return nil
 	}
 
-	// ── Image stack: only .env + compose ─────────────────────────────────────────
-	if cfg.ProjectType() == "image" {
-		if err := writeCompose(); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "Environment '%s' bootstrapped (image stack)\n", env)
-		return nil
-	}
-
-	// ── Custom stack ──────────────────────────────────────────────────────────────
 	project := cfg.Project.Name
 	prefix := cfg.Project.Prefix() + "_" + env
 
-	// 2. Backend Dockerfile + .dockerignore
-	beTmpl := filepath.Join(templatesDir, "dockerfiles", e.Backend)
-	if !isDir(beTmpl) {
-		return fmt.Errorf("no Dockerfile template for backend %q: %s", e.Backend, beTmpl)
-	}
-	beOut := filepath.Join(outDir, "backend")
-	if err := installDockerfile(beTmpl, beOut, env); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "  backend Dockerfile (%s) installed\n", e.Backend)
-
-	// 3. Frontend Dockerfile (if enabled)
-	if e.FrontendEnabled {
-		feTmpl := filepath.Join(templatesDir, "dockerfiles", e.Frontend)
-		if !isDir(feTmpl) {
-			return fmt.Errorf("no Dockerfile template for frontend %q: %s", e.Frontend, feTmpl)
-		}
-		feOut := filepath.Join(outDir, "frontend")
-		if err := installDockerfile(feTmpl, feOut, env); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  frontend Dockerfile (%s) installed\n", e.Frontend)
-	}
-
-	// 4. Nginx config
-	if err := renderNginx(templatesDir, outDir, e.Backend, e.Domain, prefix, project, env); err != nil {
-		return err
-	}
-	fmt.Fprintf(out, "  nginx.conf rendered\n")
-
-	// 5. docker-compose.yml
+	// 2. docker-compose.yml
 	if err := writeCompose(); err != nil {
 		return err
 	}
 
-	// 6. garage.toml (if enabled)
-	if e.GarageEnabled {
+	// 3. A Dockerfile per build service, scaffolded from its blueprint template —
+	//    UNLESS the project has a source repo, in which case the repo's own
+	//    Dockerfiles are used (cloned into envs/{env}/_src at build time). A build
+	//    service with no template and no repo expects a user-supplied Dockerfile.
+	if cfg.SourceRepo() == "" {
+		for _, svc := range cfg.BuildServices() {
+			tmpl := svc.Build.Template
+			if tmpl == "" {
+				continue
+			}
+			tmplDir := filepath.Join(templatesDir, "dockerfiles", tmpl)
+			if !isDir(tmplDir) {
+				return fmt.Errorf("no Dockerfile template %q for service %q: %s", tmpl, svc.Name, tmplDir)
+			}
+			if err := installDockerfile(tmplDir, filepath.Join(outDir, svc.ContextDir()), env); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "  %s Dockerfile (%s) installed\n", svc.Name, tmpl)
+		}
+	} else {
+		fmt.Fprintf(out, "  source repo configured — Dockerfiles come from the repo at build time\n")
+	}
+
+	// 4. nginx.conf for any service that fronts the app (config_template set).
+	for _, svc := range cfg.Services {
+		if svc.ConfigTemplate == "" {
+			continue
+		}
+		if err := renderNginx(templatesDir, outDir, svc.ConfigTemplate, e.Domain, prefix, project, env); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  nginx.conf rendered (%s)\n", svc.ConfigTemplate)
+	}
+
+	// 5. garage.toml (if the managed Garage dependency is enabled)
+	if cfg.EffGarage(e) {
 		if err := os.WriteFile(filepath.Join(outDir, "garage.toml"), []byte(garageTOML(e.Domain)), 0o644); err != nil {
 			return err
 		}

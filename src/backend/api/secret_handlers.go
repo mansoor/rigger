@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 )
@@ -50,7 +51,7 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, wsName, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

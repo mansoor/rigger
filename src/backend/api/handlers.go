@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,13 +22,16 @@ import (
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 	"github.com/gorilla/websocket"
 )
@@ -89,6 +93,12 @@ type Handler struct {
 	alertBroker   *alerts.Broker
 	notifier      *notify.Dispatcher
 	cryptoKey     []byte // derived from JWT secret; encrypts host SSH keys (Phase 7)
+
+	// Live pipeline runs: runID → cancel func, so a Cancel request can kill an
+	// in-flight run's docker process. Populated for the lifetime of each run's
+	// background goroutine; guarded by runMu.
+	runMu      sync.Mutex
+	runCancels map[int64]context.CancelFunc
 }
 
 func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remoteWorkspacesDir, templatesDir, dataDir string, imgCache *imagecheck.Cache, alertBroker *alerts.Broker, notifier *notify.Dispatcher, jwtSecret string) *Handler {
@@ -105,6 +115,7 @@ func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remot
 		alertBroker:   alertBroker,
 		notifier:      notifier,
 		cryptoKey:     key,
+		runCancels:    map[int64]context.CancelFunc{},
 	}
 }
 
@@ -324,6 +335,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// gorilla/websocket panics on concurrent writes (and a panic in the spawned
+	// output goroutine below isn't recovered by net/http — it would crash the whole
+	// process). Serialize ALL writes to this conn through safeWrite.
+	var wsMu sync.Mutex
+	safeWrite := func(b []byte) {
+		wsMu.Lock()
+		conn.WriteMessage(websocket.TextMessage, b) //nolint:errcheck
+		wsMu.Unlock()
+	}
+
 	// First message: { "token": "...", "workspace": { ...CreateRequest... } }
 	var msg struct {
 		Token string                  `json:"token"`
@@ -340,7 +361,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	send := func(s string) { conn.WriteMessage(websocket.TextMessage, []byte(s)) } //nolint:errcheck
+	send := func(s string) { safeWrite([]byte(s)) }
 
 	wsName := msg.Workspace.Workspace
 
@@ -415,7 +436,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, readErr := pr.Read(buf)
 			if n > 0 {
-				conn.WriteMessage(websocket.TextMessage, buf[:n]) //nolint:errcheck
+				safeWrite(buf[:n])
 			}
 			if readErr != nil {
 				break
@@ -899,10 +920,10 @@ func configEnvDeployments(data []byte) map[string]string {
 }
 
 // PUT /api/workspaces/{name}/config  — writes config.json and optionally re-bootstraps
-// processNameOK reports whether a worker/process name is a safe Docker service
+// serviceNameOK reports whether a service name is a safe Docker service/alias
 // suffix: 1–30 chars of lowercase letters, digits or hyphens, not starting or
 // ending with a hyphen.
-func processNameOK(s string) bool {
+func serviceNameOK(s string) bool {
 	if len(s) == 0 || len(s) > 30 || s[0] == '-' || s[len(s)-1] == '-' {
 		return false
 	}
@@ -914,48 +935,162 @@ func processNameOK(s string) bool {
 	return true
 }
 
-// validateConfigProcesses checks the custom-app extra processes (queue workers,
-// scheduler, etc.) in a config.json payload. Returns a user-facing message on the
-// first problem, or "" if all good. Names must be dns-safe, unique per env, and
-// not collide with the fixed service suffixes; commands required; a frontend
-// source needs the frontend enabled.
-func validateConfigProcesses(content []byte) string {
-	reserved := map[string]bool{
-		"backend": true, "frontend": true, "nginx": true, "postgres": true,
-		"mysql": true, "redis": true, "garage": true, "garage_webui": true,
+// buildArgKeyOK reports whether s is a valid Docker build-arg name: a C-style
+// identifier (letters, digits, underscores; not starting with a digit). This is
+// the safe subset that maps cleanly to a Dockerfile ARG.
+func buildArgKeyOK(s string) bool {
+	if s == "" {
+		return false
 	}
+	for i, c := range s {
+		isLetter := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 && !isLetter {
+			return false
+		}
+		if !isLetter && !isDigit {
+			return false
+		}
+	}
+	return true
+}
+
+// validateConfigServices checks the unified services[] graph in a config.json
+// payload. Returns a user-facing message on the first problem, or "" if all good:
+// names dns-safe + unique + not colliding with a managed dependency; exactly one
+// source per service; image_from/depends_on must reference a real service (or, for
+// depends_on, an enabled managed dependency).
+func validateConfigServices(content []byte) string {
+	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "garage": true, "garage_webui": true}
 	var doc struct {
+		Services []struct {
+			Name  string `json:"name"`
+			Build *struct {
+				Args map[string]string `json:"args"`
+			} `json:"build"`
+			Image        string   `json:"image"`
+			ImageFrom    string   `json:"image_from"`
+			DependsOn    []string `json:"depends_on"`
+			EnvFileMount string   `json:"env_file_mount"`
+			WebRouted    bool     `json:"web_routed"`
+			Subdomain    string   `json:"subdomain"`
+		} `json:"services"`
+		// Managed deps are project-level now; the per-env fields are still read as a
+		// fallback for configs written before the move.
+		Project struct {
+			Database string `json:"database"`
+			Redis    bool   `json:"redis_enabled"`
+			Garage   bool   `json:"garage_enabled"`
+		} `json:"project"`
 		Environments map[string]struct {
-			FrontendEnabled bool `json:"frontend_enabled"`
-			Processes       []struct {
-				Name    string `json:"name"`
-				Command string `json:"command"`
-				Source  string `json:"source"`
-			} `json:"processes"`
+			Database      string `json:"database"`
+			RedisEnabled  bool   `json:"redis_enabled"`
+			GarageEnabled bool   `json:"garage_enabled"`
 		} `json:"environments"`
 	}
 	if err := json.Unmarshal(content, &doc); err != nil {
 		return "" // malformed JSON is reported by the caller's own parse check
 	}
-	for env, ec := range doc.Environments {
-		seen := map[string]bool{}
-		for _, p := range ec.Processes {
-			switch {
-			case p.Name == "" || p.Command == "":
-				return fmt.Sprintf("environment %q: each process needs a name and a command", env)
-			case !processNameOK(p.Name):
-				return fmt.Sprintf("environment %q: process name %q must be 1–30 chars of lowercase letters, digits or hyphens", env, p.Name)
-			case reserved[p.Name]:
-				return fmt.Sprintf("environment %q: process name %q is reserved for a built-in service", env, p.Name)
-			case seen[p.Name]:
-				return fmt.Sprintf("environment %q: duplicate process name %q", env, p.Name)
-			case p.Source != "" && p.Source != "backend" && p.Source != "frontend":
-				return fmt.Sprintf("environment %q: process %q source must be \"backend\" or \"frontend\"", env, p.Name)
-			case p.Source == "frontend" && !ec.FrontendEnabled:
-				return fmt.Sprintf("environment %q: process %q uses the frontend image but the frontend is disabled", env, p.Name)
-			}
-			seen[p.Name] = true
+	names := map[string]bool{}
+	for _, s := range doc.Services {
+		switch {
+		case s.Name == "":
+			return "each service needs a name"
+		case !serviceNameOK(s.Name):
+			return fmt.Sprintf("service name %q must be 1–30 chars of lowercase letters, digits or hyphens", s.Name)
+		case reserved[s.Name]:
+			return fmt.Sprintf("service name %q is reserved for a managed dependency", s.Name)
+		case names[s.Name]:
+			return fmt.Sprintf("duplicate service name %q", s.Name)
 		}
+		sources := 0
+		if s.Build != nil {
+			sources++
+		}
+		if s.Image != "" {
+			sources++
+		}
+		if s.ImageFrom != "" {
+			sources++
+		}
+		if sources != 1 {
+			return fmt.Sprintf("service %q must have exactly one source (build, image, or image_from)", s.Name)
+		}
+		if s.Build != nil {
+			for k := range s.Build.Args {
+				if !buildArgKeyOK(k) {
+					return fmt.Sprintf("service %q build arg %q must be a valid identifier (letters, digits, underscores; not starting with a digit)", s.Name, k)
+				}
+			}
+		}
+		if m := s.EnvFileMount; m != "" && !strings.HasPrefix(m, "/") {
+			return fmt.Sprintf("service %q .env mount path %q must be absolute (e.g. /var/www/html/.env)", s.Name, m)
+		}
+		names[s.Name] = true
+	}
+	// managedDep reports whether name is an enabled managed dependency. Deps are
+	// project-level; the per-env fields are also consulted for back-compat.
+	managedDep := func(name string) bool {
+		switch name {
+		case "postgres", "mysql", "mariadb":
+			if doc.Project.Database == name {
+				return true
+			}
+		case "redis":
+			if doc.Project.Redis {
+				return true
+			}
+		case "garage":
+			if doc.Project.Garage {
+				return true
+			}
+		}
+		for _, ec := range doc.Environments {
+			switch name {
+			case "postgres", "mysql", "mariadb":
+				if ec.Database == name {
+					return true
+				}
+			case "redis":
+				if ec.RedisEnabled {
+					return true
+				}
+			case "garage":
+				if ec.GarageEnabled {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, s := range doc.Services {
+		if s.ImageFrom != "" && !names[s.ImageFrom] {
+			return fmt.Sprintf("service %q reuses the image of unknown service %q", s.Name, s.ImageFrom)
+		}
+		for _, d := range s.DependsOn {
+			if d == "" || names[d] || managedDep(d) {
+				continue
+			}
+			return fmt.Sprintf("service %q depends_on unknown service %q", s.Name, d)
+		}
+	}
+	// Web-entry host collisions: two web_routed services with the same subdomain
+	// (empty = apex) would emit conflicting Traefik routers, so one silently wins.
+	// Multiple web entries are fine as long as each claims a distinct host.
+	seenHost := map[string]string{} // subdomain → first service that claimed it
+	for _, s := range doc.Services {
+		if !s.WebRouted {
+			continue
+		}
+		sub := strings.TrimSpace(s.Subdomain)
+		if prev, ok := seenHost[sub]; ok {
+			host := "the apex domain"
+			if sub != "" {
+				host = fmt.Sprintf("subdomain %q", sub)
+			}
+			return fmt.Sprintf("services %q and %q are both web entries on %s — give one a distinct subdomain", prev, s.Name, host)
+		}
+		seenHost[sub] = s.Name
 	}
 	return ""
 }
@@ -977,7 +1112,7 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	if msg := validateConfigProcesses([]byte(body.Content)); msg != "" {
+	if msg := validateConfigServices([]byte(body.Content)); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
@@ -1075,29 +1210,44 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// regenCompose runs compose-gen.sh for every environment defined in configJSON.
-// Called as a goroutine after PutConfig writes config.json.
+// regenCompose regenerates docker-compose.yml for every environment defined in
+// configJSON, AND reconciles each env's .env image pointers to the project's current
+// registry. Called as a goroutine after PutConfig writes config.json.
 func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
-	// Parse environment names from the saved config
-	var cfg struct {
-		Environments map[string]json.RawMessage `json:"environments"`
-	}
-	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+	cfg, err := wsconfig.Parse([]byte(configJSON))
+	if err != nil {
 		return
 	}
 
 	wsRoot := wspath.ProjectDir(h.workspacesDir, workspaceName, project)
+	baseDomain := settings.WorkspaceBaseDomain(h.db, workspaceName)
+	prefix, registry := cfg.Project.Prefix(), cfg.Project.Registry
 
 	for envName := range cfg.Environments {
-		outPath := filepath.Join(wsRoot, "envs", envName, "docker-compose.yml")
+		envDir := filepath.Join(wsRoot, "envs", envName)
+		envPath := filepath.Join(envDir, ".env")
+		envContent, _ := os.ReadFile(envPath)
+
+		// Reconcile the .env REGISTRY + {SVC}_IMAGE pointers to the project's current
+		// registry, so changing (or clearing) the registry in Edit Project actually
+		// takes effect. Without this, a stale "{SVC}_IMAGE=oldregistry/…" kept compose
+		// pulling the wrong image (e.g. a denied ghcr pull) even after going local.
+		if rebased, changed := envgen.RebaseImageRegistry(envContent, registry, prefix); changed {
+			if wErr := os.WriteFile(envPath, rebased, 0o600); wErr != nil {
+				fmt.Fprintf(os.Stderr, "envgen: rebase .env for %s/%s: %v\n", workspaceName, envName, wErr)
+			} else {
+				envContent = rebased
+			}
+		}
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.Generate([]byte(configJSON), envName)
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
 		}
+		outPath := filepath.Join(envDir, "docker-compose.yml")
 		if mkErr := os.MkdirAll(filepath.Dir(outPath), 0o755); mkErr != nil {
 			fmt.Fprintf(os.Stderr, "composegen: mkdir for %s/%s: %v\n", workspaceName, envName, mkErr)
 			continue
@@ -1426,10 +1576,16 @@ func (h *Handler) resourcePrefix(wsName, name string) string {
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	ws, err := workspace.Get(h.workspacesDir, wsName, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
+	}
+	// Refine env order with the workspace's configured tier names (workspace.Get
+	// used DefaultTiers); explicit project order still wins inside Resolve.
+	if wsSettings, _ := settings.GetWorkspaceSettings(h.db, wsName); wsSettings != nil {
+		tiers := envorder.SplitTierNames(wsSettings["env_tier_names"])
+		ws.Envs = envorder.Resolve(ws.Envs, ws.Config.Project.EnvOrder, tiers)
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)
@@ -1502,7 +1658,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		body.Updates = map[string]string{}
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, wsName, name)
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -1593,8 +1749,11 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	// Regenerate this env's compose so the secrets wiring (or its removal) is
 	// reflected immediately, without waiting for a Refresh.
 	if cfgData, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name)); rerr == nil {
-		if content, gerr := composegen.Generate(cfgData, env); gerr == nil {
-			outPath := filepath.Join(wspath.EnvDir(h.workspacesDir, wsName, name, env), "docker-compose.yml")
+		envDir := wspath.EnvDir(h.workspacesDir, wsName, name, env)
+		envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), EnvFile: string(envContent)}
+		if content, gerr := composegen.GenerateRouted(cfgData, env, ro); gerr == nil {
+			outPath := filepath.Join(envDir, "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
 		}
 	}

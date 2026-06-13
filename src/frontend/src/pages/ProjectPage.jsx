@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices } from '../lib/api'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun } from '../lib/api'
+import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -10,6 +11,7 @@ import TerminalModal from '../components/TerminalModal'
 import ContainerInfoModal from '../components/ContainerInfoModal'
 import FileBrowserModal from '../components/FileBrowserModal'
 import RollbackModal from '../components/RollbackModal'
+import DatabaseInfoModal from '../components/DatabaseInfoModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -101,12 +103,15 @@ function envAccess(cfg, ws, envName) {
   const access   = ws?.env_access?.[envName] || {}
   const domain   = access.domain   || cfg?.domain   || ''
   const httpPort = access.http_port || String(cfg?.http_port || '')
-  const images   = (access.images  || []).length > 0 ? access.images : (ws?.config?.images || [])
+  const images   = (access.images  || []).length > 0 ? access.images : (ws?.config?.services || [])
 
-  const domainUrl = domain ? `${ssl ? 'https' : 'http'}://${domain}` : null
+  // access.url is the server-resolved Traefik route URL, including the
+  // auto-derived {prefix}-{env}.{base|localhost} when no explicit domain is set.
+  const routedUrl = access.url || (domain ? `${ssl ? 'https' : 'http'}://${domain}` : null)
+  const domainUrl = routedUrl
 
   if (traefik) {
-    if (domain) return { url: domainUrl, port: null, links: [], viaTraefik: true, domainUrl }
+    if (routedUrl) return { url: routedUrl, port: null, links: [], viaTraefik: true, domainUrl: routedUrl }
     return empty
   }
 
@@ -191,6 +196,7 @@ const EI = {
   terminal:<><path d="M6 7l5 5-5 5" /><path d="M13 17h6" /></>,
   backup:  <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" /></>,
   rollback:<><path d="M3 7v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /></>,
+  database:<><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
 }
 function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
   return (
@@ -312,8 +318,10 @@ function BackupStatsLine({ name, envName }) {
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   const { workspace } = useParams() // parent-tier workspace (from the route)
-  // Use server-resolved domain (${VAR} already substituted) for display
-  const domain     = ws?.env_access?.[envName]?.domain || cfg?.domain || '—'
+  // Use server-resolved domain (${VAR} already substituted) for display; fall
+  // back to the auto-derived route host when there's no explicit domain.
+  const _ea        = ws?.env_access?.[envName]
+  const domain     = _ea?.domain || (_ea?.url ? _ea.url.replace(/^https?:\/\//, '') : '') || cfg?.domain || '—'
   const gitBranch  = cfg?.git?.branch || ''
   const deployment = cfg?.deployment || 'compose'
   const isImage    = ws?.config?.project?.type === 'image'
@@ -337,6 +345,29 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     refetchInterval: 30_000,
     retry: false,
   })
+
+  // Build-image pointer status: pinned (held to an older tag) / new-build-ready
+  // (a newer version was built but not yet deployed) / up-to-date. Custom only.
+  // (`confirm` is declared later in this component for destructive actions.)
+  const { data: imgStatus } = useQuery({
+    queryKey: ['imagestatus', workspace, name, envName],
+    queryFn: () => fetchImageStatus(workspace, name, envName),
+    enabled: !isImage,
+    retry: false,
+  })
+  const newBuildReady = !!imgStatus && !imgStatus.pinned && imgStatus.deployed_version && imgStatus.deployed_version !== imgStatus.version
+  const trackMut = useMutation({
+    mutationFn: () => trackLatest(workspace, name, envName),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] }); qc.invalidateQueries({ queryKey: ['envstatus', workspace, name, envName] }) },
+  })
+  async function onTrackLatest() {
+    const pins = (imgStatus?.services || []).filter(s => s.pinned).map(s => s.name).join(', ')
+    if (await confirm({
+      title: 'Track latest build?',
+      message: `This advances ${pins || 'all build services'} to the current version (${imgStatus?.version}). Deploy afterwards to roll it out. Any pinned/rolled-back version will be released.`,
+      confirmLabel: 'Track latest',
+    })) trackMut.mutate()
+  }
 
   // Metrics history (Phase 6d) — per-env CPU/memory/disk/network for sparklines.
   // rangeMin is the selected time window (minutes); default 60.
@@ -422,6 +453,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['metrics', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['backup-stats', workspace, name, envName] })
+        qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] })
         if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
       }, 2000)
       // After update: backend invalidates its cache and runs a fresh check (~3-5s).
@@ -436,6 +468,11 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
   const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
+  const [dbInfoOpen, setDbInfoOpen] = useState(false) // managed-database connection info (Phase 5)
+  // Managed DB engine is project-level now (falls back to the legacy per-env value).
+  const dbEngine = ws?.config?.project?.database || cfg?.database || ''
+  const hasManagedDB = !!dbEngine && dbEngine !== 'none'
+  const canManageDB = ['admin', 'operator'].includes(ws?.my_role) // reveal secret + create schema
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
@@ -456,10 +493,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   })
 
   // Build a merged service list: all expected services + actual runtime state.
-  // For image stacks: start from config.images so we show services not yet started.
-  // For custom stacks: use whatever docker compose ps returned.
-  const configImages = ws?.config?.images || []
-  const serviceRows = isImage && configImages.length > 0
+  // Start from config.services so services not yet started still show; managed
+  // dependencies (db/redis/garage) appear once running from compose ps.
+  const configImages = ws?.config?.services || []
+  const serviceRows = configImages.length > 0
     ? configImages.map(img => {
         const live = containerDetails.find(c => c.short === img.name)
         return live || { short: img.name, Name: '', Service: `${name}_${envName}_${img.name}`, State: '', Health: '', Status: '' }
@@ -500,14 +537,27 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <StatusBadge label={containerStatus} color={containerStatus} />
+          {imgStatus?.pinned && (
+            <div className="flex items-center gap-1.5">
+              <span title={`Pinned: ${(imgStatus.services || []).filter(s => s.pinned).map(s => `${s.name}→${s.effective.split(':').pop()}`).join(', ')}. Latest is ${imgStatus.version}.`}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg border border-warning-border/60">📌 pinned</span>
+              {canOp && <button onClick={onTrackLatest} className="text-[10px] text-emerald-400 hover:text-emerald-300">Track latest →</button>}
+            </div>
+          )}
+          {newBuildReady && (
+            <span title={`Built ${imgStatus.version}, running ${imgStatus.deployed_version}. Deploy to roll it out.`}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-info-subtle text-info-fg border border-info-border/60">⬆ {imgStatus.version} ready</span>
+          )}
           <AccessUrls urls={accessUrls} reachable={reachable} />
         </div>
       </div>
 
       {/* Details */}
       <div className="space-y-1.5 text-sm text-content-muted">
-        {/* Only show domain/url row if neither badge above applies */}
-        {!cfg?.domain && !port && <DetailRow icon="○" value="no url configured" />}
+        {/* "No url" only when there's genuinely no way in — accessUrls already
+            accounts for an explicit domain, a published port, AND a Traefik
+            auto-routed env domain (which sets no cfg.domain/port). */}
+        {accessUrls.length === 0 && <DetailRow icon="○" value="no url configured" />}
         {gitBranch && <DetailRow icon="○" value={gitBranch} />}
       </div>
 
@@ -553,6 +603,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             </>
           )}
           <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
+          {hasManagedDB && (
+            <ToolBtn icon="database" title="Database connection info" onClick={() => setDbInfoOpen(true)}
+              className="text-content-subtle hover:text-sky-400" />
+          )}
           {canOp && (
             <>
               <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
@@ -736,6 +790,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           onClose={() => setFilesFor(null)} />
       )}
 
+      {/* Managed-database connection info + management (Phase 5/6). Reveal-secret and
+          create-schema are operator+; viewers see structure only. */}
+      {dbInfoOpen && (
+        <DatabaseInfoModal workspace={workspace} name={name} env={envName}
+          canReveal={canManageDB} canManage={canManageDB}
+          onClose={() => setDbInfoOpen(false)} />
+      )}
+
       {/* Manual backup — pick which services' data to include */}
       {backupModal && (
         <ManualBackupModal
@@ -750,7 +812,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         <RollbackModal
           workspace={workspace} name={name} envName={envName} isImage={isImage}
           onClose={() => setRollbackOpen(false)}
-          onDone={() => { refetchStatus(); qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] }) }}
+          onDone={() => { refetchStatus(); qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] }); qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] }) }}
         />
       )}
 
@@ -829,69 +891,145 @@ function DetailRow({ icon, value }) {
 
 // ── Release pipeline ──────────────────────────────────────────────────────────
 
+// ReleasePipeline renders the project's real release pipeline live: stages
+// colored by the latest run, the version deployed in each env (deploy history),
+// and a Run button with inline gate approval. Replaces the old static mock.
 function ReleasePipeline({ ws }) {
-  const isImage = ws?.config?.project?.type === 'image'
-  if (isImage) return null
-
-  const v = ws?.config?.project?.version
-  const vStr = v ? `v${v.major}.${v.minor}.${v.patch}-build.${v.build}` : '—'
+  const { workspace, name } = useParams()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  // Release pipelines build + promote images, so they only apply to build stacks
+  // (custom / from-repo / blueprint), not image/prebuilt/database pull-only stacks.
+  const isImage = !(ws?.config?.project?.type === 'custom' || (ws?.config?.services || []).some(s => s.build))
   const envs = ws?.envs || []
+  const canOp = ['admin', 'operator', 'developer'].includes(ws?.my_role)
 
-  const steps = [
-    { label: 'dev build',    status: 'done',    version: vStr },
-    { label: 'stage build',  status: 'done',    version: vStr },
-    { label: 'stage deploy', status: 'active',  version: null },
-    { label: 'QA sign-off',  status: 'pending', version: null },
-    { label: 'promote → prod', status: 'pending', version: null },
-  ]
+  const { data: pipes = [] } = useQuery({
+    queryKey: ['pipelines', workspace, name],
+    queryFn: () => fetchPipelines(workspace, name),
+    enabled: !isImage && !!workspace,
+  })
+  const [selId, setSelId] = useState(null)
+  const pipeline = pipes.find(p => p.id === selId) || pipes[0]
 
-  const stepStyle = {
-    done:    'bg-green-500 border-success text-green-900',
-    active:  'bg-amber-400 border-warning text-amber-900 animate-pulse',
-    pending: 'bg-surface-raised border-border-strong text-content-subtle',
-  }
+  const { data: runs = [] } = useQuery({
+    queryKey: ['pipeline-runs', workspace, name, pipeline?.id],
+    queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
+    enabled: !!pipeline?.id,
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : false,
+  })
+  const latestRun = runs[0]
+
+  const histories = useQueries({
+    queries: envs.map(e => ({
+      queryKey: ['deploy-history', workspace, name, e],
+      queryFn: () => fetchDeployHistory(workspace, name, e),
+      enabled: !isImage && !!workspace,
+      staleTime: 30_000,
+    })),
+  })
+  const envVersion = {}
+  envs.forEach((e, i) => { const h = histories[i]?.data?.[0]; if (h?.version) envVersion[e] = h.version })
+
+  const approveMut = useMutation({
+    mutationFn: (runId) => approvePipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }),
+  })
+  const rejectMut = useMutation({
+    mutationFn: (runId) => rejectPipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }),
+  })
+  const [openRunId, setOpenRunId] = useState(null) // run whose log/status window is open
+  const active = latestRun && (latestRun.status === 'running' || latestRun.status === 'awaiting')
+  const runMut = useMutation({
+    mutationFn: () => startPipelineRun(workspace, name, pipeline.id),
+    onSuccess: ({ run_id }) => {
+      setOpenRunId(run_id)
+      qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
+
+  if (isImage) return null
 
   return (
     <div className="bg-surface border border-border rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-content mb-5 flex items-center gap-2">
-        <span className="text-xs">○</span> Release pipeline
-      </h2>
-
-      <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-2">
-        {steps.map((step, i) => (
-          <div key={step.label} className="flex items-center">
-            <div className="flex flex-col items-center gap-1.5 min-w-[90px]">
-              <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepStyle[step.status]}`}>
-                {step.status === 'done' ? '✓' : step.status === 'active' ? '◎' : '○'}
-              </div>
-              <span className={`text-xs text-center leading-tight ${step.status === 'pending' ? 'text-content-faint' : 'text-content'}`}>
-                {step.label}
-              </span>
-              {step.version && (
-                <span className="text-xs text-content-subtle font-mono">{step.version}</span>
-              )}
-              {step.status === 'active' && (
-                <span className="text-xs text-warning-fg">in progress</span>
-              )}
-              {step.status === 'pending' && (
-                <span className="text-xs text-content-faint">—</span>
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <h2 className="text-sm font-semibold text-content flex items-center gap-2"><span className="text-xs">○</span> Release pipeline</h2>
+        <div className="flex items-center gap-2">
+          {pipes.length > 1 && (
+            <select value={pipeline?.id || ''} onChange={e => setSelId(Number(e.target.value))}
+              className="px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content">
+              {pipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          {pipeline && canOp && (
+            <div className="flex flex-col items-end gap-1">
+              <button onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {active ? '▶ Running…' : '▶ Run'}
+              </button>
+              {latestRun && (
+                <button onClick={() => setOpenRunId(latestRun.id)}
+                  className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
+                  {active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+                  View log
+                </button>
               )}
             </div>
-            {i < steps.length - 1 && (
-              <div className={`h-0.5 w-8 shrink-0 mx-1 ${i < 2 ? 'bg-green-500' : 'bg-surface-overlay'}`} />
-            )}
-          </div>
-        ))}
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center justify-between bg-surface-raised/60 rounded-lg px-4 py-3">
-        <p className="text-sm text-content">
-          Ready to promote? <span className="font-mono text-content-strong">{vStr}</span> will be retagged and deployed to prod — no rebuild.
-        </p>
-        <button className="ml-4 shrink-0 bg-surface-overlay hover:bg-surface-overlay text-content hover:text-content-strong text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5">
-          <span className="text-xs">○</span> Promote to prod
-        </button>
-      </div>
+      {!pipeline ? (
+        <div className="text-sm text-content-subtle">
+          No pipeline yet —{' '}
+          <button onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} className="text-brand-400 hover:text-brand-300">
+            generate one
+          </button>{' '}
+          in Edit Project → Pipelines.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-2">
+            {pipeline.stages.map((s, i) => {
+              const st = latestRun?.stages?.[i]?.status
+              return (
+                <div key={i} className="flex items-center">
+                  <div className="flex flex-col items-center gap-1.5 min-w-[94px]">
+                    <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepCls(st)}`}>{stepIcon(st)}</div>
+                    <span className="text-[11px] text-center leading-tight text-content">{STAGE_ICON[s.type]} {stageSummary(s)}</span>
+                  </div>
+                  {i < pipeline.stages.length - 1 && <div className="h-0.5 w-7 shrink-0 mx-1 bg-surface-overlay" />}
+                </div>
+              )
+            })}
+          </div>
+
+          {latestRun?.status === 'awaiting' && canOp && (
+            <div className="flex items-center justify-between bg-warning-subtle/40 border border-warning-border/50 rounded-lg px-4 py-2.5 mb-4">
+              <span className="text-xs text-warning-fg">Awaiting approval at a gate.</span>
+              <div className="flex gap-2">
+                <button onClick={() => approveMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white">Approve</button>
+                <button onClick={() => rejectMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-surface-overlay text-content hover:text-content-strong">Reject</button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {envs.map(e => (
+              <div key={e} className="flex-1 min-w-[110px] bg-surface-raised/60 rounded-lg px-3 py-2">
+                <div className="text-xs font-medium text-content-strong">{e}</div>
+                <div className="text-[11px] font-mono text-content-subtle">{envVersion[e] ? `v${envVersion[e]}` : '—'}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {openRunId != null && pipeline && (
+        <RunModal workspace={workspace} name={name} pipeline={pipeline} runId={openRunId}
+          onClose={() => { setOpenRunId(null); qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }) }} />
+      )}
     </div>
   )
 }
@@ -1090,14 +1228,19 @@ const SERVICE_COLORS = [
 // Falls back to hash-based assignment for any service not in the list (e.g. log lines
 // from services that have since been removed).
 function buildColorMap(containers, wsName, activeEnv) {
-  const prefix = `${wsName}_${activeEnv}_`
   const map = {}
   let idx = 0
   for (const c of (containers || [])) {
-    if (!(c.Service in map)) {
-      map[c.Service] = SERVICE_COLORS[idx % SERVICE_COLORS.length]
-      idx++
-    }
+    if (c.Service in map) continue
+    const color = SERVICE_COLORS[idx % SERVICE_COLORS.length]
+    idx++
+    // Key by BOTH the compose service ("frontend", used by the legend) AND the
+    // container name ("mcl_wda_dev_frontend", which is what `docker compose logs`
+    // prints as the line prefix because composegen sets container_name). Without
+    // the container-name alias, log lines miss the map and fall back to a hash
+    // colour that disagrees with the legend.
+    map[c.Service] = color
+    if (c.Name) map[c.Name.replace(/^\//, '')] = color
   }
   return map
 }
@@ -1828,9 +1971,28 @@ export default function ProjectPage() {
   const [termModal, setTermModal]         = useState(null) // {env}
   const [logModal, setLogModal]           = useState(null) // {env, service}
 
+  const qcMain = useQueryClient()
   const { data: ws, isLoading, error } = useQuery({
     queryKey: ['workspace', workspace, name],
     queryFn: () => fetchWorkspace(workspace, name),
+  })
+  // Pipelines for the Build button's "runs" picker (shared key → dedup with the
+  // ReleasePipeline widget).
+  const { data: headerPipelines = [] } = useQuery({
+    queryKey: ['pipelines', workspace, name],
+    queryFn: () => fetchPipelines(workspace, name),
+  })
+  const [headerRun, setHeaderRun] = useState(null) // { pipeline, runId } launched from the Build button
+  const headerRunMut = useMutation({
+    mutationFn: (p) => startPipelineRun(workspace, name, p.id).then(r => ({ pipeline: p, runId: r.run_id })),
+    onSuccess: ({ pipeline, runId }) => {
+      setHeaderRun({ pipeline, runId })
+      qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
+  const linkMut = useMutation({
+    mutationFn: (id) => setBuildPipeline(workspace, name, id),
+    onSuccess: () => qcMain.invalidateQueries({ queryKey: ['workspace', workspace, name] }),
   })
   // Role gating: developers+ run Env Card actions; operators+ edit project config;
   // admins manage the workspace.
@@ -1864,19 +2026,27 @@ export default function ProjectPage() {
   const cfg = ws?.config
   const envs = ws?.envs || []
   const type = cfg?.project?.type || 'custom'
+  // Build / Release-pipeline only apply to stacks that BUILD images. "custom" is
+  // the build family (custom app / from-repo / blueprint); image/prebuilt and the
+  // database-hosting stack are pull-only (managed DB + optional CloudBeaver). Gate
+  // on the type (always present) OR an explicit build service, so custom apps keep
+  // Build while image/database stacks hide it.
+  const hasBuildServices = type === 'custom' || (cfg?.services || []).some(s => s.build)
   const version = cfg?.project?.version
   const vStr = version ? `v${version.major}.${version.minor}.${version.patch}-build.${version.build}` : ''
 
-  // Build header stack description
+  // Build header stack description from the unified service graph + managed deps.
+  // Skip the synthetic managed-dep rows (s.managed) — they're added (capitalized)
+  // from the project-level fields below to avoid double-listing.
   const stackParts = []
-  if (type === 'image') {
-    ;(cfg?.images || []).forEach(img => stackParts.push(img.image?.split('/').pop()))
-  } else {
+  ;(cfg?.services || []).forEach(s => { if (s.name && !s.managed) stackParts.push(s.name) })
+  {
+    const proj = cfg?.project || {}
     const firstEnvCfg = cfg?.environments?.[envs[0]] || {}
-    if (firstEnvCfg.backend) stackParts.push(capitalize(firstEnvCfg.backend))
-    if (firstEnvCfg.frontend && firstEnvCfg.frontend !== 'none') stackParts.push(capitalize(firstEnvCfg.frontend))
-    if (firstEnvCfg.database && firstEnvCfg.database !== 'none') stackParts.push(capitalize(firstEnvCfg.database))
-    if (firstEnvCfg.redis_enabled) stackParts.push('Redis')
+    const dbEng = proj.database || firstEnvCfg.database // project-level, legacy fallback
+    if (dbEng && dbEng !== 'none') stackParts.push(capitalize(dbEng))
+    if (proj.redis_enabled || firstEnvCfg.redis_enabled) stackParts.push('Redis')
+    if (proj.garage_enabled || firstEnvCfg.garage_enabled) stackParts.push('Garage')
   }
 
   return (
@@ -1901,9 +2071,21 @@ export default function ProjectPage() {
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
-            {canOp && type !== 'image' && <HeaderBtn label="Build ↗" onClick={() => runAction('build', envs[0])} primary />}
+            {canOp && hasBuildServices && (
+              <BuildMenu version={version}
+                pipelines={headerPipelines}
+                linkedId={cfg?.project?.build_pipeline_id}
+                onSetLink={(id) => linkMut.mutate(id)}
+                onRunPipeline={(p) => headerRunMut.mutate(p)}
+                onBuild={part => runAction('build', envs[0], undefined, part ? ['--bump', part] : [])} />
+            )}
           </div>
         </div>
+
+        {headerRun && (
+          <RunModal workspace={workspace} name={name} pipeline={headerRun.pipeline} runId={headerRun.runId}
+            onClose={() => { qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, headerRun.pipeline.id] }); setHeaderRun(null) }} />
+        )}
 
         {/* Environment cards — left-aligned 3-column proportional grid:
             each card targets one third of the row (minus the two gaps) and never
@@ -1929,8 +2111,8 @@ export default function ProjectPage() {
           ))}
         </div>
 
-        {/* Release pipeline (custom stacks only) */}
-        {type !== 'image' && <ReleasePipeline ws={ws} />}
+        {/* Release pipeline — only for stacks that build images */}
+        {hasBuildServices && <ReleasePipeline ws={ws} />}
 
         {/* Bottom split: Action output + Logs — both fixed-height, scroll internally */}
         <div className="grid grid-cols-2 gap-5 items-start">
@@ -1986,5 +2168,78 @@ function HeaderBtn({ label, onClick, primary }) {
     >
       <span className="text-xs opacity-60">○</span> {label}
     </button>
+  )
+}
+
+// BuildMenu is a split-button. By default the main action builds the CURRENT
+// version and the caret opens version-bump options (`--bump <part>`). It can also
+// be LINKED to a pipeline (project.build_pipeline_id): then the main action runs
+// that pipeline instead, with the raw build/bump options still available in the
+// dropdown. The "Build button runs" section picks what the button does.
+function BuildMenu({ version, onBuild, pipelines = [], linkedId, onSetLink, onRunPipeline }) {
+  const [open, setOpen] = useState(false)
+  const v = version || { major: 0, minor: 0, patch: 0, build: 0 }
+  const cur = `${v.major}.${v.minor}.${v.patch}-build.${v.build}`
+  const next = {
+    build: `${v.major}.${v.minor}.${v.patch}-build.${v.build + 1}`,
+    patch: `${v.major}.${v.minor}.${v.patch + 1}-build.0`,
+    minor: `${v.major}.${v.minor + 1}.0-build.0`,
+    major: `${v.major + 1}.0.0-build.0`,
+  }
+  const item = 'w-full flex items-center justify-between gap-4 px-3 py-2 text-left hover:bg-surface-raised transition-colors'
+  const linked = pipelines.find(p => p.id === linkedId)
+  const primaryCls = 'flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded-l-lg border border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors max-w-[14rem] truncate'
+  return (
+    <div className="relative">
+      <div className="flex">
+        {linked ? (
+          <button onClick={() => onRunPipeline(linked)} className={primaryCls} title={`Run pipeline "${linked.name}"`}>
+            ▶ <span className="truncate">{linked.name}</span>
+          </button>
+        ) : (
+          <button onClick={() => onBuild(null)} className={primaryCls}>
+            <span className="text-xs opacity-60">○</span> Build ↗
+          </button>
+        )}
+        <button onClick={() => setOpen(o => !o)} title="Build options"
+          className="px-2 py-1.5 rounded-r-lg border border-l-0 border-brand-600 bg-brand-600 hover:bg-brand-700 text-white transition-colors text-xs">
+          ▾
+        </button>
+      </div>
+      {open && (<>
+        <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+        <div className="absolute right-0 mt-1 z-20 w-72 bg-surface border border-border rounded-lg shadow-lg py-1 text-sm overflow-hidden">
+          {linked && (<>
+            <button onClick={() => { setOpen(false); onRunPipeline(linked) }} className={item}>
+              <span className="truncate">▶ Run {linked.name}</span>
+            </button>
+            <div className="border-t border-border my-1" />
+          </>)}
+          <button onClick={() => { setOpen(false); onBuild(null) }} className={item}>
+            <span>Build current{linked ? ' (raw)' : ''}</span>
+            <span className="font-mono text-xs text-content-subtle">{cur}</span>
+          </button>
+          <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build &amp; bump</div>
+          {['build', 'patch', 'minor', 'major'].map(part => (
+            <button key={part} onClick={() => { setOpen(false); onBuild(part) }} className={item}>
+              <span className="capitalize">{part}</span>
+              <span className="font-mono text-xs text-content-subtle">{next[part]}</span>
+            </button>
+          ))}
+          {onSetLink && pipelines.length > 0 && (<>
+            <div className="border-t border-border my-1" />
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build button runs</div>
+            <button onClick={() => { setOpen(false); onSetLink(0) }} className={item}>
+              <span>Build (raw)</span>{!linkedId && <span className="text-xs text-brand-400">✓</span>}
+            </button>
+            {pipelines.map(p => (
+              <button key={p.id} onClick={() => { setOpen(false); onSetLink(p.id) }} className={item}>
+                <span className="truncate">{p.name}</span>{linkedId === p.id && <span className="text-xs text-brand-400">✓</span>}
+              </button>
+            ))}
+          </>)}
+        </div>
+      </>)}
+    </div>
   )
 }

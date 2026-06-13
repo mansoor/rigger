@@ -219,7 +219,7 @@ docker exec rigger rigger init-workspace -name myapp -config /toolkit/workspaces
 
 Workspaces are created through the **New Workspace wizard** in the web UI (see [Section 21](#21-rigger--web-interface)) — a 7-step flow covering project, stack, environments, services, backup, review, and a live bootstrap terminal.
 
-For automation, `rigger init-workspace -name <name> -config <config.json|->` performs the same creation headlessly: it writes the workspace, generates each environment's `.env` (auto-generating placeholder secrets) and `docker-compose.yml`, and installs Dockerfiles/nginx for custom stacks — all natively in Go. A `config.json` can be exported from an existing workspace or produced by the **Tools → Compose → Template** converter.
+For automation, `rigger init-workspace -name <name> -config <config.json|->` performs the same creation headlessly: it writes the workspace, generates each environment's `.env` (auto-generating placeholder secrets) and `docker-compose.yml`, and installs Dockerfiles/nginx for custom stacks — all natively in Go. A `config.json` can be produced from an existing image-stack workspace or a `docker-compose.yml` via the **Tools → Template Manager**.
 
 The stack types you can configure:
 
@@ -481,14 +481,15 @@ What `restore` does: stop → restore databases → restore volumes → start.
 
 ### Workspace archive backup (UI Tools page)
 
-A separate, full-workspace archival feature available from **Tools → Workspace Backup & Restore**:
+A separate, full-workspace archival feature available from **Tools → Workspace Manager** (the first Tools tab):
 
-- Creates a `.tar.gz` of the entire workspace directory (config, .env files, all volume data)
+- Creates a **`.rwb`** archive (Rigger Workspace Backup) of the entire workspace directory (config, .env files, all volume data). An optional **backup filename** field lets you name the archive; otherwise it defaults to `<workspace>-<timestamp>.rwb`. Legacy `.tar.gz` archives are still restorable
 - Excludes per-env backup snapshots to avoid archive-within-archive bloat
 - Stored at `/data/workspace-archives/` (persisted volume, survives container restarts)
 - Async — start the job and come back later to download; shows live status while running
-- Download, delete from server, or restore from the UI
-- Restore: upload the archive → backend validates `config.json` → extracts to `workspaces/`
+- **Archives on server** are listed with Download, Delete, and **Restore** (one-click restore of an archive still on the server — no re-upload needed)
+- **Restore from upload** — drag-and-drop or browse; backend validates `config.json` → extracts to `workspaces/`; "Overwrite if exists" guard
+- Snapshot and full-backup sections share one workspace selector at the top with a consistent row layout, button styling, and per-section drag-and-drop zones + instructions
 
 ---
 
@@ -560,10 +561,11 @@ In the meantime, deploy from a built/pushed image with `build` + `promote`, or r
 
 Each template is a JSON file in `templates/stacks/`. It declares images, ports, volumes, healthchecks, and `default_env_vars`. The wizard discovers templates by globbing `templates/stacks/*.json` — no registration required.
 
-You can also create templates from the UI:
-- **Export as template** button on any image-stack workspace page (replaces secrets with `CHANGE_ME`)
-- **Tools → Compose → Template** converter (paste any `docker-compose.yml`, download the generated template JSON)
-- **Save as template** button in the converter — writes directly to `templates/stacks/` on the server (no rebuild needed; templates are live-mounted)
+You can also create templates from the UI, all consolidated in **Tools → Template Manager**:
+- **Select image workspace** — pick any image-stack workspace + an environment to generate a draft template JSON from its config (secrets masked to `CHANGE_ME` **server-side**, so they never reach the browser)
+- **Convert Docker Compose** — paste or import any `docker-compose.yml` and convert it to a template JSON
+- **Upload template** — load an existing template JSON (name, label, description, tags, and body are all restored into the editor)
+- **Save as template** — writes directly to `templates/stacks/<name>.json` on the server (no rebuild needed; templates are live-mounted)
 
 ### Volume mounts in templates
 
@@ -681,7 +683,7 @@ Browser  (JWT Bearer + httpOnly refresh cookie)
 │   ├─ Command bridge (strict allowlist → native Go ops)       │
 │   ├─ Image update cache (hourly background checker)         │
 │   ├─ Stats collector (Docker info + host /proc metrics)     │
-│   └─ Async workspace archiver (tar.gz backup jobs)         │
+│   └─ Async workspace archiver (.rwb backup jobs)           │
 └─────────────────────────────────────────────────────────────┘
   │  bridge.Run → composegen / dockerops / builder / backup / version
   ▼
@@ -711,7 +713,7 @@ docker compose up --build -d
 Skeleton loading animation while data fetches. Host/Docker panels refresh every 30 s; the workspaces table tracks live resource usage with a ~4 s poll plus SSE invalidation on Docker events.
 
 - **6 stat cards:** Active alerts, Workspaces, Environments, Running containers, Docker images, Docker networks
-- **Workspaces table:** name, type, env status dots (with a 🖥 host chip on environments running remotely), **Services** (distinct compose service count), **Containers** (running/total), **CPU**, **Memory**, **Disk**, **Network** (live throughput), Open link. Live stats fan out across the local control plane and every remote host with workloads
+- **Workspaces table:** name, type, env status dots (with a 🖥 host chip on environments running remotely), **Services** (distinct compose service count), **Containers** (running/total), **CPU**, **Memory**, **Disk**, **Net I/O** (live inbound ↓ and outbound ↑ throughput shown separately), Open link. Live stats fan out across the local control plane and every remote host with workloads
 - **Docker engine panel:** version, storage driver, root dir, container/image/volume/network counts
 - **Host system panel:** OS, arch, CPU, uptime, memory bar, disk bar (amber >65%, red >85%)
 
@@ -719,6 +721,7 @@ Skeleton loading animation while data fetches. Host/Docker panels refresh every 
 
 **Environment cards** — each shows:
 - Environment name + status badge (running / partial / stopped / unknown). Status is read from the env's actual host (local or remote over SSH)
+- **compose / swarm deployment badge** next to the environment name — deployment mode is configured **per environment**, so the badge lives on each env card (not on the workspace header, where it would misleadingly reflect only the first env)
 - **🖥 host badge** for environments running on a remote host (Phase 7)
 - **Access links:** domain badge (Traefik on) or port badge(es) (Traefik off) — clickable `↗` links. They're disabled (non-clickable) when the env isn't running/healthy, and use the **remote host's address** for direct `host:port` URLs. Supports multiple links per env for multi-port image stacks (configured via the 🔗 checkbox on port rows)
 - **"↑ update available"** amber badge / **"? digest unknown"** grey badge (image stacks)
@@ -787,22 +790,30 @@ Four tabs:
 
 ### Tools page (`/tools`)
 
-#### Compose → Template
+#### Template Manager
 
-Converts any `docker-compose.yml` into a Rigger template JSON:
+A single place to create, edit, validate, and save Rigger template JSON. The **template details** (name, label, description, tags) and the **Validate / Save as Template** actions stay visible from the start but are disabled until JSON is loaded, so the full flow is always in view.
 
-- **⎘ Paste** button (clipboard API with HTTP fallback + focus-textarea fallback)
-- **↑ Import file** button (file picker for `.yml`/`.yaml`/`.txt`, auto-fills template name from filename)
-- Textarea supports Ctrl+V and right-click paste natively
-- Conversion: services → `images[]`; ports → `port`/`host_port`/`extra_ports`; named volumes → `./volumes/name` bind mounts; env values → `${VAR}` references with originals as `default_env_vars`; healthchecks + depends_on extracted
-- Output panel matched height to input panel; shows service badges + env var count
-- **⎘ Copy**, **⬇ Download**, **💾 Save as template** (writes to `templates/stacks/<name>.json` on the server — no rebuild needed)
+Three ways to load JSON into the editor (toolbar buttons, left-to-right):
 
-#### Workspace Backup & Restore
+- **⇄ Convert Docker Compose** — opens a modal to **Paste** / **Import** a `docker-compose.yml` (or load an example), then **Convert & load into editor**. Conversion: services → `images[]`; ports → `port`/`host_port`/`extra_ports`; named volumes → `./volumes/name` bind mounts; env values → `${VAR}` references with originals as `default_env_vars`; healthchecks + depends_on extracted
+- **⊞ Select image workspace** — opens a modal to pick an existing image-stack workspace (pre-filtered) + an environment; **Load** generates a draft template from its config with secrets masked to `CHANGE_ME` **server-side**
+- **↑ Upload template** — load an existing template JSON file; its name, label, description, and tags are restored into the details fields too
 
-- **Create backup** — workspace dropdown + Start button; async tar.gz job with live 2-second polling; shows archive filename + size on completion
-- **Archives on server** — lists all `.tar.gz` archives in `/data/workspace-archives/` with date, size, Download (authenticated fetch → blob URL), Delete
-- **Restore** — drag-and-drop or file picker; "Overwrite if exists" checkbox; streams restore status; workspace appears in sidebar immediately after success
+The editor:
+- **Color-coded JSON** with a **line-number gutter** (dependency-free: a transparent textarea over a highlighted layer, scroll-synced)
+- Fixed height with an internal scrollbar so the **Validate** and **Save as Template** buttons stay on screen
+- **Validate** is disabled until JSON is loaded; **Save as Template** is disabled until validation passes
+- **Copy** / **Download** (top) are visible from the start but disabled until JSON is loaded
+- **Save as template** writes to `templates/stacks/<name>.json` on the server — no rebuild needed
+
+#### Workspace Manager (Backup & Restore)
+
+The **first** Tools tab. A single workspace selector at the top drives two consistent sections — **Snapshots** and **Workspace Backup** — with matching row layouts, button styling, and per-section drag-and-drop zones + instructions.
+
+- **Create backup** — optional backup-filename field + Start button; async **`.rwb`** job with live polling; shows archive filename + size on completion
+- **Archives on server** — lists all `.rwb` (and legacy `.tar.gz`) archives in `/data/workspace-archives/` with date, size, **Download** (authenticated fetch → blob URL), **Restore** (one-click, no re-upload), **Delete**
+- **Restore from upload** — drag-and-drop or file picker; "Overwrite if exists" checkbox; streams restore status; workspace appears in the sidebar immediately after success
 
 ### Authentication
 
@@ -957,7 +968,7 @@ A deployed migration deliberately leaves the source host's containers, volumes a
 
 1. Create `templates/stacks/<name>.json` — see Section 16 for the schema
 2. No registration needed — the wizard discovers templates by globbing `*.json`
-3. Or use **Tools → Compose → Template** in the UI to generate the JSON from an existing compose file, then save it directly from the browser
+3. Or use **Tools → Template Manager** in the UI to generate the JSON (from a compose file or an existing image-stack workspace), then save it directly from the browser
 
 ### Adding a new stack type (backend/frontend)
 
@@ -1010,6 +1021,10 @@ The `latest` tag update check compares local image digest against the remote. If
 ### Log viewer shows stuck "Backing up" status
 
 Earlier versions had a path index bug in the backup job polling endpoint. Fixed in the current version — the job status is now polled via React Query with automatic retry and the correct path segment index.
+
+### Dashboard loads slowly
+
+Earlier versions computed per-workspace disk usage (`du`) **synchronously inside the `/api/stats` request**, which could take 20–30 s over a bind mount (notably the Windows/Docker Desktop mount), blocking the whole dashboard render. Fixed in the current version: disk usage is served from an async cache (5-minute TTL, refreshed in the background) and the redundant `docker stats` fan-out was dropped from `/api/stats` (the live table uses `/api/live-stats`). Dashboard responses are now sub-second.
 
 ### Port already in use
 

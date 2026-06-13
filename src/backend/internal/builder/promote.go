@@ -65,15 +65,14 @@ func (o Options) promote() error {
 		return nil
 	}
 
-	if err := retag("backend"); err != nil {
-		return err
+	builds := cfg.BuildServices()
+	if len(builds) == 0 {
+		o.info("No build services to promote for %q", dstEnv)
 	}
-	if cfg.Environments[dstEnv].FrontendEnabled {
-		if err := retag("frontend"); err != nil {
+	for _, svc := range builds {
+		if err := retag(svc.Name); err != nil {
 			return err
 		}
-	} else {
-		o.info("Frontend disabled for %q — skipping", dstEnv)
 	}
 
 	if dryRun {

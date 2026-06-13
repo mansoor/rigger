@@ -25,12 +25,18 @@ type CreateRequest struct {
 	Name         string            `json:"name"`      // free-form display name
 	Key          string            `json:"key"`       // project key (folder/URL/Docker identity); derived if empty
 	Registry     string            `json:"registry"`
+	SourceRepo   string            `json:"source_repo"`   // project-level git repo (one per project)
+	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
+	Services     []map[string]any  `json:"services"`      // unified services[] (repo-scan path); else seeded from legacy fields
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
 	Images       []ImageDef        `json:"images"`       // populated from template or manual entry
 	Backend      string            `json:"backend"`      // laravel | nodejs (custom type)
 	Frontend     string            `json:"frontend"`     // none | nextjs | react (custom type)
-	Database     string            `json:"database"`     // postgres | mysql | none (custom type)
+	Database     string            `json:"database"`     // none | postgres | mysql | mariadb (custom type)
+	DBVersion    string            `json:"db_version"`   // chosen DB image tag ("" → catalog default)
+	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
+	Cloudbeaver  bool              `json:"cloudbeaver"`  // database stack: add a CloudBeaver web SQL client (becomes the web entry)
 	Redis        bool              `json:"redis"`
 	Garage       bool              `json:"garage"`
 	Envs         []EnvRequest      `json:"environments"`
@@ -217,14 +223,6 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		if envName == "" {
 			continue
 		}
-		bePeers := e.BEReplicas
-		if bePeers < 1 {
-			bePeers = 1
-		}
-		fePeers := e.FEReplicas
-		if fePeers < 1 {
-			fePeers = 1
-		}
 		traefik := e.TraefikNet
 		if traefik == "" {
 			traefik = "traefik_net"
@@ -232,10 +230,6 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		deployment := e.Deployment
 		if deployment == "" {
 			deployment = "compose"
-		}
-		frontend := req.Frontend
-		if frontend == "" {
-			frontend = "none"
 		}
 		database := req.Database
 		if database == "" {
@@ -265,20 +259,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			},
 		}
 
-		// Custom stacks carry source-build fields; image stacks don't need them.
-		if req.Type == "custom" {
-			envBlock["backend"] = req.Backend
-			envBlock["frontend_enabled"] = frontend != "none"
-			envBlock["frontend"] = frontend
-			envBlock["database"] = database
-			envBlock["redis_enabled"] = req.Redis
-			envBlock["garage_enabled"] = req.Garage
-			envBlock["replicas"] = map[string]any{
-				"backend":  bePeers,
-				"frontend": fePeers,
-			}
-			envBlock["git"].(map[string]any)["backend_path"] = "./src/backend"
-			envBlock["git"].(map[string]any)["frontend_path"] = "./src/frontend"
+		// Managed dependencies are PROJECT-level now (engine/version/redis/garage are
+		// consistent across envs — written into the project block below). Only the
+		// per-env DBExternal (host-port exposure) lives on the env. Image stacks bring
+		// their own data services as images.
+		if (req.Type == "custom" || req.Type == "database") && database != "none" && req.DBExternal {
+			envBlock["db_external"] = true
 		}
 
 		// Merge env vars: template/smart-defaults first, then user's initial vars on top,
@@ -321,19 +307,61 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},
 	}
+	// Managed dependencies are PROJECT-level (consistent across all envs); only the
+	// per-env DBExternal stays on the env block. Image stacks bring their own data
+	// services as images, so they get no managed deps.
+	if req.Type == "custom" || req.Type == "database" {
+		pdb := req.Database
+		if pdb == "" {
+			pdb = "none"
+		}
+		if pdb != "none" {
+			project["database"] = pdb
+			if req.DBVersion != "" {
+				project["db_version"] = req.DBVersion
+			}
+		}
+		if req.Redis {
+			project["redis_enabled"] = true
+		}
+		if req.Garage {
+			project["garage_enabled"] = true
+		}
+	}
+	// Project-level source repo (one repo per project). Prefer the explicit field;
+	// fall back to the wizard's per-env git fields (first env with a repo) so the
+	// existing UI drives source until the dedicated project field lands.
+	srcRepo, srcBranch := req.SourceRepo, req.SourceBranch
+	for _, e := range req.Envs {
+		if srcRepo == "" && e.GitRepo != "" {
+			srcRepo = e.GitRepo
+			if srcBranch == "" {
+				srcBranch = e.GitBranch
+			}
+		}
+	}
+	if srcRepo != "" {
+		project["git_repo"] = srcRepo
+		if srcBranch == "" {
+			srcBranch = "main"
+		}
+		project["git_branch"] = srcBranch
+	}
 	// Host-side folder path, resolved once by the API layer at creation.
 	if req.ProjectRootDir != "" {
 		project["project_root_dir"] = req.ProjectRootDir
 	}
+	// Services come straight from the wizard when the repo scanner (or manual
+	// editor) produced them; otherwise seed from the legacy wizard fields.
+	services := req.Services
+	if len(services) == 0 {
+		services = seedServices(req)
+	}
 	cfg := map[string]any{
 		"project":      project,
+		"services":     services,
 		"versions":     versions,
 		"environments": environments,
-	}
-
-	// Image stacks include the images array
-	if req.Type == "image" && len(req.Images) > 0 {
-		cfg["images"] = req.Images
 	}
 
 	// Additional named volumes declared in the wizard
@@ -345,6 +373,136 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	// envBlock above. No workspace-level backup config.
 
 	return cfg, nil
+}
+
+// seedServices builds the unified services[] from the wizard request. Image stacks
+// map each image to a pull service; custom stacks seed a build "backend" fronted by
+// nginx (+ an optional build "frontend") from the chosen language. This is a
+// transitional mapping of the legacy wizard fields until the blueprint picker
+// (Phase 2a-2b) seeds richer, language-agnostic graphs directly.
+// cloudbeaverService returns the CloudBeaver web SQL client as a web-routed image
+// service that depends on the managed database. As the only web service in a
+// database-hosting project it becomes the web entry (the env's route / HTTP port).
+// First run requires CloudBeaver's one-time admin setup; the DB connection is added
+// from the credentials shown in the Database info tab (host = the engine's alias).
+func cloudbeaverService(engine string) map[string]any {
+	return map[string]any{
+		"name":       "cloudbeaver",
+		"image":      "dbeaver/cloudbeaver",
+		"tag":        "latest",
+		"port":       "8978",
+		"web_routed": true,
+		// Publish on CloudBeaver's native 8978 by default rather than the env's
+		// HTTP port (8080), which would collide with Rigger itself on a single host.
+		// Editable in Edit Project → Services if 8978 is taken.
+		"host_port":  "8978",
+		"volumes":    []string{"cloudbeaver_data:/opt/cloudbeaver/workspace"},
+		"depends_on": []string{engine},
+	}
+}
+
+func seedServices(req CreateRequest) []map[string]any {
+	// Database-hosting projects have no application services — just the managed DB
+	// (emitted from the env's database/db_version by composegen). Optionally a
+	// CloudBeaver web SQL client is added as the sole web-routed service → web entry.
+	if req.Type == "database" {
+		if req.Cloudbeaver && req.Database != "" && req.Database != "none" {
+			return []map[string]any{cloudbeaverService(req.Database)}
+		}
+		return nil
+	}
+	if req.Type == "image" {
+		out := make([]map[string]any, 0, len(req.Images))
+		for _, im := range req.Images {
+			tag := im.Tag
+			if tag == "" {
+				tag = "latest"
+			}
+			s := map[string]any{"name": im.Name, "image": im.Image, "tag": tag, "env_file": true}
+			if im.Port != 0 {
+				s["port"] = im.Port
+			}
+			if im.HostPort != "" {
+				s["host_port"] = im.HostPort
+			}
+			if len(im.ExtraPorts) > 0 {
+				s["extra_ports"] = im.ExtraPorts
+			}
+			if len(im.Volumes) > 0 {
+				s["volumes"] = im.Volumes
+			}
+			if len(im.DependsOn) > 0 {
+				s["depends_on"] = im.DependsOn
+			}
+			if im.Healthcheck != "" {
+				s["healthcheck"] = im.Healthcheck
+			}
+			if im.Restart != "" {
+				s["restart"] = im.Restart
+			}
+			if im.ExtraCompose != "" {
+				s["extra_compose"] = im.ExtraCompose
+			}
+			if len(im.EnvVars) > 0 {
+				s["env_vars"] = im.EnvVars
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+
+	// Custom: a build "backend" fronted by nginx, plus an optional build "frontend".
+	be := req.Backend
+	if be == "" {
+		be = "laravel"
+	}
+	port, health := backendDefaults(be)
+	backend := map[string]any{
+		"name":        "backend",
+		"role":        "app",
+		"build":       map[string]any{"template": be, "context": "backend"},
+		"env_file":    true,
+		"port":        port,
+		"healthcheck": health,
+		"volumes":     []string{"uploads:/app/storage/uploads"},
+	}
+	if req.Database == "postgres" || req.Database == "mysql" || req.Database == "mariadb" {
+		backend["depends_on"] = []string{req.Database}
+	}
+	nginx := map[string]any{
+		"name":            "nginx",
+		"image":           "nginx",
+		"tag":             "1.25-alpine",
+		"web_routed":      true,
+		"port":            "80",
+		"depends_on":      []string{"backend"},
+		"config_template": be,
+		"volumes":         []string{"./nginx.conf:/etc/nginx/conf.d/default.conf:ro", "uploads:/var/www/uploads:ro"},
+		"healthcheck":     "curl -sf http://localhost/ -o /dev/null || exit 1",
+	}
+	out := []map[string]any{backend, nginx}
+	if req.Frontend != "" && req.Frontend != "none" {
+		out = append(out, map[string]any{
+			"name":       "frontend",
+			"role":       "app",
+			"build":      map[string]any{"template": req.Frontend, "context": "frontend"},
+			"env_file":   true,
+			"port":       "3000",
+			"web_routed": true,
+			"subdomain":  "app",
+		})
+	}
+	return out
+}
+
+// backendDefaults returns the listen port + healthcheck for a legacy backend type.
+func backendDefaults(backend string) (port, health string) {
+	switch backend {
+	case "nodejs":
+		return "3000", "wget -qO- http://localhost:3000/health >/dev/null 2>&1 || curl -sf http://localhost:3000/health >/dev/null 2>&1 || exit 1"
+	default: // laravel / php-fpm
+		return "9000", "php -r 'exit(0);' 2>/dev/null || exit 1"
+	}
 }
 
 // TemplateInfo is a summary of a stack template for the API.

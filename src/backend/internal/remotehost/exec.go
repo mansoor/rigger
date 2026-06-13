@@ -6,6 +6,40 @@ import (
 	"github.com/mansoor/rigger/ui/internal/executor"
 )
 
+// runSession runs cmd on an SSH session, honoring s.Context: if the context is
+// cancelled mid-command (e.g. a pipeline Cancel), the session is closed, which
+// terminates the remote command. A nil context runs the command uninterruptibly,
+// preserving prior behavior.
+func runSession(sess interface {
+	Start(string) error
+	Wait() error
+	Close() error
+}, s executor.Spec, cmd string) error {
+	if s.Context == nil {
+		// Plain blocking run via Start/Wait keeps a single code path.
+		if err := sess.Start(cmd); err != nil {
+			return err
+		}
+		return sess.Wait()
+	}
+	if err := s.Context.Err(); err != nil {
+		return err
+	}
+	if err := sess.Start(cmd); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case <-s.Context.Done():
+		sess.Close() // drop the channel → remote command is killed
+		<-done       // reap
+		return s.Context.Err()
+	case err := <-done:
+		return err
+	}
+}
+
 // Remote is an executor.Executor that runs docker commands on a remote host over
 // SSH. It runs each command as `cd <remote-env-dir> && docker <args>`, translating
 // the control plane's local working directory to the remote WORKSPACES_DIR. The
@@ -35,7 +69,7 @@ func (r Remote) Docker(s executor.Spec) error {
 	sess.Stdin = s.Stdin
 	sess.Stdout = s.Stdout
 	sess.Stderr = s.Stderr
-	return sess.Run(r.command(s))
+	return runSession(sess, s, r.command(s))
 }
 
 // DockerOutput runs a docker command on the remote and returns its stdout.

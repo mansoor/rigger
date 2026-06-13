@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPipelines, createPipeline, updatePipeline, deletePipeline,
-  fetchPipelineRuns, openPipelineSocket,
-  approvePipelineRun, rejectPipelineRun,
+  fetchPipelineRuns, fetchPipelineRun, startPipelineRun,
+  approvePipelineRun, rejectPipelineRun, cancelPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
+  suggestPipeline,
 } from '../lib/api'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
@@ -13,6 +14,7 @@ import {
 
 const STAGE_TYPES = [
   { value: 'deploy',  label: 'Deploy — up (current/built images)' },
+  { value: 'refresh', label: 'Refresh — regenerate compose + redeploy (apply config changes)' },
   { value: 'update',  label: 'Update — pull latest + recreate' },
   { value: 'build',   label: 'Build images (custom apps)' },
   { value: 'restart', label: 'Restart' },
@@ -23,7 +25,7 @@ const STAGE_TYPES = [
   { value: 'push',    label: 'Promote — copy env → env (registry)' },
   { value: 'gate',    label: 'Gate — manual approval' },
 ]
-const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
+export const STAGE_ICON = { deploy: '🚀', refresh: '♻️', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
 
 // Script-stage presets prefill the tool image + command (env context is injected
 // as RIGGER_* vars; secrets like a Sonar token are inlined by the user).
@@ -39,14 +41,14 @@ const blankStage = (env) => ({ type: 'deploy', env: env || '', service: '', comm
 
 const inputCls = 'px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong focus:outline-none focus:border-brand-500'
 
-export default function PipelinesTab({ workspace, name, envNames = [] }) {
+export default function PipelinesTab({ workspace, name, envNames = [], serviceNames = [] }) {
   const qc = useQueryClient()
   const { data: pipelines = [], isLoading } = useQuery({
     queryKey: ['pipelines', workspace, name],
     queryFn: () => fetchPipelines(workspace, name),
   })
   const [editing, setEditing] = useState(null) // draft pipeline (with optional id) or null
-  const [running, setRunning] = useState(null) // pipeline being run (modal)
+  const [gen, setGen] = useState(null) // null = closed; { target: null } = new; { target: pipeline } = regenerate
 
   const saveMut = useMutation({
     mutationFn: (p) => p.id ? updatePipeline(workspace, name, p.id, p) : createPipeline(workspace, name, p),
@@ -60,7 +62,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
   if (editing) {
     return (
       <PipelineEditor
-        draft={editing} envNames={envNames}
+        draft={editing} envNames={envNames} serviceNames={serviceNames}
         onChange={setEditing}
         onCancel={() => setEditing(null)}
         onSave={() => saveMut.mutate(editing)}
@@ -77,13 +79,36 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
           <h2 className="text-sm font-semibold text-content">Pipelines</h2>
           <p className="text-xs text-content-subtle">Chain deploy, build, test and backup steps into a one-click run.</p>
         </div>
-        <button
-          onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
-        >
-          + Add pipeline
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setGen({ target: null })}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors"
+            title="Generate a release pipeline from this project's environments"
+          >
+            ✨ Generate from environments
+          </button>
+          <button
+            onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
+          >
+            + Add pipeline
+          </button>
+        </div>
       </div>
+
+      {gen && (
+        <GeneratePipelineDialog
+          workspace={workspace} name={name} envNames={envNames} target={gen.target}
+          onClose={() => setGen(null)}
+          onGenerated={(draft) => {
+            const t = gen.target
+            setGen(null)
+            // Regenerate updates the existing pipeline in place (keep id + name);
+            // a fresh draft opens as a new pipeline.
+            setEditing(t ? { ...draft, id: t.id, name: t.name } : draft)
+          }}
+        />
+      )}
 
       {isLoading ? (
         <p className="text-sm text-content-subtle">Loading…</p>
@@ -95,37 +120,66 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
         <div className="space-y-3">
           {pipelines.map(p => (
             <PipelineCard
-              key={p.id} workspace={workspace} name={name} pipeline={p}
-              onRun={() => setRunning(p)}
+              key={p.id} workspace={workspace} name={name} pipeline={p} envNames={envNames}
               onEdit={() => setEditing({ ...p })}
+              onRegenerate={() => setGen({ target: p })}
               onDelete={() => { if (confirm(`Delete pipeline "${p.name}"?`)) delMut.mutate(p.id) }}
             />
           ))}
         </div>
       )}
-
-      {running && (
-        <RunConsole
-          workspace={workspace} name={name} pipeline={running}
-          onClose={() => { setRunning(null); qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, running.id] }) }}
-        />
-      )}
     </section>
   )
 }
 
-function stageSummary(s) {
+export function stageSummary(s) {
   if (s.type === 'gate') return 'gate'
   if (s.type === 'test') return `test ${s.service}`
   if (s.type === 'push') return `promote ${s.env}→${s.to_env}`
   if (s.type === 'version') return `version ${s.part || ''}`
   if (s.type === 'script') return `script ${s.image || ''}`.trim()
-  return `${s.type} ${s.env}`
+  if (s.type === 'build') {
+    let t = `build ${s.env}`
+    if (s.service) t += `/${s.service}`
+    if (s.part) t += ` ↑${s.part}`
+    if (s.push) t += ' +push'
+    return t
+  }
+  let t = `${s.type} ${s.env}`
+  if (s.service && ['deploy', 'update', 'restart', 'refresh'].includes(s.type)) t += `/${s.service}`
+  return t
 }
 
-function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
+function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDelete, onRegenerate }) {
+  const qc = useQueryClient()
   const [showHistory, setShowHistory] = useState(false)
   const [showHooks, setShowHooks] = useState(false)
+  const [openRunId, setOpenRunId] = useState(null) // run whose log/status window is open
+
+  // Poll the latest run so the Run button disables and a "View log" link appears
+  // while a run is in flight — regardless of who/what started it (UI or webhook).
+  const { data: latest = [] } = useQuery({
+    queryKey: ['pipeline-runs', workspace, name, pipeline.id],
+    queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 2500 : false,
+  })
+  const latestRun = latest[0]
+  const active = latestRun && (latestRun.status === 'running' || latestRun.status === 'awaiting')
+
+  const runMut = useMutation({
+    mutationFn: () => startPipelineRun(workspace, name, pipeline.id),
+    onSuccess: ({ run_id }) => {
+      setOpenRunId(run_id)
+      qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
+
+  // Stale = a stage targets an environment that no longer exists (e.g. it was
+  // deleted after the pipeline was generated). The run would fail on that stage.
+  const known = new Set(envNames)
+  const refEnvs = new Set()
+  pipeline.stages.forEach(s => { if (s.env) refEnvs.add(s.env); if (s.to_env) refEnvs.add(s.to_env) })
+  const staleEnvs = [...refEnvs].filter(e => !known.has(e))
   return (
     <div className="bg-surface border border-border rounded-xl p-4">
       <div className="flex items-start gap-3">
@@ -133,6 +187,10 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-content-strong truncate">{pipeline.name}</span>
             {!pipeline.enabled && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-raised text-content-faint">disabled</span>}
+            {staleEnvs.length > 0 && (
+              <span title={`References removed environment(s): ${staleEnvs.join(', ')}. Regenerate or edit to fix.`}
+                className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg border border-warning-border/60">⚠ stale</span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             {pipeline.stages.map((s, i) => (
@@ -142,10 +200,26 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={onRun} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">▶ Run</button>
-          <button onClick={onEdit} className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Edit</button>
-          <button onClick={onDelete} className="text-xs px-2.5 py-1.5 rounded-lg text-danger-fg hover:bg-danger-subtle/40 transition-colors">Delete</button>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <button onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {active ? '▶ Running…' : '▶ Run'}
+            </button>
+            {onRegenerate && (
+              <button onClick={onRegenerate} title="Regenerate this pipeline's stages from the current environments"
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">🔄</button>
+            )}
+            <button onClick={onEdit} className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Edit</button>
+            <button onClick={onDelete} className="text-xs px-2.5 py-1.5 rounded-lg text-danger-fg hover:bg-danger-subtle/40 transition-colors">Delete</button>
+          </div>
+          {latestRun && (
+            <button onClick={() => setOpenRunId(latestRun.id)}
+              className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
+              {active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+              View log
+            </button>
+          )}
         </div>
       </div>
       <div className="mt-3 flex items-center gap-4">
@@ -156,8 +230,12 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
           {showHooks ? '▾' : '▸'} Webhooks
         </button>
       </div>
-      {showHistory && <RunHistory workspace={workspace} name={name} pipelineId={pipeline.id} />}
+      {showHistory && <RunHistory workspace={workspace} name={name} pipeline={pipeline} />}
       {showHooks && <Webhooks workspace={workspace} name={name} pipelineId={pipeline.id} />}
+
+      {openRunId != null && (
+        <RunModal workspace={workspace} name={name} pipeline={pipeline} runId={openRunId} onClose={() => setOpenRunId(null)} />
+      )}
     </div>
   )
 }
@@ -169,6 +247,10 @@ function Webhooks({ workspace, name, pipelineId }) {
     queryFn: () => fetchPipelineWebhooks(workspace, name, pipelineId),
   })
   const [newToken, setNewToken] = useState(null) // raw token shown once after create
+  const [copied, setCopied] = useState(false)
+  async function copyUrl() {
+    try { await navigator.clipboard.writeText(newToken); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* clipboard unavailable */ }
+  }
 
   const addMut = useMutation({
     mutationFn: () => createPipelineWebhook(workspace, name, pipelineId, {}),
@@ -192,7 +274,13 @@ function Webhooks({ workspace, name, pipelineId }) {
       {newToken && (
         <div className="px-3 py-2 rounded-lg bg-warning-subtle/40 border border-warning-border/60 text-xs">
           <p className="text-warning-fg font-semibold mb-1">Copy this URL now — it won't be shown again:</p>
-          <code className="block font-mono break-all text-content-strong select-all">{newToken}</code>
+          <div className="flex items-start gap-2">
+            <code className="flex-1 font-mono break-all text-content-strong select-all">{newToken}</code>
+            <button onClick={copyUrl} title="Copy URL"
+              className="shrink-0 px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
+              {copied ? '✓ Copied' : '⧉ Copy'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -214,15 +302,17 @@ function Webhooks({ workspace, name, pipelineId }) {
   )
 }
 
-function statusChipCls(status) {
+export function statusChipCls(status) {
   if (status === 'ok') return 'bg-success-subtle text-success-fg border-success-border/60'
   if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle text-danger-fg border-danger-border/60'
   if (status === 'cancelled' || status === 'skipped') return 'bg-surface-raised text-content-faint border-border-strong'
   return 'bg-warning-subtle text-warning-fg border-warning-border/60' // running | awaiting
 }
 
-function RunHistory({ workspace, name, pipelineId }) {
+function RunHistory({ workspace, name, pipeline }) {
+  const pipelineId = pipeline.id
   const qc = useQueryClient()
+  const [logRun, setLogRun] = useState(null) // run id whose saved logs are open
   const { data: runs = [], isLoading } = useQuery({
     queryKey: ['pipeline-runs', workspace, name, pipelineId],
     queryFn: () => fetchPipelineRuns(workspace, name, pipelineId, 20),
@@ -253,22 +343,165 @@ function RunHistory({ workspace, name, pipelineId }) {
                 className="px-2 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/40">Reject</button>
             </span>
           )}
-          <div className="flex flex-wrap gap-1 ml-auto">
+          <div className="flex flex-wrap gap-1 ml-auto items-center">
             {r.stages.map((s, i) => (
               <span key={i} title={`${s.label} — ${s.status}`} className={`px-1 rounded border text-[10px] ${statusChipCls(s.status)}`}>
                 {STAGE_ICON[s.type] || '•'}
               </span>
             ))}
+            <button onClick={() => setLogRun(r.id)} title="View saved run logs"
+              className="ml-1 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+              Logs
+            </button>
           </div>
         </div>
       ))}
+      {logRun != null && (
+        <RunModal workspace={workspace} name={name} pipeline={pipeline} runId={logRun} onClose={() => setLogRun(null)} />
+      )}
+    </div>
+  )
+}
+
+// stepCls / stepIcon map a run-stage status to the pipeline-graph node style.
+// Shared with the project-page release graph (imported there).
+export function stepCls(status) {
+  if (status === 'ok') return 'bg-green-500 border-success text-green-900'
+  if (status === 'running') return 'bg-amber-400 border-warning text-amber-900 animate-pulse'
+  if (status === 'awaiting') return 'bg-amber-400 border-warning text-amber-900'
+  if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle border-danger-border text-danger-fg'
+  if (status === 'cancelled') return 'bg-surface-raised border-danger-border/60 text-danger-fg'
+  return 'bg-surface-raised border-border-strong text-content-subtle' // skipped / pending
+}
+export function stepIcon(status) {
+  if (status === 'ok') return '✓'
+  if (status === 'fail' || status === 'rejected') return '✕'
+  if (status === 'cancelled') return '■'
+  if (status === 'running') return '◌'
+  if (status === 'awaiting') return '⏸'
+  return '○'
+}
+
+// RunModal is the single live + historical run viewer. It POLLS the run record
+// (no socket), so it can be closed and reopened freely while the run keeps going
+// in the background — behaving identically whether the run was launched from the
+// project page, the Edit-Project pipelines tab, or a webhook. Each stage shows a
+// live indicator (pending ○ / running ◌ pulsing / ok ✓ / fail ✕) plus its captured
+// output (the in-flight stage streams in, persisted ~1×/sec by the executor).
+export function RunModal({ workspace, name, pipeline, runId, onClose }) {
+  const logRef = useRef(null)
+  const qc = useQueryClient()
+  const { data: run } = useQuery({
+    queryKey: ['pipeline-run', workspace, name, pipeline.id, runId],
+    queryFn: () => fetchPipelineRun(workspace, name, pipeline.id, runId),
+    refetchInterval: (q) => {
+      const s = q.state.data?.status
+      return (s === 'running' || s === 'awaiting') ? 1500 : false
+    },
+  })
+
+  // Force-stop a still-active run: signals the backend to kill the in-flight stage.
+  // The poll then picks up the cancelled status; also refresh the history list.
+  const cancelMut = useMutation({
+    mutationFn: () => cancelPipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-run', workspace, name, pipeline.id, runId] })
+      qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
+
+  // Overlay the recorded results onto the pipeline definition so future (not-yet-run)
+  // stages render as pending. For a finished/edited pipeline, recorded results are
+  // authoritative, so iterate the longer of the two.
+  const defs = pipeline.stages || []
+  const res = run?.stages || []
+  const count = Math.max(defs.length, res.length)
+  const typeAt = (i) => res[i]?.type || defs[i]?.type
+  const statusAt = (i) => res[i]?.status || 'pending'
+  const labelAt = (i) => res[i]?.label || (defs[i] ? stageSummary(defs[i]) : `stage ${i + 1}`)
+  const overall = run?.status || 'running'
+
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [run])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-3xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold text-content-strong truncate">▶ {pipeline.name}</span>
+            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${statusChipCls(overall)}`}>
+              {overall === 'running' ? 'running…' : overall}
+            </span>
+            <span className="text-[11px] text-content-faint shrink-0">run #{runId}{run?.trigger === 'webhook' ? ' · webhook' : ''}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {(overall === 'running' || overall === 'awaiting') && (
+              <button
+                onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
+                disabled={cancelMut.isPending}
+                className="text-[11px] px-2 py-1 rounded border border-danger-border text-danger-fg hover:bg-danger-subtle disabled:opacity-50"
+                title="Force-stop this running pipeline">
+                {cancelMut.isPending ? 'Cancelling…' : '■ Cancel'}
+              </button>
+            )}
+            <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+          </div>
+        </div>
+
+        {/* Stage graph — current step pulses, completed steps go green. */}
+        <div className="flex items-center gap-0 px-5 py-4 border-b border-border overflow-x-auto">
+          {Array.from({ length: count }, (_, i) => {
+            const st = statusAt(i)
+            return (
+              <div key={i} className="flex items-center">
+                <div className="flex flex-col items-center gap-1.5 min-w-[86px]">
+                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepCls(st)}`}>{stepIcon(st)}</div>
+                  <span className="text-[10px] text-center leading-tight text-content">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
+                </div>
+                {i < count - 1 && <div className="h-0.5 w-6 shrink-0 mx-1 bg-surface-overlay" />}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Per-stage logs — pending stages are hidden until they start. */}
+        <div ref={logRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {!run ? (
+            <p className="text-xs text-content-subtle">Loading…</p>
+          ) : count === 0 ? (
+            <p className="text-xs text-content-subtle">No stages.</p>
+          ) : Array.from({ length: count }, (_, i) => {
+            const st = statusAt(i)
+            if (st === 'pending') return null
+            const r = res[i]
+            return (
+              <div key={i}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs">{STAGE_ICON[typeAt(i)] || '•'}</span>
+                  <span className="text-xs font-medium text-content-strong">{labelAt(i)}</span>
+                  <span className={`px-1.5 py-0.5 rounded border text-[10px] ${statusChipCls(st)}`}>{st === 'running' ? 'running…' : st}</span>
+                  {r?.ms ? <span className="text-[10px] text-content-faint">{r.ms} ms</span> : null}
+                </div>
+                {/* Terminal box: the background is always dark, so the text must be a
+                    fixed light colour — `text-content` is dark in light theme and would
+                    vanish on this bg. */}
+                {(r?.output || st === 'running') && (
+                  <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-gray-100">
+                    {r?.output ? renderAnsi(r.output) : <span className="text-gray-400">running…</span>}
+                  </pre>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
-function PipelineEditor({ draft, envNames, onChange, onCancel, onSave, saving, error }) {
+function PipelineEditor({ draft, envNames, serviceNames = [], onChange, onCancel, onSave, saving, error }) {
   const setStage = (i, patch) => onChange({ ...draft, stages: draft.stages.map((s, j) => j === i ? { ...s, ...patch } : s) })
   const addStage = () => onChange({ ...draft, stages: [...draft.stages, blankStage(envNames[0])] })
   const removeStage = (i) => onChange({ ...draft, stages: draft.stages.filter((_, j) => j !== i) })
@@ -313,7 +546,7 @@ function PipelineEditor({ draft, envNames, onChange, onCancel, onSave, saving, e
           </div>
           <div className="space-y-2">
             {draft.stages.map((s, i) => (
-              <StageRow key={i} idx={i} count={draft.stages.length} stage={s} envNames={envNames}
+              <StageRow key={i} idx={i} count={draft.stages.length} stage={s} envNames={envNames} serviceNames={serviceNames}
                 onChange={patch => setStage(i, patch)} onRemove={() => removeStage(i)} onMove={dir => move(i, dir)} />
             ))}
           </div>
@@ -323,7 +556,10 @@ function PipelineEditor({ draft, envNames, onChange, onCancel, onSave, saving, e
   )
 }
 
-function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
+// Stage types that act on a whole env but can be scoped to a single service.
+const SERVICE_SCOPED = ['build', 'deploy', 'update', 'restart', 'refresh']
+
+function StageRow({ idx, count, stage, envNames, serviceNames = [], onChange, onRemove, onMove }) {
   return (
     <div className="border border-border-strong rounded-lg p-3 bg-surface-raised/40">
       <div className="flex items-center gap-2 flex-wrap">
@@ -352,6 +588,16 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
               <option value="">{stage.type === 'push' ? '— from —' : '— env —'}</option>
               {envNames.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
+            {SERVICE_SCOPED.includes(stage.type) && (
+              serviceNames.length > 0 ? (
+                <select value={stage.service || ''} onChange={e => onChange({ service: e.target.value })} className={inputCls} title="Scope this stage to one service (microservices) — default is all services">
+                  <option value="">all services</option>
+                  {serviceNames.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : (
+                <input value={stage.service || ''} onChange={e => onChange({ service: e.target.value })} placeholder="service (all)" className={`${inputCls} w-32`} title="Scope to one service (blank = all)" />
+              )
+            )}
             {stage.type === 'push' && (
               <>
                 <span className="text-content-faint">→</span>
@@ -359,6 +605,21 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
                   <option value="">— to —</option>
                   {envNames.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
+              </>
+            )}
+            {stage.type === 'build' && (
+              <>
+                <select value={stage.part || ''} onChange={e => onChange({ part: e.target.value })} className={inputCls} title="Bump the version as part of this build (so the deploy rolls to the new version)">
+                  <option value="">no bump</option>
+                  <option value="build">bump build</option>
+                  <option value="patch">bump patch</option>
+                  <option value="minor">bump minor</option>
+                  <option value="major">bump major</option>
+                </select>
+                <label className="flex items-center gap-1.5 text-xs text-content-muted cursor-pointer" title="Push images to the registry (required before a later promote)">
+                  <input type="checkbox" checked={!!stage.push} onChange={e => onChange({ push: e.target.checked })} className="w-3.5 h-3.5 accent-brand-500" />
+                  push to registry
+                </label>
               </>
             )}
             {stage.type === 'backup' && (
@@ -438,35 +699,90 @@ function renderAnsi(text) {
   return out
 }
 
-function RunConsole({ workspace, name, pipeline, onClose }) {
-  const [text, setText] = useState('')
-  const [status, setStatus] = useState('running')
-  const boxRef = useRef(null)
+// GeneratePipelineDialog proposes a release/hotfix pipeline from the project's
+// ordered environments. The server returns a draft (it does not persist); the
+// caller opens it in the normal editor, so every stage stays editable.
+function GeneratePipelineDialog({ workspace, name, envNames = [], target = null, onClose, onGenerated }) {
+  const [template, setTemplate] = useState('release')
+  const [bumpPart, setBumpPart] = useState('')
+  const [gate, setGate] = useState(true)
+  const [hotfixTo, setHotfixTo] = useState(envNames[envNames.length - 1] || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
 
-  useEffect(() => {
-    const ws = openPipelineSocket(workspace, name, pipeline.id)
-    ws.addEventListener('message', e => setText(prev => prev + (e.data || '')))
-    ws.addEventListener('close', () => setStatus(s => (s === 'running' ? 'done' : s)))
-    ws.addEventListener('error', () => setStatus('error'))
-    return () => ws.close()
-  }, [workspace, name, pipeline.id])
-
-  useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight }, [text])
+  async function generate() {
+    setBusy(true); setErr('')
+    try {
+      const draft = await suggestPipeline(workspace, name, {
+        template, bump_part: bumpPart, gate,
+        hotfix_to: template === 'hotfix' ? hotfixTo : '',
+      })
+      onGenerated?.(draft)
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Failed to generate')
+      setBusy(false)
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-3xl flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-content-strong">▶ {pipeline.name}</span>
-            <span className={`text-[11px] px-1.5 py-0.5 rounded border ${status === 'error' ? statusChipCls('fail') : status === 'done' ? 'bg-surface-raised text-content-muted border-border-strong' : statusChipCls('running')}`}>
-              {status === 'running' ? 'running…' : status}
-            </span>
-          </div>
-          <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <h2 className="text-sm font-semibold text-content-strong">{target ? 'Regenerate pipeline' : 'Generate pipeline'}</h2>
+          <p className="text-xs text-content-subtle mt-1">
+            {target
+              ? <>Re-seeds <span className="font-medium text-content">{target.name}</span> from the current environments — replaces its stages. You can review before saving.</>
+              : 'Seeded from your environments (in deploy-tier order). Review and edit before saving.'}
+          </p>
         </div>
-        <div ref={boxRef} className="flex-1 overflow-y-auto px-5 py-4 font-mono text-xs leading-relaxed whitespace-pre-wrap bg-[#0c1322] text-content rounded-b-xl">
-          {text ? renderAnsi(text) : <span className="text-content-subtle">Connecting…</span>}
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Template</label>
+            <div className="flex gap-2 mt-1.5">
+              {[['release', 'Release — full chain'], ['hotfix', 'Hotfix — bypass lower envs']].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setTemplate(v)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${template === v ? 'border-brand-500 bg-brand-500/10 text-content-strong' : 'border-border-strong text-content-muted hover:bg-surface-raised'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {template === 'hotfix' && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Promote straight to</label>
+              <select value={hotfixTo} onChange={e => setHotfixTo(e.target.value)} className={`${inputCls} w-full mt-1.5`}>
+                {envNames.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Version bump</label>
+              <select value={bumpPart} onChange={e => setBumpPart(e.target.value)} className={`${inputCls} w-full mt-1.5`}>
+                <option value="">{template === 'hotfix' ? 'patch (default)' : 'none'}</option>
+                <option value="build">build</option>
+                <option value="patch">patch</option>
+                <option value="minor">minor</option>
+                <option value="major">major</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer pb-2">
+              <input type="checkbox" checked={gate} onChange={e => setGate(e.target.checked)} className="w-3.5 h-3.5 accent-brand-500" />
+              Gate before final promote
+            </label>
+          </div>
+
+          {err && <p className="text-xs text-danger-fg">{err}</p>}
+        </div>
+        <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-sm border border-border-strong text-content hover:bg-surface-raised transition-colors">Cancel</button>
+          <button type="button" onClick={generate} disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+            {busy ? (target ? 'Regenerating…' : 'Generating…') : (target ? 'Regenerate' : 'Generate')}
+          </button>
         </div>
       </div>
     </div>

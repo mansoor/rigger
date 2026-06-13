@@ -12,9 +12,10 @@ import (
 const cfgBody = `{
   "project": { "name": "app", "registry": "reg",
     "version": { "major": 1, "minor": 2, "patch": 3, "build": 4 } },
+  "services": [ { "name": "backend", "build": { "template": "laravel", "context": "backend" } } ],
   "environments": {
-    "stage": { "domain": "stage.app", "frontend_enabled": false },
-    "prod":  { "domain": "app.com",  "frontend_enabled": false }
+    "stage": { "domain": "stage.app" },
+    "prod":  { "domain": "app.com" }
   }
 }`
 
@@ -119,6 +120,54 @@ func TestBuildRunsInContextDir(t *testing.T) {
 	wantDir := filepath.Join(wsDir, "ws", "projects", "app", "envs", "prod", "backend")
 	if rec.dirs[0] != wantDir {
 		t.Errorf("build Dir = %q, want %q", rec.dirs[0], wantDir)
+	}
+}
+
+// TestBuildArgsResolved verifies custom build.args reach the docker build as
+// --build-arg pairs, sorted by key for deterministic argv, with the build-time
+// tokens (${ENV}, ${VERSION}, ${ROUTE_URL}) expanded.
+func TestBuildArgsResolved(t *testing.T) {
+	wsDir := t.TempDir()
+	wsRoot := filepath.Join(wsDir, "ws", "projects", "app")
+	beCtx := filepath.Join(wsRoot, "envs", "prod", "backend")
+	if err := os.MkdirAll(beCtx, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `{
+  "project": { "name": "app", "registry": "reg",
+    "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+  "services": [ { "name": "backend", "build": { "context": "backend",
+    "args": { "ZEBRA": "static", "ALPHA": "${ENV}-${VERSION}", "API_URL": "${ROUTE_URL}/api" } } } ],
+  "environments": {
+    "prod": { "traefik_enabled": true, "traefik_network": "rigger-traefik" }
+  }
+}`
+	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(cfg), 0o644)         //nolint:errcheck
+	os.WriteFile(filepath.Join(beCtx, "Dockerfile"), []byte("FROM scratch"), 0o644) //nolint:errcheck
+
+	rec := &recorder{}
+	o := Options{
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
+		Extra: []string{"backend"}, Stdout: &strings.Builder{}, Exec: rec,
+		// BaseDomain empty → ${ROUTE_URL} resolves to the *.localhost route (HTTP).
+	}
+	if _, err := o.Run(); err != nil {
+		t.Fatal(err)
+	}
+	build := joined(rec.calls[0])
+	for _, want := range []string{
+		"--build-arg ALPHA=prod-1.0.0-build.0",
+		"--build-arg API_URL=http://app-prod.localhost/api",
+		"--build-arg ZEBRA=static",
+	} {
+		if !strings.Contains(build, want) {
+			t.Errorf("build missing %q:\n%s", want, build)
+		}
+	}
+	// Sorted by key: ALPHA < API_URL < ZEBRA.
+	iA, iB, iZ := strings.Index(build, "ALPHA="), strings.Index(build, "API_URL="), strings.Index(build, "ZEBRA=")
+	if !(iA < iB && iB < iZ) {
+		t.Errorf("build args not sorted (ALPHA@%d API_URL@%d ZEBRA@%d):\n%s", iA, iB, iZ, build)
 	}
 }
 

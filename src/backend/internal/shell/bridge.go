@@ -3,6 +3,7 @@ package shell
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -170,7 +171,7 @@ func (b *Bridge) Migrate(workspaceName, project string, targetHostID int64, out 
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("migration requires multi-host support")
 	}
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
@@ -707,7 +708,7 @@ func (b *Bridge) ExecForEnv(workspaceName, project, env string) (executor.Execut
 // encrypted at rest in its Raft store. Idempotent (a no-op if it already
 // exists, since Swarm secrets are immutable).
 func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value string, version int) (string, error) {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return "", err
 	}
@@ -725,7 +726,7 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value strin
 // RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
 // fails if the secret is still referenced by a running service).
 func (b *Bridge) RemoveSwarmSecret(workspaceName, project, env, key string, version int) error {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project)
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return err
 	}
@@ -804,7 +805,8 @@ func (b *Bridge) Bootstrap(workspaceName, project, env string, stdout, stderr io
 
 func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, out io.Writer) error {
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
-	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, out)
+	baseDomain := settings.WorkspaceBaseDomain(b.db, workspaceName)
+	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, out)
 }
 
 // runScript runs a one-off tool container for a pipeline `script` stage, injecting
@@ -852,15 +854,84 @@ func (b *Bridge) runScript(opts RunOptions, rt *remoteTarget) error {
 	args = append(args, opts.ScriptImage, "sh", "-c", opts.ScriptCommand)
 
 	fmt.Fprintf(opts.Stdout, "⚑ Running tool container %s\n", opts.ScriptImage)
-	var ex executor.Executor = executor.Local{}
+	var base executor.Executor = executor.Local{}
 	if rt != nil {
-		ex = rt.exec
+		base = rt.exec
 	}
+	ex := executor.WithContext(base, opts.Context) // cancellable when the pipeline is
 	if err := ex.Docker(executor.Spec{Args: args, Env: shellEnv(), Stdout: opts.Stdout, Stderr: opts.Stderr}); err != nil {
 		return err
 	}
 	fmt.Fprintf(opts.Stdout, "✓ %s completed\n", opts.ScriptImage)
 	return nil
+}
+
+// ensureRegistryLogin authenticates docker to the project's configured registry
+// before a push/pull, using the workspace registry pool's stored credentials. It
+// matches the project's registry host (the image-tag prefix, cfg.Project.Registry)
+// against a registry record's URL and runs `docker login` on the given executor
+// (the local daemon, or the env's remote host). It is a no-op when no registry is
+// configured or no matching pool entry exists (e.g. a public/no-auth registry),
+// preserving prior behavior. Idempotent — docker caches the credentials.
+func (b *Bridge) ensureRegistryLogin(workspaceName, project string, ex executor.Executor, out io.Writer) error {
+	if b.db == nil {
+		return nil
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil // can't read config — let the push/pull surface its own error
+	}
+	host := normalizeRegistryHost(cfg.Project.Registry)
+	if host == "" {
+		return nil // no registry configured (local-only images)
+	}
+	// workspaceName is the workspace KEY (folder/route identity), which is exactly
+	// how registries are scoped (owner_scope='ws:{key}').
+	pool, err := settings.ListRegistriesForWorkspace(b.db, workspaceName)
+	if err != nil {
+		return nil
+	}
+	matchID := int64(0)
+	for i := range pool {
+		if normalizeRegistryHost(pool[i].URL) == host {
+			matchID = pool[i].ID
+			break
+		}
+	}
+	if matchID == 0 {
+		return nil // registry host isn't in this workspace's pool — nothing to log in with
+	}
+	reg, err := settings.GetRegistry(b.db, matchID) // re-read WITH the password
+	if err != nil || reg == nil || reg.Password == "" {
+		return nil
+	}
+	fmt.Fprintf(out, "⚑ Authenticating to registry %s…\n", reg.URL)
+	if err := ex.Docker(executor.Spec{
+		Args:   []string{"login", "--username", reg.Username, "--password-stdin", reg.URL},
+		Stdin:  strings.NewReader(reg.Password),
+		Env:    shellEnv(),
+		Stdout: out, Stderr: out,
+	}); err != nil {
+		return fmt.Errorf("docker login to %s failed: %w", reg.URL, err)
+	}
+	return nil
+}
+
+// normalizeRegistryHost reduces a registry reference to a bare host[:port] for
+// comparison: it drops the scheme and any trailing path/slash and lowercases.
+// "https://registry.example.com/" and "registry.example.com" both → the same key.
+func normalizeRegistryHost(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // RunOptions configures a command execution.
@@ -872,6 +943,12 @@ type RunOptions struct {
 	Extra     []string // additional args (e.g. "db" for backup, "minor" for version bump)
 	Stdout    io.Writer
 	Stderr    io.Writer
+
+	// Context, when set, makes the command cancellable: cancelling it kills the
+	// underlying docker process(es). Pipelines pass a per-run context so a Cancel
+	// request aborts a hung build mid-flight. nil ⇒ uncancellable (existing behavior
+	// for one-off actions, the scheduler, migrations, etc.).
+	Context context.Context
 
 	// Backup-only (Phase 11 per-env schedules): which services to back up
 	// (empty = all) and the schedule metadata recorded in the snapshot manifest.
@@ -984,6 +1061,17 @@ func (b *Bridge) Run(opts RunOptions) error {
 		return err
 	}
 
+	// Bind every docker call this command makes to opts.Context (if set) so a
+	// pipeline Cancel kills the in-flight process. builder/dockerops/backup all
+	// funnel through executor.Default(opts.Exec), so wrapping the executor we hand
+	// them propagates cancellation without touching individual call sites. A nil
+	// context yields the bare executor (unchanged behavior for one-off actions).
+	var baseExec executor.Executor = executor.Local{}
+	if rt != nil {
+		baseExec = rt.exec
+	}
+	runExec := executor.WithContext(baseExec, opts.Context)
+
 	// Phase 9 tool stage: run a one-off tool container (Trivy/Cypress/Sonar/custom)
 	// with the env's context injected as RIGGER_* variables.
 	if opts.Command == "script" {
@@ -1032,6 +1120,24 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
+			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			Exec:          runExec, // context-bound (local or remote) — cancellable
+		}
+		// Ensure the project's registry is authenticated before any push/pull. The
+		// build/push and promote paths talk to the registry but rely on docker's
+		// stored credentials — previously only populated by the registry "Test"
+		// button. Log in here (on whichever daemon will run docker) using the
+		// workspace registry's stored creds, so a fresh container/session works.
+		if (opts.Command == "build" && contains(opts.Extra, "--push")) || opts.Command == "promote" {
+			var loginExec executor.Executor = executor.Local{}
+			if rt != nil {
+				loginExec = rt.exec
+			}
+			if lerr := b.ensureRegistryLogin(opts.Workspace, opts.Project, loginExec, opts.Stdout); lerr != nil {
+				// Surface but continue — the push/pull gives a definitive error if
+				// credentials are genuinely missing or wrong.
+				fmt.Fprintf(opts.Stdout, "⚠ registry login: %v\n", lerr)
+			}
 		}
 		if rt != nil {
 			// Remote build/promote runs docker on the host's own daemon (so the
@@ -1040,7 +1146,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			// service subdirs, .env stays host-authoritative) first. Route the
 			// post-promote deploy back through the bridge so it lands on the
 			// destination env's host.
-			bopts.Exec = rt.exec
+			// bopts.Exec is already runExec (wraps rt.exec); just add remote plumbing.
 			bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 			bopts.SetDeploy(func(env string) error {
 				return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
@@ -1067,10 +1173,11 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
+			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
 			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
-			dopts.Exec = rt.exec
 			dopts.Remote = true
 			dopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 			dopts.Sync = func() error {
@@ -1104,9 +1211,9 @@ func (b *Bridge) Run(opts RunOptions) error {
 			ScheduleID:    opts.ScheduleID,
 			ScheduleName:  opts.ScheduleName,
 			Trigger:       opts.Trigger,
+			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
-			bopts.Exec = rt.exec
 			bopts.DotEnv = b.remoteDotEnv(rt, opts.Workspace, opts.Project, opts.Env)
 		}
 		handled, err := backup.Run(bopts)

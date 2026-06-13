@@ -97,7 +97,8 @@ func doCreateExec(containerID, body string) (string, error) {
 }
 
 // startExec calls POST /exec/{id}/start and returns the hijacked connection.
-// After the HTTP response headers, the body is the raw PTY stream.
+// After the HTTP response headers, the connection carries the raw, full-duplex
+// PTY stream: we write stdin to it and read stdout/stderr from it.
 func startExec(execID string) (net.Conn, io.Reader, error) {
 	body := `{"Detach":false,"Tty":true}`
 
@@ -106,33 +107,35 @@ func startExec(execID string) (net.Conn, io.Reader, error) {
 		return nil, nil, fmt.Errorf("dial docker socket (start): %w", err)
 	}
 
+	// Request a connection HIJACK via the tcp upgrade headers. This is essential:
+	// without "Connection: Upgrade" + "Upgrade: tcp" the daemon streams stdout but
+	// never reads stdin, so every keystroke is silently dropped (the terminal looks
+	// connected but won't accept input). With them the daemon answers 101 and wires
+	// stdin AND stdout onto this single connection. (Matches the docker CLI / dockerode.)
 	fmt.Fprintf(conn,
-		"POST /%s/exec/%s/start HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s",
+		"POST /%s/exec/%s/start HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: %d\r\n\r\n%s",
 		dockerAPIVer, execID, len(body), body,
 	)
 
-	// Read the HTTP response headers — after them, conn carries raw PTY bytes.
-	// We use a bufio.Reader to parse HTTP headers; any bytes buffered in it
-	// after the headers are the first bytes of PTY output.
-	r := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(r, nil)
+	// Parse the response headers; the bytes AFTER them (held in the bufio.Reader)
+	// are the first PTY bytes.
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		conn.Close()
 		return nil, nil, fmt.Errorf("exec start: %w", err)
 	}
-
-	// The Docker daemon responds with 200 OK; the body is the live PTY stream.
-	// IMPORTANT: do NOT close resp.Body — it IS the stream we will read from.
-	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+	resp.Body.Close()
+	// 101 Switching Protocols = the hijack succeeded. Older daemons may answer 200
+	// with a raw stream (stdin may not work there, but accept it as a fallback).
+	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {
 		conn.Close()
 		return nil, nil, fmt.Errorf("exec start returned %d", resp.StatusCode)
 	}
 
-	// resp.Body wraps r (the bufio.Reader), which wraps conn.
-	// Reading from resp.Body correctly drains any buffered HTTP bytes first,
-	// then reads live PTY output from conn.
-	return conn, resp.Body, nil
+	// IMPORTANT: read PTY output from the buffered reader (positioned right after the
+	// response headers), NOT resp.Body — for a 101 response resp.Body is empty.
+	return conn, br, nil
 }
 
 // Read reads PTY output bytes.

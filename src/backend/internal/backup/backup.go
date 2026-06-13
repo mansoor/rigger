@@ -112,11 +112,12 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		return
 	}
 
-	// Custom stack — driven by the environment's database field.
+	// Custom stack — driven by the project-level database engine (Eff* falls back
+	// to the legacy per-env value for configs written before the move).
 	if !c.wants("database") {
 		return
 	}
-	database := c.cfg.Environments[c.env].Database
+	database := c.cfg.effDatabase(c.env)
 	switch database {
 	case "postgres":
 		if !c.sqlDump("postgres", "postgres", "postgres", dateDir, backupDir) {
@@ -124,6 +125,11 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		}
 	case "mysql":
 		if !c.sqlDump("mysql", "mysql", "mysql", dateDir, backupDir) {
+			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
+		}
+	case "mariadb":
+		// MariaDB uses the mysql dump path; container/service is {prefix}_mariadb.
+		if !c.sqlDump("mysql", "mariadb", "mysql", dateDir, backupDir) {
 			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
 		}
 	default:
@@ -243,7 +249,7 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 		}
 	}
 
-	if c.wants("garage") && c.cfg.Environments[c.env].GarageEnabled {
+	if c.wants("garage") && c.cfg.effGarage(c.env) {
 		c.info("Archiving Garage S3 data...")
 		garageFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_garage_%s.tar.gz", c.project, c.env, dateDir))
 		mounts := map[string]string{

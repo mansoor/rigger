@@ -15,11 +15,11 @@ import (
 // needs. It is intentionally separate from workspace.Config (the API/frontend
 // view) so generation stays decoupled and image env_vars never leak to the UI.
 type Config struct {
-	Project      Project           `json:"project"`
-	Images       []Image           `json:"images"`
+	Project      Project            `json:"project"`
+	Services     []Service          `json:"services"`
 	Versions     map[string]flexStr `json:"versions"`
-	NamedVolumes []NamedVolume     `json:"named_volumes"`
-	Environments map[string]Env    `json:"environments"`
+	NamedVolumes []NamedVolume      `json:"named_volumes"`
+	Environments map[string]Env     `json:"environments"`
 }
 
 type Project struct {
@@ -30,6 +30,18 @@ type Project struct {
 	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
 	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
 	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// LocalTLS: when an env auto-routes on *.localhost (no workspace base domain),
+	// serve it over Traefik's self-signed cert instead of plain HTTP — for apps
+	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.
+	LocalTLS bool `json:"local_tls,omitempty"`
+	// Managed dependencies are project-level (consistent across envs): the DB engine
+	// + version and the Redis/Garage toggles. Only per-env DBExternal stays on Env.
+	// Legacy per-env Env.Database/DBVersion/Redis/Garage are read as a fallback so
+	// pre-move configs generate identical YAML — see gen.dbEngine/redisOn/garageOn.
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
 }
 
 type Version struct {
@@ -43,25 +55,26 @@ type NamedVolume struct {
 	Name string `json:"name"`
 }
 
-// Env is one environment's config.
+// Env is one environment's config. The app services live in Config.Services
+// (project level); per-env knobs live here. Database/Redis/Garage stay as simple
+// managed-dependency toggles until Phase 3 folds them into the service graph.
 type Env struct {
-	Domain           string                     `json:"domain"`
-	HTTPPort         flexStr                    `json:"http_port"`
-	Backend          string                     `json:"backend"`
-	FrontendEnabled  bool                       `json:"frontend_enabled"`
-	Frontend         string                     `json:"frontend"`
-	Database         string                     `json:"database"`
-	RedisEnabled     bool                       `json:"redis_enabled"`
-	GarageEnabled    bool                       `json:"garage_enabled"`
-	TraefikEnabled   bool                       `json:"traefik_enabled"`
-	TraefikNetwork   string                     `json:"traefik_network"`
-	SSLEnabled       bool                       `json:"ssl_enabled"`
-	Deployment       string                     `json:"deployment"`
-	Replicas         Replicas                   `json:"replicas"`
-	// Processes are extra long-running containers for custom apps (queue workers,
-	// scheduler, job processors) that reuse a built image with a custom command.
-	// Empty ⇒ no extra services, so existing configs/output are unchanged.
-	Processes        []Process                  `json:"processes,omitempty"`
+	Domain         string  `json:"domain"`
+	HTTPPort       flexStr `json:"http_port"`
+	Database       string  `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion      string  `json:"db_version,omitempty"`
+	DBExternal     bool    `json:"db_external,omitempty"`
+	RedisEnabled   bool    `json:"redis_enabled"`
+	GarageEnabled  bool    `json:"garage_enabled"`
+	TraefikEnabled bool    `json:"traefik_enabled"`
+	TraefikNetwork string  `json:"traefik_network"`
+	SSLEnabled     bool    `json:"ssl_enabled"`
+	// SSLSelfSigned routes HTTPS through Traefik's default (self-signed) cert
+	// instead of Let's Encrypt — used for local *.localhost envs that need HTTPS
+	// (e.g. Vaultwarden) but can't get a public cert. Ignored unless SSLEnabled.
+	SSLSelfSigned bool   `json:"ssl_self_signed,omitempty"`
+	Deployment    string `json:"deployment"`
+	// ServiceOverrides appends per-service YAML for THIS env (keyed by service name).
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides"`
 	// Swarm holds per-env Docker Swarm scheduling: env-level rolling-update/restart
 	// policy plus per-service replicas/placement overrides. Only consulted for swarm
@@ -73,19 +86,47 @@ type Env struct {
 	SecretVersions map[string]int `json:"secret_versions"`
 }
 
-type Replicas struct {
-	Backend  flexStr `json:"backend"`
-	Frontend flexStr `json:"frontend"`
+// Service is one entry in config.json services[] — the unified app-service model
+// that replaces the old custom backend/frontend enums, the image-stack images[],
+// and the Phase 1 processes[]. Exactly one source is set:
+//
+//	Build     — build from a context dir (envs/{env}/{name}/Dockerfile)
+//	Image     — pull a prebuilt image ("nginx:1.25")
+//	ImageFrom — reuse another (Build) service's image (workers/scheduler)
+//
+// Language-specific opinions (port, healthcheck, whether an nginx fronting
+// service is needed) live in the seed blueprint, NOT the generator.
+type Service struct {
+	Name              string             `json:"name"`           // dns-safe, unique
+	Role              string             `json:"role,omitempty"` // app | worker | static (informational)
+	Build             *BuildSpec         `json:"build,omitempty"`
+	Image             string             `json:"image,omitempty"`
+	ImageFrom         string             `json:"image_from,omitempty"`
+	Tag               string             `json:"tag,omitempty"` // Image source only; build tag derives from version
+	Command           string             `json:"command,omitempty"`
+	Port              flexStr            `json:"port,omitempty"`      // container port it listens on
+	HostPort          flexStr            `json:"host_port,omitempty"` // publish host:container (compose, non-traefik)
+	ExtraPorts        []flexStr          `json:"extra_ports,omitempty"`
+	WebRouted         bool               `json:"web_routed,omitempty"` // primary HTTP entry (Traefik / host port)
+	Subdomain         string             `json:"subdomain,omitempty"`  // "" = {domain}, "app" = app.{domain}
+	Healthcheck       string             `json:"healthcheck,omitempty"`
+	HealthcheckConfig HealthcheckConfig  `json:"healthcheck_config,omitempty"`
+	Volumes           []string           `json:"volumes,omitempty"`
+	DependsOn         []string           `json:"depends_on,omitempty"` // short service / managed-dep names
+	Restart           string             `json:"restart,omitempty"`
+	EnvFile           bool               `json:"env_file,omitempty"`            // inject the env's .env as process env (env_file:)
+	EnvFileMount      string             `json:"env_file_mount,omitempty"`      // also bind the env's .env as a physical file at this container path (ro)
+	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
+	ExtraCompose      string             `json:"extra_compose,omitempty"`
+	Replicas          flexStr            `json:"replicas,omitempty"` // default; per-env override via Swarm.Services
 }
 
-// Process is an extra long-running container that reuses a built image (the
-// backend or frontend) with a custom command — e.g. a queue worker, scheduler,
-// or job processor. It has no published ports and is not web-routed.
-type Process struct {
-	Name     string  `json:"name"`               // dns-safe; unique within the env
-	Command  string  `json:"command"`            // e.g. "php artisan queue:work --tries=3"
-	Source   string  `json:"source,omitempty"`   // "backend" (default) | "frontend"
-	Replicas flexStr `json:"replicas,omitempty"` // swarm only (mirrors backend/frontend today)
+// BuildSpec describes how a Build service's image is built.
+type BuildSpec struct {
+	Context    string            `json:"context,omitempty"`    // subdir, default = service name
+	Dockerfile string            `json:"dockerfile,omitempty"` // default "Dockerfile"
+	Target     string            `json:"target,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`
 }
 
 // SwarmConfig is the per-env Docker Swarm deploy tuning. Empty fields fall back to
@@ -122,24 +163,6 @@ type SwarmService struct {
 
 type ServiceOverride struct {
 	ExtraCompose string `json:"extra_compose"`
-}
-
-// Image is one entry in config.json images[] (image-stack projects).
-type Image struct {
-	Name              string             `json:"name"`
-	Image             string             `json:"image"`
-	Tag               string             `json:"tag"`
-	Port              flexStr            `json:"port"`
-	HostPort          flexStr            `json:"host_port"`
-	Healthcheck       string             `json:"healthcheck"`
-	Command           string             `json:"command"`
-	Volumes           []string           `json:"volumes"`
-	ExtraPorts        []flexStr          `json:"extra_ports"`
-	Restart           string             `json:"restart"`
-	HealthcheckConfig HealthcheckConfig  `json:"healthcheck_config"`
-	DependsOn         []string           `json:"depends_on"`
-	EnvVars           map[string]flexStr `json:"env_vars"`
-	ExtraCompose      string             `json:"extra_compose"`
 }
 
 type HealthcheckConfig struct {
@@ -181,14 +204,6 @@ func (c *Config) resourcePrefix() string {
 		return c.Project.ResourcePrefix
 	}
 	return c.Project.Name
-}
-
-// projectType returns the project type, defaulting to "custom".
-func (c *Config) projectType() string {
-	if c.Project.Type == "" {
-		return "custom"
-	}
-	return c.Project.Type
 }
 
 // ── flexStr ─────────────────────────────────────────────────────────────────────

@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// imageConfig is a minimal image-stack config.json that composegen can render.
+// imageConfig is a minimal pull-image (no build services) config.json — so
+// bootstrap should write .env + compose but no Dockerfiles or nginx.conf.
 const imageConfig = `{
-  "project": { "name": "wp", "type": "image" },
-  "images": [ { "name": "app", "image": "wordpress", "tag": "latest", "port": 80, "host_port": 8080 } ],
+  "project": { "name": "wp" },
+  "services": [ { "name": "app", "image": "wordpress", "tag": "latest", "port": "80", "host_port": "8080", "env_file": true } ],
   "environments": { "prod": { "env_vars": { "WP_PASSWORD": "CHANGE_ME", "WP_PORT": "8080" } } }
 }`
 
@@ -26,7 +27,7 @@ func TestBootstrapImageStack(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, &out); err != nil {
+	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, "", &out); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 
@@ -59,7 +60,7 @@ func TestBootstrapPreservesEnvWithoutRegen(t *testing.T) {
 	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(imageConfig), 0o644) //nolint:errcheck
 	os.WriteFile(filepath.Join(envDir, ".env"), []byte("SENTINEL=keepme\n"), 0o644) //nolint:errcheck
 
-	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, nil); err != nil {
+	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(envDir, ".env"))

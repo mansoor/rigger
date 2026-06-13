@@ -22,8 +22,49 @@ import (
 // Config is the subset of config.json the non-compose operations read.
 type Config struct {
 	Project      Project        `json:"project"`
+	Services     []Service      `json:"services"`
 	Versions     map[string]Str `json:"versions"`
 	Environments map[string]Env `json:"environments"`
+}
+
+// Service is the read view of a unified services[] entry — enough for build,
+// bootstrap, envgen and deploy-history to know which services build, from what
+// context/template, and how to reuse images.
+type Service struct {
+	Name           string `json:"name"`
+	Build          *Build `json:"build,omitempty"`
+	Image          string `json:"image,omitempty"`
+	ImageFrom      string `json:"image_from,omitempty"`
+	Tag            string `json:"tag,omitempty"`
+	ConfigTemplate string `json:"config_template,omitempty"` // bootstrap renders templates/nginx/<x>.conf → nginx.conf
+}
+
+// Build describes how a build service's image is produced.
+type Build struct {
+	Context    string            `json:"context,omitempty"`    // subdir under envs/<env>/, default = service name
+	Dockerfile string            `json:"dockerfile,omitempty"` // default "Dockerfile"
+	Template   string            `json:"template,omitempty"`   // templates/dockerfiles/<template> to scaffold
+	Target     string            `json:"target,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`       // --build-arg KEY=VALUE; values may use ${ENV}/${VERSION}/${ROUTE_URL}
+}
+
+// BuildServices returns the services that build from source (Build != nil).
+func (c *Config) BuildServices() []Service {
+	var out []Service
+	for _, s := range c.Services {
+		if s.Build != nil {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ContextDir returns the build context subdir for a build service (default = name).
+func (s Service) ContextDir() string {
+	if s.Build != nil && s.Build.Context != "" {
+		return s.Build.Context
+	}
+	return s.Name
 }
 
 type Project struct {
@@ -34,6 +75,40 @@ type Project struct {
 	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
 	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
 	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// GitRepo / GitBranch are the project's single source repository (one repo per
+	// project; each build service's build.context is a subdir). Cloned into
+	// envs/{env}/_src before build. Empty ⇒ build services use scaffolded Dockerfiles.
+	GitRepo   string `json:"git_repo,omitempty"`
+	GitBranch string `json:"git_branch,omitempty"`
+	// EnvOrder is the explicit deploy-tier order of this project's environments
+	// (low→high, e.g. ["dev","staging","prod"]). Empty ⇒ order is auto-guessed
+	// from env names. Drives the release pipeline and the project-page env strip.
+	// See internal/envorder.
+	EnvOrder []string `json:"env_order,omitempty"`
+	// Managed dependencies are PROJECT-level (consistent across all environments):
+	// the database engine (none|postgres|mysql|mariadb), its catalog version, and
+	// the Redis / Garage toggles. Only the per-env DBExternal (host-port exposure)
+	// stays on Env. These supersede the legacy per-env Env.Database/DBVersion/
+	// RedisEnabled/GarageEnabled, which are still read as a fallback (see Eff*).
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
+}
+
+// SourceRepo returns the project's source repository URL ("" if none).
+func (c *Config) SourceRepo() string { return c.Project.GitRepo }
+
+// Branch returns the git branch to build env from: the env override, else the
+// project default, else "main".
+func (c *Config) Branch(env string) string {
+	if e, ok := c.Environments[env]; ok && e.Git.Branch != "" {
+		return e.Git.Branch
+	}
+	if c.Project.GitBranch != "" {
+		return c.Project.GitBranch
+	}
+	return "main"
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to Name.
@@ -44,6 +119,34 @@ func (p Project) Prefix() string {
 	return p.Name
 }
 
+// Managed dependencies moved from per-env to project-level. The Eff* helpers
+// return the project value when set, else fall back to the given env's legacy
+// value — so configs written before the move keep generating identical output
+// (no migration pass needed) while new configs are driven project-wide.
+
+// EffDatabase returns the project's database engine, falling back to the env's
+// legacy Database. "none" and "" both mean no managed DB.
+func (c *Config) EffDatabase(e Env) string {
+	if c.Project.Database != "" {
+		return c.Project.Database
+	}
+	return e.Database
+}
+
+// EffDBVersion returns the project's chosen DB version, falling back to the env's.
+func (c *Config) EffDBVersion(e Env) string {
+	if c.Project.DBVersion != "" {
+		return c.Project.DBVersion
+	}
+	return e.DBVersion
+}
+
+// EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
+func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
+
+// EffGarage reports whether Garage is enabled (project-level OR legacy per-env).
+func (c *Config) EffGarage(e Env) bool { return c.Project.Garage || e.GarageEnabled }
+
 type Version struct {
 	Major int `json:"major"`
 	Minor int `json:"minor"`
@@ -51,26 +154,31 @@ type Version struct {
 	Build int `json:"build"`
 }
 
-// Env is one environment's config.
+// Env is one environment's config. App services are project-level (Config.Services);
+// database/redis/garage stay as managed-dependency toggles.
 type Env struct {
-	Domain          string         `json:"domain"`
-	HTTPPort        Str            `json:"http_port"`
-	HTTPSPort       Str            `json:"https_port"`
-	Backend         string         `json:"backend"`
-	FrontendEnabled bool           `json:"frontend_enabled"`
-	Frontend        string         `json:"frontend"`
-	Database        string         `json:"database"`
-	RedisEnabled    bool           `json:"redis_enabled"`
-	GarageEnabled   bool           `json:"garage_enabled"`
-	TraefikEnabled  bool           `json:"traefik_enabled"`
-	Deployment      string         `json:"deployment"`
-	Replicas        Replicas       `json:"replicas"`
-	EnvVars         map[string]Str `json:"env_vars"`
+	Domain   string `json:"domain"`
+	HTTPPort Str    `json:"http_port"`
+	HTTPSPort Str   `json:"https_port"`
+	// Managed database (catalog-driven, one per env). Database is the engine id
+	// (none|postgres|mysql|mariadb); DBVersion is the chosen image tag ("" → the
+	// catalog default); DBExternal publishes the DB port on the host so external
+	// clients can connect. Older configs only have Database (string) — DBVersion/
+	// DBExternal default to "" / false, preserving prior behaviour.
+	Database       string         `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion      string         `json:"db_version,omitempty"`
+	DBExternal     bool           `json:"db_external,omitempty"`
+	RedisEnabled   bool           `json:"redis_enabled"`
+	GarageEnabled  bool           `json:"garage_enabled"`
+	TraefikEnabled bool           `json:"traefik_enabled"`
+	Deployment     string         `json:"deployment"`
+	Git            EnvGit         `json:"git"`
+	EnvVars        map[string]Str `json:"env_vars"`
 }
 
-type Replicas struct {
-	Backend  Str `json:"backend"`
-	Frontend Str `json:"frontend"`
+// EnvGit is the per-env git override (branch). The repo is project-level.
+type EnvGit struct {
+	Branch string `json:"branch"`
 }
 
 // Load reads and parses a config.json from disk.
@@ -117,10 +225,15 @@ func (c *Config) Version(key, def string) string {
 }
 
 // ImageTag reproduces lib.sh image_tag():
-// "{registry}/{project}-{service}:{version}-{env}".
+// "{registry}/{project}-{service}:{version}-{env}". With no registry (a local-only
+// build, e.g. a scanned repo) the "{registry}/" prefix is omitted — a leading slash
+// is an invalid Docker reference (`docker build -t /foo:bar` errors).
 func (c *Config) ImageTag(service, env string) string {
-	return fmt.Sprintf("%s/%s-%s:%s-%s",
-		c.Project.Registry, c.Project.Prefix(), service, c.VersionString(), env)
+	name := fmt.Sprintf("%s-%s:%s-%s", c.Project.Prefix(), service, c.VersionString(), env)
+	if c.Project.Registry == "" {
+		return name
+	}
+	return c.Project.Registry + "/" + name
 }
 
 // StackName reproduces lib.sh stack_name(): "{project}_{env}". This is also the
