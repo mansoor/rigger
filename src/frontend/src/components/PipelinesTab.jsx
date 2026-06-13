@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPipelines, createPipeline, updatePipeline, deletePipeline,
-  fetchPipelineRuns, openPipelineSocket,
+  fetchPipelineRuns, fetchPipelineRun, openPipelineSocket,
   approvePipelineRun, rejectPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
   suggestPipeline,
@@ -274,6 +274,7 @@ export function statusChipCls(status) {
 
 function RunHistory({ workspace, name, pipelineId }) {
   const qc = useQueryClient()
+  const [logRun, setLogRun] = useState(null) // run id whose saved logs are open
   const { data: runs = [], isLoading } = useQuery({
     queryKey: ['pipeline-runs', workspace, name, pipelineId],
     queryFn: () => fetchPipelineRuns(workspace, name, pipelineId, 20),
@@ -304,15 +305,64 @@ function RunHistory({ workspace, name, pipelineId }) {
                 className="px-2 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/40">Reject</button>
             </span>
           )}
-          <div className="flex flex-wrap gap-1 ml-auto">
+          <div className="flex flex-wrap gap-1 ml-auto items-center">
             {r.stages.map((s, i) => (
               <span key={i} title={`${s.label} — ${s.status}`} className={`px-1 rounded border text-[10px] ${statusChipCls(s.status)}`}>
                 {STAGE_ICON[s.type] || '•'}
               </span>
             ))}
+            <button onClick={() => setLogRun(r.id)} title="View saved run logs"
+              className="ml-1 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+              Logs
+            </button>
           </div>
         </div>
       ))}
+      {logRun != null && (
+        <RunLogModal workspace={workspace} name={name} pipelineId={pipelineId} runId={logRun} onClose={() => setLogRun(null)} />
+      )}
+    </div>
+  )
+}
+
+// RunLogModal shows the saved per-stage output of a past run (persisted in
+// pipeline_runs.stages[].output, ~64KB tail per stage). Read-only history.
+function RunLogModal({ workspace, name, pipelineId, runId, onClose }) {
+  const { data: run, isLoading } = useQuery({
+    queryKey: ['pipeline-run', workspace, name, pipelineId, runId],
+    queryFn: () => fetchPipelineRun(workspace, name, pipelineId, runId),
+  })
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[85vh] flex flex-col bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-semibold text-content-strong">Run #{runId}</span>
+            {run && <span className={`px-1.5 py-0.5 rounded border text-xs ${statusChipCls(run.status)}`}>{run.status}</span>}
+            {run && <span className="text-xs text-content-subtle">{new Date(run.started_at).toLocaleString()} · {run.username || 'system'}</span>}
+          </div>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {isLoading ? (
+            <p className="text-xs text-content-subtle">Loading…</p>
+          ) : !run?.stages?.length ? (
+            <p className="text-xs text-content-subtle">No stage output recorded.</p>
+          ) : run.stages.map((s, i) => (
+            <div key={i}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs">{STAGE_ICON[s.type] || '•'}</span>
+                <span className="text-xs font-medium text-content-strong">{s.label || s.type}</span>
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${statusChipCls(s.status)}`}>{s.status}</span>
+                {s.ms != null && <span className="text-[10px] text-content-faint">{s.ms} ms</span>}
+              </div>
+              <pre className="text-[11px] font-mono bg-surface-raised/60 border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-content">
+                {s.output ? renderAnsi(s.output) : <span className="text-content-faint">(no output)</span>}
+              </pre>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
