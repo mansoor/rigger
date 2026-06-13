@@ -33,7 +33,13 @@ func (o Options) advancePointers(cfg *wsconfig.Config, builds []wsconfig.Service
 	for _, svc := range builds {
 		key := deployhistory.OverrideKey(svc.Name)
 		newTag := cfg.ImageTag(svc.Name, o.Env)
-		prevTag := fmt.Sprintf("%s/%s-%s:%s-%s", reg, prefix, svc.Name, prevVer, o.Env)
+		// Must match wsconfig.ImageTag: omit the "{registry}/" prefix when there's no
+		// registry (local-only build), else the prev pointer never matches and a
+		// tracking pointer is wrongly treated as pinned.
+		prevTag := fmt.Sprintf("%s-%s:%s-%s", prefix, svc.Name, prevVer, o.Env)
+		if reg != "" {
+			prevTag = reg + "/" + prevTag
+		}
 		switch cur := dotenv[key]; {
 		case cur == "" || cur == prevTag:
 			if cur != newTag {

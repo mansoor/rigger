@@ -288,11 +288,20 @@ func (g *gen) depHasHealthcheck(name string) bool {
 
 // serviceImageRef resolves a service's `image:` value from its source.
 func serviceImageRef(svc Service, rp, registry, tag string) string {
+	// localTag builds {registry}/{rp}-{name}:{tag}, omitting the registry prefix when
+	// empty (a leading slash is an invalid image reference — local-only builds).
+	localTag := func(name string) string {
+		ref := rp + "-" + name + ":" + tag
+		if registry != "" {
+			ref = registry + "/" + ref
+		}
+		return ref
+	}
 	switch {
 	case svc.ImageFrom != "":
-		return "${" + imageEnvVar(svc.ImageFrom) + ":-" + registry + "/" + rp + "-" + svc.ImageFrom + ":" + tag + "}"
+		return "${" + imageEnvVar(svc.ImageFrom) + ":-" + localTag(svc.ImageFrom) + "}"
 	case svc.Build != nil:
-		return "${" + imageEnvVar(svc.Name) + ":-" + registry + "/" + rp + "-" + svc.Name + ":" + tag + "}"
+		return "${" + imageEnvVar(svc.Name) + ":-" + localTag(svc.Name) + "}"
 	default:
 		if svc.Tag != "" {
 			return svc.Image + ":" + svc.Tag

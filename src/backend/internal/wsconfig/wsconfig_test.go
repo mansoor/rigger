@@ -41,6 +41,21 @@ func TestImageTag(t *testing.T) {
 	}
 }
 
+// With no registry (a local-only build, e.g. a scanned repo) the "{registry}/"
+// prefix must be omitted — a leading slash is an invalid Docker reference and
+// `docker build -t /foo:bar` errors with "invalid reference format".
+func TestImageTagNoRegistry(t *testing.T) {
+	c, err := Parse([]byte(`{"project":{"name":"mcl_kyt","version":{"major":1,"minor":0,"patch":0,"build":0}},"environments":{"dev":{}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.ImageTag("backend", "dev")
+	want := "mcl_kyt-backend:1.0.0-build.0-dev"
+	if got != want {
+		t.Errorf("ImageTag (no registry) = %q, want %q (no leading slash)", got, want)
+	}
+}
+
 func TestStackName(t *testing.T) {
 	if got := parse(t).StackName("prod"); got != "myapp_prod" {
 		t.Errorf("StackName = %q, want myapp_prod", got)

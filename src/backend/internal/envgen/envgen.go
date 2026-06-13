@@ -280,7 +280,14 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("REGISTRY=%s\n", registry)
 	p("IMAGE_TAG=%s\n", tag)
 	for _, svc := range cfg.BuildServices() {
-		p("%s=%s/%s-%s:%s\n", imageEnvVar(svc.Name), registry, imgBase, svc.Name, tag)
+		// Omit the "{registry}/" prefix when there's no registry (local-only build) —
+		// a leading slash is an invalid image reference. Must match wsconfig.ImageTag
+		// and composegen.serviceImageRef so the built tag and the .env pointer agree.
+		img := fmt.Sprintf("%s-%s:%s", imgBase, svc.Name, tag)
+		if registry != "" {
+			img = registry + "/" + img
+		}
+		p("%s=%s\n", imageEnvVar(svc.Name), img)
 	}
 	p("\n")
 

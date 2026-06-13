@@ -225,10 +225,15 @@ func (c *Config) Version(key, def string) string {
 }
 
 // ImageTag reproduces lib.sh image_tag():
-// "{registry}/{project}-{service}:{version}-{env}".
+// "{registry}/{project}-{service}:{version}-{env}". With no registry (a local-only
+// build, e.g. a scanned repo) the "{registry}/" prefix is omitted — a leading slash
+// is an invalid Docker reference (`docker build -t /foo:bar` errors).
 func (c *Config) ImageTag(service, env string) string {
-	return fmt.Sprintf("%s/%s-%s:%s-%s",
-		c.Project.Registry, c.Project.Prefix(), service, c.VersionString(), env)
+	name := fmt.Sprintf("%s-%s:%s-%s", c.Project.Prefix(), service, c.VersionString(), env)
+	if c.Project.Registry == "" {
+		return name
+	}
+	return c.Project.Registry + "/" + name
 }
 
 // StackName reproduces lib.sh stack_name(): "{project}_{env}". This is also the
