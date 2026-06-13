@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices } from '../lib/api'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun } from '../lib/api'
+import { RunConsole, STAGE_ICON, stageSummary, statusChipCls } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -834,69 +835,140 @@ function DetailRow({ icon, value }) {
 
 // ── Release pipeline ──────────────────────────────────────────────────────────
 
+// stepCls / stepIcon map a run-stage status to the pipeline-graph node style.
+function stepCls(status) {
+  if (status === 'ok') return 'bg-green-500 border-success text-green-900'
+  if (status === 'running') return 'bg-amber-400 border-warning text-amber-900 animate-pulse'
+  if (status === 'awaiting') return 'bg-amber-400 border-warning text-amber-900'
+  if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle border-danger-border text-danger-fg'
+  return 'bg-surface-raised border-border-strong text-content-subtle' // skipped / not-yet-run
+}
+function stepIcon(status) {
+  if (status === 'ok') return '✓'
+  if (status === 'fail' || status === 'rejected') return '✕'
+  if (status === 'running') return '◌'
+  if (status === 'awaiting') return '⏸'
+  return '○'
+}
+
+// ReleasePipeline renders the project's real release pipeline live: stages
+// colored by the latest run, the version deployed in each env (deploy history),
+// and a Run button with inline gate approval. Replaces the old static mock.
 function ReleasePipeline({ ws }) {
+  const { workspace, name } = useParams()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
   const isImage = ws?.config?.project?.type === 'image'
-  if (isImage) return null
-
-  const v = ws?.config?.project?.version
-  const vStr = v ? `v${v.major}.${v.minor}.${v.patch}-build.${v.build}` : '—'
   const envs = ws?.envs || []
+  const canOp = ['admin', 'operator', 'developer'].includes(ws?.my_role)
 
-  const steps = [
-    { label: 'dev build',    status: 'done',    version: vStr },
-    { label: 'stage build',  status: 'done',    version: vStr },
-    { label: 'stage deploy', status: 'active',  version: null },
-    { label: 'QA sign-off',  status: 'pending', version: null },
-    { label: 'promote → prod', status: 'pending', version: null },
-  ]
+  const { data: pipes = [] } = useQuery({
+    queryKey: ['pipelines', workspace, name],
+    queryFn: () => fetchPipelines(workspace, name),
+    enabled: !isImage && !!workspace,
+  })
+  const [selId, setSelId] = useState(null)
+  const pipeline = pipes.find(p => p.id === selId) || pipes[0]
 
-  const stepStyle = {
-    done:    'bg-green-500 border-success text-green-900',
-    active:  'bg-amber-400 border-warning text-amber-900 animate-pulse',
-    pending: 'bg-surface-raised border-border-strong text-content-subtle',
-  }
+  const { data: runs = [] } = useQuery({
+    queryKey: ['pipeline-runs', workspace, name, pipeline?.id],
+    queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
+    enabled: !!pipeline?.id,
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : false,
+  })
+  const latestRun = runs[0]
+
+  const histories = useQueries({
+    queries: envs.map(e => ({
+      queryKey: ['deploy-history', workspace, name, e],
+      queryFn: () => fetchDeployHistory(workspace, name, e),
+      enabled: !isImage && !!workspace,
+      staleTime: 30_000,
+    })),
+  })
+  const envVersion = {}
+  envs.forEach((e, i) => { const h = histories[i]?.data?.[0]; if (h?.version) envVersion[e] = h.version })
+
+  const approveMut = useMutation({
+    mutationFn: (runId) => approvePipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }),
+  })
+  const rejectMut = useMutation({
+    mutationFn: (runId) => rejectPipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }),
+  })
+  const [running, setRunning] = useState(false)
+
+  if (isImage) return null
 
   return (
     <div className="bg-surface border border-border rounded-xl p-5">
-      <h2 className="text-sm font-semibold text-content mb-5 flex items-center gap-2">
-        <span className="text-xs">○</span> Release pipeline
-      </h2>
+      <div className="flex items-center justify-between gap-3 mb-5">
+        <h2 className="text-sm font-semibold text-content flex items-center gap-2"><span className="text-xs">○</span> Release pipeline</h2>
+        <div className="flex items-center gap-2">
+          {pipes.length > 1 && (
+            <select value={pipeline?.id || ''} onChange={e => setSelId(Number(e.target.value))}
+              className="px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content">
+              {pipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )}
+          {pipeline && canOp && (
+            <button onClick={() => setRunning(true)}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">▶ Run</button>
+          )}
+        </div>
+      </div>
 
-      <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-2">
-        {steps.map((step, i) => (
-          <div key={step.label} className="flex items-center">
-            <div className="flex flex-col items-center gap-1.5 min-w-[90px]">
-              <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepStyle[step.status]}`}>
-                {step.status === 'done' ? '✓' : step.status === 'active' ? '◎' : '○'}
-              </div>
-              <span className={`text-xs text-center leading-tight ${step.status === 'pending' ? 'text-content-faint' : 'text-content'}`}>
-                {step.label}
-              </span>
-              {step.version && (
-                <span className="text-xs text-content-subtle font-mono">{step.version}</span>
-              )}
-              {step.status === 'active' && (
-                <span className="text-xs text-warning-fg">in progress</span>
-              )}
-              {step.status === 'pending' && (
-                <span className="text-xs text-content-faint">—</span>
-              )}
-            </div>
-            {i < steps.length - 1 && (
-              <div className={`h-0.5 w-8 shrink-0 mx-1 ${i < 2 ? 'bg-green-500' : 'bg-surface-overlay'}`} />
-            )}
+      {!pipeline ? (
+        <div className="text-sm text-content-subtle">
+          No pipeline yet —{' '}
+          <button onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} className="text-brand-400 hover:text-brand-300">
+            generate one
+          </button>{' '}
+          in Edit Project → Pipelines.
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-2">
+            {pipeline.stages.map((s, i) => {
+              const st = latestRun?.stages?.[i]?.status
+              return (
+                <div key={i} className="flex items-center">
+                  <div className="flex flex-col items-center gap-1.5 min-w-[94px]">
+                    <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepCls(st)}`}>{stepIcon(st)}</div>
+                    <span className="text-[11px] text-center leading-tight text-content">{STAGE_ICON[s.type]} {stageSummary(s)}</span>
+                  </div>
+                  {i < pipeline.stages.length - 1 && <div className="h-0.5 w-7 shrink-0 mx-1 bg-surface-overlay" />}
+                </div>
+              )
+            })}
           </div>
-        ))}
-      </div>
 
-      <div className="flex items-center justify-between bg-surface-raised/60 rounded-lg px-4 py-3">
-        <p className="text-sm text-content">
-          Ready to promote? <span className="font-mono text-content-strong">{vStr}</span> will be retagged and deployed to prod — no rebuild.
-        </p>
-        <button className="ml-4 shrink-0 bg-surface-overlay hover:bg-surface-overlay text-content hover:text-content-strong text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-1.5">
-          <span className="text-xs">○</span> Promote to prod
-        </button>
-      </div>
+          {latestRun?.status === 'awaiting' && canOp && (
+            <div className="flex items-center justify-between bg-warning-subtle/40 border border-warning-border/50 rounded-lg px-4 py-2.5 mb-4">
+              <span className="text-xs text-warning-fg">Awaiting approval at a gate.</span>
+              <div className="flex gap-2">
+                <button onClick={() => approveMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white">Approve</button>
+                <button onClick={() => rejectMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-surface-overlay text-content hover:text-content-strong">Reject</button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            {envs.map(e => (
+              <div key={e} className="flex-1 min-w-[110px] bg-surface-raised/60 rounded-lg px-3 py-2">
+                <div className="text-xs font-medium text-content-strong">{e}</div>
+                <div className="text-[11px] font-mono text-content-subtle">{envVersion[e] ? `v${envVersion[e]}` : '—'}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {running && pipeline && (
+        <RunConsole workspace={workspace} name={name} pipeline={pipeline}
+          onClose={() => { setRunning(false); qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }) }} />
+      )}
     </div>
   )
 }

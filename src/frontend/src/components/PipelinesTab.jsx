@@ -24,7 +24,7 @@ const STAGE_TYPES = [
   { value: 'push',    label: 'Promote — copy env → env (registry)' },
   { value: 'gate',    label: 'Gate — manual approval' },
 ]
-const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
+export const STAGE_ICON = { deploy: '🚀', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
 
 // Script-stage presets prefill the tool image + command (env context is injected
 // as RIGGER_* vars; secrets like a Sonar token are inlined by the user).
@@ -133,7 +133,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
   )
 }
 
-function stageSummary(s) {
+export function stageSummary(s) {
   if (s.type === 'gate') return 'gate'
   if (s.type === 'test') return `test ${s.service}`
   if (s.type === 'push') return `promote ${s.env}→${s.to_env}`
@@ -234,7 +234,7 @@ function Webhooks({ workspace, name, pipelineId }) {
   )
 }
 
-function statusChipCls(status) {
+export function statusChipCls(status) {
   if (status === 'ok') return 'bg-success-subtle text-success-fg border-success-border/60'
   if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle text-danger-fg border-danger-border/60'
   if (status === 'cancelled' || status === 'skipped') return 'bg-surface-raised text-content-faint border-border-strong'
@@ -464,7 +464,7 @@ function renderAnsi(text) {
   return out
 }
 
-function RunConsole({ workspace, name, pipeline, onClose }) {
+export function RunConsole({ workspace, name, pipeline, onClose }) {
   const [text, setText] = useState('')
   const [status, setStatus] = useState('running')
   const boxRef = useRef(null)
