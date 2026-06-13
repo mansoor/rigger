@@ -80,6 +80,11 @@ type Project struct {
 	// envs/{env}/_src before build. Empty ⇒ build services use scaffolded Dockerfiles.
 	GitRepo   string `json:"git_repo,omitempty"`
 	GitBranch string `json:"git_branch,omitempty"`
+	// EnvOrder is the explicit deploy-tier order of this project's environments
+	// (low→high, e.g. ["dev","staging","prod"]). Empty ⇒ order is auto-guessed
+	// from env names. Drives the release pipeline and the project-page env strip.
+	// See internal/envorder.
+	EnvOrder []string `json:"env_order,omitempty"`
 }
 
 // SourceRepo returns the project's source repository URL ("" if none).
