@@ -26,7 +26,10 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 	case "update":
 		o.Command = "update" // pull latest images from the registry, then recreate
 	case "build":
-		o.Command = "build" // build all service images for the env (no push)
+		o.Command = "build" // build all service images for the env
+		if s.Push {
+			o.Extra = []string{"--push"} // also push to the registry (required before a later promote)
+		}
 	case "restart":
 		o.Command = "restart"
 	case "backup":
@@ -77,6 +80,9 @@ func stageLabel(s Stage) string {
 		}
 		return "backup " + s.Env
 	default:
+		if s.Type == "build" && s.Push {
+			return "build " + s.Env + " (+push)"
+		}
 		return s.Type + " " + s.Env
 	}
 }

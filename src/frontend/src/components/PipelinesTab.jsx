@@ -120,6 +120,7 @@ function stageSummary(s) {
   if (s.type === 'push') return `promote ${s.env}→${s.to_env}`
   if (s.type === 'version') return `version ${s.part || ''}`
   if (s.type === 'script') return `script ${s.image || ''}`.trim()
+  if (s.type === 'build' && s.push) return `build ${s.env} +push`
   return `${s.type} ${s.env}`
 }
 
@@ -360,6 +361,12 @@ function StageRow({ idx, count, stage, envNames, onChange, onRemove, onMove }) {
                   {envNames.map(e => <option key={e} value={e}>{e}</option>)}
                 </select>
               </>
+            )}
+            {stage.type === 'build' && (
+              <label className="flex items-center gap-1.5 text-xs text-content-muted cursor-pointer" title="Push images to the registry (required before a later promote)">
+                <input type="checkbox" checked={!!stage.push} onChange={e => onChange({ push: e.target.checked })} className="w-3.5 h-3.5 accent-brand-500" />
+                push to registry
+              </label>
             )}
             {stage.type === 'backup' && (
               <input value={stage.service} onChange={e => onChange({ service: e.target.value })} placeholder="service (optional)" className={`${inputCls} w-36`} />
