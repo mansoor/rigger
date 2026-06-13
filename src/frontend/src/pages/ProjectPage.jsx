@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest } from '../lib/api'
 import { RunConsole, STAGE_ICON, stageSummary, statusChipCls } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
@@ -344,6 +344,29 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     retry: false,
   })
 
+  // Build-image pointer status: pinned (held to an older tag) / new-build-ready
+  // (a newer version was built but not yet deployed) / up-to-date. Custom only.
+  // (`confirm` is declared later in this component for destructive actions.)
+  const { data: imgStatus } = useQuery({
+    queryKey: ['imagestatus', workspace, name, envName],
+    queryFn: () => fetchImageStatus(workspace, name, envName),
+    enabled: !isImage,
+    retry: false,
+  })
+  const newBuildReady = !!imgStatus && !imgStatus.pinned && imgStatus.deployed_version && imgStatus.deployed_version !== imgStatus.version
+  const trackMut = useMutation({
+    mutationFn: () => trackLatest(workspace, name, envName),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] }); qc.invalidateQueries({ queryKey: ['envstatus', workspace, name, envName] }) },
+  })
+  async function onTrackLatest() {
+    const pins = (imgStatus?.services || []).filter(s => s.pinned).map(s => s.name).join(', ')
+    if (await confirm({
+      title: 'Track latest build?',
+      message: `This advances ${pins || 'all build services'} to the current version (${imgStatus?.version}). Deploy afterwards to roll it out. Any pinned/rolled-back version will be released.`,
+      confirmLabel: 'Track latest',
+    })) trackMut.mutate()
+  }
+
   // Metrics history (Phase 6d) — per-env CPU/memory/disk/network for sparklines.
   // rangeMin is the selected time window (minutes); default 60.
   const [rangeMin, setRangeMin] = useState(60)
@@ -428,6 +451,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['metrics', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['backup-stats', workspace, name, envName] })
+        qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] })
         if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
       }, 2000)
       // After update: backend invalidates its cache and runs a fresh check (~3-5s).
@@ -506,6 +530,17 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <StatusBadge label={containerStatus} color={containerStatus} />
+          {imgStatus?.pinned && (
+            <div className="flex items-center gap-1.5">
+              <span title={`Pinned: ${(imgStatus.services || []).filter(s => s.pinned).map(s => `${s.name}→${s.effective.split(':').pop()}`).join(', ')}. Latest is ${imgStatus.version}.`}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg border border-warning-border/60">📌 pinned</span>
+              {canOp && <button onClick={onTrackLatest} className="text-[10px] text-emerald-400 hover:text-emerald-300">Track latest →</button>}
+            </div>
+          )}
+          {newBuildReady && (
+            <span title={`Built ${imgStatus.version}, running ${imgStatus.deployed_version}. Deploy to roll it out.`}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-info-subtle text-info-fg border border-info-border/60">⬆ {imgStatus.version} ready</span>
+          )}
           <AccessUrls urls={accessUrls} reachable={reachable} />
         </div>
       </div>
@@ -756,7 +791,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         <RollbackModal
           workspace={workspace} name={name} envName={envName} isImage={isImage}
           onClose={() => setRollbackOpen(false)}
-          onDone={() => { refetchStatus(); qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] }) }}
+          onDone={() => { refetchStatus(); qc.invalidateQueries({ queryKey: ['containers', workspace, name, envName] }); qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] }) }}
         />
       )}
 
