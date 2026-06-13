@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPipelines, createPipeline, updatePipeline, deletePipeline,
   fetchPipelineRuns, fetchPipelineRun, startPipelineRun,
-  approvePipelineRun, rejectPipelineRun,
+  approvePipelineRun, rejectPipelineRun, cancelPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
   suggestPipeline,
 } from '../lib/api'
@@ -370,11 +370,13 @@ export function stepCls(status) {
   if (status === 'running') return 'bg-amber-400 border-warning text-amber-900 animate-pulse'
   if (status === 'awaiting') return 'bg-amber-400 border-warning text-amber-900'
   if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle border-danger-border text-danger-fg'
+  if (status === 'cancelled') return 'bg-surface-raised border-danger-border/60 text-danger-fg'
   return 'bg-surface-raised border-border-strong text-content-subtle' // skipped / pending
 }
 export function stepIcon(status) {
   if (status === 'ok') return '✓'
   if (status === 'fail' || status === 'rejected') return '✕'
+  if (status === 'cancelled') return '■'
   if (status === 'running') return '◌'
   if (status === 'awaiting') return '⏸'
   return '○'
@@ -388,12 +390,23 @@ export function stepIcon(status) {
 // output (the in-flight stage streams in, persisted ~1×/sec by the executor).
 export function RunModal({ workspace, name, pipeline, runId, onClose }) {
   const logRef = useRef(null)
+  const qc = useQueryClient()
   const { data: run } = useQuery({
     queryKey: ['pipeline-run', workspace, name, pipeline.id, runId],
     queryFn: () => fetchPipelineRun(workspace, name, pipeline.id, runId),
     refetchInterval: (q) => {
       const s = q.state.data?.status
       return (s === 'running' || s === 'awaiting') ? 1500 : false
+    },
+  })
+
+  // Force-stop a still-active run: signals the backend to kill the in-flight stage.
+  // The poll then picks up the cancelled status; also refresh the history list.
+  const cancelMut = useMutation({
+    mutationFn: () => cancelPipelineRun(workspace, name, pipeline.id, runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-run', workspace, name, pipeline.id, runId] })
+      qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
     },
   })
 
@@ -421,7 +434,18 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
             </span>
             <span className="text-[11px] text-content-faint shrink-0">run #{runId}{run?.trigger === 'webhook' ? ' · webhook' : ''}</span>
           </div>
-          <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none shrink-0">✕</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {(overall === 'running' || overall === 'awaiting') && (
+              <button
+                onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
+                disabled={cancelMut.isPending}
+                className="text-[11px] px-2 py-1 rounded border border-danger-border text-danger-fg hover:bg-danger-subtle disabled:opacity-50"
+                title="Force-stop this running pipeline">
+                {cancelMut.isPending ? 'Cancelling…' : '■ Cancel'}
+              </button>
+            )}
+            <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+          </div>
         </div>
 
         {/* Stage graph — current step pulses, completed steps go green. */}

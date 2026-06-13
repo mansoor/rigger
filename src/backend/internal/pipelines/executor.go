@@ -2,6 +2,7 @@ package pipelines
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -130,9 +131,10 @@ func stageLabel(s Stage) string {
 
 // Outcome values returned by Execute.
 const (
-	OutcomeOK       = "ok"
-	OutcomeFail     = "fail"
-	OutcomeAwaiting = "awaiting" // paused at a manual gate; resume with Execute(startIdx)
+	OutcomeOK        = "ok"
+	OutcomeFail      = "fail"
+	OutcomeAwaiting  = "awaiting"  // paused at a manual gate; resume with Execute(startIdx)
+	OutcomeCancelled = "cancelled" // cancelled by the user (or interrupted) mid-run
 )
 
 // Execute runs a pipeline's stages from startIdx, streaming output to out, and
@@ -152,7 +154,14 @@ const (
 // client (or a reopened log window) can track where the pipeline is right now,
 // independent of any live socket. The slice is reused between calls; copy it if
 // you retain it past the callback.
-func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int, progress func(results []StageResult)) (results []StageResult, outcome string) {
+// ctx, when non-nil, makes the run cancellable: cancelling it both stops the
+// loop between stages and kills the in-flight stage's docker process (the context
+// is threaded down to the executor). A cancelled run returns OutcomeCancelled with
+// the interrupted stage marked "cancelled" and the rest "skipped".
+func Execute(ctx context.Context, bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int, progress func(results []StageResult)) (results []StageResult, outcome string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	results = []StageResult{}
 	outcome = OutcomeOK
 	emit := func() {
@@ -160,7 +169,25 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int, progr
 			progress(results)
 		}
 	}
+	// cancelTail marks the stage at index i (and every later stage) cancelled/skipped
+	// and returns the OutcomeCancelled result. Called when the context is cancelled.
+	cancelTail := func(i int, curRunning bool) ([]StageResult, string) {
+		if curRunning && len(results) > 0 {
+			results[len(results)-1].Status = OutcomeCancelled
+		}
+		for j := i + 1; j < len(p.Stages); j++ {
+			sk := p.Stages[j]
+			results = append(results, StageResult{Type: sk.Type, Env: sk.Env, Label: stageLabel(sk), Status: "skipped"})
+		}
+		fmt.Fprintf(out, "\n\033[33m■ Pipeline cancelled.\033[0m\n")
+		emit()
+		return results, OutcomeCancelled
+	}
 	for i := startIdx; i < len(p.Stages); i++ {
+		// Cancelled before this stage even started → stop cleanly.
+		if ctx.Err() != nil {
+			return cancelTail(i-1, false)
+		}
 		s := p.Stages[i]
 		label := stageLabel(s)
 
@@ -189,10 +216,19 @@ func Execute(bridge BridgeRunner, p Pipeline, out io.Writer, startIdx int, progr
 		opts := StageRunOptions(p.Workspace, p.Project, s)
 		opts.Stdout = mw
 		opts.Stderr = mw
+		opts.Context = ctx // cancellable: a Cancel kills this stage's docker process
 
 		start := time.Now()
 		err := bridge.Run(opts)
 		cur.MS = time.Since(start).Milliseconds()
+
+		// If the run was cancelled, the stage error is just the killed process —
+		// classify it as cancelled (not a real failure) and stop here.
+		if ctx.Err() != nil {
+			fmt.Fprintf(mw, "\n\033[33m✗ %s cancelled\033[0m\n", label)
+			cur.Output = cw.String()
+			return cancelTail(i, true)
+		}
 
 		if err != nil {
 			fmt.Fprintf(mw, "\n\033[31m✗ %s failed: %s\033[0m\n", label, err.Error())

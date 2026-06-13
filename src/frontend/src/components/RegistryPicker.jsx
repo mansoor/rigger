@@ -12,6 +12,7 @@ import { fetchWorkspaceRegistries, createWorkspaceRegistry, testRegistryCredenti
 // (cfg.Project.Registry); the saved record supplies the push credentials.
 
 const CUSTOM = '__custom__'
+const LOCAL = '__local__' // "no registry" — build images locally, never push/pull a registry
 const inputCls = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors'
 
 function FieldLabel({ children }) {
@@ -43,11 +44,15 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
   const [busy, setBusy] = useState('') // '' | 'test' | 'save'
   const [msg, setMsg] = useState(null) // { ok, text }
 
-  // Auto-select a default once the pool loads and nothing is chosen (create flow).
+  // Auto-select the workspace's DEFAULT registry once the pool loads and nothing is
+  // chosen — but only when a default is actually configured (create flow inheriting
+  // it). Never force registries[0]: an empty value is a valid, deliberate choice
+  // ("Local — no registry"), and force-picking the first pool entry made it
+  // impossible to keep a project local (it silently reverted to a random registry).
   const wsDefault = registries.find(r => String(r.id) === String(defaultRegistryId))
   useEffect(() => {
-    if (!isLoading && registries.length > 0 && !value) {
-      onChange((wsDefault || registries[0]).url)
+    if (!isLoading && !value && wsDefault) {
+      onChange(wsDefault.url)
     }
   }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -66,11 +71,15 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
   }, [isCustomValue, didInit, value])
 
   const showManual = manual || (!hasRegistries && !isLoading)
-  const selectValue = manual ? CUSTOM : (matched ? value : '')
+  // An empty value with no manual form open means "Local — no registry".
+  const selectValue = manual ? CUSTOM : matched ? value : value ? '' : LOCAL
 
   function chooseSelect(v) {
     setMsg(null)
-    if (v === CUSTOM) {
+    if (v === LOCAL) {
+      setManual(false)
+      onChange('') // build images locally; never push/pull a registry
+    } else if (v === CUSTOM) {
       setManual(true)
       setUrl('')
       onChange('') // force a deliberate Save / anonymous URL before proceeding
@@ -118,10 +127,13 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
       {hasRegistries && (
         <select value={selectValue} onChange={e => chooseSelect(e.target.value)}
           className={`${inputCls} ${error ? 'border-danger' : ''}`}>
-          <option value="" disabled>Select a registry…</option>
+          <option value={LOCAL}>Local — no registry (build images locally)</option>
           {registries.map(r => <option key={r.id} value={r.url}>{r.name} — {r.url}</option>)}
           <option value={CUSTOM}>Other (enter manually)…</option>
         </select>
+      )}
+      {hasRegistries && selectValue === LOCAL && (
+        <p className="text-xs text-content-faint mt-1">Images are built locally and never pushed/pulled. Pick a registry only if remote hosts need to pull them.</p>
       )}
       {hasRegistries && wsDefault && value === wsDefault.url && (
         <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>

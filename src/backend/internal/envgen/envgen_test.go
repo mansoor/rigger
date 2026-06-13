@@ -337,3 +337,46 @@ func TestProjectNameQuotedWhenSpaced(t *testing.T) {
 		t.Errorf("plain PROJECT_NAME should be unquoted:\n%s", env2)
 	}
 }
+
+// TestRebaseImageRegistry covers re-basing .env image pointers to a new registry —
+// the fix for "changing the project registry was silently ignored, so compose kept
+// pulling stale {SVC}_IMAGE values from the old registry".
+func TestRebaseImageRegistry(t *testing.T) {
+	const prefix = "mcl_kyt"
+	in := []byte("REGISTRY=ghcr.io/old/ns\n" +
+		"IMAGE_TAG=1.0.0-build.0-dev\n" +
+		"BACKEND_IMAGE=ghcr.io/old/ns/mcl_kyt-backend:1.0.0-build.0-dev\n" +
+		"FRONTEND_IMAGE=ghcr.io/old/ns/mcl_kyt-frontend:1.0.0-build.0-dev\n" +
+		"DOMAIN=x\n")
+
+	// → local (no registry): strip the prefix, keep the local tag + version.
+	out, changed := RebaseImageRegistry(in, "", prefix)
+	if !changed {
+		t.Fatal("expected change when going local")
+	}
+	m := ParseEnv(out)
+	if m["REGISTRY"] != "" {
+		t.Errorf("REGISTRY = %q, want empty", m["REGISTRY"])
+	}
+	if m["BACKEND_IMAGE"] != "mcl_kyt-backend:1.0.0-build.0-dev" {
+		t.Errorf("BACKEND_IMAGE = %q, want local tag", m["BACKEND_IMAGE"])
+	}
+	if m["IMAGE_TAG"] != "1.0.0-build.0-dev" || m["DOMAIN"] != "x" {
+		t.Errorf("non-image lines must be untouched: %+v", m)
+	}
+
+	// → a new registry: re-prefix with it, version preserved.
+	out2, changed2 := RebaseImageRegistry(out, "registry.example.com", prefix)
+	if !changed2 {
+		t.Fatal("expected change when setting a registry")
+	}
+	m2 := ParseEnv(out2)
+	if m2["FRONTEND_IMAGE"] != "registry.example.com/mcl_kyt-frontend:1.0.0-build.0-dev" {
+		t.Errorf("FRONTEND_IMAGE = %q, want re-prefixed", m2["FRONTEND_IMAGE"])
+	}
+
+	// Idempotent: re-basing to the same registry changes nothing.
+	if _, changed3 := RebaseImageRegistry(out2, "registry.example.com", prefix); changed3 {
+		t.Error("expected no change re-basing to the same registry")
+	}
+}

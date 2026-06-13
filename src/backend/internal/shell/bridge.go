@@ -3,6 +3,7 @@ package shell
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -853,10 +854,11 @@ func (b *Bridge) runScript(opts RunOptions, rt *remoteTarget) error {
 	args = append(args, opts.ScriptImage, "sh", "-c", opts.ScriptCommand)
 
 	fmt.Fprintf(opts.Stdout, "⚑ Running tool container %s\n", opts.ScriptImage)
-	var ex executor.Executor = executor.Local{}
+	var base executor.Executor = executor.Local{}
 	if rt != nil {
-		ex = rt.exec
+		base = rt.exec
 	}
+	ex := executor.WithContext(base, opts.Context) // cancellable when the pipeline is
 	if err := ex.Docker(executor.Spec{Args: args, Env: shellEnv(), Stdout: opts.Stdout, Stderr: opts.Stderr}); err != nil {
 		return err
 	}
@@ -941,6 +943,12 @@ type RunOptions struct {
 	Extra     []string // additional args (e.g. "db" for backup, "minor" for version bump)
 	Stdout    io.Writer
 	Stderr    io.Writer
+
+	// Context, when set, makes the command cancellable: cancelling it kills the
+	// underlying docker process(es). Pipelines pass a per-run context so a Cancel
+	// request aborts a hung build mid-flight. nil ⇒ uncancellable (existing behavior
+	// for one-off actions, the scheduler, migrations, etc.).
+	Context context.Context
 
 	// Backup-only (Phase 11 per-env schedules): which services to back up
 	// (empty = all) and the schedule metadata recorded in the snapshot manifest.
@@ -1053,6 +1061,17 @@ func (b *Bridge) Run(opts RunOptions) error {
 		return err
 	}
 
+	// Bind every docker call this command makes to opts.Context (if set) so a
+	// pipeline Cancel kills the in-flight process. builder/dockerops/backup all
+	// funnel through executor.Default(opts.Exec), so wrapping the executor we hand
+	// them propagates cancellation without touching individual call sites. A nil
+	// context yields the bare executor (unchanged behavior for one-off actions).
+	var baseExec executor.Executor = executor.Local{}
+	if rt != nil {
+		baseExec = rt.exec
+	}
+	runExec := executor.WithContext(baseExec, opts.Context)
+
 	// Phase 9 tool stage: run a one-off tool container (Trivy/Cypress/Sonar/custom)
 	// with the env's context injected as RIGGER_* variables.
 	if opts.Command == "script" {
@@ -1102,6 +1121,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		// Ensure the project's registry is authenticated before any push/pull. The
 		// build/push and promote paths talk to the registry but rely on docker's
@@ -1126,7 +1146,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			// service subdirs, .env stays host-authoritative) first. Route the
 			// post-promote deploy back through the bridge so it lands on the
 			// destination env's host.
-			bopts.Exec = rt.exec
+			// bopts.Exec is already runExec (wraps rt.exec); just add remote plumbing.
 			bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 			bopts.SetDeploy(func(env string) error {
 				return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
@@ -1154,10 +1174,10 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
 			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
-			dopts.Exec = rt.exec
 			dopts.Remote = true
 			dopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 			dopts.Sync = func() error {
@@ -1191,9 +1211,9 @@ func (b *Bridge) Run(opts RunOptions) error {
 			ScheduleID:    opts.ScheduleID,
 			ScheduleName:  opts.ScheduleName,
 			Trigger:       opts.Trigger,
+			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
-			bopts.Exec = rt.exec
 			bopts.DotEnv = b.remoteDotEnv(rt, opts.Workspace, opts.Project, opts.Env)
 		}
 		handled, err := backup.Run(bopts)

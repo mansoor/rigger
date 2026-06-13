@@ -554,8 +554,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
       {/* Details */}
       <div className="space-y-1.5 text-sm text-content-muted">
-        {/* Only show domain/url row if neither badge above applies */}
-        {!cfg?.domain && !port && <DetailRow icon="○" value="no url configured" />}
+        {/* "No url" only when there's genuinely no way in — accessUrls already
+            accounts for an explicit domain, a published port, AND a Traefik
+            auto-routed env domain (which sets no cfg.domain/port). */}
+        {accessUrls.length === 0 && <DetailRow icon="○" value="no url configured" />}
         {gitBranch && <DetailRow icon="○" value={gitBranch} />}
       </div>
 
@@ -1226,14 +1228,19 @@ const SERVICE_COLORS = [
 // Falls back to hash-based assignment for any service not in the list (e.g. log lines
 // from services that have since been removed).
 function buildColorMap(containers, wsName, activeEnv) {
-  const prefix = `${wsName}_${activeEnv}_`
   const map = {}
   let idx = 0
   for (const c of (containers || [])) {
-    if (!(c.Service in map)) {
-      map[c.Service] = SERVICE_COLORS[idx % SERVICE_COLORS.length]
-      idx++
-    }
+    if (c.Service in map) continue
+    const color = SERVICE_COLORS[idx % SERVICE_COLORS.length]
+    idx++
+    // Key by BOTH the compose service ("frontend", used by the legend) AND the
+    // container name ("mcl_wda_dev_frontend", which is what `docker compose logs`
+    // prints as the line prefix because composegen sets container_name). Without
+    // the container-name alias, log lines miss the map and fall back to a hash
+    // colour that disagrees with the legend.
+    map[c.Service] = color
+    if (c.Name) map[c.Name.replace(/^\//, '')] = color
   }
   return map
 }

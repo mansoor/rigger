@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -371,16 +372,49 @@ func (h *Handler) executePipelineRun(p *pipelines.Pipeline, trigger, username st
 	return h.continueRun(runID, p, nil, 0, out)
 }
 
+// ── Live-run cancel registry ──────────────────────────────────────────────────
+
+// registerRun creates a cancellable context for a run and stores its cancel func
+// so CancelPipelineRun can stop it. The caller must defer unregisterRun(id).
+func (h *Handler) registerRun(id int64) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	h.runMu.Lock()
+	h.runCancels[id] = cancel
+	h.runMu.Unlock()
+	return ctx
+}
+
+func (h *Handler) unregisterRun(id int64) {
+	h.runMu.Lock()
+	delete(h.runCancels, id)
+	h.runMu.Unlock()
+}
+
+// cancelRun signals a live run to stop (killing its in-flight docker process).
+// Returns false if the run isn't currently executing in this process.
+func (h *Handler) cancelRun(id int64) bool {
+	h.runMu.Lock()
+	cancel, ok := h.runCancels[id]
+	h.runMu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
+}
+
 // continueRun executes stages from startIdx, persisting per-stage progress LIVE
 // (running → ok/fail, with throttled in-flight output) so a polling client or a
 // reopened log window can track the run independent of any socket, then finalizes.
-// prior is the already-recorded stages (gate resume); nil for a fresh run.
+// prior is the already-recorded stages (gate resume); nil for a fresh run. The run
+// is registered for cancellation for the lifetime of this call.
 func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipelines.StageResult, startIdx int, out io.Writer) string {
+	ctx := h.registerRun(runID)
+	defer h.unregisterRun(runID)
 	progress := func(seg []pipelines.StageResult) {
 		all := append(append([]pipelines.StageResult{}, prior...), seg...)
 		pipelines.UpdateRunProgress(h.db, runID, all) //nolint:errcheck
 	}
-	results, outcome := pipelines.Execute(h.bridge, *p, out, startIdx, progress)
+	results, outcome := pipelines.Execute(ctx, h.bridge, *p, out, startIdx, progress)
 	all := append(append([]pipelines.StageResult{}, prior...), results...)
 	h.finalizeRun(runID, p, all, outcome)
 	return outcome
@@ -479,4 +513,52 @@ func (h *Handler) awaitingRun(w http.ResponseWriter, r *http.Request, ws, name s
 		return nil, nil, false
 	}
 	return p, run, true
+}
+
+// CancelPipelineRun force-stops a running pipeline: it signals the run's context
+// (which kills the in-flight stage's docker process), and the run's goroutine then
+// finalizes it as "cancelled". If the run isn't executing in this process (e.g. it
+// was already orphaned by a restart), the record is marked cancelled directly so
+// the UI never shows a stranded "running". Operator+.
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/cancel
+func (h *Handler) CancelPipelineRun(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	id, ok := h.ownedPipeline(w, r, ws, name)
+	if !ok {
+		return
+	}
+	runID, _ := strconv.ParseInt(r.PathValue("runId"), 10, 64)
+	run, err := pipelines.GetRun(h.db, runID)
+	if err != nil || run == nil || run.PipelineID != id {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	if run.Status != "running" && run.Status != pipelines.OutcomeAwaiting {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not active"})
+		return
+	}
+	pname := ""
+	if p, _ := pipelines.Get(h.db, id); p != nil {
+		pname = p.Name
+	}
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec( //nolint:errcheck
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+			claims.UserID, claims.Username, h.resourcePrefix(ws, name), "pipeline-cancel:"+pname, "",
+		)
+	}
+	// Live run: signal it and let its goroutine finalize the record (kills the
+	// in-flight docker process via the threaded context).
+	if h.cancelRun(runID) {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "cancelling"})
+		return
+	}
+	// Not live here (orphaned, or awaiting with no goroutine) — mark it directly so
+	// the UI clears, flipping any non-terminal stage to cancelled/skipped.
+	pipelines.MarkRunCancelled(h.db, run, time.Now().UnixMilli()) //nolint:errcheck
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
 }

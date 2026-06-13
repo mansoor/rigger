@@ -517,3 +517,59 @@ func ParseEnv(content []byte) map[string]string {
 	}
 	return out
 }
+
+// RebaseImageRegistry rewrites a .env's REGISTRY line and the "{registry}/" prefix
+// of every "{SVC}_IMAGE" pointer to match `registry` (the project's configured
+// registry; "" = local-only). Only the registry prefix changes — the local image
+// portion ("{prefix}-{svc}:{tag}", including any pinned version) is preserved.
+//
+// The image pointers are DERIVED from the registry at generation time, but nothing
+// else re-derives them when the project's registry config later changes. Without
+// this, changing (or clearing) the registry was silently ignored: stale
+// "{SVC}_IMAGE=oldregistry/…" values kept compose pulling/denying the wrong image.
+// Called on every config save so a registry change always propagates. Returns the
+// (possibly unchanged) content and whether anything changed.
+func RebaseImageRegistry(content []byte, registry, prefix string) ([]byte, bool) {
+	if len(content) == 0 || prefix == "" {
+		return content, false
+	}
+	marker := prefix + "-"
+	lines := strings.Split(string(content), "\n")
+	changed := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq <= 0 {
+			continue
+		}
+		rawKey, val := line[:eq], line[eq+1:]
+		key := strings.TrimSpace(rawKey)
+
+		if key == "REGISTRY" {
+			if nl := rawKey + "=" + registry; nl != line {
+				lines[i] = nl
+				changed = true
+			}
+			continue
+		}
+		if !strings.HasSuffix(key, "_IMAGE") {
+			continue
+		}
+		idx := strings.Index(val, marker)
+		if idx < 0 {
+			continue // not one of our prefixed build-image pointers — leave it
+		}
+		local := val[idx:] // "{prefix}-{svc}:{tag}"
+		nv := local
+		if registry != "" {
+			nv = registry + "/" + local
+		}
+		if nl := rawKey + "=" + nv; nl != line {
+			lines[i] = nl
+			changed = true
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), changed
+}

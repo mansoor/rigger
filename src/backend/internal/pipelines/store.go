@@ -290,6 +290,70 @@ func GetRun(d *db.DB, id int64) (*Run, error) {
 		   FROM pipeline_runs WHERE id=?`, id))
 }
 
+// cancelStages flips any still-active stage (running or awaiting) to "cancelled",
+// leaving completed stages untouched. Used when a run is force-stopped or swept.
+func cancelStages(stages []StageResult) []StageResult {
+	for i := range stages {
+		if stages[i].Status == "running" || stages[i].Status == OutcomeAwaiting {
+			stages[i].Status = OutcomeCancelled
+		}
+	}
+	return stages
+}
+
+// MarkRunCancelled finalizes a run as cancelled directly in the DB (no live
+// goroutine to signal): it flips any active stage to cancelled and stamps the
+// finish time. Used for orphaned/awaiting runs that aren't executing in-process.
+func MarkRunCancelled(d *db.DB, run *Run, finishedMs int64) error {
+	return UpdateRun(d, Run{
+		ID:         run.ID,
+		PipelineID: run.PipelineID,
+		Status:     OutcomeCancelled,
+		Stages:     cancelStages(run.Stages),
+		FinishedAt: finishedMs,
+	})
+}
+
+// ReconcileRunning sweeps runs left at "running" (and stages mid-flight) — e.g.
+// because the server restarted while a run's goroutine was executing — marking
+// them cancelled with the given finish time so the UI never shows a stranded
+// in-flight run. Returns the number of runs reconciled. Call once at startup.
+func ReconcileRunning(d *db.DB, finishedMs int64) (int, error) {
+	rows, err := d.Query(`SELECT id, stages FROM pipeline_runs WHERE status='running'`)
+	if err != nil {
+		return 0, err
+	}
+	type pending struct {
+		id     int64
+		stages string
+	}
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err := rows.Scan(&p.id, &p.stages); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		todo = append(todo, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, p := range todo {
+		var stages []StageResult
+		if p.stages != "" {
+			json.Unmarshal([]byte(p.stages), &stages) //nolint:errcheck
+		}
+		b, _ := json.Marshal(cancelStages(stages))
+		d.Exec( //nolint:errcheck
+			`UPDATE pipeline_runs SET status='cancelled', stages=?, finished_at=? WHERE id=? AND status='running'`,
+			string(b), finishedMs, p.id,
+		)
+	}
+	return len(todo), nil
+}
+
 // ── scanning helpers ──────────────────────────────────────────────────────────
 
 type scanner interface{ Scan(dest ...any) error }

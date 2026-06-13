@@ -21,14 +21,27 @@ type Spec struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
 	Timeout time.Duration // when >0, the command is killed if it runs longer (e.g. a hung `docker stats`)
+	// Context, when set, ties the command's lifetime to the caller's context:
+	// cancelling it SIGKILLs the docker process. Pipelines stamp this (via
+	// WithContext) so a Cancel request kills a hung build mid-flight. nil ⇒ the
+	// command runs uncancellable (existing behavior).
+	Context context.Context
 }
 
-// newCmd builds the exec.Cmd, applying Spec.Timeout via a context when set. The
-// returned cancel must be called by the caller (deferred) to release resources.
+// newCmd builds the exec.Cmd, applying Spec.Context and/or Spec.Timeout. A
+// cancellable command is created whenever either is set; the returned cancel must
+// be called by the caller (deferred) to release resources.
 func newCmd(s Spec) (*exec.Cmd, context.CancelFunc) {
+	base := s.Context
+	if base == nil {
+		base = context.Background()
+	}
 	if s.Timeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), s.Timeout)
+		ctx, cancel := context.WithTimeout(base, s.Timeout)
 		return exec.CommandContext(ctx, "docker", s.Args...), cancel //nolint:gosec
+	}
+	if s.Context != nil {
+		return exec.CommandContext(base, "docker", s.Args...), func() {} //nolint:gosec
 	}
 	return exec.Command("docker", s.Args...), func() {} //nolint:gosec
 }
@@ -75,4 +88,47 @@ func Default(e Executor) Executor {
 		return Local{}
 	}
 	return e
+}
+
+// ctxExecutor wraps an Executor so every command it runs carries ctx, unless the
+// caller already set a per-Spec context. Because builder/dockerops/backup funnel
+// all docker calls through Default(opts.Exec), injecting one of these as the
+// Options.Exec propagates cancellation to every command of a pipeline stage
+// without touching individual call sites.
+type ctxExecutor struct {
+	inner Executor
+	ctx   context.Context
+}
+
+// WithContext binds e (defaulting to Local) to ctx so its commands are cancelled
+// when ctx is. A nil ctx returns the executor unchanged.
+func WithContext(e Executor, ctx context.Context) Executor {
+	if ctx == nil {
+		return Default(e)
+	}
+	return ctxExecutor{inner: Default(e), ctx: ctx}
+}
+
+func (c ctxExecutor) Docker(s Spec) error {
+	if s.Context == nil {
+		s.Context = c.ctx
+	}
+	return c.inner.Docker(s)
+}
+
+func (c ctxExecutor) DockerOutput(s Spec) ([]byte, error) {
+	if s.Context == nil {
+		s.Context = c.ctx
+	}
+	return c.inner.DockerOutput(s)
+}
+
+// RemoteDir forwards path translation when the wrapped executor is a remote one,
+// so callers that type-assert for it (e.g. build-context sync) still work through
+// the wrapper.
+func (c ctxExecutor) RemoteDir(localDir string) string {
+	if rd, ok := c.inner.(interface{ RemoteDir(string) string }); ok {
+		return rd.RemoteDir(localDir)
+	}
+	return localDir
 }

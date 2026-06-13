@@ -424,13 +424,16 @@ func writeFile(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o644)
 }
 
-// resolveSvc accepts either a short service name ("app") or the full prefixed
-// name ("myapp_prod_app") and returns the compose service name.
+// resolveSvc returns the compose service name to target. Service blocks are keyed
+// by their SHORT name ("app") — the prefixed identity lives in container_name — so
+// compose subcommands (logs/up/stop/restart/exec) take the short name. A caller may
+// pass either the short name or the full prefixed form ("myapp_prod_app"); strip the
+// stack prefix so both resolve to the short service key. (Prepending the prefix, as
+// this did before service blocks went short, made `compose logs <prefixed>` match
+// nothing — it exits 0 with no output, so single-service logs/actions silently did
+// nothing.)
 func (r *runner) resolveSvc(svc string) string {
-	if strings.HasPrefix(svc, r.stack+"_") {
-		return svc
-	}
-	return r.stack + "_" + svc
+	return strings.TrimPrefix(svc, r.stack+"_")
 }
 
 func (r *runner) firstExtra() string {

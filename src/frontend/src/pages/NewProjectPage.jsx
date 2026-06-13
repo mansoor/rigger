@@ -588,8 +588,8 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
 function RegistryField({ data, onChange, errors, workspace, defaultRegistryId }) {
   return (
     <div>
-      <Label required>Container registry</Label>
-      <p className="text-xs text-content-subtle mb-2">Built images are tagged and pushed here so remote hosts can pull them without rebuilding.</p>
+      <Label>Container registry</Label>
+      <p className="text-xs text-content-subtle mb-2">Optional — only needed so remote hosts can pull built images. Leave as "Local" to build &amp; run images on the deploy host.</p>
       <RegistryPicker
         workspace={workspace}
         value={data.registry}
@@ -1716,15 +1716,14 @@ export default function NewProjectPage() {
     if (!data.name.trim()) e.name = 'Required'
     else if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/.test(data.name.trim())) e.name = '1–32 chars: letters, digits, space, dash, underscore'
     if (step === 1 && nameConflict) e.key = 'Choose a valid, available key' // key validity from Step1
-    // Registry only matters for custom (build) stacks — and lives on step 2 now.
-    if (step === 2 && data.stackType === 'custom' && !data.registry.trim()) e.registry = 'Required'
+    // Registry is OPTIONAL for build stacks: "Local — no registry" builds images on
+    // the deploy host and is valid for single-host deploys. A registry is only needed
+    // so remote hosts can pull, so don't force one here.
     if (step === 2 && data.stackType === 'scan') {
-      if (!data.registry.trim()) e.registry = 'Required'
       if (!(data.source_repo || '').trim()) e.source_repo = 'Enter a repository URL'
       else if (!data.scanDraft) e.source_repo = 'Click Scan to detect the stack first'
     }
     if (step === 2 && data.stackType === 'blueprint') {
-      if (!data.registry.trim()) e.registry = 'Required'
       if (!data.blueprintId) e.blueprint = 'Pick a stack template'
     }
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'

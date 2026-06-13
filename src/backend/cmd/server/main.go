@@ -18,6 +18,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/metrics"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/pipelines"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
@@ -37,6 +38,13 @@ func main() {
 	database, err := db.Open(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("db: %v", err)
+	}
+
+	// Any pipeline run left "running" was stranded by a previous shutdown (its
+	// goroutine died before finalizing). Sweep them to cancelled so the UI never
+	// shows a stranded in-flight run.
+	if n, rerr := pipelines.ReconcileRunning(database, time.Now().UnixMilli()); rerr == nil && n > 0 {
+		log.Printf("pipelines: reconciled %d orphaned running run(s) → cancelled", n)
 	}
 
 	// ── Services ──────────────────────────────────────────────────────────────
@@ -781,6 +789,7 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve", authSvc.Middleware(http.HandlerFunc(handler.ApprovePipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject", authSvc.Middleware(http.HandlerFunc(handler.RejectPipelineRun)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/cancel", authSvc.Middleware(http.HandlerFunc(handler.CancelPipelineRun)))
 	// POST triggers a run in the background and returns its id; the UI then opens a
 	// poll-based log/status view bound to that run (closeable + reopenable).
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", authSvc.Middleware(http.HandlerFunc(handler.StartPipelineRun)))

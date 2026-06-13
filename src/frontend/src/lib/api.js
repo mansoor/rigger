@@ -138,6 +138,7 @@ export const fetchPipelineRuns = (ws, name, id, limit = 30) => api.get(`${projBa
 export const fetchPipelineRun  = (ws, name, id, runId) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}`).then(r => r.data)
 export const approvePipelineRun = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/approve`).then(r => r.data)
 export const rejectPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/reject`).then(r => r.data)
+export const cancelPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(ws, name)}/pipelines/${id}/runs/${runId}/cancel`).then(r => r.data)
 export const fetchPipelineWebhooks = (ws, name, id) => api.get(`${projBase(ws, name)}/pipelines/${id}/webhooks`).then(r => r.data)
 export const createPipelineWebhook = (ws, name, id, body = {}) => api.post(`${projBase(ws, name)}/pipelines/${id}/webhooks`, body).then(r => r.data)
 export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projBase(ws, name)}/pipelines/${id}/webhooks/${whId}`).then(r => r.data)

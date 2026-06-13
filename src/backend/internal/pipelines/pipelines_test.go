@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"context"
 	"errors"
 	"io"
 	"strings"
@@ -186,7 +187,7 @@ func TestRunHaltsOnFailure(t *testing.T) {
 		{Type: "restart", Env: "dev", OnFailure: "stop"},
 	}}
 	fb := &fakeBridge{failOn: "test"}
-	results, outcome := Execute(fb, p, io.Discard, 0, nil)
+	results, outcome := Execute(context.Background(), fb, p, io.Discard, 0, nil)
 	if outcome != OutcomeFail {
 		t.Fatalf("expected fail outcome, got %q", outcome)
 	}
@@ -210,7 +211,7 @@ func TestRunContinueOnFailure(t *testing.T) {
 		{Type: "restart", Env: "dev", OnFailure: "stop"},
 	}}
 	fb := &fakeBridge{failOn: "test"}
-	results, outcome := Execute(fb, p, io.Discard, 0, nil)
+	results, outcome := Execute(context.Background(), fb, p, io.Discard, 0, nil)
 	if outcome != OutcomeFail {
 		t.Fatalf("expected fail outcome (one stage failed), got %q", outcome)
 	}
@@ -229,7 +230,7 @@ func TestRunProgressReportsRunningThenOk(t *testing.T) {
 	// Collect the status of the last stage at every progress emission. We must see
 	// a "running" status before the terminal "ok" for each stage.
 	var sawRunning, sawOK bool
-	_, outcome := Execute(fb, p, io.Discard, 0, func(res []StageResult) {
+	_, outcome := Execute(context.Background(), fb, p, io.Discard, 0, func(res []StageResult) {
 		if len(res) == 0 {
 			return
 		}
@@ -260,7 +261,7 @@ func TestRunGatePauseResume(t *testing.T) {
 	fb := &fakeBridge{}
 
 	// First segment: runs deploy stage, then pauses at the gate.
-	seg1, outcome := Execute(fb, p, io.Discard, 0, nil)
+	seg1, outcome := Execute(context.Background(), fb, p, io.Discard, 0, nil)
 	if outcome != OutcomeAwaiting {
 		t.Fatalf("expected awaiting, got %q", outcome)
 	}
@@ -272,12 +273,57 @@ func TestRunGatePauseResume(t *testing.T) {
 	}
 
 	// Resume after approval: continue from index len(seg1) = 2.
-	seg2, outcome2 := Execute(fb, p, io.Discard, len(seg1), nil)
+	seg2, outcome2 := Execute(context.Background(), fb, p, io.Discard, len(seg1), nil)
 	if outcome2 != OutcomeOK {
 		t.Fatalf("expected ok after resume, got %q", outcome2)
 	}
 	if len(seg2) != 1 || seg2[0].Env != "prod" || seg2[0].Status != "ok" {
 		t.Fatalf("unexpected segment 2: %+v", seg2)
+	}
+}
+
+// A pre-cancelled context stops the run before any stage executes: the outcome is
+// cancelled and every stage is recorded skipped (none ran on the bridge).
+func TestRunCancelledBeforeStart(t *testing.T) {
+	p := Pipeline{Workspace: "mcl", Project: "web", Name: "x", Stages: []Stage{
+		{Type: "build", Env: "dev", OnFailure: "stop"},
+		{Type: "deploy", Env: "dev", OnFailure: "stop"},
+	}}
+	fb := &fakeBridge{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	results, outcome := Execute(ctx, fb, p, io.Discard, 0, nil)
+	if outcome != OutcomeCancelled {
+		t.Fatalf("expected cancelled, got %q", outcome)
+	}
+	if len(fb.calls) != 0 {
+		t.Fatalf("no stage should run on a pre-cancelled ctx, got %v", fb.calls)
+	}
+	for _, r := range results {
+		if r.Status != "skipped" {
+			t.Fatalf("expected all stages skipped, got %+v", results)
+		}
+	}
+}
+
+// ReconcileRunning sweeps a stranded running run (e.g. left by a restart) to
+// cancelled, flipping its in-flight stage too.
+func TestReconcileRunning(t *testing.T) {
+	d := openTestDB(t)
+	id, _ := CreateRun(d, Run{
+		PipelineID: 1, Workspace: "mcl", Project: "web", Status: "running", StartedAt: 1000,
+		Stages: []StageResult{{Type: "build", Env: "dev", Status: "running"}},
+	})
+	n, err := ReconcileRunning(d, 5000)
+	if err != nil || n != 1 {
+		t.Fatalf("reconcile: n=%d err=%v", n, err)
+	}
+	got, _ := GetRun(d, id)
+	if got.Status != OutcomeCancelled || got.FinishedAt != 5000 {
+		t.Fatalf("run not reconciled: %+v", got)
+	}
+	if len(got.Stages) != 1 || got.Stages[0].Status != OutcomeCancelled {
+		t.Fatalf("stage not flipped: %+v", got.Stages)
 	}
 }
 

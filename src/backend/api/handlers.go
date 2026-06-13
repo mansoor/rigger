@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
@@ -29,6 +31,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 	"github.com/gorilla/websocket"
 )
@@ -90,6 +93,12 @@ type Handler struct {
 	alertBroker   *alerts.Broker
 	notifier      *notify.Dispatcher
 	cryptoKey     []byte // derived from JWT secret; encrypts host SSH keys (Phase 7)
+
+	// Live pipeline runs: runID → cancel func, so a Cancel request can kill an
+	// in-flight run's docker process. Populated for the lifetime of each run's
+	// background goroutine; guarded by runMu.
+	runMu      sync.Mutex
+	runCancels map[int64]context.CancelFunc
 }
 
 func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remoteWorkspacesDir, templatesDir, dataDir string, imgCache *imagecheck.Cache, alertBroker *alerts.Broker, notifier *notify.Dispatcher, jwtSecret string) *Handler {
@@ -106,6 +115,7 @@ func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remot
 		alertBroker:   alertBroker,
 		notifier:      notifier,
 		cryptoKey:     key,
+		runCancels:    map[int64]context.CancelFunc{},
 	}
 }
 
@@ -1200,31 +1210,44 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// regenCompose runs compose-gen.sh for every environment defined in configJSON.
-// Called as a goroutine after PutConfig writes config.json.
+// regenCompose regenerates docker-compose.yml for every environment defined in
+// configJSON, AND reconciles each env's .env image pointers to the project's current
+// registry. Called as a goroutine after PutConfig writes config.json.
 func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
-	// Parse environment names from the saved config
-	var cfg struct {
-		Environments map[string]json.RawMessage `json:"environments"`
-	}
-	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+	cfg, err := wsconfig.Parse([]byte(configJSON))
+	if err != nil {
 		return
 	}
 
 	wsRoot := wspath.ProjectDir(h.workspacesDir, workspaceName, project)
 	baseDomain := settings.WorkspaceBaseDomain(h.db, workspaceName)
+	prefix, registry := cfg.Project.Prefix(), cfg.Project.Registry
 
 	for envName := range cfg.Environments {
-		outPath := filepath.Join(wsRoot, "envs", envName, "docker-compose.yml")
+		envDir := filepath.Join(wsRoot, "envs", envName)
+		envPath := filepath.Join(envDir, ".env")
+		envContent, _ := os.ReadFile(envPath)
+
+		// Reconcile the .env REGISTRY + {SVC}_IMAGE pointers to the project's current
+		// registry, so changing (or clearing) the registry in Edit Project actually
+		// takes effect. Without this, a stale "{SVC}_IMAGE=oldregistry/…" kept compose
+		// pulling the wrong image (e.g. a denied ghcr pull) even after going local.
+		if rebased, changed := envgen.RebaseImageRegistry(envContent, registry, prefix); changed {
+			if wErr := os.WriteFile(envPath, rebased, 0o600); wErr != nil {
+				fmt.Fprintf(os.Stderr, "envgen: rebase .env for %s/%s: %v\n", workspaceName, envName, wErr)
+			} else {
+				envContent = rebased
+			}
+		}
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		envContent, _ := os.ReadFile(filepath.Join(wsRoot, "envs", envName, ".env"))
 		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
 		}
+		outPath := filepath.Join(envDir, "docker-compose.yml")
 		if mkErr := os.MkdirAll(filepath.Dir(outPath), 0o755); mkErr != nil {
 			fmt.Fprintf(os.Stderr, "composegen: mkdir for %s/%s: %v\n", workspaceName, envName, mkErr)
 			continue
