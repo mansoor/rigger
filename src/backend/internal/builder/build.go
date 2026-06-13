@@ -34,6 +34,14 @@ func (o Options) build() error {
 		}
 	}
 
+	// Capture the version BEFORE any bump so advancePointers can tell which env
+	// image pointers were tracking the old version (advance them) vs pinned to
+	// something else (leave them).
+	prevVer := ""
+	if pc, perr := o.loadConfig(); perr == nil {
+		prevVer = pc.VersionString()
+	}
+
 	if bump {
 		o.info("Bumping version (%s)...", bumpPart)
 		if _, err := version.Bump(o.configPath(), bumpPart); err != nil {
@@ -88,6 +96,13 @@ func (o Options) build() error {
 		if err := o.buildService(cfg, svc, srcDir, push); err != nil {
 			return err
 		}
+	}
+
+	// Advance the env's image pointers so the next deploy runs what we just built
+	// (tracking services only; pins are left + reported). Best-effort: a failure
+	// here shouldn't fail the build itself — the images are already built.
+	if err := o.advancePointers(cfg, builds, prevVer); err != nil {
+		o.info("⚠ built ok, but could not advance image pointers: %v", err)
 	}
 	return nil
 }
