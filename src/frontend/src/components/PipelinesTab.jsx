@@ -48,7 +48,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
   })
   const [editing, setEditing] = useState(null) // draft pipeline (with optional id) or null
   const [running, setRunning] = useState(null) // pipeline being run (modal)
-  const [genOpen, setGenOpen] = useState(false) // "Generate from environments" dialog
+  const [gen, setGen] = useState(null) // null = closed; { target: null } = new; { target: pipeline } = regenerate
 
   const saveMut = useMutation({
     mutationFn: (p) => p.id ? updatePipeline(workspace, name, p.id, p) : createPipeline(workspace, name, p),
@@ -81,7 +81,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setGenOpen(true)}
+            onClick={() => setGen({ target: null })}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors"
             title="Generate a release pipeline from this project's environments"
           >
@@ -96,11 +96,17 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
         </div>
       </div>
 
-      {genOpen && (
+      {gen && (
         <GeneratePipelineDialog
-          workspace={workspace} name={name} envNames={envNames}
-          onClose={() => setGenOpen(false)}
-          onGenerated={(draft) => { setGenOpen(false); setEditing(draft) }}
+          workspace={workspace} name={name} envNames={envNames} target={gen.target}
+          onClose={() => setGen(null)}
+          onGenerated={(draft) => {
+            const t = gen.target
+            setGen(null)
+            // Regenerate updates the existing pipeline in place (keep id + name);
+            // a fresh draft opens as a new pipeline.
+            setEditing(t ? { ...draft, id: t.id, name: t.name } : draft)
+          }}
         />
       )}
 
@@ -114,9 +120,10 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
         <div className="space-y-3">
           {pipelines.map(p => (
             <PipelineCard
-              key={p.id} workspace={workspace} name={name} pipeline={p}
+              key={p.id} workspace={workspace} name={name} pipeline={p} envNames={envNames}
               onRun={() => setRunning(p)}
               onEdit={() => setEditing({ ...p })}
+              onRegenerate={() => setGen({ target: p })}
               onDelete={() => { if (confirm(`Delete pipeline "${p.name}"?`)) delMut.mutate(p.id) }}
             />
           ))}
@@ -143,9 +150,15 @@ export function stageSummary(s) {
   return `${s.type} ${s.env}`
 }
 
-function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
+function PipelineCard({ workspace, name, pipeline, envNames = [], onRun, onEdit, onDelete, onRegenerate }) {
   const [showHistory, setShowHistory] = useState(false)
   const [showHooks, setShowHooks] = useState(false)
+  // Stale = a stage targets an environment that no longer exists (e.g. it was
+  // deleted after the pipeline was generated). The run would fail on that stage.
+  const known = new Set(envNames)
+  const refEnvs = new Set()
+  pipeline.stages.forEach(s => { if (s.env) refEnvs.add(s.env); if (s.to_env) refEnvs.add(s.to_env) })
+  const staleEnvs = [...refEnvs].filter(e => !known.has(e))
   return (
     <div className="bg-surface border border-border rounded-xl p-4">
       <div className="flex items-start gap-3">
@@ -153,6 +166,10 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-content-strong truncate">{pipeline.name}</span>
             {!pipeline.enabled && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-raised text-content-faint">disabled</span>}
+            {staleEnvs.length > 0 && (
+              <span title={`References removed environment(s): ${staleEnvs.join(', ')}. Regenerate or edit to fix.`}
+                className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg border border-warning-border/60">⚠ stale</span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             {pipeline.stages.map((s, i) => (
@@ -164,6 +181,10 @@ function PipelineCard({ workspace, name, pipeline, onRun, onEdit, onDelete }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={onRun} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">▶ Run</button>
+          {onRegenerate && (
+            <button onClick={onRegenerate} title="Regenerate this pipeline's stages from the current environments"
+              className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">🔄</button>
+          )}
           <button onClick={onEdit} className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Edit</button>
           <button onClick={onDelete} className="text-xs px-2.5 py-1.5 rounded-lg text-danger-fg hover:bg-danger-subtle/40 transition-colors">Delete</button>
         </div>
@@ -502,7 +523,7 @@ export function RunConsole({ workspace, name, pipeline, onClose }) {
 // GeneratePipelineDialog proposes a release/hotfix pipeline from the project's
 // ordered environments. The server returns a draft (it does not persist); the
 // caller opens it in the normal editor, so every stage stays editable.
-function GeneratePipelineDialog({ workspace, name, envNames = [], onClose, onGenerated }) {
+function GeneratePipelineDialog({ workspace, name, envNames = [], target = null, onClose, onGenerated }) {
   const [template, setTemplate] = useState('release')
   const [bumpPart, setBumpPart] = useState('')
   const [gate, setGate] = useState(true)
@@ -528,8 +549,12 @@ function GeneratePipelineDialog({ workspace, name, envNames = [], onClose, onGen
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-full max-w-md bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
-          <h2 className="text-sm font-semibold text-content-strong">Generate pipeline</h2>
-          <p className="text-xs text-content-subtle mt-1">Seeded from your environments (in deploy-tier order). Review and edit before saving.</p>
+          <h2 className="text-sm font-semibold text-content-strong">{target ? 'Regenerate pipeline' : 'Generate pipeline'}</h2>
+          <p className="text-xs text-content-subtle mt-1">
+            {target
+              ? <>Re-seeds <span className="font-medium text-content">{target.name}</span> from the current environments — replaces its stages. You can review before saving.</>
+              : 'Seeded from your environments (in deploy-tier order). Review and edit before saving.'}
+          </p>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div>
@@ -577,7 +602,7 @@ function GeneratePipelineDialog({ workspace, name, envNames = [], onClose, onGen
             className="px-3 py-1.5 rounded-lg text-sm border border-border-strong text-content hover:bg-surface-raised transition-colors">Cancel</button>
           <button type="button" onClick={generate} disabled={busy}
             className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
-            {busy ? 'Generating…' : 'Generate'}
+            {busy ? (target ? 'Regenerating…' : 'Generating…') : (target ? 'Regenerate' : 'Generate')}
           </button>
         </div>
       </div>
