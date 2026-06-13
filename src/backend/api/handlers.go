@@ -325,6 +325,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// gorilla/websocket panics on concurrent writes (and a panic in the spawned
+	// output goroutine below isn't recovered by net/http — it would crash the whole
+	// process). Serialize ALL writes to this conn through safeWrite.
+	var wsMu sync.Mutex
+	safeWrite := func(b []byte) {
+		wsMu.Lock()
+		conn.WriteMessage(websocket.TextMessage, b) //nolint:errcheck
+		wsMu.Unlock()
+	}
+
 	// First message: { "token": "...", "workspace": { ...CreateRequest... } }
 	var msg struct {
 		Token string                  `json:"token"`
@@ -341,7 +351,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	send := func(s string) { conn.WriteMessage(websocket.TextMessage, []byte(s)) } //nolint:errcheck
+	send := func(s string) { safeWrite([]byte(s)) }
 
 	wsName := msg.Workspace.Workspace
 
@@ -416,7 +426,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, readErr := pr.Read(buf)
 			if n > 0 {
-				conn.WriteMessage(websocket.TextMessage, buf[:n]) //nolint:errcheck
+				safeWrite(buf[:n])
 			}
 			if readErr != nil {
 				break
