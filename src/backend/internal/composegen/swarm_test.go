@@ -61,7 +61,7 @@ func TestSwarmDeployBlockTuned(t *testing.T) {
 	}
 	s := string(out)
 	for _, want := range []string{
-		"  q_prod_app:",
+		"  app:", // service key is short; swarm names the service {stack}_app
 		"      replicas: 3",
 		"      placement:\n        constraints:\n          - node.role==worker",
 		"        condition: any",

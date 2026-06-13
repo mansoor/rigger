@@ -97,7 +97,13 @@ func (g *gen) emitVolumes(prefix string) {
 // from per-service fields — no language branching.
 func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwarm bool) {
 	e := g.e
-	key := prefix + "_" + svc.Name
+	// The compose service KEY is the bare service name; the compose project / swarm
+	// stack already namespaces it with {prefix}_{env}, so a prefixed key would double
+	// it (container `{proj}-{proj}_app-1` / swarm service `{stack}_{stack}_app`).
+	// container_name pins the clean, single-prefix name in compose — identical to the
+	// swarm service name `{stack}_{key}` = `{prefix}_{env}_{name}`.
+	key := svc.Name
+	cname := prefix + "_" + svc.Name
 	restart := svc.Restart
 	if restart == "" {
 		restart = "unless-stopped"
@@ -106,6 +112,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line(sectionComment(svc.Name+" ("+serviceLabel(svc)+")", dashService))
 	g.line("  " + key + ":")
 	g.line("    image: " + serviceImageRef(svc, rp, registry, tag))
+	g.line("    container_name: " + cname)
 	if svc.Command != "" {
 		g.line("    command: '" + svc.Command + "'")
 	}
@@ -164,7 +171,9 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		}
 	}
 
-	g.emitServicePorts(key, svc)
+	// Traefik router id must stay globally unique across the shared rigger-traefik
+	// (it routes every project), so pass the long {prefix}_{env}_{name} — NOT the short key.
+	g.emitServicePorts(cname, svc)
 
 	if svc.Healthcheck != "" {
 		hc := svc.HealthcheckConfig
@@ -190,7 +199,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 // the service's own host_port if set, else the env HTTP port (so editing the
 // service port just changes the published port, not adds a second one). Non-web
 // services publish host_port/extra_ports, or expose the container port.
-func (g *gen) emitServicePorts(key string, svc Service) {
+func (g *gen) emitServicePorts(router string, svc Service) {
 	e := g.e
 	port := string(svc.Port)
 	var publishes []string
@@ -200,7 +209,7 @@ func (g *gen) emitServicePorts(key string, svc Service) {
 		if svc.Subdomain != "" && e.Domain != "" {
 			host = svc.Subdomain + "." + e.Domain
 		}
-		g.traefikLabels(key, host, port)
+		g.traefikLabels(router, host, port)
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins
 		// (the user's chosen port), else the env HTTP port. Subdomain web services
@@ -233,9 +242,10 @@ func (g *gen) emitServicePorts(key string, svc Service) {
 	}
 }
 
-// emitDependsOn resolves short dependency names to {prefix}_{name} and emits the
-// block: compose uses condition (service_healthy when the target has a
-// healthcheck, else service_started); swarm uses the bare list form.
+// emitDependsOn emits the depends_on block keyed by the bare service name (service
+// keys are short now — the project/stack namespaces them). Compose uses the
+// condition form (service_healthy when the target has a healthcheck, else
+// service_started); swarm uses the bare list form.
 func (g *gen) emitDependsOn(prefix string, deps []string, isSwarm bool) {
 	var names []string
 	for _, d := range deps {
@@ -249,10 +259,10 @@ func (g *gen) emitDependsOn(prefix string, deps []string, isSwarm bool) {
 	g.line("    depends_on:")
 	for _, dep := range names {
 		if isSwarm {
-			g.line("      - " + prefix + "_" + dep)
+			g.line("      - " + dep)
 			continue
 		}
-		g.line("      " + prefix + "_" + dep + ":")
+		g.line("      " + dep + ":")
 		if g.depHasHealthcheck(dep) {
 			g.line("        condition: service_healthy")
 		} else {
@@ -372,7 +382,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		eng, _ := databases.Get("postgres")
 		ver := g.dbVersion(eng)
 		g.line(sectionComment("PostgreSQL "+ver, dashPostgres))
-		g.line("  " + prefix + "_postgres:")
+		g.line("  postgres:")
 		g.line("    image: postgres:" + ver)
 		g.line("    container_name: " + prefix + "_postgres")
 		g.dbExternalPorts(eng)
@@ -396,7 +406,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		eng, _ := databases.Get(engine)
 		ver := g.dbVersion(eng)
 		g.line(sectionComment(eng.Label+" "+ver, dashMySQL))
-		g.line("  " + prefix + "_" + engine + ":")
+		g.line("  " + engine + ":")
 		g.line("    image: " + eng.Image + ":" + ver)
 		g.line("    container_name: " + prefix + "_" + engine)
 		g.dbExternalPorts(eng)
@@ -424,7 +434,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 
 	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
-		g.line("  " + prefix + "_redis:")
+		g.line("  redis:")
 		g.line("    image: redis:" + verRedis)
 		g.line("    container_name: " + prefix + "_redis")
 		g.line("    command: [\"redis-server\", \"--appendonly\", \"yes\"]")
@@ -439,7 +449,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 
 	if g.garageOn() {
 		g.line(sectionComment("Garage "+verGarage+" (S3-compatible)", dashGarage))
-		g.line("  " + prefix + "_garage:")
+		g.line("  garage:")
 		g.line("    image: dxflrs/garage:" + verGarage)
 		g.line("    container_name: " + prefix + "_garage")
 		g.line("    volumes:")
@@ -455,14 +465,14 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 
 		g.line(sectionComment("Garage WebUI", dashGarageWebUI))
-		g.line("  " + prefix + "_garage_webui:")
+		g.line("  garage_webui:")
 		g.line("    image: khofesh/garage-webui:" + verGarageWebUI)
 		g.line("    container_name: " + prefix + "_garage_webui")
 		g.line("    environment:")
 		g.line("      GARAGE_API_URL: http://" + prefix + "_garage:3900")
 		g.line("      GARAGE_API_TOKEN: ${GARAGE_ADMIN_TOKEN}")
 		g.line("    depends_on:")
-		g.line("      - " + prefix + "_garage")
+		g.line("      - garage")
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
 		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")

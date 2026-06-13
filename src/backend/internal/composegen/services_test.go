@@ -44,12 +44,12 @@ func TestServicesCustomShape(t *testing.T) {
 	}
 	s := string(out)
 
-	app := svcBlock(t, s, "shop_dev_app")
+	app := svcBlock(t, s, "app")
 	for _, want := range []string{
 		"image: ${APP_IMAGE:-reg/shop-app:2.1.0-build.3-dev}",
 		"env_file: .env",
 		"          - app",
-		"    depends_on:\n      shop_dev_postgres:\n        condition: service_healthy\n      shop_dev_redis:\n        condition: service_healthy",
+		"    depends_on:\n      postgres:\n        condition: service_healthy\n      redis:\n        condition: service_healthy",
 		"      - shop_dev_uploads:/app/storage/uploads",
 		"php -r 'exit(0);'",
 		"    expose:\n      - \"9000\"",
@@ -63,11 +63,11 @@ func TestServicesCustomShape(t *testing.T) {
 		t.Errorf("internal app service must not publish ports\n%s", app)
 	}
 
-	nginx := svcBlock(t, s, "shop_dev_nginx")
+	nginx := svcBlock(t, s, "nginx")
 	for _, want := range []string{
 		"image: nginx:1.25-alpine",
 		"    ports:\n      - \"8080:80\"",                                          // web-routed, no traefik → bind env HTTP port
-		"    depends_on:\n      shop_dev_app:\n        condition: service_healthy", // app has a healthcheck
+		"    depends_on:\n      app:\n        condition: service_healthy", // app has a healthcheck
 		"      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro",
 	} {
 		if !strings.Contains(nginx, want) {
@@ -75,7 +75,7 @@ func TestServicesCustomShape(t *testing.T) {
 		}
 	}
 
-	worker := svcBlock(t, s, "shop_dev_worker")
+	worker := svcBlock(t, s, "worker")
 	for _, want := range []string{
 		"image: ${APP_IMAGE:-reg/shop-app:2.1.0-build.3-dev}", // reuses app's image
 		"command: 'php artisan queue:work'",
@@ -90,8 +90,8 @@ func TestServicesCustomShape(t *testing.T) {
 
 	// Managed deps + volumes block.
 	for _, want := range []string{
-		"  shop_dev_postgres:", "  shop_dev_redis:",
-		"  shop_dev_uploads:", "  shop_dev_pg_data:", "  shop_dev_redis_data:",
+		"  postgres:", "  redis:", // service keys are short
+		"  shop_dev_uploads:", "  shop_dev_pg_data:", "  shop_dev_redis_data:", // volume names stay prefixed
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("expected %q in output\n%s", want, s)
@@ -116,9 +116,9 @@ func TestManagedDBMariaDBVersionExternal(t *testing.T) {
 	// Managed-dep blocks are asserted against the full output (svcBlock would false-
 	// match the app's depends_on line for the same name).
 	for _, want := range []string{
-		"  shop_dev_mariadb:",
+		"  mariadb:",                            // service key is short
 		"image: mariadb:10.11",                  // engine image + chosen version
-		"container_name: shop_dev_mariadb",
+		"container_name: shop_dev_mariadb",      // container_name stays prefixed (stable identity)
 		"    ports:\n      - \"${DB_EXTERNAL_PORT:-3306}:3306\"", // external publish
 		"MYSQL_ROOT_PASSWORD",                    // reuses MYSQL_* contract
 		"      - shop_dev_mariadb_data:/var/lib/mysql",
@@ -133,8 +133,8 @@ func TestManagedDBMariaDBVersionExternal(t *testing.T) {
 		t.Errorf("mariadb must NOT carry the MySQL-only native-password command\n%s", s)
 	}
 	// app depends_on resolves the mariadb managed dep (healthcheck → service_healthy).
-	app := svcBlock(t, s, "shop_dev_app")
-	if !strings.Contains(app, "shop_dev_mariadb:\n        condition: service_healthy") {
+	app := svcBlock(t, s, "app")
+	if !strings.Contains(app, "mariadb:\n        condition: service_healthy") {
 		t.Errorf("app depends_on should resolve mariadb as healthy\n%s", app)
 	}
 }
@@ -165,7 +165,7 @@ func TestManagedDepProjectLevelParity(t *testing.T) {
 	if string(a) != string(b) {
 		t.Fatalf("project-level deps must generate identical compose to legacy per-env\n--- legacy ---\n%s\n--- project ---\n%s", a, b)
 	}
-	if !strings.Contains(string(b), "  shop_dev_postgres:") || !strings.Contains(string(b), "  shop_dev_redis:") {
+	if !strings.Contains(string(b), "  postgres:") || !strings.Contains(string(b), "  redis:") {
 		t.Errorf("project-level deps should still emit postgres + redis blocks\n%s", b)
 	}
 }
@@ -208,7 +208,7 @@ func TestServicesSelfServingTraefik(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := svcBlock(t, string(out), "api_prod_app")
+	app := svcBlock(t, string(out), "app")
 	for _, want := range []string{
 		"image: ${APP_IMAGE:-reg/api-app:1.0.0-build.0-prod}",
 		"      traefik_net: {}",
@@ -220,7 +220,7 @@ func TestServicesSelfServingTraefik(t *testing.T) {
 			t.Errorf("self-serving app missing %q\n---\n%s", want, app)
 		}
 	}
-	if strings.Contains(string(out), "_nginx:") {
+	if strings.Contains(string(out), "  nginx:") {
 		t.Errorf("self-serving app should not emit an nginx service\n%s", out)
 	}
 }
@@ -258,7 +258,7 @@ func TestServicesTraefikModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := svcBlock(t, string(httpOut), "api_prod_app")
+	app := svcBlock(t, string(httpOut), "app")
 	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=web")
 	mustNotContain(t, app, "websecure")
 	mustNotContain(t, app, "redirectscheme")
@@ -269,7 +269,7 @@ func TestServicesTraefikModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app = svcBlock(t, string(leOut), "api_prod_app")
+	app = svcBlock(t, string(leOut), "app")
 	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=websecure")
 	mustContain(t, app, "traefik.http.routers.api_prod_app.tls.certresolver=letsencrypt")
 	mustContain(t, app, "traefik.http.routers.api_prod_app_web.entrypoints=web")
@@ -280,7 +280,7 @@ func TestServicesTraefikModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app = svcBlock(t, string(ssOut), "api_prod_app")
+	app = svcBlock(t, string(ssOut), "app")
 	mustContain(t, app, "traefik.http.routers.api_prod_app.entrypoints=websecure")
 	mustContain(t, app, "traefik.http.routers.api_prod_app.tls=true")
 	mustNotContain(t, app, "certresolver")
@@ -322,7 +322,7 @@ func TestServicesAutoRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := svcBlock(t, string(local), "mcl_wda_dev_nginx")
+	app := svcBlock(t, string(local), "nginx")
 	mustContain(t, app, "Host(`mcl-wda-dev.localhost`)") // underscores → hyphens
 	mustContain(t, app, "entrypoints=web")
 	mustNotContain(t, app, "ports:") // routed, not host-bound
@@ -332,7 +332,7 @@ func TestServicesAutoRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app = svcBlock(t, string(prod), "mcl_wda_dev_nginx")
+	app = svcBlock(t, string(prod), "nginx")
 	mustContain(t, app, "Host(`mcl-wda-dev.apps.example.com`)")
 	mustContain(t, app, "entrypoints=websecure")
 	mustContain(t, app, "certresolver=letsencrypt")
@@ -350,7 +350,7 @@ func TestServicesLocalTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app := svcBlock(t, string(out), "ws_vault_dev_app")
+	app := svcBlock(t, string(out), "app")
 	mustContain(t, app, "Host(`ws-vault-dev.localhost`)")
 	mustContain(t, app, "entrypoints=websecure")
 	mustContain(t, app, "tls=true")
@@ -439,7 +439,7 @@ func TestServicesEnvFileMount(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Service references the config at its target path.
-	app := svcBlock(t, string(out), "app_dev_backend")
+	app := svcBlock(t, string(out), "backend")
 	for _, want := range []string{"configs:", "- source: app_dev_dotenv", "target: /var/www/html/.env"} {
 		if !strings.Contains(app, want) {
 			t.Errorf("service block missing %q\n---\n%s", want, app)
