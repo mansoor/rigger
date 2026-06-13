@@ -7,6 +7,7 @@ import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
+import ManagedServices, { enabledDependsOnTargets } from '../components/ManagedServices'
 import EnvReorderModal from '../components/EnvReorderModal'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
@@ -85,62 +86,6 @@ const BUILD_TEMPLATES = [
 ]
 // Managed-dependency service names a service may depend_on.
 const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'garage']
-
-// managedDepNames derives the synthetic service names for a project's active managed
-// dependencies (mirrors backend workspace.managedDepServices) — shown read-only in
-// the Services list. Engine|version|redis|garage are project-level.
-function managedDepNames(project) {
-  const out = []
-  const db = project?.database
-  if (db && db !== 'none') out.push({ name: db, kind: db })
-  if (project?.redis_enabled) out.push({ name: 'redis', kind: 'redis' })
-  if (project?.garage_enabled) { out.push({ name: 'garage', kind: 'garage' }); out.push({ name: 'garage_webui', kind: 'garage' }) }
-  return out
-}
-
-// ProjectDependencies is the project-level managed-dependency picker shown at the top
-// of the Services tab. Engine/version/redis/garage are consistent across all
-// environments (per-env external-port exposure lives on each environment instead).
-function ProjectDependencies({ project, setProject }) {
-  return (
-    <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4">
-      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1">Project dependencies</p>
-      <p className="text-xs text-content-subtle mb-3">
-        Managed services (database, cache, object storage), consistent across every environment. They
-        appear as services below and are referenced via env vars + <code className="font-mono">depends_on</code>.
-        Remove one by setting it back to <em>None</em> / off.
-      </p>
-      <div className="grid grid-cols-3 gap-3 items-end">
-        <div>
-          <Label>Database</Label>
-          <DatabaseSelect engine={project?.database || 'none'} version={project?.db_version}
-            onChange={(eng, ver) => setProject(p => ({ ...p, database: eng, db_version: ver }))} caption={false} />
-        </div>
-        <Toggle label="Redis" checked={!!project?.redis_enabled} onChange={v => setProject(p => ({ ...p, redis_enabled: v }))} />
-        <Toggle label="Garage S3" checked={!!project?.garage_enabled} onChange={v => setProject(p => ({ ...p, garage_enabled: v }))} />
-      </div>
-    </div>
-  )
-}
-
-// ManagedDepRows lists the project's managed dependencies as read-only service rows
-// beneath the editable services — they can't be deleted here (remove via the
-// dependency toggle above) until the full service-graph fold lands.
-function ManagedDepRows({ project }) {
-  const rows = managedDepNames(project)
-  if (rows.length === 0) return null
-  return (
-    <div className="mt-3 space-y-2">
-      {rows.map(r => (
-        <div key={r.name} className="flex items-center gap-3 bg-surface-raised/30 border border-border-strong/60 rounded-xl px-4 py-3">
-          <span className="text-sm font-semibold text-content-strong">{r.name}</span>
-          <span className="text-[11px] px-2 py-0.5 rounded bg-surface-overlay/40 text-content-muted">managed · {r.kind}</span>
-          <span className="ml-auto text-[11px] text-content-faint">remove via Project dependencies above</span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function serviceSource(s) {
   if (s.build) return 'build'
@@ -270,7 +215,7 @@ const RESTART_OPTIONS = [
 // ServiceCard keeps local row state so empty rows added by + buttons survive
 // until the user types into them. Without local state, portRowsToFields() would
 // immediately filter out the empty new row and Add would appear broken.
-function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
+function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = [] }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(idx === 0) // collapsible — first service open
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
@@ -301,7 +246,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove }) {
   }
 
   const otherNames = allImages.map((m, j) => j !== idx ? m.name : null).filter(Boolean)
-  const depOptions = [...otherNames, ...MANAGED_DEPS]
+  // Only offer the managed services actually enabled on this project (not the full
+  // static list) so depends_on can't reference a dependency that won't exist.
+  const depOptions = [...otherNames, ...managedDeps]
 
   const monoInput = 'px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500'
 
@@ -814,7 +761,7 @@ function svcKindLabel(s) {
   return `image ${s.image || ''}${s.tag ? `:${s.tag}` : ''}`
 }
 
-function ImagesEditor({ images, onChange, gitRepo, gitBranch }) {
+function ImagesEditor({ images, onChange, gitRepo, gitBranch, managedDeps = [] }) {
   const [scanning, setScanning] = useState(false)
   const addService = () => onChange([...images, {
     name: '', image: '', tag: 'latest', port: 0, host_port: '',
@@ -848,6 +795,7 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch }) {
           img={img}
           idx={i}
           allImages={images}
+          managedDeps={managedDeps}
           onUpdate={(idx, updated) => onChange(images.map((m, j) => j === idx ? updated : m))}
           onRemove={idx => onChange(images.filter((_, j) => j !== idx))}
         />
@@ -1848,12 +1796,22 @@ export default function EditProjectPage() {
             project-level managed dependencies (DB / Redis / Garage). */}
         {tab === 'services' && (
           <section className="mb-6">
-            <ProjectDependencies project={project} setProject={setProject} />
+            {/* Managed services (project-level). Hidden for image / pre-built stacks
+                — they bring their own data services as images (matches the wizard). */}
+            {project?.type !== 'image' && (
+              <div className="mb-5">
+                <ManagedServices
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, garage: project?.garage_enabled }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, garage_enabled: !!v.garage }))}
+                  resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
+                />
+              </div>
+            )}
 
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages}
-              gitRepo={project?.git_repo} gitBranch={project?.git_branch} />
-            <ManagedDepRows project={project} />
+              gitRepo={project?.git_repo} gitBranch={project?.git_branch}
+              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, garage: project?.garage_enabled })} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
