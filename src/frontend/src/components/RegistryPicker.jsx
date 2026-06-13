@@ -52,11 +52,15 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
   }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the project already references an unsaved (custom) URL, open the manual form
-  // pre-filled so the user can attach credentials or keep it as anonymous.
+  // pre-filled. A stored URL with no matching saved record means it was entered as
+  // an *anonymous* registry (credentialed ones are saved as records and match), so
+  // restore the anonymous toggle — otherwise Edit Project showed the credentialed
+  // form on reload and the "Anonymous registry" choice appeared lost.
   useEffect(() => {
     if (!didInit && isCustomValue) {
       setManual(true)
       setUrl(value)
+      setAnon(true)
       setDidInit(true)
     }
   }, [isCustomValue, didInit, value])
