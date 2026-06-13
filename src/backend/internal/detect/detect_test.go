@@ -72,6 +72,117 @@ services:
 	}
 }
 
+// TestDetectComposeFidelity covers the faithful-import capture (Path 2): per-service
+// environment, all ports (extra_ports), healthcheck, build dockerfile/args, named +
+// bind volumes, profile skipping, DB version capture, the web-entry heuristic, and
+// .env.example seeding. Modeled on a kyt-shaped compose.
+func TestDetectComposeFidelity(t *testing.T) {
+	dir := repo(t, map[string]string{
+		".env.example": "POSTGRES_DB=teslamate\nSECRET_KEY=replace-me\n# a comment\nMQTT_HOST=mosquitto\n",
+		"docker-compose.yml": `
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-teslamate}
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        VERSION: "1.2.3"
+    environment:
+      DATABASE_URL: postgresql://db:5432/app
+      MQTT_PORT: 1883
+      DEBUG: false
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+  photon:
+    image: koodinikula/photon:latest
+    profiles:
+      - geocoder
+`,
+	})
+	d := Detect(dir)
+
+	// DB → managed dep with version captured from the image tag.
+	if d.Database != "postgres" || d.DBVersion != "16-alpine" {
+		t.Errorf("db: database=%q db_version=%q, want postgres/16-alpine", d.Database, d.DBVersion)
+	}
+	if svcByName(d, "db") != nil {
+		t.Errorf("postgres should be a managed dep, not a service")
+	}
+
+	// Profile-gated service skipped.
+	if svcByName(d, "photon") != nil {
+		t.Errorf("profile-gated photon should be skipped")
+	}
+
+	// backend: env (incl. non-string scalars), healthcheck, build dockerfile+args.
+	backend := svcByName(d, "backend")
+	if backend == nil {
+		t.Fatal("backend service missing")
+	}
+	if backend.EnvVars["DATABASE_URL"] != "postgresql://db:5432/app" || backend.EnvVars["MQTT_PORT"] != "1883" || backend.EnvVars["DEBUG"] != "false" {
+		t.Errorf("backend env not captured faithfully: %v", backend.EnvVars)
+	}
+	if backend.Healthcheck != "curl -f http://localhost:8000/health || exit 1" {
+		t.Errorf("backend healthcheck = %q", backend.Healthcheck)
+	}
+	if backend.HealthcheckConfig == nil || backend.HealthcheckConfig.Interval != "15s" || backend.HealthcheckConfig.Retries != "5" {
+		t.Errorf("backend healthcheck config = %+v", backend.HealthcheckConfig)
+	}
+	if backend.Build == nil || backend.Build.Context != "./backend" || backend.Build.Dockerfile != "Dockerfile.prod" || backend.Build.Args["VERSION"] != "1.2.3" {
+		t.Errorf("backend build not captured: %+v", backend.Build)
+	}
+
+	// proxy: all ports (first → Port/HostPort, rest → ExtraPorts), bind+named volumes,
+	// and chosen as the web entry (publishes 80).
+	proxy := svcByName(d, "proxy")
+	if proxy == nil || proxy.Port != "80" || proxy.HostPort != "80" {
+		t.Fatalf("proxy port wrong: %+v", proxy)
+	}
+	if len(proxy.ExtraPorts) != 1 || proxy.ExtraPorts[0] != "443:443" {
+		t.Errorf("proxy extra_ports = %v, want [443:443]", proxy.ExtraPorts)
+	}
+	if len(proxy.Volumes) != 2 || proxy.Volumes[0] != "./Caddyfile:/etc/caddy/Caddyfile:ro" {
+		t.Errorf("proxy volumes not preserved: %v", proxy.Volumes)
+	}
+	if !proxy.WebRouted {
+		t.Errorf("proxy (publishes :80) should be the web entry")
+	}
+
+	// mosquitto: both ports captured.
+	mq := svcByName(d, "mosquitto")
+	if mq == nil || mq.Port != "1883" || len(mq.ExtraPorts) != 1 || mq.ExtraPorts[0] != "9001:9001" {
+		t.Errorf("mosquitto ports wrong: %+v", mq)
+	}
+
+	// .env.example seeded.
+	if d.EnvVars["POSTGRES_DB"] != "teslamate" || d.EnvVars["MQTT_HOST"] != "mosquitto" {
+		t.Errorf("env seeded from .env.example wrong: %v", d.EnvVars)
+	}
+}
+
 func TestDetectDockerfileMonorepo(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"apps/api/Dockerfile": "FROM golang:1.25\nEXPOSE 9090\n",

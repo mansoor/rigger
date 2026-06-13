@@ -221,6 +221,7 @@ function ScanStack({ data, onChange }) {
       const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim())
       onChange('scanDraft', d)
       onChange('database', d.database || 'none')
+      onChange('dbVersion', d.db_version || '')
       onChange('redis', !!d.redis)
       onChange('garage', !!d.garage)
     } catch (e) {
@@ -229,6 +230,15 @@ function ScanStack({ data, onChange }) {
     } finally { setBusy(false) }
   }
   const svcs = draft?.services || []
+  // Set the web entry: web_routed=true on the chosen service, false on the rest.
+  function pickWeb(idx) {
+    if (!draft) return
+    onChange('scanDraft', {
+      ...draft,
+      services: svcs.map((s, i) => ({ ...s, web_routed: i === idx })),
+    })
+  }
+  const envCount = s => Object.keys(s.env_vars || {}).length
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-[1fr_8rem_auto] gap-2 items-end">
@@ -254,18 +264,32 @@ function ScanStack({ data, onChange }) {
             <span className="text-xs text-content-subtle">{svcs.length} service{svcs.length !== 1 ? 's' : ''}</span>
           </div>
           <div className="space-y-1.5">
-            {svcs.map((s, i) => (
-              <div key={i} className="flex items-center gap-2 text-xs">
-                <span className="font-mono text-content">{s.name}</span>
-                <span className="text-content-faint">
-                  {s.build ? `build${s.build.context && s.build.context !== '.' ? ` (${s.build.context})` : ''}`
-                    : s.image_from ? `worker → ${s.image_from}`
-                    : `image ${s.image}${s.tag ? `:${s.tag}` : ''}`}
-                </span>
-                {s.port && <span className="text-content-subtle">:{s.port}</span>}
-                {s.web_routed && <span className="text-success-fg">web</span>}
-              </div>
-            ))}
+            {svcs.length > 0 && (
+              <p className="text-[11px] text-content-faint uppercase tracking-wide">Web entry — which service receives external traffic:</p>
+            )}
+            {svcs.map((s, i) => {
+              const ports = [s.port, ...(s.extra_ports || []).map(p => String(p).split(':').pop())].filter(Boolean)
+              const meta = [
+                envCount(s) > 0 && `${envCount(s)} env`,
+                (s.volumes || []).length > 0 && `${s.volumes.length} vol`,
+                s.healthcheck && 'healthcheck',
+              ].filter(Boolean)
+              return (
+                <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="radio" name="webentry" checked={!!s.web_routed} onChange={() => pickWeb(i)}
+                    className="w-3.5 h-3.5 accent-brand-500 shrink-0" title="Set as web entry" />
+                  <span className="font-mono text-content">{s.name}</span>
+                  <span className="text-content-faint">
+                    {s.build ? `build${s.build.context && s.build.context !== '.' ? ` (${s.build.context})` : ''}`
+                      : s.image_from ? `worker → ${s.image_from}`
+                      : `image ${s.image}${s.tag ? `:${s.tag}` : ''}`}
+                  </span>
+                  {ports.length > 0 && <span className="text-content-subtle">:{ports.join(',')}</span>}
+                  {meta.length > 0 && <span className="text-content-faint">· {meta.join(' · ')}</span>}
+                  {s.web_routed && <span className="text-success-fg">web</span>}
+                </label>
+              )
+            })}
             {svcs.length === 0 && <p className="text-xs text-content-subtle">No services detected — you can add them in Edit Project after creating.</p>}
           </div>
           {(draft.database !== 'none' || draft.redis || draft.garage) && (
@@ -1759,7 +1783,9 @@ export default function NewProjectPage() {
           })
         : [],
       custom_env_vars: data.stackType === 'image' ? data.customEnvVars : {},
-      initial_env_vars: {}, // vars now per-environment via environments[].vars
+      // Repo scan seeds the env's .env from the repo's .env.example so ${VAR} refs in
+      // the imported compose `environment:` resolve (and secrets get generated).
+      initial_env_vars: isScan ? (data.scanDraft?.env_vars || {}) : {},
       named_volumes: data.volumes.filter(v => v.name && v.mountPath),
       backend: (isImage || isScan || isDatabase) ? '' : data.backend,
       frontend: (isImage || isScan || isDatabase) ? 'none' : data.frontend,

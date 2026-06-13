@@ -9,6 +9,7 @@
 package detect
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,25 +19,37 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 )
 
-// Service mirrors a config.json services[] entry (the unified model).
+// Service mirrors a config.json services[] entry (the unified model). JSON tags
+// match composegen's Service so the draft flows straight into config.json and the
+// generated compose (extra_ports, healthcheck_config, build args/dockerfile, …).
 type Service struct {
-	Name           string   `json:"name"`
-	Build          *Build   `json:"build,omitempty"`
-	Image          string   `json:"image,omitempty"`
-	ImageFrom      string   `json:"image_from,omitempty"`
-	Tag            string   `json:"tag,omitempty"`
-	Command        string   `json:"command,omitempty"`
-	Port           string   `json:"port,omitempty"`
-	HostPort       string   `json:"host_port,omitempty"`
-	WebRouted      bool     `json:"web_routed,omitempty"`
-	Subdomain      string   `json:"subdomain,omitempty"`
-	Healthcheck    string   `json:"healthcheck,omitempty"`
-	EnvFile        bool     `json:"env_file,omitempty"`
-	DependsOn      []string          `json:"depends_on,omitempty"`
-	Volumes        []string          `json:"volumes,omitempty"`
-	Restart        string            `json:"restart,omitempty"`
-	ConfigTemplate string            `json:"config_template,omitempty"`
-	EnvVars        map[string]string `json:"env_vars,omitempty"`
+	Name              string             `json:"name"`
+	Build             *Build             `json:"build,omitempty"`
+	Image             string             `json:"image,omitempty"`
+	ImageFrom         string             `json:"image_from,omitempty"`
+	Tag               string             `json:"tag,omitempty"`
+	Command           string             `json:"command,omitempty"`
+	Port              string             `json:"port,omitempty"`
+	HostPort          string             `json:"host_port,omitempty"`
+	ExtraPorts        []string           `json:"extra_ports,omitempty"`
+	WebRouted         bool               `json:"web_routed,omitempty"`
+	Subdomain         string             `json:"subdomain,omitempty"`
+	Healthcheck       string             `json:"healthcheck,omitempty"`
+	HealthcheckConfig *HealthcheckConfig `json:"healthcheck_config,omitempty"`
+	EnvFile           bool               `json:"env_file,omitempty"`
+	DependsOn         []string           `json:"depends_on,omitempty"`
+	Volumes           []string           `json:"volumes,omitempty"`
+	Restart           string             `json:"restart,omitempty"`
+	ConfigTemplate    string             `json:"config_template,omitempty"`
+	EnvVars           map[string]string  `json:"env_vars,omitempty"`
+}
+
+// HealthcheckConfig mirrors composegen's per-service healthcheck timing.
+type HealthcheckConfig struct {
+	Interval    string `json:"interval,omitempty"`
+	Timeout     string `json:"timeout,omitempty"`
+	Retries     string `json:"retries,omitempty"`
+	StartPeriod string `json:"start_period,omitempty"`
 }
 
 // applyBlueprintServiceEnv copies a blueprint's static per-service env onto the
@@ -58,24 +71,30 @@ func applyBlueprintServiceEnv(s *Service, bp blueprints.Blueprint) {
 
 // Build is a build service's source spec.
 type Build struct {
-	Context    string `json:"context,omitempty"`
-	Dockerfile string `json:"dockerfile,omitempty"`
-	Template   string `json:"template,omitempty"`
+	Context    string            `json:"context,omitempty"`
+	Dockerfile string            `json:"dockerfile,omitempty"`
+	Template   string            `json:"template,omitempty"`
+	Args       map[string]string `json:"args,omitempty"`
 }
 
 // Draft is the detection result the wizard pre-fills from.
 type Draft struct {
-	Services []Service `json:"services"`
-	Database string    `json:"database"` // none | postgres | mysql
-	Redis    bool      `json:"redis"`
-	Garage   bool      `json:"garage"`
-	Detected string    `json:"detected"` // primary stack label, for display
-	Notes    []string  `json:"notes"`    // human-readable detection notes
+	Services  []Service         `json:"services"`
+	Database  string            `json:"database"`             // none | postgres | mysql
+	DBVersion string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
+	Redis     bool              `json:"redis"`
+	Garage    bool              `json:"garage"`
+	Detected  string            `json:"detected"`            // primary stack label, for display
+	Notes     []string          `json:"notes"`               // human-readable detection notes
+	EnvVars   map[string]string `json:"env_vars,omitempty"`  // seeded from .env.example for the env's .env
 }
 
 // Detect scans a repo directory and returns a draft service graph.
 func Detect(repoDir string) Draft {
 	d := Draft{Services: []Service{}, Database: "none", Notes: []string{}}
+	// Seed env vars from .env.example so the env's .env carries the app's expected
+	// keys (and ${VAR:-default} refs in compose `environment:` resolve at deploy).
+	d.EnvVars = parseDotenv(repoDir)
 
 	// 1. An existing compose file is authoritative.
 	if cf := findFirst(repoDir, "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"); cf != "" {
@@ -120,12 +139,15 @@ type composeFile struct {
 	Services map[string]composeSvc `yaml:"services"`
 }
 type composeSvc struct {
-	Image     string    `yaml:"image"`
-	Build     yaml.Node `yaml:"build"`
-	Command   yaml.Node `yaml:"command"`
-	Ports     []string  `yaml:"ports"`
-	DependsOn yaml.Node `yaml:"depends_on"`
-	Volumes   []string  `yaml:"volumes"`
+	Image       string    `yaml:"image"`
+	Build       yaml.Node `yaml:"build"`
+	Command     yaml.Node `yaml:"command"`
+	Ports       []string  `yaml:"ports"`
+	DependsOn   yaml.Node `yaml:"depends_on"`
+	Volumes     []string  `yaml:"volumes"`
+	Environment yaml.Node `yaml:"environment"`
+	Healthcheck yaml.Node `yaml:"healthcheck"`
+	Profiles    []string  `yaml:"profiles"`
 }
 
 func fromCompose(repoDir, path string, d *Draft) bool {
@@ -137,17 +159,37 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	if yaml.Unmarshal(raw, &cf) != nil || len(cf.Services) == 0 {
 		return false
 	}
+	var skippedProfiles []string
 	for _, name := range sortedKeys(cf.Services) {
 		cs := cf.Services[name]
+		// Profile-gated services aren't started by a default `docker compose up`
+		// (e.g. an optional geocoder) — skip them, note for the user.
+		if len(cs.Profiles) > 0 {
+			skippedProfiles = append(skippedProfiles, name)
+			continue
+		}
 		// Recognised data services become managed-dependency toggles, not services.
+		// Capture the image tag so the catalog uses the same version (e.g. 16-alpine).
 		if role := dbRole(cs.Image); role != "" {
 			applyManagedDep(role, d)
+			if _, tag := splitImage(cs.Image); tag != "" && tag != "latest" && d.DBVersion == "" {
+				d.DBVersion = tag
+			}
 			continue
 		}
 		s := Service{Name: dnsName(name), Restart: "unless-stopped", EnvFile: true}
+		// Environment (map or list form) — kept literal so ${VAR:-default} still
+		// interpolates at deploy against the seeded .env. Copied first so compose
+		// values win over any blueprint defaults applied below.
+		for k, v := range nodeToEnvMap(cs.Environment) {
+			if s.EnvVars == nil {
+				s.EnvVars = map[string]string{}
+			}
+			s.EnvVars[k] = v
+		}
 		if !cs.Build.IsZero() {
-			ctx := composeBuildContext(cs.Build)
-			s.Build = &Build{Context: ctx}
+			ctx, dockerfile, args := composeBuild(cs.Build)
+			s.Build = &Build{Context: ctx, Dockerfile: dockerfile, Args: args}
 			// Identify the framework in the build context so the service carries
 			// its blueprint id (build.template) — envgen reads that to emit the
 			// framework's env contract (DB_*/DATABASE_URL/…). Compose alone
@@ -155,7 +197,7 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 			if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
 				s.Build.Template = id
 				if bp, ok := blueprints.Get(id); ok {
-					applyBlueprintServiceEnv(&s, bp)
+					applyBlueprintServiceEnv(&s, bp) // fills only keys compose didn't set
 				}
 			}
 		} else if cs.Image != "" {
@@ -165,15 +207,27 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 		if c := scalarOrJoin(cs.Command); c != "" {
 			s.Command = c
 		}
-		if hp, cp := firstPort(cs.Ports); cp != "" {
+		// Ports: first container port → Port (+HostPort); the rest → ExtraPorts (raw).
+		if ports := normalizePorts(cs.Ports); len(ports) > 0 {
+			hp, cp := splitPort(ports[0])
 			s.Port = cp
 			if hp != "" {
 				s.HostPort = hp
 			}
+			s.ExtraPorts = append(s.ExtraPorts, ports[1:]...)
 		}
+		if hc, hcfg := parseHealthcheck(cs.Healthcheck); hc != "" {
+			s.Healthcheck = hc
+			s.HealthcheckConfig = hcfg
+		}
+		s.Volumes = cs.Volumes
 		s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), cf.Services)
 		d.Services = append(d.Services, s)
 	}
+	if len(skippedProfiles) > 0 {
+		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default).")
+	}
+	pickWebEntry(d)
 	return len(d.Services) > 0
 }
 
@@ -432,19 +486,210 @@ func firstPort(ports []string) (host, container string) {
 	return "", ""
 }
 
-func composeBuildContext(n yaml.Node) string {
-	// build: "." (scalar) or build: { context: "./api" }
+// composeBuild extracts context/dockerfile/args from a compose `build:` node, which
+// is either a scalar ("./api") or a map ({context, dockerfile, args}).
+func composeBuild(n yaml.Node) (context, dockerfile string, args map[string]string) {
+	if n.Kind == yaml.ScalarNode {
+		return n.Value, "", nil
+	}
+	var m struct {
+		Context    string    `yaml:"context"`
+		Dockerfile string    `yaml:"dockerfile"`
+		Args       yaml.Node `yaml:"args"`
+	}
+	_ = n.Decode(&m)
+	context = m.Context
+	if context == "" {
+		context = "."
+	}
+	if a := nodeToEnvMap(m.Args); len(a) > 0 {
+		args = a
+	}
+	return context, m.Dockerfile, args
+}
+
+// nodeToEnvMap parses a compose `environment:`/build `args:` node — either map form
+// (KEY: value) or list form (- KEY=value) — into a string map. Non-string scalars
+// (numbers, bools) are stringified; values are kept literal (incl. ${VAR:-default}).
+func nodeToEnvMap(n yaml.Node) map[string]string {
+	out := map[string]string{}
+	if n.IsZero() {
+		return out
+	}
+	var m map[string]interface{}
+	if n.Decode(&m) == nil && len(m) > 0 {
+		for k, v := range m {
+			if v == nil {
+				out[k] = ""
+			} else {
+				out[k] = fmt.Sprintf("%v", v)
+			}
+		}
+		return out
+	}
+	var list []string
+	if n.Decode(&list) == nil {
+		for _, item := range list {
+			if i := strings.IndexByte(item, '='); i > 0 {
+				out[strings.TrimSpace(item[:i])] = item[i+1:]
+			} else if t := strings.TrimSpace(item); t != "" {
+				out[t] = ""
+			}
+		}
+	}
+	return out
+}
+
+// parseHealthcheck maps a compose healthcheck node to the bare test command (which
+// composegen re-wraps in CMD-SHELL) plus its timing. Returns "" when absent/disabled.
+func parseHealthcheck(n yaml.Node) (string, *HealthcheckConfig) {
+	if n.IsZero() {
+		return "", nil
+	}
+	var hc struct {
+		Test        yaml.Node `yaml:"test"`
+		Interval    string    `yaml:"interval"`
+		Timeout     string    `yaml:"timeout"`
+		Retries     int       `yaml:"retries"`
+		StartPeriod string    `yaml:"start_period"`
+		Disable     bool      `yaml:"disable"`
+	}
+	if n.Decode(&hc) != nil || hc.Disable {
+		return "", nil
+	}
+	test := healthcheckTest(hc.Test)
+	if test == "" {
+		return "", nil
+	}
+	cfg := &HealthcheckConfig{Interval: hc.Interval, Timeout: hc.Timeout, StartPeriod: hc.StartPeriod}
+	if hc.Retries > 0 {
+		cfg.Retries = itoa(hc.Retries)
+	}
+	return test, cfg
+}
+
+// healthcheckTest unwraps the test field: a scalar string, or a list like
+// ["CMD-SHELL", "<cmd>"] / ["CMD", "<bin>", "<arg>"…]. "NONE" disables it.
+func healthcheckTest(n yaml.Node) string {
 	if n.Kind == yaml.ScalarNode {
 		return n.Value
 	}
-	var m struct {
-		Context string `yaml:"context"`
+	var list []string
+	if n.Decode(&list) == nil && len(list) > 0 {
+		switch list[0] {
+		case "NONE":
+			return ""
+		case "CMD-SHELL", "CMD":
+			if len(list) > 1 {
+				return strings.Join(list[1:], " ")
+			}
+		}
+		return strings.Join(list, " ")
 	}
-	_ = n.Decode(&m)
-	if m.Context == "" {
-		return "."
+	return ""
+}
+
+// normalizePorts trims quotes/whitespace and drops empties.
+func normalizePorts(ports []string) []string {
+	var out []string
+	for _, p := range ports {
+		if p = strings.Trim(p, `"' `); p != "" {
+			out = append(out, p)
+		}
 	}
-	return m.Context
+	return out
+}
+
+// splitPort returns (hostPort, containerPort) from "h:c", "ip:h:c", or "c".
+func splitPort(p string) (host, container string) {
+	parts := strings.Split(strings.Trim(p, `"' `), ":")
+	switch len(parts) {
+	case 1:
+		return "", parts[0]
+	case 2:
+		return parts[0], parts[1]
+	default:
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+}
+
+var ingressImageRE = regexp.MustCompile(`nginx|caddy|traefik|httpd|haproxy`)
+
+// pickWebEntry chooses a web entry when none was already marked (compose imports
+// rarely set one): the service publishing 80/443, else an ingress-like image, else
+// the first build service. The user can change it in the wizard / Edit Project.
+func pickWebEntry(d *Draft) {
+	for _, s := range d.Services {
+		if s.WebRouted {
+			return
+		}
+	}
+	idx := -1
+	for i, s := range d.Services {
+		if portsInclude(s, "80") || portsInclude(s, "443") {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		for i, s := range d.Services {
+			if s.Image != "" && ingressImageRE.MatchString(strings.ToLower(s.Image)) {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		for i, s := range d.Services {
+			if s.Build != nil {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx >= 0 {
+		d.Services[idx].WebRouted = true
+		if d.Services[idx].Port == "" {
+			d.Services[idx].Port = "80"
+		}
+		d.Notes = append(d.Notes, "Set "+d.Services[idx].Name+" as the web entry — change it on the next step if wrong.")
+	}
+}
+
+func portsInclude(s Service, container string) bool {
+	if s.Port == container {
+		return true
+	}
+	for _, e := range s.ExtraPorts {
+		if _, c := splitPort(e); c == container {
+			return true
+		}
+	}
+	return false
+}
+
+// parseDotenv reads .env.example / .env.sample into a KEY→VALUE map (best-effort)
+// to seed the environment's .env so ${VAR} refs resolve and secret-fill applies.
+func parseDotenv(repoDir string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(readFile(findFirst(repoDir, ".env.example", ".env.sample")), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		if i := strings.IndexByte(line, '='); i > 0 {
+			k := strings.TrimSpace(line[:i])
+			v := strings.Trim(strings.TrimSpace(line[i+1:]), `"'`)
+			if k != "" {
+				out[k] = v
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func scalarOrJoin(n yaml.Node) string {
