@@ -916,7 +916,10 @@ function ReleasePipeline({ ws }) {
     queryKey: ['pipeline-runs', workspace, name, pipeline?.id],
     queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
     enabled: !!pipeline?.id,
-    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : false,
+    // Poll fast while a run is in flight; keep a slow baseline when idle so a run
+    // started elsewhere (a webhook, or another browser) is picked up without a
+    // manual interaction — a bare `false` here stopped polling and froze the widget.
+    refetchInterval: (q) => (q.state.data || []).some(r => r.status === 'running' || r.status === 'awaiting') ? 3000 : 15_000,
   })
   const latestRun = runs[0]
 
