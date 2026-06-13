@@ -5,6 +5,7 @@ import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, f
 import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
+import EnvReorderModal from '../components/EnvReorderModal'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
 import TrashIcon from '../components/TrashIcon'
@@ -1493,6 +1494,7 @@ export default function EditProjectPage() {
   const [images, setImages]   = useState(null)
   const [newEnvCounter, setNewEnvCounter] = useState(0)
   const [saveError, setSaveError] = useState('')
+  const [reorderOpen, setReorderOpen] = useState(false)
   const [firstEnvVars, setFirstEnvVars] = useState({})
   const [baseline, setBaseline] = useState(null)        // serialized config at load
   const [confirmCancel, setConfirmCancel] = useState(false)
@@ -1794,11 +1796,27 @@ export default function EditProjectPage() {
         <section className="mb-6">
           <div className="flex items-center justify-between gap-3 mb-3">
             <h2 className="text-sm font-semibold text-content">Environments</h2>
-            <button type="button" onClick={addEnv}
-              className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-              + Add environment
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {currentEnvNames.length > 1 && (
+                <button type="button" onClick={() => setReorderOpen(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content hover:bg-surface-raised transition-colors">
+                  ⇅ Reorder
+                </button>
+              )}
+              <button type="button" onClick={addEnv}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                + Add environment
+              </button>
+            </div>
           </div>
+          {reorderOpen && (
+            <EnvReorderModal
+              workspace={workspace} name={name}
+              envNames={ws?.envs || currentEnvNames}
+              onClose={() => setReorderOpen(false)}
+              onSaved={() => { qc.invalidateQueries({ queryKey: ['workspace', workspace, name] }); qc.invalidateQueries({ queryKey: ['config', workspace, name] }) }}
+            />
+          )}
           <p className="text-xs text-content-subtle mb-3">
             {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
             {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
