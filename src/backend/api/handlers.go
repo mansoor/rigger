@@ -25,6 +25,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
@@ -1525,6 +1526,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
+	}
+	// Refine env order with the workspace's configured tier names (workspace.Get
+	// used DefaultTiers); explicit project order still wins inside Resolve.
+	if wsSettings, _ := settings.GetWorkspaceSettings(h.db, wsName); wsSettings != nil {
+		tiers := envorder.SplitTierNames(wsSettings["env_tier_names"])
+		ws.Envs = envorder.Resolve(ws.Envs, ws.Config.Project.EnvOrder, tiers)
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)

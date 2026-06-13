@@ -6,37 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
-
-// envOrder ranks environment names by their conventional deployment-pipeline
-// position so cards render in a stable, intuitive order (dev → stage → prod)
-// rather than the random order of a Go map. Unknown names sort last,
-// alphabetically.
-func envRank(name string) int {
-	switch strings.ToLower(name) {
-	case "dev", "develop", "development":
-		return 0
-	case "test", "testing":
-		return 1
-	case "qa":
-		return 2
-	case "stage", "staging":
-		return 3
-	case "uat":
-		return 4
-	case "preprod", "pre-prod", "preproduction":
-		return 5
-	case "prod", "production", "live":
-		return 6
-	default:
-		return 100
-	}
-}
 
 type Version struct {
 	Major int `json:"major"`
@@ -59,6 +34,9 @@ type Project struct {
 	// at creation so the UI can show where it lives without a runtime docker
 	// inspect. May be empty for projects created before this was added.
 	ProjectRootDir string `json:"project_root_dir,omitempty"`
+	// EnvOrder is the explicit deploy-tier order of this project's environments
+	// (low→high). Empty ⇒ order auto-guessed from env names. See internal/envorder.
+	EnvOrder []string `json:"env_order,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the
@@ -308,19 +286,14 @@ func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, err
 	for envName := range cfg.Environments {
 		envSet[envName] = true
 	}
-	var envs []string
+	var rawEnvs []string
 	for k := range envSet {
-		envs = append(envs, k)
+		rawEnvs = append(rawEnvs, k)
 	}
-	// Stable, pipeline-style order (dev → stage → prod → others) so cards don't
-	// shuffle between loads.
-	sort.Slice(envs, func(i, j int) bool {
-		ri, rj := envRank(envs[i]), envRank(envs[j])
-		if ri != rj {
-			return ri < rj
-		}
-		return envs[i] < envs[j]
-	})
+	// Effective deploy-tier order: explicit project order, else auto-guess from
+	// env names (DefaultTiers here; GetWorkspace refines with the workspace's
+	// env_tier_names setting). Keeps cards from shuffling between loads.
+	envs := envorder.Resolve(rawEnvs, cfg.Project.EnvOrder, nil)
 
 	// Build per-environment resolved access info.
 	// Best-effort: missing .env files result in empty/raw values, never an error.

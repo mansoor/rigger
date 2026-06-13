@@ -766,6 +766,9 @@ func main() {
 	// Phase 9: deployment pipelines (project-scoped). REST CRUD + run history are
 	// JWT-authed via middleware (per-project RBAC enforced in the handlers); the run
 	// endpoint is a WebSocket authed by a token in its first message (like /action).
+	// Release-pipeline #4: explicit env deploy-tier order (drives auto-seeded pipelines).
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.GetEnvOrder)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.PutEnvOrder)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.ListPipelines)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.CreatePipeline)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.UpdatePipeline)))

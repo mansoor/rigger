@@ -21,6 +21,9 @@ var workspaceSettingKeys = map[string]bool{
 	"default_backup_target_id": true,
 	// W7: workspace default appearance (JSON blob; users can override per-account).
 	"appearance_prefs": true,
+	// Release pipeline: env tier names (low→high, comma/newline) driving the
+	// auto-guess deploy order. Empty ⇒ envorder.DefaultTiers.
+	"env_tier_names": true,
 }
 
 // GET /api/workspaces/{ws}/settings
