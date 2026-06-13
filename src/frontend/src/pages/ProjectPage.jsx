@@ -469,7 +469,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
   const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
   const [dbInfoOpen, setDbInfoOpen] = useState(false) // managed-database connection info (Phase 5)
-  const hasManagedDB = !!cfg?.database && cfg.database !== 'none'
+  // Managed DB engine is project-level now (falls back to the legacy per-env value).
+  const dbEngine = ws?.config?.project?.database || cfg?.database || ''
+  const hasManagedDB = !!dbEngine && dbEngine !== 'none'
   const canManageDB = ['admin', 'operator'].includes(ws?.my_role) // reveal secret + create schema
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
@@ -2027,13 +2029,17 @@ export default function ProjectPage() {
   const vStr = version ? `v${version.major}.${version.minor}.${version.patch}-build.${version.build}` : ''
 
   // Build header stack description from the unified service graph + managed deps.
+  // Skip the synthetic managed-dep rows (s.managed) — they're added (capitalized)
+  // from the project-level fields below to avoid double-listing.
   const stackParts = []
-  ;(cfg?.services || []).forEach(s => { if (s.name) stackParts.push(s.name) })
+  ;(cfg?.services || []).forEach(s => { if (s.name && !s.managed) stackParts.push(s.name) })
   {
+    const proj = cfg?.project || {}
     const firstEnvCfg = cfg?.environments?.[envs[0]] || {}
-    if (firstEnvCfg.database && firstEnvCfg.database !== 'none') stackParts.push(capitalize(firstEnvCfg.database))
-    if (firstEnvCfg.redis_enabled) stackParts.push('Redis')
-    if (firstEnvCfg.garage_enabled) stackParts.push('Garage')
+    const dbEng = proj.database || firstEnvCfg.database // project-level, legacy fallback
+    if (dbEng && dbEng !== 'none') stackParts.push(capitalize(dbEng))
+    if (proj.redis_enabled || firstEnvCfg.redis_enabled) stackParts.push('Redis')
+    if (proj.garage_enabled || firstEnvCfg.garage_enabled) stackParts.push('Garage')
   }
 
   return (

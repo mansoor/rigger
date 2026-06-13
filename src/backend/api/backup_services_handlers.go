@@ -32,6 +32,11 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cfg struct {
+		// Managed deps are project-level now; per-env fields kept for back-compat.
+		Project struct {
+			Database string `json:"database"`
+			Garage   bool   `json:"garage_enabled"`
+		} `json:"project"`
 		Services []struct {
 			Name  string          `json:"name"`
 			Image string          `json:"image"`
@@ -45,12 +50,17 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &cfg)
 
 	e := cfg.Environments[env]
+	database := cfg.Project.Database
+	if database == "" {
+		database = e.Database
+	}
+	garageOn := cfg.Project.Garage || e.GarageEnabled
 	var out []backupServiceInfo
 	hasBuild := false
 
-	// The managed database (env toggle) backs up as a SQL dump.
-	if e.Database != "" && e.Database != "none" {
-		out = append(out, backupServiceInfo{ID: "database", Label: "Database", Kind: "database", Hint: e.Database + " — SQL dump"})
+	// The managed database backs up as a SQL dump.
+	if database != "" && database != "none" {
+		out = append(out, backupServiceInfo{ID: "database", Label: "Database", Kind: "database", Hint: database + " — SQL dump"})
 	}
 
 	// Pull-image services that look like a database are dump candidates too.
@@ -78,7 +88,7 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	if hasBuild {
 		out = append(out, backupServiceInfo{ID: "uploads", Label: "App uploads", Kind: "volume", Hint: "Uploads volume"})
 	}
-	if e.GarageEnabled {
+	if garageOn {
 		out = append(out, backupServiceInfo{ID: "garage", Label: "Garage S3 data", Kind: "volume", Hint: "Garage object-store volumes"})
 	}
 	if out == nil {

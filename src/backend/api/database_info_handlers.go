@@ -67,7 +67,9 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "environment not found"})
 		return
 	}
-	engine := ec.Database
+	// Managed deps are project-level (Eff* falls back to legacy per-env); only the
+	// external-port exposure (ec.DBExternal) is per-environment.
+	engine := cfg.EffDatabase(ec)
 	if engine == "" || engine == "none" {
 		writeJSON(w, http.StatusOK, databaseInfoResponse{Engine: "none"})
 		return
@@ -77,7 +79,7 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, databaseInfoResponse{Engine: engine, Label: engine})
 		return
 	}
-	version := ec.DBVersion
+	version := cfg.EffDBVersion(ec)
 	if version == "" {
 		version = eng.DefaultVersion
 	}

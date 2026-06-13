@@ -139,6 +139,37 @@ func TestManagedDBMariaDBVersionExternal(t *testing.T) {
 	}
 }
 
+// Managed deps moved from per-env to project-level (consistent across envs); only
+// DBExternal stays per-env. The generator reads an effective value (project-level
+// else legacy per-env), so a project-level engine/version/redis must produce the
+// SAME compose as the old per-env form. This locks the fallback parity.
+func TestManagedDepProjectLevelParity(t *testing.T) {
+	legacy := `{
+		"project": {"name":"shop","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"app","role":"app","build":{},"port":"9000","env_file":true,"depends_on":["postgres"]}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080","database":"postgres","db_version":"15-alpine","redis_enabled":true}}
+	}`
+	project := `{
+		"project": {"name":"shop","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","db_version":"15-alpine","redis_enabled":true},
+		"services": [{"name":"app","role":"app","build":{},"port":"9000","env_file":true,"depends_on":["postgres"]}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	a, err := GenerateAt([]byte(legacy), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := GenerateAt([]byte(project), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) {
+		t.Fatalf("project-level deps must generate identical compose to legacy per-env\n--- legacy ---\n%s\n--- project ---\n%s", a, b)
+	}
+	if !strings.Contains(string(b), "  shop_dev_postgres:") || !strings.Contains(string(b), "  shop_dev_redis:") {
+		t.Errorf("project-level deps should still emit postgres + redis blocks\n%s", b)
+	}
+}
+
 // A web-routed service that also sets its own host_port must emit exactly ONE
 // `ports:` block publishing that host_port (not also the env HTTP port) — two
 // `ports:` keys are invalid YAML. Regression for the CloudBeaver duplicate-ports bug.

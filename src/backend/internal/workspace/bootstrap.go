@@ -119,7 +119,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	}
 
 	// 5. garage.toml (if the managed Garage dependency is enabled)
-	if e.GarageEnabled {
+	if cfg.EffGarage(e) {
 		if err := os.WriteFile(filepath.Join(outDir, "garage.toml"), []byte(garageTOML(e.Domain)), 0o644); err != nil {
 			return err
 		}

@@ -40,6 +40,13 @@ type Project struct {
 	// BuildPipelineID, when >0, makes the project's Build button run that pipeline
 	// instead of a plain build (lets ops override the default build behaviour).
 	BuildPipelineID int64 `json:"build_pipeline_id,omitempty"`
+	// Managed dependencies are project-level (consistent across envs). The frontend
+	// reads these to render the dependency picker + derived service rows. Only the
+	// per-env DBExternal (host-port exposure) lives on EnvConfig.
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the
@@ -68,6 +75,13 @@ type EnvConfig struct {
 	Backend         string                      `json:"backend"`
 	Frontend        string                      `json:"frontend"`
 	Database        string                      `json:"database"`
+	// DBExternal is the per-env toggle that publishes the managed DB's port on the
+	// host (expose on dev, keep prod private). The engine/version live project-level.
+	DBExternal      bool                        `json:"db_external,omitempty"`
+	// RedisEnabled/GarageEnabled are the legacy per-env managed-dep toggles, kept so
+	// pre-move configs still resolve the derived service rows (fallback).
+	RedisEnabled    bool                        `json:"redis_enabled,omitempty"`
+	GarageEnabled   bool                        `json:"garage_enabled,omitempty"`
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides,omitempty"`
 	// SecretKeys are env-var names flagged as secrets (Phase 8). For swarm
 	// deployments their values live in Docker Swarm secrets (encrypted at rest),
@@ -100,6 +114,47 @@ type Config struct {
 	Services     []ConfigService      `json:"services"`
 }
 
+// managedDepServices returns synthetic (managed) service rows for the project's
+// active managed dependencies, so the DB/Redis/Garage appear in the Services list.
+// Engine/redis/garage are project-level; for configs written before the move they
+// fall back to any environment's legacy per-env value. Rows are skipped when a real
+// service of the same name already exists (e.g. an image-stack postgres).
+func managedDepServices(c *Config) []ConfigService {
+	have := map[string]bool{}
+	for _, s := range c.Services {
+		have[s.Name] = true
+	}
+	engine := c.Project.Database
+	redis := c.Project.Redis
+	garage := c.Project.Garage
+	for _, ec := range c.Environments { // legacy per-env fallback
+		if engine == "" && ec.Database != "" && ec.Database != "none" {
+			engine = ec.Database
+		}
+		redis = redis || ec.RedisEnabled
+		garage = garage || ec.GarageEnabled
+	}
+	var out []ConfigService
+	add := func(name, kind string) {
+		if name == "" || name == "none" || have[name] {
+			return
+		}
+		have[name] = true
+		out = append(out, ConfigService{Name: name, Managed: true, Engine: kind})
+	}
+	if engine != "" && engine != "none" {
+		add(engine, engine) // postgres | mysql | mariadb
+	}
+	if redis {
+		add("redis", "redis")
+	}
+	if garage {
+		add("garage", "garage")
+		add("garage_webui", "garage")
+	}
+	return out
+}
+
 // ConfigService is the read view of a unified services[] entry needed for
 // env-access resolution: which service is the web entry and its published port.
 type ConfigService struct {
@@ -111,6 +166,12 @@ type ConfigService struct {
 	// services build images — drives whether Build / Release-pipeline show. Absent
 	// for pull-only (image / database) services.
 	Build json.RawMessage `json:"build,omitempty"`
+	// Managed marks a synthetic row derived from a project-level managed dependency
+	// (database/redis/garage). The UI lists these alongside real services but hides
+	// the delete affordance — they're removed by unchecking the dependency. Until the
+	// full service-graph fold, these are NOT persisted to config.json services[].
+	Managed bool   `json:"managed,omitempty"`
+	Engine  string `json:"engine,omitempty"` // managed rows: the dependency kind (postgres|redis|garage|…)
 }
 
 // ConfigImage is the read-only view of an image service as stored in config.json.
@@ -286,6 +347,11 @@ func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, err
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Workspace{}, fmt.Errorf("parse config.json: %w", err)
 	}
+	// Surface project-level managed dependencies as synthetic (managed) service rows
+	// so the DB/Redis/Garage appear in the Services list. They are NOT written back to
+	// config.json — removal is done by unchecking the dependency. Until the full
+	// service-graph fold (backlog), this derived view is how deps "are" services.
+	cfg.Services = append(cfg.Services, managedDepServices(&cfg)...)
 
 	// Collect environment names: union of envs/ subdirectories on disk AND
 	// keys in config.json environments. This ensures a newly-added environment

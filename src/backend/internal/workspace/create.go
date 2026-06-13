@@ -259,19 +259,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			},
 		}
 
-		// Managed-dependency toggles (custom stacks). Image stacks bring their own
-		// data services as images. App services now live in the project-level
-		// services[] graph, not per-env.
-		if req.Type == "custom" || req.Type == "database" {
-			envBlock["database"] = database
-			if database != "none" && req.DBVersion != "" {
-				envBlock["db_version"] = req.DBVersion
-			}
-			if database != "none" && req.DBExternal {
-				envBlock["db_external"] = true
-			}
-			envBlock["redis_enabled"] = req.Redis
-			envBlock["garage_enabled"] = req.Garage
+		// Managed dependencies are PROJECT-level now (engine/version/redis/garage are
+		// consistent across envs — written into the project block below). Only the
+		// per-env DBExternal (host-port exposure) lives on the env. Image stacks bring
+		// their own data services as images.
+		if (req.Type == "custom" || req.Type == "database") && database != "none" && req.DBExternal {
+			envBlock["db_external"] = true
 		}
 
 		// Merge env vars: template/smart-defaults first, then user's initial vars on top,
@@ -313,6 +306,27 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		"version": map[string]any{
 			"major": 1, "minor": 0, "patch": 0, "build": 0,
 		},
+	}
+	// Managed dependencies are PROJECT-level (consistent across all envs); only the
+	// per-env DBExternal stays on the env block. Image stacks bring their own data
+	// services as images, so they get no managed deps.
+	if req.Type == "custom" || req.Type == "database" {
+		pdb := req.Database
+		if pdb == "" {
+			pdb = "none"
+		}
+		if pdb != "none" {
+			project["database"] = pdb
+			if req.DBVersion != "" {
+				project["db_version"] = req.DBVersion
+			}
+		}
+		if req.Redis {
+			project["redis_enabled"] = true
+		}
+		if req.Garage {
+			project["garage_enabled"] = true
+		}
 	}
 	// Project-level source repo (one repo per project). Prefer the explicit field;
 	// fall back to the wizard's per-env git fields (first env with a repo) so the

@@ -126,17 +126,18 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 	// User must match the account the managed-db container provisions, which
 	// envgen writes as MYSQL_USER/POSTGRES_USER = "<dbBase>_user".
 	dbUser := dbBase + "_user"
+	engine := cfg.EffDatabase(e)
 	var db *blueprints.DBFacts
-	switch e.Database {
+	switch engine {
 	case "mysql", "mariadb":
 		// MariaDB is wire-compatible with MySQL — frameworks use the mysql driver;
 		// only the host (container/alias) differs ({prefix}_mysql vs {prefix}_mariadb).
-		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_" + e.Database, Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_" + engine, Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
 	case "postgres":
 		db = &blueprints.DBFacts{Engine: "postgres", Host: prefix + "_postgres", Port: "5432", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
 	}
 	var redis *blueprints.RedisFacts
-	if e.RedisEnabled {
+	if cfg.EffRedis(e) {
 		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
 	}
 
@@ -293,13 +294,16 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("TRAEFIK_ENABLED=%t\n\n", e.TraefikEnabled)
 
 	p("# ── Database ───────────────────────────────────────────────\n")
-	p("DATABASE=%s\n", e.Database)
+	// Managed deps are project-level (Eff* falls back to the legacy per-env value);
+	// only DBExternal (host-port exposure) stays per-env.
+	engine := cfg.EffDatabase(e)
+	p("DATABASE=%s\n", engine)
 	// DB identifiers must be valid (no spaces/punctuation), so derive them from
 	// the dns-safe resource prefix — NOT cfg.Project.Name, which is a free-form
 	// display name that can contain spaces (e.g. "weather dashboard app" would
 	// yield the invalid identifier "weather dashboard app_dev").
 	dbBase := identSafe(imgBase)
-	switch e.Database {
+	switch engine {
 	case "postgres":
 		p("POSTGRES_HOST=%s_postgres\n", prefix)
 		p("POSTGRES_PORT=5432\n")
@@ -308,7 +312,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("POSTGRES_PASSWORD=%s\n", dbPassword)
 	case "mysql", "mariadb":
 		// MariaDB reuses the MYSQL_* contract; only the host (container) differs.
-		p("MYSQL_HOST=%s_%s\n", prefix, e.Database)
+		p("MYSQL_HOST=%s_%s\n", prefix, engine)
 		p("MYSQL_PORT=3306\n")
 		p("MYSQL_DATABASE=%s_%s\n", dbBase, env)
 		p("MYSQL_USER=%s_user\n", dbBase)
@@ -317,9 +321,10 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	// When the DB is published externally, expose the host port (overridable) so the
 	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.
-	if e.Database != "" && e.Database != "none" && e.DBExternal {
+	// DBExternal is per-environment (expose on dev, keep prod private).
+	if engine != "" && engine != "none" && e.DBExternal {
 		port := "5432"
-		if e.Database != "postgres" {
+		if engine != "postgres" {
 			port = "3306"
 		}
 		p("DB_EXTERNAL_PORT=%s\n", port)
@@ -346,18 +351,20 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	p("APP_KEY=%s\n\n", appKey)
 
+	redisOn := cfg.EffRedis(e)
 	p("# ── Redis ──────────────────────────────────────────────────\n")
-	p("REDIS_ENABLED=%t\n", e.RedisEnabled)
-	if e.RedisEnabled {
+	p("REDIS_ENABLED=%t\n", redisOn)
+	if redisOn {
 		p("REDIS_HOST=%s_redis\n", prefix)
 		p("REDIS_PORT=6379\n")
 		p("REDIS_PASSWORD=\n")
 	}
 	p("\n")
 
+	garageOn := cfg.EffGarage(e)
 	p("# ── Garage (S3-compatible storage) ─────────────────────────\n")
-	p("GARAGE_ENABLED=%t\n", e.GarageEnabled)
-	if e.GarageEnabled {
+	p("GARAGE_ENABLED=%t\n", garageOn)
+	if garageOn {
 		p("GARAGE_HOST=%s_garage\n", prefix)
 		p("GARAGE_API_PORT=3900\n")
 		p("GARAGE_S3_PORT=3901\n")

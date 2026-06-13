@@ -80,6 +80,9 @@ type wsConfig struct {
 		Name           string `json:"name"`
 		Type           string `json:"type"`
 		ResourcePrefix string `json:"resource_prefix"`
+		// Managed deps are project-level now; per-env fields kept for back-compat.
+		Database string `json:"database"`
+		Garage   bool   `json:"garage_enabled"`
 	} `json:"project"`
 	Images []struct {
 		Name  string `json:"name"`
@@ -92,6 +95,20 @@ type wsConfig struct {
 	Backup struct {
 		Retention int `json:"retention"` // number of snapshots to keep per env (0 = unset → no prune)
 	} `json:"backup"`
+}
+
+// effDatabase / effGarage resolve the managed dependency for an env: project-level
+// value if set, else the legacy per-env value (configs written before deps moved
+// to the project level).
+func (c *wsConfig) effDatabase(env string) string {
+	if c.Project.Database != "" {
+		return c.Project.Database
+	}
+	return c.Environments[env].Database
+}
+
+func (c *wsConfig) effGarage(env string) bool {
+	return c.Project.Garage || c.Environments[env].GarageEnabled
 }
 
 func loadConfig(workspacesDir, workspace, project string) (*wsConfig, error) {

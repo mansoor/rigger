@@ -52,7 +52,7 @@ func (h *Handler) dbExecContext(workspace, project, env string) (*dbExecCtx, err
 	if !ok {
 		return nil, fmt.Errorf("environment not found")
 	}
-	engine := ec.Database
+	engine := cfg.EffDatabase(ec) // project-level (falls back to legacy per-env)
 	if engine == "" || engine == "none" {
 		return nil, fmt.Errorf("no managed database in this environment")
 	}

@@ -85,6 +85,15 @@ type Project struct {
 	// from env names. Drives the release pipeline and the project-page env strip.
 	// See internal/envorder.
 	EnvOrder []string `json:"env_order,omitempty"`
+	// Managed dependencies are PROJECT-level (consistent across all environments):
+	// the database engine (none|postgres|mysql|mariadb), its catalog version, and
+	// the Redis / Garage toggles. Only the per-env DBExternal (host-port exposure)
+	// stays on Env. These supersede the legacy per-env Env.Database/DBVersion/
+	// RedisEnabled/GarageEnabled, which are still read as a fallback (see Eff*).
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
 }
 
 // SourceRepo returns the project's source repository URL ("" if none).
@@ -109,6 +118,34 @@ func (p Project) Prefix() string {
 	}
 	return p.Name
 }
+
+// Managed dependencies moved from per-env to project-level. The Eff* helpers
+// return the project value when set, else fall back to the given env's legacy
+// value — so configs written before the move keep generating identical output
+// (no migration pass needed) while new configs are driven project-wide.
+
+// EffDatabase returns the project's database engine, falling back to the env's
+// legacy Database. "none" and "" both mean no managed DB.
+func (c *Config) EffDatabase(e Env) string {
+	if c.Project.Database != "" {
+		return c.Project.Database
+	}
+	return e.Database
+}
+
+// EffDBVersion returns the project's chosen DB version, falling back to the env's.
+func (c *Config) EffDBVersion(e Env) string {
+	if c.Project.DBVersion != "" {
+		return c.Project.DBVersion
+	}
+	return e.DBVersion
+}
+
+// EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
+func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
+
+// EffGarage reports whether Garage is enabled (project-level OR legacy per-env).
+func (c *Config) EffGarage(e Env) bool { return c.Project.Garage || e.GarageEnabled }
 
 type Version struct {
 	Major int `json:"major"`

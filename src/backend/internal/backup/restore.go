@@ -95,8 +95,8 @@ func (c *ctx) restoreDB(snapshot, backupDir string) int {
 		return fails
 	}
 
-	// Custom stack.
-	switch c.cfg.Environments[c.env].Database {
+	// Custom stack — project-level engine (falls back to legacy per-env).
+	switch c.cfg.effDatabase(c.env) {
 	case "postgres":
 		dump := findDump(backupDir, "postgres")
 		if dump == "" {
@@ -107,7 +107,7 @@ func (c *ctx) restoreDB(snapshot, backupDir string) int {
 			fails++
 		}
 	case "mysql", "mariadb":
-		engine := c.cfg.Environments[c.env].Database // mysql | mariadb (service/container name)
+		engine := c.cfg.effDatabase(c.env) // mysql | mariadb (service/container name)
 		dump := findDump(backupDir, "mysql")          // MariaDB dumps share the mysql label
 		if dump == "" {
 			c.warn("No MySQL dump found in snapshot — skipping DB restore")

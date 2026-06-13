@@ -34,6 +34,14 @@ type Project struct {
 	// serve it over Traefik's self-signed cert instead of plain HTTP — for apps
 	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.
 	LocalTLS bool `json:"local_tls,omitempty"`
+	// Managed dependencies are project-level (consistent across envs): the DB engine
+	// + version and the Redis/Garage toggles. Only per-env DBExternal stays on Env.
+	// Legacy per-env Env.Database/DBVersion/Redis/Garage are read as a fallback so
+	// pre-move configs generate identical YAML — see gen.dbEngine/redisOn/garageOn.
+	Database  string `json:"database,omitempty"`
+	DBVersion string `json:"db_version,omitempty"`
+	Redis     bool   `json:"redis_enabled,omitempty"`
+	Garage    bool   `json:"garage_enabled,omitempty"`
 }
 
 type Version struct {

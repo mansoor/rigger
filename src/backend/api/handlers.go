@@ -955,6 +955,13 @@ func validateConfigServices(content []byte) string {
 			WebRouted    bool     `json:"web_routed"`
 			Subdomain    string   `json:"subdomain"`
 		} `json:"services"`
+		// Managed deps are project-level now; the per-env fields are still read as a
+		// fallback for configs written before the move.
+		Project struct {
+			Database string `json:"database"`
+			Redis    bool   `json:"redis_enabled"`
+			Garage   bool   `json:"garage_enabled"`
+		} `json:"project"`
 		Environments map[string]struct {
 			Database      string `json:"database"`
 			RedisEnabled  bool   `json:"redis_enabled"`
@@ -1001,9 +1008,23 @@ func validateConfigServices(content []byte) string {
 		}
 		names[s.Name] = true
 	}
-	// managedDep reports whether name is an enabled managed dependency in any env
-	// (services are project-level, so a depends_on can reference one enabled anywhere).
+	// managedDep reports whether name is an enabled managed dependency. Deps are
+	// project-level; the per-env fields are also consulted for back-compat.
 	managedDep := func(name string) bool {
+		switch name {
+		case "postgres", "mysql", "mariadb":
+			if doc.Project.Database == name {
+				return true
+			}
+		case "redis":
+			if doc.Project.Redis {
+				return true
+			}
+		case "garage":
+			if doc.Project.Garage {
+				return true
+			}
+		}
 		for _, ec := range doc.Environments {
 			switch name {
 			case "postgres", "mysql", "mariadb":

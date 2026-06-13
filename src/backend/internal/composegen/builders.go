@@ -39,7 +39,8 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 // services, the managed-dependency volumes (toggle-driven), and explicit
 // named_volumes[]. Bind mounts and env-var paths are skipped.
 func (g *gen) emitVolumes(prefix string) {
-	c, e := g.cfg, g.e
+	c := g.cfg
+	engine := g.dbEngine()
 	var vols []string
 	seen := map[string]bool{}
 	add := func(v string) {
@@ -58,19 +59,19 @@ func (g *gen) emitVolumes(prefix string) {
 			}
 		}
 	}
-	if e.Database == "postgres" {
+	if engine == "postgres" {
 		add(prefix + "_pg_data")
 	}
-	if e.Database == "mysql" {
+	if engine == "mysql" {
 		add(prefix + "_mysql_data")
 	}
-	if e.Database == "mariadb" {
+	if engine == "mariadb" {
 		add(prefix + "_mariadb_data")
 	}
-	if e.RedisEnabled {
+	if g.redisOn() {
 		add(prefix + "_redis_data")
 	}
-	if e.GarageEnabled {
+	if g.garageOn() {
 		add(prefix + "_garage_data")
 		add(prefix + "_garage_meta")
 	}
@@ -319,11 +320,30 @@ func portOr(p, def string) string {
 
 // ── Managed dependencies (db / redis / garage) — env toggles ─────────────────────
 
-// dbVersion resolves the managed DB's image tag: the env's explicit DBVersion,
-// else the project versions map, else the catalog default. The catalog default
-// matches the legacy hardcoded tag, so existing compose output is unchanged until
-// a version is actually chosen.
+// Managed dependencies are project-level (consistent across envs); only DBExternal
+// stays per-env. These getters prefer the project value and fall back to the env's
+// legacy field, so configs written before the move generate identical compose.
+
+// dbEngine returns the active database engine (project-level, else legacy per-env).
+func (g *gen) dbEngine() string {
+	if g.cfg.Project.Database != "" {
+		return g.cfg.Project.Database
+	}
+	return g.e.Database
+}
+
+// redisOn / garageOn report whether the dependency is enabled (project OR legacy env).
+func (g *gen) redisOn() bool  { return g.cfg.Project.Redis || g.e.RedisEnabled }
+func (g *gen) garageOn() bool { return g.cfg.Project.Garage || g.e.GarageEnabled }
+
+// dbVersion resolves the managed DB's image tag: the project's explicit DBVersion
+// (else the legacy per-env one), else the project versions map, else the catalog
+// default. The catalog default matches the legacy hardcoded tag, so existing
+// compose output is unchanged until a version is actually chosen.
 func (g *gen) dbVersion(eng databases.Engine) string {
+	if v := g.cfg.Project.DBVersion; v != "" {
+		return databases.ResolveVersion(eng.ID, v)
+	}
 	if g.e.DBVersion != "" {
 		return databases.ResolveVersion(eng.ID, g.e.DBVersion)
 	}
@@ -342,12 +362,13 @@ func (g *gen) dbExternalPorts(eng databases.Engine) {
 }
 
 func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
-	c, e := g.cfg, g.e
+	c := g.cfg
+	engine := g.dbEngine()
 	verRedis := c.version("redis", "7-alpine")
 	verGarage := c.version("garage", "v1.0.1")
 	verGarageWebUI := c.version("garage_webui", "latest")
 
-	if e.Database == "postgres" {
+	if engine == "postgres" {
 		eng, _ := databases.Get("postgres")
 		ver := g.dbVersion(eng)
 		g.line(sectionComment("PostgreSQL "+ver, dashPostgres))
@@ -371,37 +392,37 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	// MySQL and MariaDB share the MYSQL_* env contract + /var/lib/mysql volume; they
 	// differ only in image, the native-password command (MySQL-only), the data
 	// volume name, the container/alias name, and the healthcheck client.
-	if e.Database == "mysql" || e.Database == "mariadb" {
-		eng, _ := databases.Get(e.Database)
+	if engine == "mysql" || engine == "mariadb" {
+		eng, _ := databases.Get(engine)
 		ver := g.dbVersion(eng)
 		g.line(sectionComment(eng.Label+" "+ver, dashMySQL))
-		g.line("  " + prefix + "_" + e.Database + ":")
+		g.line("  " + prefix + "_" + engine + ":")
 		g.line("    image: " + eng.Image + ":" + ver)
-		g.line("    container_name: " + prefix + "_" + e.Database)
+		g.line("    container_name: " + prefix + "_" + engine)
 		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line(g.dbEnvLine("MYSQL_DATABASE"))
 		g.line(g.dbEnvLine("MYSQL_USER"))
 		g.line(g.dbEnvLine("MYSQL_PASSWORD"))
 		g.line(g.dbEnvLine("MYSQL_ROOT_PASSWORD"))
-		if e.Database == "mysql" {
+		if engine == "mysql" {
 			g.line("    command: --default-authentication-plugin=mysql_native_password")
 		}
 		g.line("    volumes:")
-		g.line("      - " + prefix + "_" + e.Database + "_data:/var/lib/mysql")
+		g.line("      - " + prefix + "_" + engine + "_data:/var/lib/mysql")
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
-		if e.Database == "mariadb" {
+		if engine == "mariadb" {
 			// Newer MariaDB images ship mariadb-admin and may drop the mysqladmin symlink.
 			g.healthcheck("mariadb-admin ping -h localhost --silent 2>/dev/null || mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
 		} else {
 			g.healthcheck("mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
 		}
-		g.deployBlock(isSwarm, e.Database, "1", "unless-stopped")
+		g.deployBlock(isSwarm, engine, "1", "unless-stopped")
 		g.line("")
 	}
 
-	if e.RedisEnabled {
+	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  " + prefix + "_redis:")
 		g.line("    image: redis:" + verRedis)
@@ -416,7 +437,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
-	if e.GarageEnabled {
+	if g.garageOn() {
 		g.line(sectionComment("Garage "+verGarage+" (S3-compatible)", dashGarage))
 		g.line("  " + prefix + "_garage:")
 		g.line("    image: dxflrs/garage:" + verGarage)

@@ -191,13 +191,8 @@ function BlueprintStack({ data, onChange }) {
         </div>
       </div>
 
-      <div className="pt-1 border-t border-border">
-        <p className="text-xs font-semibold uppercase tracking-wider text-content-muted mb-2 mt-3">
-          Database <span className="font-normal normal-case text-content-faint">(optional)</span>
-        </p>
-        <DatabaseSelect engine={data.database} version={data.dbVersion}
-          onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
-      </div>
+      {/* Database (+ Redis/Garage) is chosen on the next step (Dependencies) — it's
+          project-level, consistent across environments. */}
 
       {(data.blueprintId || dbCount > 0) && (
         <div className="bg-surface border border-border rounded-xl p-3 text-xs text-content-subtle">
@@ -616,25 +611,14 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       {/* No-repo stack template picker */}
       {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
 
-      {/* Database hosting: a managed database on its own (no app code) */}
+      {/* Database hosting: a managed database on its own (no app code). The engine
+          + CloudBeaver are chosen on the next step (Dependencies). */}
       {data.stackType === 'database' && (
-        <div className="space-y-3">
-          <div>
-            <Label required>Database engine</Label>
-            <DatabaseSelect engine={data.database === 'none' ? '' : data.database} version={data.dbVersion}
-              onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
-            {errors.database && <p className="text-danger-fg text-xs mt-1">{errors.database}</p>}
-          </div>
-          <div className="pt-1 border-t border-border">
-            <Toggle label="Include CloudBeaver (web SQL client)"
-              hint="Browser-based SQL client supporting many engines — becomes this project's web entry. You complete its one-time setup and add the DB connection (details on the Database tab)."
-              checked={data.cloudbeaver} onChange={v => onChange('cloudbeaver', v)} />
-          </div>
-          <p className="text-xs text-content-subtle">
-            A standalone managed database with auto-generated credentials. Connect from other projects (shared network),
-            from outside (enable external access in Edit Project), or browse it via CloudBeaver above.
-          </p>
-        </div>
+        <p className="text-xs text-content-subtle">
+          A standalone managed database with auto-generated credentials. Pick the engine on the next
+          step (Dependencies). Connect from other projects (shared network), from outside (enable
+          external access per-environment in Edit Project), or browse it via CloudBeaver.
+        </p>
       )}
 
       {/* Image stack: custom image list + env vars */}
@@ -700,30 +684,70 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
         />
       )}
 
-      {/* Custom stack options */}
+      {/* Custom stack options. Database/Redis/Garage are chosen on the next step
+          (Dependencies) — project-level, consistent across environments. */}
       {data.stackType === 'custom' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Backend</Label>
-              <Select value={data.backend} onChange={v => onChange('backend', v)} options={BACKEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Frontend</Label>
-              <Select value={data.frontend} onChange={v => onChange('frontend', v)} options={FRONTEND_OPTIONS} />
-            </div>
-            <div>
-              <Label>Database</Label>
-              <DatabaseSelect engine={data.database} version={data.dbVersion}
-                onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
-            </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>Backend</Label>
+            <Select value={data.backend} onChange={v => onChange('backend', v)} options={BACKEND_OPTIONS} />
           </div>
-          <div className="space-y-3 pt-2 border-t border-border">
-            <Toggle label="Redis cache" hint="redis:7-alpine" checked={data.redis} onChange={v => onChange('redis', v)} />
-            <Toggle label="Garage S3" hint="Self-hosted S3-compatible object storage" checked={data.garage} onChange={v => onChange('garage', v)} />
+          <div>
+            <Label>Frontend</Label>
+            <Select value={data.frontend} onChange={v => onChange('frontend', v)} options={FRONTEND_OPTIONS} />
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Dependencies (wizard step 3 — StepDeps) ───────────────────────────────────
+// Managed dependencies are PROJECT-level (consistent across all environments) and
+// surface as services. Sits between Stack and Services. Image/prebuilt stacks bring
+// their own data services as images, so this step is a no-op for them.
+function StepDeps({ data, onChange, errors }) {
+  const st = data.stackType
+  const isDatabase = st === 'database'
+  const showsDeps = st === 'custom' || st === 'blueprint' || st === 'database' || st === 'scan'
+  if (!showsDeps) {
+    return (
+      <div className="space-y-5">
+        <StepHeader step={3} title="Dependencies" subtitle="Managed services that run alongside your app." />
+        <p className="text-sm text-content-muted">
+          No managed dependencies for this stack type — {st === 'image'
+            ? 'image stacks bring their own data services as images.'
+            : 'pre-built templates include their own services.'}
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-5">
+      <StepHeader step={3} title="Dependencies"
+        subtitle="Run alongside your app and appear as services. Consistent across all environments." />
+      <div>
+        <Label required={isDatabase}>Database</Label>
+        <DatabaseSelect engine={isDatabase && data.database === 'none' ? '' : data.database} version={data.dbVersion}
+          onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
+        {errors.database && <p className="text-danger-fg text-xs mt-1">{errors.database}</p>}
+      </div>
+      {isDatabase ? (
+        <div className="pt-1 border-t border-border">
+          <Toggle label="Include CloudBeaver (web SQL client)"
+            hint="Browser-based SQL client supporting many engines — becomes this project's web entry. You complete its one-time setup and add the DB connection (details on the Database tab)."
+            checked={data.cloudbeaver} onChange={v => onChange('cloudbeaver', v)} />
+        </div>
+      ) : (
+        <div className="space-y-3 pt-2 border-t border-border">
+          <Toggle label="Redis cache" hint="redis:7-alpine" checked={data.redis} onChange={v => onChange('redis', v)} />
+          <Toggle label="Garage S3" hint="Self-hosted S3-compatible object storage" checked={data.garage} onChange={v => onChange('garage', v)} />
+        </div>
+      )}
+      <p className="text-xs text-content-subtle">
+        Selected dependencies appear on the Services page. Manage them there after creation — for a
+        database, that's where you expose a host port (per-environment).
+      </p>
     </div>
   )
 }
@@ -906,7 +930,7 @@ function Step3({ data, onChange, workspace }) {
 
   return (
     <div className="space-y-4">
-      <StepHeader step={4} title="Environments" subtitle="Configure the environments for this workspace." />
+      <StepHeader step={5} title="Environments" subtitle="Configure the environments for this workspace." />
       {data.environments.map((env, i) => (
         <EnvForm
           key={i} idx={i} env={env}
@@ -1254,7 +1278,7 @@ function Step4({ data, onChange }) {
 
   return (
     <div className="space-y-6">
-      <StepHeader step={3} title="Services" subtitle="Configure ports, volumes, restart policy and healthchecks per service." />
+      <StepHeader step={4} title="Services" subtitle="Configure ports, volumes, restart policy and healthchecks per service." />
 
       {/* Per-service config — image and prebuilt stacks */}
       {showServices && serviceImages.length > 0 && (
@@ -1376,7 +1400,7 @@ function Step5({ data, onChange, workspace, defaultTargetId }) {
 
   return (
     <div className="space-y-5">
-      <StepHeader step={5} title="Backups (optional)" subtitle="Set automatic backups per environment — or skip and configure later." />
+      <StepHeader step={6} title="Backups (optional)" subtitle="Set automatic backups per environment — or skip and configure later." />
 
       <div className="px-4 py-3 bg-surface-raised/50 border border-border-strong/60 rounded-lg text-sm text-content-muted leading-relaxed">
         Add schedules to an environment to choose <strong className="text-content">which services' data</strong> to back up,
@@ -1386,7 +1410,7 @@ function Step5({ data, onChange, workspace, defaultTargetId }) {
       </div>
 
       {namedEnvs.length === 0 && (
-        <p className="text-sm text-content-subtle">Name your environments first (Step 4) to configure their backups.</p>
+        <p className="text-sm text-content-subtle">Name your environments first (Step 5) to configure their backups.</p>
       )}
 
       {defaultTargetName && (
@@ -1449,7 +1473,7 @@ function Step6({ data }) {
 
   return (
     <div className="space-y-5">
-      <StepHeader step={6} title="Review" subtitle="Confirm your configuration before creating the workspace." />
+      <StepHeader step={7} title="Review" subtitle="Confirm your configuration before creating the workspace." />
 
       <div className="bg-surface border border-border rounded-xl p-4 space-y-0">
         <ReviewRow label="Project name" value={data.name} />
@@ -1545,7 +1569,7 @@ function Step7({ payload, onDone, onResult, onGoBack }) {
 
   return (
     <div className="space-y-4">
-      <StepHeader step={7} title="Result" subtitle={
+      <StepHeader step={8} title="Result" subtitle={
         !isDone ? 'Bootstrap in progress — this takes a few seconds.' :
         isSuccess ? 'Project created successfully.' :
         'Project creation failed — review the output above.'
@@ -1595,7 +1619,7 @@ function Step7({ payload, onDone, onResult, onGoBack }) {
 
 // ── Stepper nav ───────────────────────────────────────────────────────────────
 
-const STEPS = ['Project', 'Stack', 'Services', 'Environments', 'Backup', 'Review', 'Result']
+const STEPS = ['Project', 'Stack', 'Dependencies', 'Services', 'Environments', 'Backup', 'Review', 'Result']
 
 function Stepper({ current, maxVisited, onStepClick }) {
   return (
@@ -1603,8 +1627,8 @@ function Stepper({ current, maxVisited, onStepClick }) {
       {STEPS.map((label, i) => {
         const n = i + 1
         const state    = n < current ? 'done' : n === current ? 'active' : 'pending'
-        // Step 7 (Result) is never clickable — can't skip back to it
-        const clickable = n <= maxVisited && n !== current && n < 7
+        // The final Result step is never clickable — can't skip back to it
+        const clickable = n <= maxVisited && n !== current && n < STEPS.length
         return (
           <div key={label} className="flex items-center flex-1 last:flex-none">
             <div className="flex flex-col items-center gap-1">
@@ -1708,13 +1732,14 @@ export default function NewProjectPage() {
     }
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'
     if (step === 2 && data.stackType === 'image' && data.images.every(img => !img.name || !img.image)) e.images = 'Add at least one service with a name and image'
-    if (step === 2 && data.stackType === 'database' && (!data.database || data.database === 'none')) e.database = 'Select a database engine'
-    // Steps 3/4 are Services then Environments (swapped to match Edit workspace).
-    if (step === 3) {
+    // Step 3 = Dependencies (project-level). The database-hosting stack requires an engine.
+    if (step === 3 && data.stackType === 'database' && (!data.database || data.database === 'none')) e.database = 'Select a database engine'
+    // Steps 4/5 are Services then Environments (swapped to match Edit workspace).
+    if (step === 4) {
       const badVols = data.volumes.filter(v => v.name && !v.mountPath)
       if (badVols.length > 0) e.volumes = 'Each volume needs a mount path'
     }
-    if (step === 4 && data.environments.some(e => !e.name.trim())) e.envs = 'All environments need a name'
+    if (step === 5 && data.environments.some(e => !e.name.trim())) e.envs = 'All environments need a name'
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -1793,7 +1818,7 @@ export default function NewProjectPage() {
             <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
             <span className="text-content-muted text-sm">New project{workspace ? ` · ${workspace}` : ''}</span>
           </div>
-          {step < 7
+          {step < 8
             ? <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg transition-colors">Cancel</button>
             : <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-border-strong bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Close</button>
           }
@@ -1808,23 +1833,25 @@ export default function NewProjectPage() {
           <div className="bg-surface border border-border rounded-2xl p-8">
             {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} defaultHostId={defaultHostId} />}
             {step === 2 && <Step2 data={data} onChange={update} errors={errors} workspace={workspace} defaultRegistryId={defaultRegistryId} />}
-            {/* Services (3) then Environments (4) — define the stack shape before
+            {/* Step 3 = Dependencies (project-level managed services). */}
+            {step === 3 && <StepDeps data={data} onChange={update} errors={errors} />}
+            {/* Services (4) then Environments (5) — define the stack shape before
                 its environments. Step4=Services component, Step3=Environments. */}
-            {step === 3 && <Step4 data={data} onChange={update} errors={errors} />}
-            {step === 4 && <Step3 data={data} onChange={update} workspace={workspace} />}
-            {step === 5 && <Step5 data={data} onChange={update} workspace={workspace} defaultTargetId={defaultTargetId} />}
-            {step === 6 && <Step6 data={data} />}
-            {step === 7 && (
+            {step === 4 && <Step4 data={data} onChange={update} errors={errors} />}
+            {step === 5 && <Step3 data={data} onChange={update} workspace={workspace} />}
+            {step === 6 && <Step5 data={data} onChange={update} workspace={workspace} defaultTargetId={defaultTargetId} />}
+            {step === 7 && <Step6 data={data} />}
+            {step === 8 && (
               <Step7
                 payload={buildPayload()}
                 onDone={handleDone}
                 onResult={result => setCreateResult(result)}
-                onGoBack={() => { setCreateResult(null); setStep(6) }}
+                onGoBack={() => { setCreateResult(null); setStep(7) }}
               />
             )}
 
-            {/* Navigation buttons (hidden on step 7) */}
-            {step < 7 && (
+            {/* Navigation buttons (hidden on the final Result step) */}
+            {step < 8 && (
               <div className="flex items-center justify-between mt-8 pt-6 border-t border-border">
                 <button
                   type="button"
@@ -1839,7 +1866,7 @@ export default function NewProjectPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={step === 6 ? () => { if (validate()) { setMaxVisited(7); setStep(7) } } : next}
+                  onClick={step === 7 ? () => { if (validate()) { setMaxVisited(8); setStep(8) } } : next}
                   disabled={step === 1 && !!nameConflict}
                   className={`text-content-strong text-sm font-semibold px-6 py-2 rounded-lg transition-colors ${
                     step === 1 && nameConflict
@@ -1847,7 +1874,7 @@ export default function NewProjectPage() {
                       : 'bg-brand-600 hover:bg-brand-700'
                   }`}
                 >
-                  {step === 6 ? 'Create project' : 'Continue →'}
+                  {step === 7 ? 'Create project' : 'Continue →'}
                 </button>
               </div>
             )}

@@ -83,8 +83,64 @@ const BUILD_TEMPLATES = [
   { value: 'nextjs', label: 'Next.js' },
   { value: 'react', label: 'React / Vite' },
 ]
-// Managed-dependency service names a service may depend_on (env toggles).
+// Managed-dependency service names a service may depend_on.
 const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'garage']
+
+// managedDepNames derives the synthetic service names for a project's active managed
+// dependencies (mirrors backend workspace.managedDepServices) — shown read-only in
+// the Services list. Engine|version|redis|garage are project-level.
+function managedDepNames(project) {
+  const out = []
+  const db = project?.database
+  if (db && db !== 'none') out.push({ name: db, kind: db })
+  if (project?.redis_enabled) out.push({ name: 'redis', kind: 'redis' })
+  if (project?.garage_enabled) { out.push({ name: 'garage', kind: 'garage' }); out.push({ name: 'garage_webui', kind: 'garage' }) }
+  return out
+}
+
+// ProjectDependencies is the project-level managed-dependency picker shown at the top
+// of the Services tab. Engine/version/redis/garage are consistent across all
+// environments (per-env external-port exposure lives on each environment instead).
+function ProjectDependencies({ project, setProject }) {
+  return (
+    <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4">
+      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1">Project dependencies</p>
+      <p className="text-xs text-content-subtle mb-3">
+        Managed services (database, cache, object storage), consistent across every environment. They
+        appear as services below and are referenced via env vars + <code className="font-mono">depends_on</code>.
+        Remove one by setting it back to <em>None</em> / off.
+      </p>
+      <div className="grid grid-cols-3 gap-3 items-end">
+        <div>
+          <Label>Database</Label>
+          <DatabaseSelect engine={project?.database || 'none'} version={project?.db_version}
+            onChange={(eng, ver) => setProject(p => ({ ...p, database: eng, db_version: ver }))} caption={false} />
+        </div>
+        <Toggle label="Redis" checked={!!project?.redis_enabled} onChange={v => setProject(p => ({ ...p, redis_enabled: v }))} />
+        <Toggle label="Garage S3" checked={!!project?.garage_enabled} onChange={v => setProject(p => ({ ...p, garage_enabled: v }))} />
+      </div>
+    </div>
+  )
+}
+
+// ManagedDepRows lists the project's managed dependencies as read-only service rows
+// beneath the editable services — they can't be deleted here (remove via the
+// dependency toggle above) until the full service-graph fold lands.
+function ManagedDepRows({ project }) {
+  const rows = managedDepNames(project)
+  if (rows.length === 0) return null
+  return (
+    <div className="mt-3 space-y-2">
+      {rows.map(r => (
+        <div key={r.name} className="flex items-center gap-3 bg-surface-raised/30 border border-border-strong/60 rounded-xl px-4 py-3">
+          <span className="text-sm font-semibold text-content-strong">{r.name}</span>
+          <span className="text-[11px] px-2 py-0.5 rounded bg-surface-overlay/40 text-content-muted">managed · {r.kind}</span>
+          <span className="ml-auto text-[11px] text-content-faint">remove via Project dependencies above</span>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function serviceSource(s) {
   if (s.build) return 'build'
@@ -812,17 +868,15 @@ const SWARM_FAILURE = [{ value: 'rollback', label: 'rollback' }, { value: 'pause
 // SwarmSettings edits cfg.swarm: per-service replicas + placement, plus the
 // env-level restart/update/rollback policy. Numeric fields are stored as strings
 // (flexStr-tolerant); empty means "use Rigger's default" on generation.
-function SwarmSettings({ cfg, onChange, projectType, imageNames = [] }) {
+function SwarmSettings({ cfg, onChange, projectType, imageNames = [], managedDeps = [] }) {
   const sw = cfg.swarm || {}
   const updSwarm = (patch) => onChange({ ...cfg, swarm: { ...sw, ...patch } })
   const updSvc = (svc, patch) => updSwarm({ services: { ...(sw.services || {}), [svc]: { ...((sw.services || {})[svc] || {}), ...patch } } })
   const updPolicy = (key, patch) => updSwarm({ [key]: { ...(sw[key] || {}), ...patch } })
   const [advOpen, setAdvOpen] = useState(false)
 
-  const services = [...imageNames,
-    ...(cfg.database && cfg.database !== 'none' ? [cfg.database] : []),
-    ...(cfg.redis_enabled ? ['redis'] : []),
-    ...(cfg.garage_enabled ? ['garage'] : [])]
+  // Managed deps (DB/Redis/Garage) are project-level now — passed in.
+  const services = [...imageNames, ...managedDeps]
 
   const svcReplicas = (svc) => {
     const o = sw.services?.[svc]
@@ -954,7 +1008,7 @@ function ProcessesSettings({ cfg, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
@@ -1087,27 +1141,30 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
       </div>
 
-      {/* Managed dependencies (env toggles). App services live in the Services tab. */}
-      <div className="space-y-3 pt-3 border-t border-border-strong/50">
-        <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Managed dependencies</p>
-        <div className="grid grid-cols-3 gap-3 items-end">
-          <div>
-            <Label>Database</Label>
-            <DatabaseSelect engine={cfg.database || 'none'} version={cfg.db_version}
-              onChange={(eng, ver) => onChange({ ...cfg, database: eng, db_version: ver })} caption={false} />
-          </div>
-          <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
-          <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
+      {/* Database access — per-environment external-port exposure. The DB engine /
+          version themselves are project-level (Services tab → Project dependencies). */}
+      {projectDatabase && projectDatabase !== 'none' && (
+        <div className="space-y-2 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Database access</p>
+          <Toggle
+            label="Expose database on a host port"
+            hint={`Publish ${projectDatabase} on this environment's host so external clients can connect — typically dev only; keep prod private. Override the port via DB_EXTERNAL_PORT in env vars.`}
+            checked={!!cfg.db_external}
+            onChange={v => upd('db_external', v)}
+          />
+          <p className="text-xs text-content-subtle">
+            The managed {projectDatabase} (and any Redis / Garage) is provisioned project-wide — configure it in the{' '}
+            <strong>Services</strong> tab → <em>Project dependencies</em>.
+          </p>
         </div>
-        <p className="text-xs text-content-subtle">
-          Define app services (build / pull / worker) in the <strong>Services</strong> tab; these managed
-          dependencies are provisioned for you and referenced via env vars + <code className="font-mono">depends_on</code>.
-        </p>
-      </div>
+      )}
 
       {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
       {cfg.deployment === 'swarm' && (
-        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames} />
+        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames}
+          managedDeps={projectDatabase && projectDatabase !== 'none'
+            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]
+            : [...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]} />
       )}
 
       {/* Git */}
@@ -1787,12 +1844,16 @@ export default function EditProjectPage() {
         </section>
         )}
 
-        {/* Services — the unified service graph (build / pull / worker) */}
+        {/* Services — the unified service graph (build / pull / worker) +
+            project-level managed dependencies (DB / Redis / Garage). */}
         {tab === 'services' && (
           <section className="mb-6">
+            <ProjectDependencies project={project} setProject={setProject} />
+
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages}
               gitRepo={project?.git_repo} gitBranch={project?.git_branch} />
+            <ManagedDepRows project={project} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
@@ -1850,6 +1911,9 @@ export default function EditProjectPage() {
                 resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 baseDomain={baseDomain}
                 localTLS={!!project?.local_tls}
+                projectDatabase={project?.database || ''}
+                projectRedis={!!project?.redis_enabled}
+                projectGarage={!!project?.garage_enabled}
               />
             ))}
           </div>
