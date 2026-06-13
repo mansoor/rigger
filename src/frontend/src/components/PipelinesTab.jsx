@@ -425,7 +425,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
         </div>
 
         {/* Stage graph — current step pulses, completed steps go green. */}
-        <div className="flex items-center gap-0 px-5 pt-4 overflow-x-auto">
+        <div className="flex items-center gap-0 px-5 py-4 border-b border-border overflow-x-auto">
           {Array.from({ length: count }, (_, i) => {
             const st = statusAt(i)
             return (
@@ -458,9 +458,12 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                   <span className={`px-1.5 py-0.5 rounded border text-[10px] ${statusChipCls(st)}`}>{st === 'running' ? 'running…' : st}</span>
                   {r?.ms ? <span className="text-[10px] text-content-faint">{r.ms} ms</span> : null}
                 </div>
+                {/* Terminal box: the background is always dark, so the text must be a
+                    fixed light colour — `text-content` is dark in light theme and would
+                    vanish on this bg. */}
                 {(r?.output || st === 'running') && (
-                  <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-content">
-                    {r?.output ? renderAnsi(r.output) : <span className="text-content-subtle">running…</span>}
+                  <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-gray-100">
+                    {r?.output ? renderAnsi(r.output) : <span className="text-gray-400">running…</span>}
                   </pre>
                 )}
               </div>
