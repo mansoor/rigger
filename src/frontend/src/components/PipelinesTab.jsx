@@ -210,6 +210,10 @@ function Webhooks({ workspace, name, pipelineId }) {
     queryFn: () => fetchPipelineWebhooks(workspace, name, pipelineId),
   })
   const [newToken, setNewToken] = useState(null) // raw token shown once after create
+  const [copied, setCopied] = useState(false)
+  async function copyUrl() {
+    try { await navigator.clipboard.writeText(newToken); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* clipboard unavailable */ }
+  }
 
   const addMut = useMutation({
     mutationFn: () => createPipelineWebhook(workspace, name, pipelineId, {}),
@@ -233,7 +237,13 @@ function Webhooks({ workspace, name, pipelineId }) {
       {newToken && (
         <div className="px-3 py-2 rounded-lg bg-warning-subtle/40 border border-warning-border/60 text-xs">
           <p className="text-warning-fg font-semibold mb-1">Copy this URL now — it won't be shown again:</p>
-          <code className="block font-mono break-all text-content-strong select-all">{newToken}</code>
+          <div className="flex items-start gap-2">
+            <code className="flex-1 font-mono break-all text-content-strong select-all">{newToken}</code>
+            <button onClick={copyUrl} title="Copy URL"
+              className="shrink-0 px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
+              {copied ? '✓ Copied' : '⧉ Copy'}
+            </button>
+          </div>
         </div>
       )}
 
