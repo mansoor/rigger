@@ -120,6 +120,7 @@ export const putEnvOrder       = (ws, name, order) => api.put(`${projBase(ws, na
 // Phase 9: deployment pipelines (project-scoped).
 export const fetchPipelines    = (ws, name)           => api.get(`${projBase(ws, name)}/pipelines`).then(r => r.data)
 export const createPipeline    = (ws, name, body)     => api.post(`${projBase(ws, name)}/pipelines`, body).then(r => r.data)
+export const suggestPipeline   = (ws, name, opts)     => api.post(`${projBase(ws, name)}/pipelines/suggest`, opts).then(r => r.data)
 export const updatePipeline    = (ws, name, id, body) => api.put(`${projBase(ws, name)}/pipelines/${id}`, body).then(r => r.data)
 export const deletePipeline    = (ws, name, id)       => api.delete(`${projBase(ws, name)}/pipelines/${id}`).then(r => r.data)
 export const fetchPipelineRuns = (ws, name, id, limit = 30) => api.get(`${projBase(ws, name)}/pipelines/${id}/runs`, { params: { limit } }).then(r => r.data)

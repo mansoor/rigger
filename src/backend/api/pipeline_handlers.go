@@ -13,8 +13,58 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/pipelines"
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
+
+// POST /api/workspaces/{workspace}/projects/{name}/pipelines/suggest
+// Returns a DRAFT pipeline (not persisted) generated from the project's ordered
+// environments. The UI loads it into the editor; saving goes through Create.
+func (h *Handler) SuggestPipeline(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	var body struct {
+		Template   string `json:"template"`
+		BumpPart   string `json:"bump_part"`
+		Gate       bool   `json:"gate"`
+		HotfixFrom string `json:"hotfix_from"`
+		HotfixTo   string `json:"hotfix_to"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, ws, name))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	if len(cfg.BuildServices()) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no build services — release pipelines build & promote images; this project pulls prebuilt images"})
+		return
+	}
+	envs := envorder.Resolve(cfg.EnvNames(), cfg.Project.EnvOrder, h.tierNames(ws))
+	if len(envs) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project has no environments"})
+		return
+	}
+	if body.Template == "hotfix" && len(envs) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "hotfix needs at least two environments"})
+		return
+	}
+	gname, stages := pipelines.Generate(pipelines.GenerateOptions{
+		Template: body.Template, Envs: envs, BumpPart: body.BumpPart, Gate: body.Gate,
+		HotfixFrom: body.HotfixFrom, HotfixTo: body.HotfixTo,
+	})
+	writeJSON(w, http.StatusOK, pipelines.Pipeline{
+		Workspace: ws, Project: name, Name: gname, Stages: stages, Enabled: true,
+	})
+}
 
 // Phase 9 — Deployment Pipelines. Pipelines are project-scoped (workspace +
 // project keys) and surfaced in the Edit Project "Pipelines" tab. Viewing needs

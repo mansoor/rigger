@@ -5,6 +5,7 @@ import {
   fetchPipelineRuns, openPipelineSocket,
   approvePipelineRun, rejectPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
+  suggestPipeline,
 } from '../lib/api'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
@@ -47,6 +48,7 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
   })
   const [editing, setEditing] = useState(null) // draft pipeline (with optional id) or null
   const [running, setRunning] = useState(null) // pipeline being run (modal)
+  const [genOpen, setGenOpen] = useState(false) // "Generate from environments" dialog
 
   const saveMut = useMutation({
     mutationFn: (p) => p.id ? updatePipeline(workspace, name, p.id, p) : createPipeline(workspace, name, p),
@@ -77,13 +79,30 @@ export default function PipelinesTab({ workspace, name, envNames = [] }) {
           <h2 className="text-sm font-semibold text-content">Pipelines</h2>
           <p className="text-xs text-content-subtle">Chain deploy, build, test and backup steps into a one-click run.</p>
         </div>
-        <button
-          onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
-        >
-          + Add pipeline
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setGenOpen(true)}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors"
+            title="Generate a release pipeline from this project's environments"
+          >
+            ✨ Generate from environments
+          </button>
+          <button
+            onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
+          >
+            + Add pipeline
+          </button>
+        </div>
       </div>
+
+      {genOpen && (
+        <GeneratePipelineDialog
+          workspace={workspace} name={name} envNames={envNames}
+          onClose={() => setGenOpen(false)}
+          onGenerated={(draft) => { setGenOpen(false); setEditing(draft) }}
+        />
+      )}
 
       {isLoading ? (
         <p className="text-sm text-content-subtle">Loading…</p>
@@ -474,6 +493,92 @@ function RunConsole({ workspace, name, pipeline, onClose }) {
         </div>
         <div ref={boxRef} className="flex-1 overflow-y-auto px-5 py-4 font-mono text-xs leading-relaxed whitespace-pre-wrap bg-[#0c1322] text-content rounded-b-xl">
           {text ? renderAnsi(text) : <span className="text-content-subtle">Connecting…</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// GeneratePipelineDialog proposes a release/hotfix pipeline from the project's
+// ordered environments. The server returns a draft (it does not persist); the
+// caller opens it in the normal editor, so every stage stays editable.
+function GeneratePipelineDialog({ workspace, name, envNames = [], onClose, onGenerated }) {
+  const [template, setTemplate] = useState('release')
+  const [bumpPart, setBumpPart] = useState('')
+  const [gate, setGate] = useState(true)
+  const [hotfixTo, setHotfixTo] = useState(envNames[envNames.length - 1] || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function generate() {
+    setBusy(true); setErr('')
+    try {
+      const draft = await suggestPipeline(workspace, name, {
+        template, bump_part: bumpPart, gate,
+        hotfix_to: template === 'hotfix' ? hotfixTo : '',
+      })
+      onGenerated?.(draft)
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Failed to generate')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <h2 className="text-sm font-semibold text-content-strong">Generate pipeline</h2>
+          <p className="text-xs text-content-subtle mt-1">Seeded from your environments (in deploy-tier order). Review and edit before saving.</p>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Template</label>
+            <div className="flex gap-2 mt-1.5">
+              {[['release', 'Release — full chain'], ['hotfix', 'Hotfix — bypass lower envs']].map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setTemplate(v)}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${template === v ? 'border-brand-500 bg-brand-500/10 text-content-strong' : 'border-border-strong text-content-muted hover:bg-surface-raised'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {template === 'hotfix' && (
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Promote straight to</label>
+              <select value={hotfixTo} onChange={e => setHotfixTo(e.target.value)} className={`${inputCls} w-full mt-1.5`}>
+                {envNames.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-content-muted">Version bump</label>
+              <select value={bumpPart} onChange={e => setBumpPart(e.target.value)} className={`${inputCls} w-full mt-1.5`}>
+                <option value="">{template === 'hotfix' ? 'patch (default)' : 'none'}</option>
+                <option value="build">build</option>
+                <option value="patch">patch</option>
+                <option value="minor">minor</option>
+                <option value="major">major</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer pb-2">
+              <input type="checkbox" checked={gate} onChange={e => setGate(e.target.checked)} className="w-3.5 h-3.5 accent-brand-500" />
+              Gate before final promote
+            </label>
+          </div>
+
+          {err && <p className="text-xs text-danger-fg">{err}</p>}
+        </div>
+        <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-sm border border-border-strong text-content hover:bg-surface-raised transition-colors">Cancel</button>
+          <button type="button" onClick={generate} disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+            {busy ? 'Generating…' : 'Generate'}
+          </button>
         </div>
       </div>
     </div>

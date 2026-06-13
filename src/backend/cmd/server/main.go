@@ -770,6 +770,7 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.GetEnvOrder)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.PutEnvOrder)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.ListPipelines)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/suggest", authSvc.Middleware(http.HandlerFunc(handler.SuggestPipeline)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines", authSvc.Middleware(http.HandlerFunc(handler.CreatePipeline)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.UpdatePipeline)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipeline)))
