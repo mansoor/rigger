@@ -30,6 +30,10 @@ type Project struct {
 	// ResourcePrefix is the immutable Docker resource prefix ({workspace}_{project});
 	// empty ⇒ fall back to Name. See workspace.Project.Prefix.
 	ResourcePrefix string `json:"resource_prefix,omitempty"`
+	// GitRepo is the project's source repository ("" ⇒ none). When set, the env's
+	// source is checked out to envs/{env}/_src, so repo-relative bind-mount sources
+	// (e.g. ./mosquitto/mosquitto.conf) are re-rooted there. See gen.bindSource.
+	GitRepo string `json:"git_repo,omitempty"`
 	// LocalTLS: when an env auto-routes on *.localhost (no workspace base domain),
 	// serve it over Traefik's self-signed cert instead of plain HTTP — for apps
 	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.

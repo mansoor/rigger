@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -63,6 +64,13 @@ type Bridge struct {
 
 	// Per-workspace directory sizes, refreshed off the dashboard request path.
 	disk *diskUsageCache
+
+	// hostWS is the HOST-side path the Docker daemon mapped to workspacesDir inside
+	// this (Rigger) container — discovered once via self-inspect. Used to translate
+	// bind-mount sources to host-resolvable paths (RIGGER_BIND_ROOT). Empty ⇒ not
+	// containerised / undiscoverable, and callers fall back to identity.
+	hostWSOnce sync.Once
+	hostWS     string
 }
 
 // NewBridge builds a bridge. Pass a nil db/pool (and the local workspaces dir as
@@ -678,6 +686,64 @@ func (b *Bridge) localEnvDir(workspaceName, project, env string) string {
 	return wspath.EnvDir(b.workspacesDir, workspaceName, project, env)
 }
 
+// hostBindRoot returns the HOST-visible absolute path of an env directory — the
+// value compose substitutes for ${RIGGER_BIND_ROOT} so the Docker daemon can
+// resolve relative bind-mount sources. When Rigger runs inside a container the env
+// dir's in-container path (/toolkit/workspaces/…) is meaningless to the host
+// daemon, so we translate it through the discovered workspaces host mount. When not
+// containerised (or undiscoverable) the local path is already host-visible, so it
+// is returned unchanged.
+func (b *Bridge) hostBindRoot(workspaceName, project, env string) string {
+	local := b.localEnvDir(workspaceName, project, env)
+	hw := b.hostWorkspacesDir()
+	if hw == "" || hw == b.workspacesDir {
+		return local
+	}
+	return hw + strings.TrimPrefix(local, b.workspacesDir)
+}
+
+// hostWorkspacesDir returns the host-side path the Docker daemon mapped to
+// workspacesDir inside this container, discovered once. Empty ⇒ undiscoverable.
+func (b *Bridge) hostWorkspacesDir() string {
+	b.hostWSOnce.Do(func() { b.hostWS = discoverHostMount(b.workspacesDir) })
+	return b.hostWS
+}
+
+// discoverHostMount finds the host-side source path the Docker daemon mapped to
+// `dest` inside this container, by inspecting our own container's mounts. The
+// container id is the hostname (Docker's default). Returns "" when not in a
+// container, docker is unreachable, or no mount covers dest — callers fall back to
+// the in-container path, which is already correct for a non-containerised Rigger.
+func discoverHostMount(dest string) string {
+	id, err := os.Hostname()
+	if err != nil || id == "" {
+		return ""
+	}
+	out, err := executor.Local{}.DockerOutput(executor.Spec{
+		Args: []string{"inspect", id, "--format", "{{json .Mounts}}"},
+	})
+	if err != nil {
+		return ""
+	}
+	var mounts []struct{ Source, Destination string }
+	if json.Unmarshal(bytes.TrimSpace(out), &mounts) != nil {
+		return ""
+	}
+	// Pick the mount whose Destination is the longest prefix of dest (handles a
+	// mount at the workspaces dir itself or at any parent of it).
+	bestLen, host := -1, ""
+	for _, m := range mounts {
+		d := strings.TrimRight(m.Destination, "/")
+		if dest == d || strings.HasPrefix(dest, d+"/") {
+			if len(d) > bestLen {
+				bestLen = len(d)
+				host = m.Source + dest[len(d):]
+			}
+		}
+	}
+	return host
+}
+
 // splitPrefix splits a resource prefix "{workspace}_{project}" back into its
 // parts (names never contain "_", so the first separator is authoritative).
 func splitPrefix(prefix string) (workspace, project string) {
@@ -1183,6 +1249,12 @@ func (b *Bridge) Run(opts RunOptions) error {
 			dopts.Sync = func() error {
 				return rt.client.PushDir(localDir, rt.exec.RemoteDir(localDir), ".env")
 			}
+		} else {
+			// Local: tell compose where this env's bind-mount sources live on the HOST
+			// daemon (Rigger runs in a container, so its own paths aren't resolvable).
+			// composegen emits bind sources rooted at ${RIGGER_BIND_ROOT}. On a remote
+			// host the compose runs natively, so the default `.` already resolves.
+			dopts.EnvVars = append(dopts.EnvVars, "RIGGER_BIND_ROOT="+b.hostBindRoot(opts.Workspace, opts.Project, opts.Env))
 		}
 		handled, err := dockerops.Run(dopts)
 		if handled {
