@@ -65,15 +65,36 @@ func (h *Handler) resolveContainerRef(ex executor.Executor, wsName, ws, env, svc
 		} `json:"environments"`
 	}
 	json.Unmarshal(raw, &cfg) //nolint:errcheck
-	if cfg.Environments[env].Deployment != "swarm" {
-		return svc, nil // compose: svc is already the container_name
-	}
-
 	prefix := cfg.Project.ResourcePrefix
 	if prefix == "" {
 		prefix = cfg.Project.Name
 	}
 	stack := prefix + "_" + env
+
+	if cfg.Environments[env].Deployment != "swarm" {
+		// Compose: `svc` is the compose SERVICE name (what `docker compose ps`
+		// reports and the UI sends), which is NOT necessarily the container_name —
+		// the unified generator no longer sets container_name on app services, so
+		// Docker auto-names them "{project}_{service}_N". Resolve the real container
+		// id by compose labels (works for running + stopped). Fall back to the given
+		// name for older deploys that DID set an explicit container_name.
+		out, err := ex.DockerOutput(executor.Spec{Args: []string{
+			"ps", "-aq",
+			"--filter", "label=com.docker.compose.project=" + stack,
+			"--filter", "label=com.docker.compose.service=" + svc,
+		}})
+		if err == nil {
+			id := strings.TrimSpace(string(out))
+			if nl := strings.IndexByte(id, '\n'); nl >= 0 {
+				id = id[:nl]
+			}
+			if id != "" {
+				return id, nil
+			}
+		}
+		return svc, nil // fallback: explicit container_name (legacy) or best-effort
+	}
+
 	full := resolveSwarmServiceName(ex, stack, svc)
 	out, err := ex.DockerOutput(executor.Spec{
 		Args: []string{"ps", "-q", "--filter", "label=com.docker.swarm.service.name=" + full},
