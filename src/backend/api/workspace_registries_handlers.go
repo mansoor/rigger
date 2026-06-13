@@ -120,6 +120,28 @@ func (h *Handler) DeleteWorkspaceRegistry(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /api/workspaces/{ws}/registries/test-credentials — docker login test for
+// AD-HOC credentials that aren't saved yet. Used by the project registry picker so
+// a user can verify a registry before creating the workspace record. Adds no new
+// capability over CreateWorkspaceRegistry (which already logs in on create).
+func (h *Handler) TestRegistryCredentials(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	if _, err := os.Stat(wspath.WorkspaceMeta(h.workspacesDir, ws)); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		return
+	}
+	var body registryBody
+	if err := readJSON(r, &body); err != nil || body.URL == "" || body.Username == "" || body.Password == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url, username, and password are required"})
+		return
+	}
+	if loginErr := dockerLogin(body.URL, body.Username, body.Password); loginErr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "docker login failed: " + loginErr.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "message": "Login succeeded"})
+}
+
 // POST /api/workspaces/{ws}/registries/{id}/test — docker login test, gated to the pool.
 func (h *Handler) TestWorkspaceRegistry(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("workspace")

@@ -1,6 +1,11 @@
 package composegen
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/databases"
+)
 
 // Trailing dash counts for section comments. App services use a fixed width
 // (no historical parity to match — the unified model regenerates goldens); the
@@ -58,6 +63,9 @@ func (g *gen) emitVolumes(prefix string) {
 	}
 	if e.Database == "mysql" {
 		add(prefix + "_mysql_data")
+	}
+	if e.Database == "mariadb" {
+		add(prefix + "_mariadb_data")
 	}
 	if e.RedisEnabled {
 		add(prefix + "_redis_data")
@@ -175,27 +183,35 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line("")
 }
 
-// emitServicePorts handles web routing and port publishing. A web-routed service
-// gets Traefik labels (when Traefik is on) or binds the env HTTP port; otherwise
-// host_port/extra_ports are published, or the container port is exposed.
+// emitServicePorts handles web routing and port publishing, emitting at most ONE
+// `ports:` block (duplicate keys are invalid YAML). A web-routed apex service under
+// Traefik gets labels (no host port); without Traefik it binds a single host port —
+// the service's own host_port if set, else the env HTTP port (so editing the
+// service port just changes the published port, not adds a second one). Non-web
+// services publish host_port/extra_ports, or expose the container port.
 func (g *gen) emitServicePorts(key string, svc Service) {
 	e := g.e
 	port := string(svc.Port)
-	if svc.WebRouted {
-		if e.TraefikEnabled {
-			host := e.Domain
-			if svc.Subdomain != "" && e.Domain != "" {
-				host = svc.Subdomain + "." + e.Domain
-			}
-			g.traefikLabels(key, host, port)
-		} else if svc.Subdomain == "" && string(e.HTTPPort) != "" {
-			// Apex web service without Traefik binds the env HTTP port. Subdomain
-			// services need Traefik, so without it they aren't published here.
-			g.portMapping(string(e.HTTPPort), portOr(port, "80"))
-		}
-	}
 	var publishes []string
-	if string(svc.HostPort) != "" && port != "" {
+	switch {
+	case svc.WebRouted && e.TraefikEnabled:
+		host := e.Domain
+		if svc.Subdomain != "" && e.Domain != "" {
+			host = svc.Subdomain + "." + e.Domain
+		}
+		g.traefikLabels(key, host, port)
+	case svc.WebRouted && svc.Subdomain == "":
+		// Apex web service without Traefik: publish one host port. host_port wins
+		// (the user's chosen port), else the env HTTP port. Subdomain web services
+		// need Traefik, so without it they aren't published here.
+		hostPort := string(svc.HostPort)
+		if hostPort == "" {
+			hostPort = string(e.HTTPPort)
+		}
+		if hostPort != "" {
+			publishes = append(publishes, hostPort+":"+portOr(port, "80"))
+		}
+	case !svc.WebRouted && string(svc.HostPort) != "" && port != "":
 		publishes = append(publishes, string(svc.HostPort)+":"+port)
 	}
 	for _, ep := range svc.ExtraPorts {
@@ -253,7 +269,7 @@ func (g *gen) depHasHealthcheck(name string) bool {
 		}
 	}
 	switch name {
-	case "postgres", "mysql", "redis", "garage":
+	case "postgres", "mysql", "mariadb", "redis", "garage":
 		return true // managed deps always carry a healthcheck (see buildManagedDeps)
 	}
 	return false
@@ -301,21 +317,44 @@ func portOr(p, def string) string {
 	return p
 }
 
-// ── Managed dependencies (db / redis / garage) — env toggles until Phase 3 ───────
+// ── Managed dependencies (db / redis / garage) — env toggles ─────────────────────
+
+// dbVersion resolves the managed DB's image tag: the env's explicit DBVersion,
+// else the project versions map, else the catalog default. The catalog default
+// matches the legacy hardcoded tag, so existing compose output is unchanged until
+// a version is actually chosen.
+func (g *gen) dbVersion(eng databases.Engine) string {
+	if g.e.DBVersion != "" {
+		return databases.ResolveVersion(eng.ID, g.e.DBVersion)
+	}
+	return g.cfg.version(eng.ID, eng.DefaultVersion)
+}
+
+// dbExternalPorts publishes the DB port on the host when DBExternal is set, so
+// external clients can connect. The host port defaults to the engine's standard
+// port and is overridable via DB_EXTERNAL_PORT in the env's .env.
+func (g *gen) dbExternalPorts(eng databases.Engine) {
+	if !g.e.DBExternal {
+		return
+	}
+	g.line("    ports:")
+	g.line(fmt.Sprintf("      - \"${DB_EXTERNAL_PORT:-%d}:%d\"", eng.Port, eng.Port))
+}
 
 func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	c, e := g.cfg, g.e
-	verPostgres := c.version("postgres", "15-alpine")
-	verMySQL := c.version("mysql", "8.0")
 	verRedis := c.version("redis", "7-alpine")
 	verGarage := c.version("garage", "v1.0.1")
 	verGarageWebUI := c.version("garage_webui", "latest")
 
 	if e.Database == "postgres" {
-		g.line(sectionComment("PostgreSQL "+verPostgres, dashPostgres))
+		eng, _ := databases.Get("postgres")
+		ver := g.dbVersion(eng)
+		g.line(sectionComment("PostgreSQL "+ver, dashPostgres))
 		g.line("  " + prefix + "_postgres:")
-		g.line("    image: postgres:" + verPostgres)
+		g.line("    image: postgres:" + ver)
 		g.line("    container_name: " + prefix + "_postgres")
+		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line(g.dbEnvLine("POSTGRES_DB"))
 		g.line(g.dbEnvLine("POSTGRES_USER"))
@@ -329,23 +368,36 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
-	if e.Database == "mysql" {
-		g.line(sectionComment("MySQL "+verMySQL, dashMySQL))
-		g.line("  " + prefix + "_mysql:")
-		g.line("    image: mysql:" + verMySQL)
-		g.line("    container_name: " + prefix + "_mysql")
+	// MySQL and MariaDB share the MYSQL_* env contract + /var/lib/mysql volume; they
+	// differ only in image, the native-password command (MySQL-only), the data
+	// volume name, the container/alias name, and the healthcheck client.
+	if e.Database == "mysql" || e.Database == "mariadb" {
+		eng, _ := databases.Get(e.Database)
+		ver := g.dbVersion(eng)
+		g.line(sectionComment(eng.Label+" "+ver, dashMySQL))
+		g.line("  " + prefix + "_" + e.Database + ":")
+		g.line("    image: " + eng.Image + ":" + ver)
+		g.line("    container_name: " + prefix + "_" + e.Database)
+		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line(g.dbEnvLine("MYSQL_DATABASE"))
 		g.line(g.dbEnvLine("MYSQL_USER"))
 		g.line(g.dbEnvLine("MYSQL_PASSWORD"))
 		g.line(g.dbEnvLine("MYSQL_ROOT_PASSWORD"))
-		g.line("    command: --default-authentication-plugin=mysql_native_password")
+		if e.Database == "mysql" {
+			g.line("    command: --default-authentication-plugin=mysql_native_password")
+		}
 		g.line("    volumes:")
-		g.line("      - " + prefix + "_mysql_data:/var/lib/mysql")
+		g.line("      - " + prefix + "_" + e.Database + "_data:/var/lib/mysql")
 		g.line("    networks:")
 		g.line("      - " + prefix + "_net")
-		g.healthcheck("mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
-		g.deployBlock(isSwarm, "mysql", "1", "unless-stopped")
+		if e.Database == "mariadb" {
+			// Newer MariaDB images ship mariadb-admin and may drop the mysqladmin symlink.
+			g.healthcheck("mariadb-admin ping -h localhost --silent 2>/dev/null || mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
+		} else {
+			g.healthcheck("mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
+		}
+		g.deployBlock(isSwarm, e.Database, "1", "unless-stopped")
 		g.line("")
 	}
 

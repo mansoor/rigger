@@ -99,6 +99,71 @@ func TestServicesCustomShape(t *testing.T) {
 	}
 }
 
+// Catalog-driven managed DB: MariaDB engine + chosen version + external publish.
+// MariaDB reuses the MYSQL_* contract but a distinct image/container/volume, omits
+// the MySQL-only native-password command, and (external) publishes its port.
+func TestManagedDBMariaDBVersionExternal(t *testing.T) {
+	cfg := `{
+		"project": {"name":"shop","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"app","role":"app","build":{},"port":"9000","env_file":true,"depends_on":["mariadb"]}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080","database":"mariadb","db_version":"10.11","db_external":true}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	// Managed-dep blocks are asserted against the full output (svcBlock would false-
+	// match the app's depends_on line for the same name).
+	for _, want := range []string{
+		"  shop_dev_mariadb:",
+		"image: mariadb:10.11",                  // engine image + chosen version
+		"container_name: shop_dev_mariadb",
+		"    ports:\n      - \"${DB_EXTERNAL_PORT:-3306}:3306\"", // external publish
+		"MYSQL_ROOT_PASSWORD",                    // reuses MYSQL_* contract
+		"      - shop_dev_mariadb_data:/var/lib/mysql",
+		"mariadb-admin ping",                     // mariadb healthcheck
+		"  shop_dev_mariadb_data:",               // named volume declared
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "--default-authentication-plugin") {
+		t.Errorf("mariadb must NOT carry the MySQL-only native-password command\n%s", s)
+	}
+	// app depends_on resolves the mariadb managed dep (healthcheck → service_healthy).
+	app := svcBlock(t, s, "shop_dev_app")
+	if !strings.Contains(app, "shop_dev_mariadb:\n        condition: service_healthy") {
+		t.Errorf("app depends_on should resolve mariadb as healthy\n%s", app)
+	}
+}
+
+// A web-routed service that also sets its own host_port must emit exactly ONE
+// `ports:` block publishing that host_port (not also the env HTTP port) — two
+// `ports:` keys are invalid YAML. Regression for the CloudBeaver duplicate-ports bug.
+func TestWebRoutedHostPortSinglePortsBlock(t *testing.T) {
+	cfg := `{
+		"project": {"name":"db","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"cloudbeaver","image":"dbeaver/cloudbeaver","tag":"latest","port":"8978","web_routed":true,"host_port":"9000"}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if n := strings.Count(s, "    ports:"); n != 1 {
+		t.Fatalf("expected exactly one ports block, got %d\n%s", n, s)
+	}
+	if !strings.Contains(s, `      - "9000:8978"`) {
+		t.Errorf("expected host_port mapping 9000:8978\n%s", s)
+	}
+	if strings.Contains(s, "8080:8978") {
+		t.Errorf("must not also bind the env HTTP port when host_port is set\n%s", s)
+	}
+}
+
 // A self-serving app (Spring Boot / Go / .NET shape): one build service routed by
 // Traefik on its own port, no nginx. Verifies traefik labels + traefik network join.
 func TestServicesSelfServingTraefik(t *testing.T) {

@@ -97,6 +97,20 @@ type Config struct {
 	Project      Project              `json:"project"`
 	Environments map[string]EnvConfig `json:"environments"`
 	Images       []ConfigImage        `json:"images"`
+	Services     []ConfigService      `json:"services"`
+}
+
+// ConfigService is the read view of a unified services[] entry needed for
+// env-access resolution: which service is the web entry and its published port.
+type ConfigService struct {
+	Name      string `json:"name"`
+	WebRouted bool   `json:"web_routed"`
+	Subdomain string `json:"subdomain"`
+	HostPort  string `json:"host_port"`
+	// Build is the raw build block (passed through) so the UI can tell which
+	// services build images — drives whether Build / Release-pipeline show. Absent
+	// for pull-only (image / database) services.
+	Build json.RawMessage `json:"build,omitempty"`
 }
 
 // ConfigImage is the read-only view of an image service as stored in config.json.
@@ -310,6 +324,15 @@ func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, err
 		if ec, ok := cfg.Environments[envName]; ok {
 			info.Domain   = resolve(ec.Domain)
 			info.HTTPPort = resolve(fmt.Sprintf("%v", ec.HTTPPort))
+			// An apex web service that sets its own host_port publishes on THAT port
+			// (composegen prefers it over the env HTTP port), so the access URL must
+			// use it too. Mirrors emitServicePorts' "host_port wins" rule.
+			for _, svc := range cfg.Services {
+				if svc.WebRouted && svc.Subdomain == "" && svc.HostPort != "" {
+					info.HTTPPort = resolve(svc.HostPort)
+					break
+				}
+			}
 			// Full Traefik route URL — incl. the auto-derived {prefix}-{env}.
 			// {base|localhost} when Traefik is on and no explicit domain is set.
 			if url, routed := composegen.EnvRouteURL(data, envName, baseDomain); routed {

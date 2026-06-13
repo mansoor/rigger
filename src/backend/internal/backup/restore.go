@@ -106,8 +106,9 @@ func (c *ctx) restoreDB(snapshot, backupDir string) int {
 		if err := c.restorePostgres("postgres", c.envOr("POSTGRES_USER", "postgres"), c.envOr("POSTGRES_DB", c.project), dump); err != nil {
 			fails++
 		}
-	case "mysql":
-		dump := findDump(backupDir, "mysql")
+	case "mysql", "mariadb":
+		engine := c.cfg.Environments[c.env].Database // mysql | mariadb (service/container name)
+		dump := findDump(backupDir, "mysql")          // MariaDB dumps share the mysql label
 		if dump == "" {
 			c.warn("No MySQL dump found in snapshot — skipping DB restore")
 			return 0
@@ -117,7 +118,7 @@ func (c *ctx) restoreDB(snapshot, backupDir string) int {
 			c.warn("MYSQL_ROOT_PASSWORD not set — cannot restore DB")
 			return 1
 		}
-		if err := c.restoreMySQL("mysql", rootPass, c.envOr("MYSQL_DATABASE", c.project), dump); err != nil {
+		if err := c.restoreMySQL(engine, rootPass, c.envOr("MYSQL_DATABASE", c.project), dump); err != nil {
 			fails++
 		}
 	default:

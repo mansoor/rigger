@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline } from '../lib/api'
-import { RunConsole, STAGE_ICON, stageSummary, statusChipCls } from '../components/PipelinesTab'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun } from '../lib/api'
+import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -11,6 +11,7 @@ import TerminalModal from '../components/TerminalModal'
 import ContainerInfoModal from '../components/ContainerInfoModal'
 import FileBrowserModal from '../components/FileBrowserModal'
 import RollbackModal from '../components/RollbackModal'
+import DatabaseInfoModal from '../components/DatabaseInfoModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -195,6 +196,7 @@ const EI = {
   terminal:<><path d="M6 7l5 5-5 5" /><path d="M13 17h6" /></>,
   backup:  <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" /></>,
   rollback:<><path d="M3 7v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /></>,
+  database:<><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
 }
 function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
   return (
@@ -466,6 +468,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
   const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
+  const [dbInfoOpen, setDbInfoOpen] = useState(false) // managed-database connection info (Phase 5)
+  const hasManagedDB = !!cfg?.database && cfg.database !== 'none'
+  const canManageDB = ['admin', 'operator'].includes(ws?.my_role) // reveal secret + create schema
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
@@ -594,6 +599,10 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             </>
           )}
           <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
+          {hasManagedDB && (
+            <ToolBtn icon="database" title="Database connection info" onClick={() => setDbInfoOpen(true)}
+              className="text-content-subtle hover:text-sky-400" />
+          )}
           {canOp && (
             <>
               <ToolBtn icon="terminal" title="Open a terminal" disabled={!isRunning}
@@ -777,6 +786,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           onClose={() => setFilesFor(null)} />
       )}
 
+      {/* Managed-database connection info + management (Phase 5/6). Reveal-secret and
+          create-schema are operator+; viewers see structure only. */}
+      {dbInfoOpen && (
+        <DatabaseInfoModal workspace={workspace} name={name} env={envName}
+          canReveal={canManageDB} canManage={canManageDB}
+          onClose={() => setDbInfoOpen(false)} />
+      )}
+
       {/* Manual backup — pick which services' data to include */}
       {backupModal && (
         <ManualBackupModal
@@ -870,22 +887,6 @@ function DetailRow({ icon, value }) {
 
 // ── Release pipeline ──────────────────────────────────────────────────────────
 
-// stepCls / stepIcon map a run-stage status to the pipeline-graph node style.
-function stepCls(status) {
-  if (status === 'ok') return 'bg-green-500 border-success text-green-900'
-  if (status === 'running') return 'bg-amber-400 border-warning text-amber-900 animate-pulse'
-  if (status === 'awaiting') return 'bg-amber-400 border-warning text-amber-900'
-  if (status === 'fail' || status === 'rejected') return 'bg-danger-subtle border-danger-border text-danger-fg'
-  return 'bg-surface-raised border-border-strong text-content-subtle' // skipped / not-yet-run
-}
-function stepIcon(status) {
-  if (status === 'ok') return '✓'
-  if (status === 'fail' || status === 'rejected') return '✕'
-  if (status === 'running') return '◌'
-  if (status === 'awaiting') return '⏸'
-  return '○'
-}
-
 // ReleasePipeline renders the project's real release pipeline live: stages
 // colored by the latest run, the version deployed in each env (deploy history),
 // and a Run button with inline gate approval. Replaces the old static mock.
@@ -893,7 +894,9 @@ function ReleasePipeline({ ws }) {
   const { workspace, name } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const isImage = ws?.config?.project?.type === 'image'
+  // Release pipelines build + promote images, so they only apply to build stacks
+  // (custom / from-repo / blueprint), not image/prebuilt/database pull-only stacks.
+  const isImage = !(ws?.config?.project?.type === 'custom' || (ws?.config?.services || []).some(s => s.build))
   const envs = ws?.envs || []
   const canOp = ['admin', 'operator', 'developer'].includes(ws?.my_role)
 
@@ -932,7 +935,15 @@ function ReleasePipeline({ ws }) {
     mutationFn: (runId) => rejectPipelineRun(workspace, name, pipeline.id, runId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }),
   })
-  const [running, setRunning] = useState(false)
+  const [openRunId, setOpenRunId] = useState(null) // run whose log/status window is open
+  const active = latestRun && (latestRun.status === 'running' || latestRun.status === 'awaiting')
+  const runMut = useMutation({
+    mutationFn: () => startPipelineRun(workspace, name, pipeline.id),
+    onSuccess: ({ run_id }) => {
+      setOpenRunId(run_id)
+      qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
 
   if (isImage) return null
 
@@ -948,8 +959,19 @@ function ReleasePipeline({ ws }) {
             </select>
           )}
           {pipeline && canOp && (
-            <button onClick={() => setRunning(true)}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">▶ Run</button>
+            <div className="flex flex-col items-end gap-1">
+              <button onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {active ? '▶ Running…' : '▶ Run'}
+              </button>
+              {latestRun && (
+                <button onClick={() => setOpenRunId(latestRun.id)}
+                  className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
+                  {active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+                  View log
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -1000,9 +1022,9 @@ function ReleasePipeline({ ws }) {
         </>
       )}
 
-      {running && pipeline && (
-        <RunConsole workspace={workspace} name={name} pipeline={pipeline}
-          onClose={() => { setRunning(false); qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }) }} />
+      {openRunId != null && pipeline && (
+        <RunModal workspace={workspace} name={name} pipeline={pipeline} runId={openRunId}
+          onClose={() => { setOpenRunId(null); qc.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] }) }} />
       )}
     </div>
   )
@@ -1951,7 +1973,14 @@ export default function ProjectPage() {
     queryKey: ['pipelines', workspace, name],
     queryFn: () => fetchPipelines(workspace, name),
   })
-  const [headerRun, setHeaderRun] = useState(null) // pipeline launched from the Build button
+  const [headerRun, setHeaderRun] = useState(null) // { pipeline, runId } launched from the Build button
+  const headerRunMut = useMutation({
+    mutationFn: (p) => startPipelineRun(workspace, name, p.id).then(r => ({ pipeline: p, runId: r.run_id })),
+    onSuccess: ({ pipeline, runId }) => {
+      setHeaderRun({ pipeline, runId })
+      qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, pipeline.id] })
+    },
+  })
   const linkMut = useMutation({
     mutationFn: (id) => setBuildPipeline(workspace, name, id),
     onSuccess: () => qcMain.invalidateQueries({ queryKey: ['workspace', workspace, name] }),
@@ -1988,6 +2017,12 @@ export default function ProjectPage() {
   const cfg = ws?.config
   const envs = ws?.envs || []
   const type = cfg?.project?.type || 'custom'
+  // Build / Release-pipeline only apply to stacks that BUILD images. "custom" is
+  // the build family (custom app / from-repo / blueprint); image/prebuilt and the
+  // database-hosting stack are pull-only (managed DB + optional CloudBeaver). Gate
+  // on the type (always present) OR an explicit build service, so custom apps keep
+  // Build while image/database stacks hide it.
+  const hasBuildServices = type === 'custom' || (cfg?.services || []).some(s => s.build)
   const version = cfg?.project?.version
   const vStr = version ? `v${version.major}.${version.minor}.${version.patch}-build.${version.build}` : ''
 
@@ -2023,20 +2058,20 @@ export default function ProjectPage() {
           {/* Global actions */}
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {canEdit && <HeaderBtn label="Edit project" onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} />}
-            {canOp && type !== 'image' && (
+            {canOp && hasBuildServices && (
               <BuildMenu version={version}
                 pipelines={headerPipelines}
                 linkedId={cfg?.project?.build_pipeline_id}
                 onSetLink={(id) => linkMut.mutate(id)}
-                onRunPipeline={(p) => setHeaderRun(p)}
+                onRunPipeline={(p) => headerRunMut.mutate(p)}
                 onBuild={part => runAction('build', envs[0], undefined, part ? ['--bump', part] : [])} />
             )}
           </div>
         </div>
 
         {headerRun && (
-          <RunConsole workspace={workspace} name={name} pipeline={headerRun}
-            onClose={() => { setHeaderRun(null); qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, headerRun.id] }) }} />
+          <RunModal workspace={workspace} name={name} pipeline={headerRun.pipeline} runId={headerRun.runId}
+            onClose={() => { qcMain.invalidateQueries({ queryKey: ['pipeline-runs', workspace, name, headerRun.pipeline.id] }); setHeaderRun(null) }} />
         )}
 
         {/* Environment cards — left-aligned 3-column proportional grid:
@@ -2063,8 +2098,8 @@ export default function ProjectPage() {
           ))}
         </div>
 
-        {/* Release pipeline (custom stacks only) */}
-        {type !== 'image' && <ReleasePipeline ws={ws} />}
+        {/* Release pipeline — only for stacks that build images */}
+        {hasBuildServices && <ReleasePipeline ws={ws} />}
 
         {/* Bottom split: Action output + Logs — both fixed-height, scroll internally */}
         <div className="grid grid-cols-2 gap-5 items-start">

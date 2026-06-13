@@ -53,7 +53,9 @@ type NamedVolume struct {
 type Env struct {
 	Domain         string  `json:"domain"`
 	HTTPPort       flexStr `json:"http_port"`
-	Database       string  `json:"database"` // none | postgres | mysql
+	Database       string  `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion      string  `json:"db_version,omitempty"`
+	DBExternal     bool    `json:"db_external,omitempty"`
 	RedisEnabled   bool    `json:"redis_enabled"`
 	GarageEnabled  bool    `json:"garage_enabled"`
 	TraefikEnabled bool    `json:"traefik_enabled"`

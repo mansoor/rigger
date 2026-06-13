@@ -941,7 +941,7 @@ func buildArgKeyOK(s string) bool {
 // source per service; image_from/depends_on must reference a real service (or, for
 // depends_on, an enabled managed dependency).
 func validateConfigServices(content []byte) string {
-	reserved := map[string]bool{"postgres": true, "mysql": true, "redis": true, "garage": true, "garage_webui": true}
+	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "garage": true, "garage_webui": true}
 	var doc struct {
 		Services []struct {
 			Name  string `json:"name"`
@@ -1006,7 +1006,7 @@ func validateConfigServices(content []byte) string {
 	managedDep := func(name string) bool {
 		for _, ec := range doc.Environments {
 			switch name {
-			case "postgres", "mysql":
+			case "postgres", "mysql", "mariadb":
 				if ec.Database == name {
 					return true
 				}

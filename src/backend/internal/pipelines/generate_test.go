@@ -12,10 +12,12 @@ func trace(stages []Stage) []string {
 		case "version":
 			out[i] = "version:" + s.Part
 		case "build":
+			out[i] = "build:" + s.Env
 			if s.Push {
-				out[i] = "build:" + s.Env + "+push"
-			} else {
-				out[i] = "build:" + s.Env
+				out[i] += "+push"
+			}
+			if s.Part != "" {
+				out[i] += "#" + s.Part
 			}
 		default:
 			out[i] = s.Type + ":" + s.Env
@@ -41,7 +43,7 @@ func TestGenerateReleaseChain(t *testing.T) {
 		Template: "release", Envs: []string{"dev", "staging", "prod"}, BumpPart: "minor", Gate: true,
 	})
 	want := []string{
-		"version:minor", "build:dev+push", "deploy:dev",
+		"build:dev+push#minor", "deploy:dev",
 		"push:dev→staging", "gate:", "push:staging→prod",
 	}
 	if !eq(trace(stages), want) {
@@ -74,7 +76,7 @@ func TestGenerateHotfixBypass(t *testing.T) {
 		Template: "hotfix", Envs: []string{"dev", "staging", "prod"}, Gate: true,
 	})
 	// Skips staging entirely; default bump=patch; default from=dev, to=prod.
-	want := []string{"version:patch", "build:dev+push", "gate:", "push:dev→prod"}
+	want := []string{"build:dev+push#patch", "gate:", "push:dev→prod"}
 	if !eq(trace(stages), want) {
 		t.Errorf("hotfix = %v, want %v", trace(stages), want)
 	}
@@ -88,7 +90,7 @@ func TestGenerateHotfixExplicitTarget(t *testing.T) {
 		Template: "hotfix", Envs: []string{"dev", "staging", "prod"},
 		HotfixFrom: "dev", HotfixTo: "staging", BumpPart: "build",
 	})
-	want := []string{"version:build", "build:dev+push", "push:dev→staging"}
+	want := []string{"build:dev+push#build", "push:dev→staging"}
 	if !eq(trace(stages), want) {
 		t.Errorf("hotfix-explicit = %v, want %v", trace(stages), want)
 	}

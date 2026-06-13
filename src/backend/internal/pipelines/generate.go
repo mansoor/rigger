@@ -25,8 +25,14 @@ func Generate(o GenerateOptions) (string, []Stage) {
 	return generateRelease(o)
 }
 
-// generateRelease: [version] → build@e0(+push when promoting) → deploy@e0 →
+// generateRelease: build@e0(↑bump, +push when promoting) → deploy@e0 →
 // promote e0→e1 → … → [gate] → promote e(n-1)→e(n).
+//
+// The version bump is folded INTO the build stage (Stage.Part) rather than a
+// separate leading `version` stage: the build then owns the bump and captures the
+// pre-bump version correctly, so its image-pointer advance rolls the env to the
+// new version and the following deploy runs it (a standalone version-then-build
+// desyncs that and leaves the deploy on the old image).
 func generateRelease(o GenerateOptions) (string, []Stage) {
 	envs := o.Envs
 	if len(envs) == 0 {
@@ -34,14 +40,10 @@ func generateRelease(o GenerateOptions) (string, []Stage) {
 	}
 	multi := len(envs) > 1
 
-	var stages []Stage
-	if o.BumpPart != "" {
-		stages = append(stages, Stage{Type: "version", Part: o.BumpPart, OnFailure: "stop"})
+	stages := []Stage{
+		{Type: "build", Env: envs[0], Push: multi, Part: o.BumpPart, OnFailure: "stop"},
+		{Type: "deploy", Env: envs[0], OnFailure: "stop"},
 	}
-	stages = append(stages,
-		Stage{Type: "build", Env: envs[0], Push: multi, OnFailure: "stop"},
-		Stage{Type: "deploy", Env: envs[0], OnFailure: "stop"},
-	)
 	for i := 0; i+1 < len(envs); i++ {
 		if o.Gate && i == len(envs)-2 { // gate before the final (highest) promotion
 			stages = append(stages, Stage{Type: "gate", Command: "Approve promotion to " + envs[i+1], OnFailure: "stop"})
@@ -55,9 +57,10 @@ func generateRelease(o GenerateOptions) (string, []Stage) {
 	return "Release " + envs[0], stages
 }
 
-// generateHotfix bypasses the chain: [version] → build@from(+push) → [gate] →
+// generateHotfix bypasses the chain: build@from(↑bump, +push) → [gate] →
 // promote from→to. Builds the artifact at the lowest env and ships it straight
-// to stage/prod without deploying the intermediate tiers.
+// to stage/prod without deploying the intermediate tiers. As with release, the
+// bump is folded into the build stage so the build owns it.
 func generateHotfix(o GenerateOptions) (string, []Stage) {
 	envs := o.Envs
 	from := o.HotfixFrom
@@ -75,8 +78,7 @@ func generateHotfix(o GenerateOptions) (string, []Stage) {
 
 	promote := from != to && to != ""
 	stages := []Stage{
-		{Type: "version", Part: bump, OnFailure: "stop"},
-		{Type: "build", Env: from, Push: promote, OnFailure: "stop"},
+		{Type: "build", Env: from, Push: promote, Part: bump, OnFailure: "stop"},
 	}
 	if promote {
 		if o.Gate {

@@ -265,6 +265,8 @@ func main() {
 			switch {
 			case r.Method == "GET" && id == "":
 				handler.ListWorkspaceRegistries(w, r)
+			case r.Method == "POST" && id == "test-credentials":
+				handler.TestRegistryCredentials(w, r)
 			case r.Method == "POST" && id == "":
 				handler.CreateWorkspaceRegistry(w, r)
 			case r.Method == "POST" && sub == "test":
@@ -779,9 +781,9 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}", authSvc.Middleware(http.HandlerFunc(handler.GetPipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/approve", authSvc.Middleware(http.HandlerFunc(handler.ApprovePipelineRun)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/runs/{runId}/reject", authSvc.Middleware(http.HandlerFunc(handler.RejectPipelineRun)))
-	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", func(w http.ResponseWriter, r *http.Request) {
-		handler.RunPipeline(w, r)
-	})
+	// POST triggers a run in the background and returns its id; the UI then opens a
+	// poll-based log/status view bound to that run (closeable + reopenable).
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/run", authSvc.Middleware(http.HandlerFunc(handler.StartPipelineRun)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.ListPipelineWebhooks)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePipelineWebhook)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/pipelines/{id}/webhooks/{whId}", authSvc.Middleware(http.HandlerFunc(handler.DeletePipelineWebhook)))
@@ -796,6 +798,9 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/rollback", authSvc.Middleware(http.HandlerFunc(handler.RollbackEnv)))
 	// Build-image lifecycle (#): per-env pointer status + catch-up to latest.
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database", authSvc.Middleware(http.HandlerFunc(handler.GetDatabaseInfo)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseSchemas)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseSchema)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/image-status", authSvc.Middleware(http.HandlerFunc(handler.GetImageStatus)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/track-latest", authSvc.Middleware(http.HandlerFunc(handler.TrackLatest)))
 
@@ -803,6 +808,8 @@ func main() {
 	mux.Handle("POST /api/scan-repo", authSvc.Middleware(http.HandlerFunc(handler.ScanRepo)))
 	// Stack blueprints for the no-repo "start from a template" picker.
 	mux.Handle("GET /api/blueprints", authSvc.Middleware(http.HandlerFunc(handler.Blueprints)))
+	// Managed database catalog (engines + selectable versions) for the DB picker.
+	mux.Handle("GET /api/databases", authSvc.Middleware(http.HandlerFunc(handler.Databases)))
 
 	// WebSocket terminal — interactive shell into a container
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {

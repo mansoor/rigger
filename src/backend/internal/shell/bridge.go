@@ -864,6 +864,74 @@ func (b *Bridge) runScript(opts RunOptions, rt *remoteTarget) error {
 	return nil
 }
 
+// ensureRegistryLogin authenticates docker to the project's configured registry
+// before a push/pull, using the workspace registry pool's stored credentials. It
+// matches the project's registry host (the image-tag prefix, cfg.Project.Registry)
+// against a registry record's URL and runs `docker login` on the given executor
+// (the local daemon, or the env's remote host). It is a no-op when no registry is
+// configured or no matching pool entry exists (e.g. a public/no-auth registry),
+// preserving prior behavior. Idempotent — docker caches the credentials.
+func (b *Bridge) ensureRegistryLogin(workspaceName, project string, ex executor.Executor, out io.Writer) error {
+	if b.db == nil {
+		return nil
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil // can't read config — let the push/pull surface its own error
+	}
+	host := normalizeRegistryHost(cfg.Project.Registry)
+	if host == "" {
+		return nil // no registry configured (local-only images)
+	}
+	// workspaceName is the workspace KEY (folder/route identity), which is exactly
+	// how registries are scoped (owner_scope='ws:{key}').
+	pool, err := settings.ListRegistriesForWorkspace(b.db, workspaceName)
+	if err != nil {
+		return nil
+	}
+	matchID := int64(0)
+	for i := range pool {
+		if normalizeRegistryHost(pool[i].URL) == host {
+			matchID = pool[i].ID
+			break
+		}
+	}
+	if matchID == 0 {
+		return nil // registry host isn't in this workspace's pool — nothing to log in with
+	}
+	reg, err := settings.GetRegistry(b.db, matchID) // re-read WITH the password
+	if err != nil || reg == nil || reg.Password == "" {
+		return nil
+	}
+	fmt.Fprintf(out, "⚑ Authenticating to registry %s…\n", reg.URL)
+	if err := ex.Docker(executor.Spec{
+		Args:   []string{"login", "--username", reg.Username, "--password-stdin", reg.URL},
+		Stdin:  strings.NewReader(reg.Password),
+		Env:    shellEnv(),
+		Stdout: out, Stderr: out,
+	}); err != nil {
+		return fmt.Errorf("docker login to %s failed: %w", reg.URL, err)
+	}
+	return nil
+}
+
+// normalizeRegistryHost reduces a registry reference to a bare host[:port] for
+// comparison: it drops the scheme and any trailing path/slash and lowercases.
+// "https://registry.example.com/" and "registry.example.com" both → the same key.
+func normalizeRegistryHost(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 // RunOptions configures a command execution.
 type RunOptions struct {
 	Workspace string // parent tier
@@ -1034,6 +1102,22 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+		}
+		// Ensure the project's registry is authenticated before any push/pull. The
+		// build/push and promote paths talk to the registry but rely on docker's
+		// stored credentials — previously only populated by the registry "Test"
+		// button. Log in here (on whichever daemon will run docker) using the
+		// workspace registry's stored creds, so a fresh container/session works.
+		if (opts.Command == "build" && contains(opts.Extra, "--push")) || opts.Command == "promote" {
+			var loginExec executor.Executor = executor.Local{}
+			if rt != nil {
+				loginExec = rt.exec
+			}
+			if lerr := b.ensureRegistryLogin(opts.Workspace, opts.Project, loginExec, opts.Stdout); lerr != nil {
+				// Surface but continue — the push/pull gives a definitive error if
+				// credentials are genuinely missing or wrong.
+				fmt.Fprintf(opts.Stdout, "⚠ registry login: %v\n", lerr)
+			}
 		}
 		if rt != nil {
 			// Remote build/promote runs docker on the host's own daemon (so the

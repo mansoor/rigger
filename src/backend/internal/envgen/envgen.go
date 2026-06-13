@@ -128,8 +128,10 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 	dbUser := dbBase + "_user"
 	var db *blueprints.DBFacts
 	switch e.Database {
-	case "mysql":
-		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_mysql", Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
+	case "mysql", "mariadb":
+		// MariaDB is wire-compatible with MySQL — frameworks use the mysql driver;
+		// only the host (container/alias) differs ({prefix}_mysql vs {prefix}_mariadb).
+		db = &blueprints.DBFacts{Engine: "mysql", Host: prefix + "_" + e.Database, Port: "3306", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
 	case "postgres":
 		db = &blueprints.DBFacts{Engine: "postgres", Host: prefix + "_postgres", Port: "5432", Name: dbBase + "_" + env, User: dbUser, Password: dbPassword}
 	}
@@ -304,13 +306,23 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("POSTGRES_DB=%s_%s\n", dbBase, env)
 		p("POSTGRES_USER=%s_user\n", dbBase)
 		p("POSTGRES_PASSWORD=%s\n", dbPassword)
-	case "mysql":
-		p("MYSQL_HOST=%s_mysql\n", prefix)
+	case "mysql", "mariadb":
+		// MariaDB reuses the MYSQL_* contract; only the host (container) differs.
+		p("MYSQL_HOST=%s_%s\n", prefix, e.Database)
 		p("MYSQL_PORT=3306\n")
 		p("MYSQL_DATABASE=%s_%s\n", dbBase, env)
 		p("MYSQL_USER=%s_user\n", dbBase)
 		p("MYSQL_PASSWORD=%s\n", dbPassword)
 		p("MYSQL_ROOT_PASSWORD=%s\n", dbRootPassword)
+	}
+	// When the DB is published externally, expose the host port (overridable) so the
+	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.
+	if e.Database != "" && e.Database != "none" && e.DBExternal {
+		port := "5432"
+		if e.Database != "postgres" {
+			port = "3306"
+		}
+		p("DB_EXTERNAL_PORT=%s\n", port)
 	}
 	p("\n")
 

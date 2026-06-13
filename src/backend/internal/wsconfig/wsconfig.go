@@ -118,12 +118,19 @@ type Version struct {
 }
 
 // Env is one environment's config. App services are project-level (Config.Services);
-// database/redis/garage stay as managed-dependency toggles until Phase 3.
+// database/redis/garage stay as managed-dependency toggles.
 type Env struct {
-	Domain         string         `json:"domain"`
-	HTTPPort       Str            `json:"http_port"`
-	HTTPSPort      Str            `json:"https_port"`
-	Database       string         `json:"database"` // none | postgres | mysql
+	Domain   string `json:"domain"`
+	HTTPPort Str    `json:"http_port"`
+	HTTPSPort Str   `json:"https_port"`
+	// Managed database (catalog-driven, one per env). Database is the engine id
+	// (none|postgres|mysql|mariadb); DBVersion is the chosen image tag ("" → the
+	// catalog default); DBExternal publishes the DB port on the host so external
+	// clients can connect. Older configs only have Database (string) — DBVersion/
+	// DBExternal default to "" / false, preserving prior behaviour.
+	Database       string         `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion      string         `json:"db_version,omitempty"`
+	DBExternal     bool           `json:"db_external,omitempty"`
 	RedisEnabled   bool           `json:"redis_enabled"`
 	GarageEnabled  bool           `json:"garage_enabled"`
 	TraefikEnabled bool           `json:"traefik_enabled"`

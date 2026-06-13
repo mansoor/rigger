@@ -126,6 +126,11 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		if !c.sqlDump("mysql", "mysql", "mysql", dateDir, backupDir) {
 			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
 		}
+	case "mariadb":
+		// MariaDB uses the mysql dump path; container/service is {prefix}_mariadb.
+		if !c.sqlDump("mysql", "mariadb", "mysql", dateDir, backupDir) {
+			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
+		}
 	default:
 		c.info("No database configured (database=%s) — skipping DB backup", database)
 	}

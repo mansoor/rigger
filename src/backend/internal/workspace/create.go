@@ -33,7 +33,10 @@ type CreateRequest struct {
 	Images       []ImageDef        `json:"images"`       // populated from template or manual entry
 	Backend      string            `json:"backend"`      // laravel | nodejs (custom type)
 	Frontend     string            `json:"frontend"`     // none | nextjs | react (custom type)
-	Database     string            `json:"database"`     // postgres | mysql | none (custom type)
+	Database     string            `json:"database"`     // none | postgres | mysql | mariadb (custom type)
+	DBVersion    string            `json:"db_version"`   // chosen DB image tag ("" → catalog default)
+	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
+	Cloudbeaver  bool              `json:"cloudbeaver"`  // database stack: add a CloudBeaver web SQL client (becomes the web entry)
 	Redis        bool              `json:"redis"`
 	Garage       bool              `json:"garage"`
 	Envs         []EnvRequest      `json:"environments"`
@@ -259,8 +262,14 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		// Managed-dependency toggles (custom stacks). Image stacks bring their own
 		// data services as images. App services now live in the project-level
 		// services[] graph, not per-env.
-		if req.Type == "custom" {
+		if req.Type == "custom" || req.Type == "database" {
 			envBlock["database"] = database
+			if database != "none" && req.DBVersion != "" {
+				envBlock["db_version"] = req.DBVersion
+			}
+			if database != "none" && req.DBExternal {
+				envBlock["db_external"] = true
+			}
 			envBlock["redis_enabled"] = req.Redis
 			envBlock["garage_enabled"] = req.Garage
 		}
@@ -357,7 +366,37 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 // nginx (+ an optional build "frontend") from the chosen language. This is a
 // transitional mapping of the legacy wizard fields until the blueprint picker
 // (Phase 2a-2b) seeds richer, language-agnostic graphs directly.
+// cloudbeaverService returns the CloudBeaver web SQL client as a web-routed image
+// service that depends on the managed database. As the only web service in a
+// database-hosting project it becomes the web entry (the env's route / HTTP port).
+// First run requires CloudBeaver's one-time admin setup; the DB connection is added
+// from the credentials shown in the Database info tab (host = the engine's alias).
+func cloudbeaverService(engine string) map[string]any {
+	return map[string]any{
+		"name":       "cloudbeaver",
+		"image":      "dbeaver/cloudbeaver",
+		"tag":        "latest",
+		"port":       "8978",
+		"web_routed": true,
+		// Publish on CloudBeaver's native 8978 by default rather than the env's
+		// HTTP port (8080), which would collide with Rigger itself on a single host.
+		// Editable in Edit Project → Services if 8978 is taken.
+		"host_port":  "8978",
+		"volumes":    []string{"cloudbeaver_data:/opt/cloudbeaver/workspace"},
+		"depends_on": []string{engine},
+	}
+}
+
 func seedServices(req CreateRequest) []map[string]any {
+	// Database-hosting projects have no application services — just the managed DB
+	// (emitted from the env's database/db_version by composegen). Optionally a
+	// CloudBeaver web SQL client is added as the sole web-routed service → web entry.
+	if req.Type == "database" {
+		if req.Cloudbeaver && req.Database != "" && req.Database != "none" {
+			return []map[string]any{cloudbeaverService(req.Database)}
+		}
+		return nil
+	}
 	if req.Type == "image" {
 		out := make([]map[string]any, 0, len(req.Images))
 		for _, im := range req.Images {
@@ -413,7 +452,7 @@ func seedServices(req CreateRequest) []map[string]any {
 		"healthcheck": health,
 		"volumes":     []string{"uploads:/app/storage/uploads"},
 	}
-	if req.Database == "postgres" || req.Database == "mysql" {
+	if req.Database == "postgres" || req.Database == "mysql" || req.Database == "mariadb" {
 		backend["depends_on"] = []string{req.Database}
 	}
 	nginx := map[string]any{

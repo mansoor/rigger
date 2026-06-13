@@ -25,6 +25,7 @@ const (
 // two-environment operation and is deferred to a later iteration.
 var stageTypes = map[string]bool{
 	"deploy": true, "update": true, "build": true,
+	"refresh": true, // regenerate docker-compose.yml from config/.env, then up -d (apply config changes)
 	"restart": true, "backup": true, "test": true,
 	"push":    true, // promote src env → dst env (pull/tag/push via registry)
 	"gate":    true, // manual approval pause (9d) — no env
@@ -243,6 +244,18 @@ func UpdateRun(d *db.DB, r Run) error {
 		r.PipelineID, r.PipelineID, keepPerPipe,
 	)
 	return nil
+}
+
+// UpdateRunProgress persists in-flight stage results for a still-running run
+// (status forced to 'running', finish time left NULL) WITHOUT pruning history.
+// Called repeatedly by the executor's progress callback, so it stays lightweight.
+func UpdateRunProgress(d *db.DB, id int64, stages []StageResult) error {
+	b, _ := json.Marshal(stages)
+	_, err := d.Exec(
+		`UPDATE pipeline_runs SET status='running', stages=?, finished_at=NULL WHERE id=?`,
+		string(b), id,
+	)
+	return err
 }
 
 // ListRuns returns up to limit most-recent runs for a pipeline, newest first.

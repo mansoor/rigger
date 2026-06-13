@@ -5,6 +5,8 @@ import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, f
 import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
+import RegistryPicker from '../components/RegistryPicker'
+import DatabaseSelect from '../components/DatabaseSelect'
 import EnvReorderModal from '../components/EnvReorderModal'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
 import Layout from '../components/Layout'
@@ -66,7 +68,6 @@ function Select({ value, onChange, options }) {
 }
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
-const DB_OPTIONS         = [{ value: 'none', label: 'None' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'mysql', label: 'MySQL' }]
 
 // Unified service model (Phase 2a): a service is built, pulled, or reuses another
 // service's image (a worker). Build services scaffold a Dockerfile from a template.
@@ -83,7 +84,7 @@ const BUILD_TEMPLATES = [
   { value: 'react', label: 'React / Vite' },
 ]
 // Managed-dependency service names a service may depend_on (env toggles).
-const MANAGED_DEPS = ['postgres', 'mysql', 'redis', 'garage']
+const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'garage']
 
 function serviceSource(s) {
   if (s.build) return 'build'
@@ -1092,7 +1093,8 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         <div className="grid grid-cols-3 gap-3 items-end">
           <div>
             <Label>Database</Label>
-            <Select value={cfg.database || 'none'} onChange={v => upd('database', v)} options={DB_OPTIONS} />
+            <DatabaseSelect engine={cfg.database || 'none'} version={cfg.db_version}
+              onChange={(eng, ver) => onChange({ ...cfg, database: eng, db_version: ver })} caption={false} />
           </div>
           <Toggle label="Redis" checked={!!cfg.redis_enabled} onChange={v => upd('redis_enabled', v)} />
           <Toggle label="Garage S3" checked={!!cfg.garage_enabled} onChange={v => upd('garage_enabled', v)} />
@@ -1715,12 +1717,17 @@ export default function EditProjectPage() {
                 <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
               </div>
             </div>
-            {/* Registry only applies to custom (build) stacks — image stacks pull
-                images directly, so hide it (matches the New Project wizard). */}
-            {project?.type !== 'image' && (
-              <div className="sm:max-w-[50%]">
+            {/* Registry only applies to stacks that BUILD images. Pull-only stacks
+                (image/prebuilt) and database-hosting stacks don't push, so hide it. */}
+            {(images || []).some(s => s.build) && (
+              <div className="sm:max-w-[60%]">
                 <Label>Registry</Label>
-                <Input value={project?.registry} onChange={v => setProject(p => ({ ...p, registry: v }))} />
+                <p className="text-xs text-content-subtle mb-2">Built images are tagged and pushed here. Pick a saved registry or add one with credentials so the build can authenticate.</p>
+                <RegistryPicker
+                  workspace={workspace}
+                  value={project?.registry}
+                  onChange={v => setProject(p => ({ ...p, registry: v }))}
+                />
               </div>
             )}
 
@@ -1866,7 +1873,7 @@ export default function EditProjectPage() {
         {tab === 'backup' && envs && <BackupSection workspaceName={name} envs={envs} updateEnv={updateEnv} />}
 
         {/* Pipelines (Phase 9) */}
-        {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} />}
+        {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} serviceNames={(images || []).map(img => img.name).filter(Boolean)} />}
 
         {/* Danger zone */}
         {tab === 'danger' && <DangerZone name={name} />}

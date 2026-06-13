@@ -4,7 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceRegistries, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, fetchBlueprints } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, fetchBlueprints } from '../lib/api'
+import RegistryPicker from '../components/RegistryPicker'
+import DatabaseSelect from '../components/DatabaseSelect'
 import { useWorkspaceStore } from '../store/workspace'
 import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
@@ -81,8 +83,6 @@ function StepHeader({ step, title, subtitle }) {
 
 // ── Step 1: Project ───────────────────────────────────────────────────────────
 
-const CUSTOM_REGISTRY = '__custom__'
-
 function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId }) {
   // Remote hosts available to this workspace (Phase 3) — for the default-host selector.
   const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
@@ -143,12 +143,15 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
 
 // ── Step 2: Stack ─────────────────────────────────────────────────────────────
 
+// Display order (Phase 0 of the database-hosting roadmap): curated → image → custom →
+// repo → blueprint. "Database Hosting" is appended later (roadmap Phase 4).
 const STACK_TYPES = [
-  { id: 'scan',      label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
-  { id: 'blueprint', label: 'Start from a stack template', desc: 'No repo yet — pick a stack (Laravel, Spring, Django, Go, .NET…); Rigger scaffolds a starter Dockerfile + services.' },
   { id: 'prebuilt',  label: 'Pre-built template',  desc: 'Pick from curated stacks — NPM, WordPress, Vaultwarden, Uptime Kuma…' },
   { id: 'image',     label: 'Image stack',          desc: 'Deploy any Docker images — specify your own image names, tags, and ports.' },
   { id: 'custom',    label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
+  { id: 'scan',      label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
+  { id: 'blueprint', label: 'Start from a stack template', desc: 'No repo yet — pick a stack (Laravel, Spring, Django, Go, .NET…); Rigger scaffolds a starter Dockerfile + services.' },
+  { id: 'database',  label: 'Database hosting', desc: 'Run a managed database (PostgreSQL, MySQL, MariaDB) on its own — no app code.' },
 ]
 
 // BlueprintStack: pick a stack template (no repo). The selected blueprint's
@@ -162,29 +165,48 @@ function BlueprintStack({ data, onChange }) {
     onChange('blueprintId', bp.id)
     onChange('blueprintServices', bp.services || [])
   }
+  // The seeds note counts the app service(s) plus a managed database when chosen,
+  // so "creates 2 services from the start" reads true (e.g. Laravel + PostgreSQL).
+  const appCount = (data.blueprintServices || []).length
+  const dbCount = (data.database && data.database !== 'none') ? 1 : 0
   return (
-    <div className="space-y-3">
-      {isLoading && <p className="text-sm text-content-subtle">Loading stacks…</p>}
-      {error && <p className="text-sm text-danger-fg">Couldn’t load stack templates.</p>}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {blueprints.map(bp => (
-          <button key={bp.id} type="button" onClick={() => pick(bp)}
-            className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
-              data.blueprintId === bp.id
-                ? 'border-brand-600 bg-brand-600/10'
-                : 'border-border hover:border-border-strong bg-surface'}`}>
-            <div className="text-sm font-semibold text-content-strong">{bp.label}</div>
-            <div className="text-[11px] text-content-faint mt-0.5">
-              {bp.language}{bp.port ? ` · :${bp.port}` : ''}{bp.needs_nginx ? ' · +nginx' : ''}
-            </div>
-          </button>
-        ))}
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-content-muted mb-2">Programming language</p>
+        {isLoading && <p className="text-sm text-content-subtle">Loading stacks…</p>}
+        {error && <p className="text-sm text-danger-fg">Couldn’t load stack templates.</p>}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {blueprints.map(bp => (
+            <button key={bp.id} type="button" onClick={() => pick(bp)}
+              className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                data.blueprintId === bp.id
+                  ? 'border-brand-600 bg-brand-600/10'
+                  : 'border-border hover:border-border-strong bg-surface'}`}>
+              <div className="text-sm font-semibold text-content-strong">{bp.label}</div>
+              <div className="text-[11px] text-content-faint mt-0.5">
+                {bp.language}{bp.port ? ` · :${bp.port}` : ''}{bp.needs_nginx ? ' · +nginx' : ''}
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
-      {data.blueprintId && (
+
+      <div className="pt-1 border-t border-border">
+        <p className="text-xs font-semibold uppercase tracking-wider text-content-muted mb-2 mt-3">
+          Database <span className="font-normal normal-case text-content-faint">(optional)</span>
+        </p>
+        <DatabaseSelect engine={data.database} version={data.dbVersion}
+          onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
+      </div>
+
+      {(data.blueprintId || dbCount > 0) && (
         <div className="bg-surface border border-border rounded-xl p-3 text-xs text-content-subtle">
-          Seeds {(data.blueprintServices || []).length} service{(data.blueprintServices || []).length !== 1 ? 's' : ''}:{' '}
-          <span className="font-mono text-content">{(data.blueprintServices || []).map(s => s.name).join(', ')}</span>.
-          Rigger scaffolds a starter Dockerfile you replace with your code — fine-tune everything in <strong>Edit Project → Services</strong>.
+          Seeds {appCount + dbCount} service{appCount + dbCount !== 1 ? 's' : ''}:{' '}
+          <span className="font-mono text-content">
+            {[...(data.blueprintServices || []).map(s => s.name), dbCount ? data.database : null].filter(Boolean).join(', ')}
+          </span>.
+          {data.blueprintId && ' Rigger scaffolds a starter Dockerfile you replace with your code — fine-tune everything in '}
+          {data.blueprintId && <strong>Edit Project → Services</strong>}{data.blueprintId && '.'}
         </div>
       )}
     </div>
@@ -267,7 +289,6 @@ function ScanStack({ data, onChange }) {
 
 const BACKEND_OPTIONS  = [{ value: 'laravel', label: 'Laravel (PHP-FPM)' }, { value: 'nodejs', label: 'Node.js (Express / Fastify)' }]
 const FRONTEND_OPTIONS = [{ value: 'none', label: 'None (API only)' }, { value: 'nextjs', label: 'Next.js' }, { value: 'react', label: 'React / Vite SPA' }]
-const DB_OPTIONS       = [{ value: 'none', label: 'None' }, { value: 'postgres', label: 'PostgreSQL' }, { value: 'mysql', label: 'MySQL' }]
 
 function TemplateCard({ tmpl, selected, onClick }) {
   const tagColors = ['bg-info-subtle text-info-fg', 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300', 'bg-success-subtle text-success-fg']
@@ -538,91 +559,24 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
   )
 }
 
-// RegistryField — saved-registries dropdown + manual entry. Shown only for
-// custom (build-type) stacks: those tag & push built images to the registry so
-// remote hosts can pull them without rebuilding. Image/prebuilt stacks pull
-// their images directly (registry embedded in each image ref), so it's hidden.
+// RegistryField — container registry selector for custom (build-type) stacks:
+// those tag & push built images to the registry so remote hosts can pull them
+// without rebuilding. Image/prebuilt stacks pull their images directly (registry
+// embedded in each image ref), so it's hidden. The picker lets the user choose a
+// saved workspace registry or add a new one inline (with credentials), so the
+// build can authenticate to push.
 function RegistryField({ data, onChange, errors, workspace, defaultRegistryId }) {
-  const { data: registries = [], isLoading } = useQuery({
-    queryKey: ['ws-registries', workspace],
-    queryFn: () => fetchWorkspaceRegistries(workspace),
-    enabled: !!workspace,
-  })
-
-  // Default once loaded (if none chosen yet): the workspace's default registry if
-  // it set one, else the first in the pool.
-  const wsDefault = registries.find(r => String(r.id) === String(defaultRegistryId))
-  useEffect(() => {
-    if (!isLoading && registries.length > 0 && !data.registry) {
-      onChange('registry', (wsDefault || registries[0]).url)
-    }
-  }, [isLoading, registries.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const hasRegistries = !isLoading && registries.length > 0
-  const isCustom = !isLoading && registries.length > 0 && !registries.some(r => r.url === data.registry)
-  const selectValue = isCustom ? CUSTOM_REGISTRY : (data.registry || '')
-  const handleSelectChange = val => onChange('registry', val === CUSTOM_REGISTRY ? '' : val)
-
   return (
     <div>
       <Label required>Container registry</Label>
       <p className="text-xs text-content-subtle mb-2">Built images are tagged and pushed here so remote hosts can pull them without rebuilding.</p>
-
-      {!isLoading && !hasRegistries && (
-        <div className="mb-3 flex items-start gap-2 px-3 py-2.5 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
-          <span className="text-warning-fg mt-0.5 shrink-0">⚠</span>
-          <p className="text-xs text-warning-fg">
-            No registries configured.{' '}
-            <a href="/settings" target="_blank" rel="noreferrer"
-              className="underline underline-offset-2 hover:text-warning-fg transition-colors">
-              Add one in Settings
-            </a>{' '}
-            to reuse credentials across workspaces.
-          </p>
-        </div>
-      )}
-
-      {hasRegistries && (
-        <select
-          value={selectValue}
-          onChange={e => handleSelectChange(e.target.value)}
-          className={`w-full px-3 py-2 bg-surface-raised border rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors ${
-            errors.registry ? 'border-danger' : 'border-border-strong'
-          }`}
-        >
-          {registries.map(r => (
-            <option key={r.id} value={r.url}>{r.name} — {r.url}</option>
-          ))}
-          <option value={CUSTOM_REGISTRY}>Other (enter manually)…</option>
-        </select>
-      )}
-      {hasRegistries && wsDefault && data.registry === wsDefault.url && (
-        <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
-      )}
-
-      {(!hasRegistries || isCustom || selectValue === CUSTOM_REGISTRY) && (
-        <div className={hasRegistries ? 'mt-2' : ''}>
-          <Input
-            value={data.registry} onChange={v => onChange('registry', v)}
-            placeholder="registry.example.com"
-            error={errors.registry}
-          />
-          {hasRegistries && (
-            <p className="text-xs text-content-subtle mt-1">
-              To save this registry for reuse,{' '}
-              <a href="/settings" target="_blank" rel="noreferrer"
-                className="text-brand-400 hover:text-brand-300 underline underline-offset-2 transition-colors">
-                add it in Settings
-              </a>{' '}
-              first.
-            </p>
-          )}
-        </div>
-      )}
-
-      {errors.registry && hasRegistries && !isCustom && selectValue !== CUSTOM_REGISTRY && (
-        <p className="text-danger-fg text-xs mt-1">{errors.registry}</p>
-      )}
+      <RegistryPicker
+        workspace={workspace}
+        value={data.registry}
+        onChange={v => onChange('registry', v)}
+        defaultRegistryId={defaultRegistryId}
+        error={errors.registry}
+      />
     </div>
   )
 }
@@ -661,6 +615,27 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
 
       {/* No-repo stack template picker */}
       {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
+
+      {/* Database hosting: a managed database on its own (no app code) */}
+      {data.stackType === 'database' && (
+        <div className="space-y-3">
+          <div>
+            <Label required>Database engine</Label>
+            <DatabaseSelect engine={data.database === 'none' ? '' : data.database} version={data.dbVersion}
+              onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
+            {errors.database && <p className="text-danger-fg text-xs mt-1">{errors.database}</p>}
+          </div>
+          <div className="pt-1 border-t border-border">
+            <Toggle label="Include CloudBeaver (web SQL client)"
+              hint="Browser-based SQL client supporting many engines — becomes this project's web entry. You complete its one-time setup and add the DB connection (details on the Database tab)."
+              checked={data.cloudbeaver} onChange={v => onChange('cloudbeaver', v)} />
+          </div>
+          <p className="text-xs text-content-subtle">
+            A standalone managed database with auto-generated credentials. Connect from other projects (shared network),
+            from outside (enable external access in Edit Project), or browse it via CloudBeaver above.
+          </p>
+        </div>
+      )}
 
       {/* Image stack: custom image list + env vars */}
       {data.stackType === 'image' && (
@@ -739,7 +714,8 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
             </div>
             <div>
               <Label>Database</Label>
-              <Select value={data.database} onChange={v => onChange('database', v)} options={DB_OPTIONS} />
+              <DatabaseSelect engine={data.database} version={data.dbVersion}
+                onChange={(eng, ver) => { onChange('database', eng); onChange('dbVersion', ver) }} />
             </div>
           </div>
           <div className="space-y-3 pt-2 border-t border-border">
@@ -1662,7 +1638,7 @@ function Stepper({ current, maxVisited, onStepClick }) {
 const DEFAULT_DATA = {
   name: '', key: '', registry: '',
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
-  backend: 'laravel', frontend: 'none', database: 'postgres', redis: false, garage: false,
+  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', cloudbeaver: false, redis: false, garage: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
   environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
@@ -1732,6 +1708,7 @@ export default function NewProjectPage() {
     }
     if (step === 2 && data.stackType === 'prebuilt' && !data.template) e.template = 'Select a template'
     if (step === 2 && data.stackType === 'image' && data.images.every(img => !img.name || !img.image)) e.images = 'Add at least one service with a name and image'
+    if (step === 2 && data.stackType === 'database' && (!data.database || data.database === 'none')) e.database = 'Select a database engine'
     // Steps 3/4 are Services then Environments (swapped to match Edit workspace).
     if (step === 3) {
       const badVols = data.volumes.filter(v => v.name && !v.mountPath)
@@ -1750,7 +1727,8 @@ export default function NewProjectPage() {
   function buildPayload() {
     const isScan = data.stackType === 'scan'
     const isBlueprint = data.stackType === 'blueprint'
-    const isImage = !isScan && !isBlueprint && (data.stackType === 'prebuilt' || data.stackType === 'image')
+    const isDatabase = data.stackType === 'database'
+    const isImage = !isScan && !isBlueprint && !isDatabase && (data.stackType === 'prebuilt' || data.stackType === 'image')
     return {
       workspace: workspace, // parent-tier workspace KEY
       name: data.name.trim(), // free-form display name
@@ -1758,7 +1736,7 @@ export default function NewProjectPage() {
       // Registry tags/pushes built images (custom + scan + blueprint build stacks).
       // Image and prebuilt stacks pull directly, so send empty.
       registry: (data.stackType === 'custom' || isScan || isBlueprint) ? data.registry.trim() : '',
-      type: isImage ? 'image' : 'custom',
+      type: isDatabase ? 'database' : isImage ? 'image' : 'custom',
       template: data.stackType === 'prebuilt' ? data.template : '',
       // Repo-scan sends the detected graph; blueprint sends the seeded graph.
       // Blueprint has no repo — Dockerfiles scaffold from the template on bootstrap.
@@ -1784,11 +1762,13 @@ export default function NewProjectPage() {
       custom_env_vars: data.stackType === 'image' ? data.customEnvVars : {},
       initial_env_vars: {}, // vars now per-environment via environments[].vars
       named_volumes: data.volumes.filter(v => v.name && v.mountPath),
-      backend: (isImage || isScan) ? '' : data.backend,
-      frontend: (isImage || isScan) ? 'none' : data.frontend,
+      backend: (isImage || isScan || isDatabase) ? '' : data.backend,
+      frontend: (isImage || isScan || isDatabase) ? 'none' : data.frontend,
       database: isImage ? 'none' : data.database,
-      redis: isImage ? false : data.redis,
-      garage: isImage ? false : data.garage,
+      db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
+      cloudbeaver: isDatabase ? data.cloudbeaver : false,
+      redis: (isImage || isDatabase) ? false : data.redis,
+      garage: (isImage || isDatabase) ? false : data.garage,
       environments: data.environments.filter(e => e.name).map(e => ({
         ...e,
         ssl_enabled: e.traefik && !!e.domain && !!e.ssl_enabled,
