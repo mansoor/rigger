@@ -1621,14 +1621,15 @@ function Step7({ payload, onDone, onResult, onGoBack }) {
 
 const STEPS = ['Project', 'Stack', 'Dependencies', 'Services', 'Environments', 'Backup', 'Review', 'Result']
 
-function Stepper({ current, maxVisited, onStepClick }) {
+function Stepper({ current, maxVisited, onStepClick, skipStep = 0 }) {
   return (
     <div className="flex items-center gap-0 mb-8">
       {STEPS.map((label, i) => {
         const n = i + 1
+        const skipped  = n === skipStep // not applicable for the chosen stack
         const state    = n < current ? 'done' : n === current ? 'active' : 'pending'
         // The final Result step is never clickable — can't skip back to it
-        const clickable = n <= maxVisited && n !== current && n < STEPS.length
+        const clickable = !skipped && n <= maxVisited && n !== current && n < STEPS.length
         return (
           <div key={label} className="flex items-center flex-1 last:flex-none">
             <div className="flex flex-col items-center gap-1">
@@ -1637,15 +1638,16 @@ function Stepper({ current, maxVisited, onStepClick }) {
                 onClick={() => clickable && onStepClick(n)}
                 disabled={!clickable}
                 className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+                  skipped            ? 'bg-surface-raised/40 text-content-faint border border-border-strong/50 opacity-50' :
                   state === 'done'   ? 'bg-brand-600 text-white' :
                   state === 'active' ? 'bg-brand-600 text-white ring-2 ring-brand-400 ring-offset-2 ring-offset-canvas' :
                   'bg-surface-raised text-content-subtle border border-border-strong'
                 } ${clickable ? 'cursor-pointer hover:ring-2 hover:ring-brand-400 hover:ring-offset-1 hover:ring-offset-canvas' : 'cursor-default'}`}
-                title={clickable ? `Go to step ${n}: ${label}` : undefined}
+                title={skipped ? `${label} — not applicable for this stack` : clickable ? `Go to step ${n}: ${label}` : undefined}
               >
-                {state === 'done' ? '✓' : n}
+                {skipped ? '–' : state === 'done' ? '✓' : n}
               </button>
-              <span className={`text-xs ${state === 'active' ? 'text-content-strong' : clickable ? 'text-content-muted' : 'text-content-subtle'}`}>{label}</span>
+              <span className={`text-xs ${skipped ? 'text-content-faint line-through' : state === 'active' ? 'text-content-strong' : clickable ? 'text-content-muted' : 'text-content-subtle'}`}>{label}</span>
             </div>
             {i < STEPS.length - 1 && (
               <div className={`flex-1 h-px mx-2 mb-4 ${n < current ? 'bg-brand-600' : 'bg-surface-overlay'}`} />
@@ -1744,9 +1746,26 @@ export default function NewProjectPage() {
     return Object.keys(e).length === 0
   }
 
+  // The Dependencies step (3) only applies to stacks that have managed deps; image
+  // and pre-built stacks bring their own services, so it's skipped entirely there.
+  const depsApplies = ['custom', 'blueprint', 'database', 'scan'].includes(data.stackType)
+
   function next() {
     if (!validate()) return
-    setStep(s => { const n = s + 1; setMaxVisited(m => Math.max(m, n)); return n })
+    setStep(s => {
+      let n = s + 1
+      if (n === 3 && !depsApplies) n = 4 // skip Dependencies when N/A
+      setMaxVisited(m => Math.max(m, n))
+      return n
+    })
+  }
+
+  // Step back, hopping over the Dependencies step when it doesn't apply.
+  function prev() {
+    if (step <= 1) { navigate(-1); return }
+    let p = step - 1
+    if (p === 3 && !depsApplies) p = 2
+    setStep(p)
   }
 
   function buildPayload() {
@@ -1828,7 +1847,7 @@ export default function NewProjectPage() {
       {/* Wizard body */}
       <div className="flex-1 flex items-start justify-center p-8">
         <div className="w-full max-w-2xl">
-          <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} />
+          <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} skipStep={depsApplies ? 0 : 3} />
 
           <div className="bg-surface border border-border rounded-2xl p-8">
             {step === 1 && <Step1 data={data} onChange={update} errors={errors} onConflict={setNameConflict} workspace={workspace} defaultHostId={defaultHostId} />}
@@ -1855,7 +1874,7 @@ export default function NewProjectPage() {
               <div className="flex items-center justify-between mt-8 pt-6 border-t border-border">
                 <button
                   type="button"
-                  onClick={() => step > 1 ? setStep(s => s - 1) : navigate(-1)}
+                  onClick={prev}
                   className={`text-sm font-medium px-4 py-2 rounded-lg border transition-colors ${
                     step === 1
                       ? 'border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg'
