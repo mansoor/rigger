@@ -1243,7 +1243,7 @@ function WorkspaceBackup() {
               <input
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
-                placeholder={selectedWs ? `${selectedWs}_<timestamp>.rws` : 'auto: <project>_<timestamp>.rws'}
+                placeholder={selectedWs ? `${currentWs}_${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<project>_<timestamp>.rws'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1309,7 +1309,7 @@ function WorkspaceBackup() {
               <input
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
-                placeholder={selectedWs ? `${selectedWs}-<timestamp>.rwb` : 'auto: <project>-<timestamp>.rwb'}
+                placeholder={selectedWs ? `${currentWs}_${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>_<project>-<timestamp>.rwb'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
               />
             </div>
