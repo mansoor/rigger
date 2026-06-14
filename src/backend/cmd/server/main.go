@@ -810,6 +810,10 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database", authSvc.Middleware(http.HandlerFunc(handler.GetDatabaseInfo)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseSchemas)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseSchema)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas/{schema}", authSvc.Middleware(http.HandlerFunc(handler.DeleteDatabaseSchema)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseUsers)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseUser)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/adminer-login", authSvc.Middleware(http.HandlerFunc(handler.AdminerLogin)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/image-status", authSvc.Middleware(http.HandlerFunc(handler.GetImageStatus)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/track-latest", authSvc.Middleware(http.HandlerFunc(handler.TrackLatest)))
 

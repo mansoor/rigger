@@ -223,6 +223,38 @@ func TestWebRoutedHostPortSinglePortsBlock(t *testing.T) {
 	}
 }
 
+// The Adminer web-SQL service (database-hosting web entry): publishes its host port
+// once (8978:8080), injects the env's .env (env_file), and bind-mounts the Rigger
+// auto-login plugin into Adminer's plugins-enabled dir via ${RIGGER_BIND_ROOT}.
+func TestAdminerWebSQLService(t *testing.T) {
+	cfg := `{
+		"project": {"name":"db","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"adminer","image":"adminer","tag":"4.8.1","port":"8080","web_routed":true,
+			"host_port":"8978","env_file":true,
+			"volumes":["${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro"]}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := svcBlock(t, string(out), "adminer")
+	for _, want := range []string{
+		"image: adminer:4.8.1",
+		"    env_file: .env",
+		"      - \"8978:8080\"",
+		"      - ${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro",
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("adminer block missing %q\n---\n%s", want, a)
+		}
+	}
+	// Exactly one ports: block (the host_port), not also the env HTTP port.
+	if strings.Count(a, "ports:") != 1 {
+		t.Errorf("adminer must have a single ports: block\n%s", a)
+	}
+}
+
 // A self-serving app (Spring Boot / Go / .NET shape): one build service routed by
 // Traefik on its own port, no nginx. Verifies traefik labels + traefik network join.
 func TestServicesSelfServingTraefik(t *testing.T) {

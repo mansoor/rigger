@@ -36,6 +36,7 @@ type dbExecCtx struct {
 	eng       databases.Engine
 	exec      executor.Executor
 	container string // resolved docker container ref (compose container_name / swarm task)
+	host      string // network-resolvable DB host on the compose net (what Adminer connects to)
 	dbName    string
 	user      string
 	rootPass  string // mysql/mariadb root password (for privileged ops)
@@ -79,7 +80,7 @@ func (h *Handler) dbExecContext(workspace, project, env string) (*dbExecCtx, err
 		return nil, err
 	}
 	return &dbExecCtx{
-		engine: engine, eng: eng, exec: ex, container: ref, dbName: dbName,
+		engine: engine, eng: eng, exec: ex, container: ref, host: container, dbName: dbName,
 		user: dotenv[pfx+"_USER"], rootPass: dotenv["MYSQL_ROOT_PASSWORD"], password: dotenv[pfx+"_PASSWORD"],
 	}, nil
 }
@@ -192,4 +193,56 @@ func (h *Handler) CreateDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "created", "name": name})
+}
+
+// DeleteDatabaseSchema — DELETE …/envs/{env}/database/schemas/{schema}?confirm={schema}.
+// Drops a schema (postgres, CASCADE) or database (mysql/mariadb). Destructive, so it
+// requires the typed-name confirmation to match, and refuses the primary application
+// database / the postgres "public" schema. Also clears any stored users for it.
+// operator+.
+func (h *Handler) DeleteDatabaseSchema(w http.ResponseWriter, r *http.Request) {
+	workspace, project, env := r.PathValue("workspace"), r.PathValue("name"), r.PathValue("env")
+	if !auth.AtLeast(h.pipelineRole(r, workspace, project), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("schema"))
+	if !dbIdentRe.MatchString(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		return
+	}
+	if r.URL.Query().Get("confirm") != name {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "confirmation name does not match"})
+		return
+	}
+	c, err := h.dbExecContext(workspace, project, env)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if name == c.dbName || (c.engine == "postgres" && name == "public") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "refusing to delete the primary application database"})
+		return
+	}
+	var sql string
+	if c.engine == "postgres" {
+		sql = fmt.Sprintf(`DROP SCHEMA IF EXISTS "%s" CASCADE`, name)
+	} else {
+		sql = fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name)
+	}
+	if out, derr := c.run(sql); derr != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "delete failed: " + strings.TrimSpace(string(out)+" "+derr.Error())})
+		return
+	}
+	// Forget any Rigger-created users recorded for this schema (the DB users may
+	// still exist but their schema is gone; leave them in the DB, drop our record).
+	h.db.Exec(`DELETE FROM managed_db_users WHERE workspace=? AND project=? AND env=? AND schema_name=?`, //nolint:errcheck
+		workspace, project, env, name)
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec( //nolint:errcheck
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+			claims.UserID, claims.Username, h.resourcePrefix(workspace, project), "db-delete-schema:"+name, env,
+		)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "name": name})
 }

@@ -424,6 +424,25 @@ func (d *DB) migrate() error {
 			created_at  INTEGER NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_deploy_history_env ON deploy_history(workspace, project, env, id);
+
+		-- DB Hosting: users Rigger created on a managed database (one per schema it
+		-- provisions), so the Manage Database UI can show the user/password and build
+		-- a per-user Adminer auto-login link on reload. The password is AES-256-GCM
+		-- encrypted at rest (same key as host SSH keys). Scoped by (workspace, project,
+		-- env); username is unique within that scope.
+		CREATE TABLE IF NOT EXISTS managed_db_users (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace     TEXT NOT NULL,
+			project       TEXT NOT NULL,
+			env           TEXT NOT NULL,
+			engine        TEXT NOT NULL,
+			schema_name   TEXT NOT NULL DEFAULT '',
+			username      TEXT NOT NULL,
+			password_enc  TEXT NOT NULL,
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(workspace, project, env, username)
+		);
+		CREATE INDEX IF NOT EXISTS idx_managed_db_users_env ON managed_db_users(workspace, project, env);
 	`)
 	if err != nil {
 		return err

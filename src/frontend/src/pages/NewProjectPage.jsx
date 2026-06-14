@@ -1265,12 +1265,12 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
           stacks bring their own data services as images so it's hidden for them. */}
       {managedApplies && (
         <ManagedServices
-          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, garage: data.garage, cloudbeaver: data.cloudbeaver }}
+          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, garage: data.garage, webSql: data.webSql }}
           onChange={v => {
             onChange('database', v.database); onChange('dbVersion', v.dbVersion)
-            onChange('redis', !!v.redis); onChange('garage', !!v.garage); onChange('cloudbeaver', !!v.cloudbeaver)
+            onChange('redis', !!v.redis); onChange('garage', !!v.garage); onChange('webSql', !!v.webSql)
           }}
-          showCloudbeaver={data.stackType === 'database'}
+          showWebSql={data.stackType === 'database'}
           requireDatabase={data.stackType === 'database'}
           error={errors.database}
           resourcePrefix={data.key ? `${workspace}_${data.key}` : ''}
@@ -1659,7 +1659,7 @@ function Stepper({ current, maxVisited, onStepClick }) {
 const DEFAULT_DATA = {
   name: '', key: '', registry: '',
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
-  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', cloudbeaver: false, redis: false, garage: false,
+  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', webSql: false, redis: false, garage: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
   environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
@@ -1790,7 +1790,7 @@ export default function NewProjectPage() {
       frontend: (isImage || isScan || isDatabase) ? 'none' : data.frontend,
       database: isImage ? 'none' : data.database,
       db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
-      cloudbeaver: isDatabase ? data.cloudbeaver : false,
+      web_sql: isDatabase ? data.webSql : false,
       redis: (isImage || isDatabase) ? false : data.redis,
       garage: (isImage || isDatabase) ? false : data.garage,
       environments: data.environments.filter(e => e.name).map(e => ({

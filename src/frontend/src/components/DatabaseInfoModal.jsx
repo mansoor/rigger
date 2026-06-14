@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema } from '../lib/api'
+import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
 function humanBytes(n) {
@@ -39,7 +39,25 @@ function Row({ label, value, mono = true }) {
   )
 }
 
-export default function DatabaseInfoModal({ workspace, name, env, canReveal = false, canManage = false, onClose }) {
+// ConnectBtn opens an Adminer auto-login window for the given identity. webSqlEnabled
+// reflects whether the project has an Adminer web-SQL service; adminerUrl is the
+// deployed web-entry URL (Adminer). Hidden/disabled with a hint otherwise.
+function ConnectBtn({ openAdminer, webSqlEnabled, adminerUrl, as = 'admin', label = 'Connect to database', compact = false }) {
+  if (!webSqlEnabled) {
+    return compact ? null : <p className="text-[11px] text-content-faint">Enable <strong>Adminer</strong> in Edit Project → Services to use the web SQL console.</p>
+  }
+  if (!adminerUrl) {
+    return compact ? null : <p className="text-[11px] text-content-faint">Deploy this environment to get a web SQL console URL.</p>
+  }
+  return (
+    <button type="button" onClick={() => openAdminer(as)}
+      className={`inline-flex items-center gap-1.5 rounded-lg font-semibold text-white bg-brand-600 hover:bg-brand-700 ${compact ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1.5 text-xs'}`}>
+      ⛁ {label}
+    </button>
+  )
+}
+
+export default function DatabaseInfoModal({ workspace, name, env, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onClose }) {
   const [reveal, setReveal] = useState(false)
   const [tab, setTab] = useState('connection')
   const { data: info, isLoading } = useQuery({
@@ -48,6 +66,18 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
   })
   const has = info && info.engine && info.engine !== 'none'
   const tabCls = (t) => `px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-brand-500 text-content-strong' : 'border-transparent text-content-subtle hover:text-content'}`
+
+  // Open Adminer auto-logged-in as `as` ('admin' or a username). The window is opened
+  // synchronously (avoids popup blocking); the authenticated HTML (a self-submitting
+  // POST form) is then written into it so the JWT stays in the request header.
+  function openAdminer(as) {
+    if (!adminerUrl) return
+    const wnd = window.open('', '_blank')
+    if (wnd) { try { wnd.document.write('<p style="font:14px system-ui;padding:2rem;color:#888">Connecting…</p>') } catch { /* */ } }
+    adminerLoginHTML(workspace, name, env, as, adminerUrl)
+      .then(htmlText => { if (wnd) { wnd.document.open(); wnd.document.write(htmlText); wnd.document.close() } })
+      .catch(() => { if (wnd) { try { wnd.document.body.innerHTML = '<p style="font:14px system-ui;padding:2rem;color:#c00">Failed to open the SQL console.</p>' } catch { /* */ } } })
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -75,9 +105,18 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
           ) : !has ? (
             <p className="text-xs text-content-subtle">No managed database configured for this environment.</p>
           ) : tab === 'manage' ? (
-            <ManageTab workspace={workspace} name={name} env={env} info={info} canManage={canManage} />
+            <ManageTab workspace={workspace} name={name} env={env} info={info} canManage={canManage}
+              openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} />
           ) : (
             <>
+              {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
+              {canManage && (
+                <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
+                  <div className="text-xs text-content-subtle">Open a browser SQL console connected to this database.</div>
+                  <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" />
+                </section>
+              )}
+
               {/* In-network connection */}
               <section className="space-y-1.5">
                 <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">In-network (from other services)</h3>
@@ -149,24 +188,80 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
   )
 }
 
-// ManageTab — the safe management surface (Phase 6): list schemas/databases with
-// table count + size, and create a new one (operator+). No ad-hoc SQL.
-function ManageTab({ workspace, name, env, info, canManage }) {
+// PwCell renders a managed user's password masked, with reveal + copy.
+function PwCell({ password }) {
+  const [show, setShow] = useState(false)
+  if (!password) return <span className="text-content-faint">—</span>
+  return (
+    <span className="inline-flex items-center gap-1">
+      <code className="font-mono text-content select-all">{show ? password : '••••••••'}</code>
+      <button type="button" onClick={() => setShow(s => !s)} title={show ? 'Hide' : 'Reveal'}
+        className="px-1 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle text-[10px]">{show ? '🙈' : '👁'}</button>
+      <CopyBtn value={password} />
+    </span>
+  )
+}
+
+const dbIdent = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/
+
+// ManageTab — schemas/databases with table count + size, each row joined to the
+// Rigger-created user that owns it (user, password, one-click Adminer link). Create
+// a schema (optionally with a dedicated user that gets granted on it). operator+.
+function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlEnabled, adminerUrl }) {
   const qc = useQueryClient()
   const [newName, setNewName] = useState('')
+  const [withUser, setWithUser] = useState(true)
+  const [newUser, setNewUser] = useState('')
   const [err, setErr] = useState('')
-  const key = ['db-schemas', workspace, name, env]
-  const { data, isLoading, error } = useQuery({ queryKey: key, queryFn: () => fetchDatabaseSchemas(workspace, name, env) })
+  const [created, setCreated] = useState(null) // { name, password } shown once
+  const sKey = ['db-schemas', workspace, name, env]
+  const uKey = ['db-users', workspace, name, env, canManage]
+  const { data, isLoading, error } = useQuery({ queryKey: sKey, queryFn: () => fetchDatabaseSchemas(workspace, name, env) })
+  const { data: usersData } = useQuery({ queryKey: uKey, queryFn: () => fetchDatabaseUsers(workspace, name, env, canManage) })
   const unit = data?.unit || 'schema'
+  const users = usersData?.users || []
+  const userBySchema = {}
+  users.forEach(u => { if (u.schema && !userBySchema[u.schema]) userBySchema[u.schema] = u })
+
   const createMut = useMutation({
-    mutationFn: () => createDatabaseSchema(workspace, name, env, newName.trim()),
-    onSuccess: () => { setNewName(''); setErr(''); qc.invalidateQueries({ queryKey: key }) },
+    mutationFn: async () => {
+      const schema = newName.trim()
+      await createDatabaseSchema(workspace, name, env, schema)
+      if (withUser && newUser.trim()) {
+        const r = await createDatabaseUser(workspace, name, env, { name: newUser.trim(), schema })
+        return r
+      }
+      return null
+    },
+    onSuccess: (r) => {
+      setNewName(''); setNewUser(''); setErr('')
+      setCreated(r && r.name ? { name: r.name, password: r.password } : null)
+      qc.invalidateQueries({ queryKey: sKey }); qc.invalidateQueries({ queryKey: uKey })
+    },
     onError: (e) => setErr(e?.response?.data?.error || 'Create failed'),
   })
-  const valid = /^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(newName.trim())
+  const schemaValid = dbIdent.test(newName.trim())
+  const userValid = !withUser || dbIdent.test(newUser.trim())
+
+  // Delete a schema/database — requires typing the exact name to confirm.
+  const [delName, setDelName] = useState('')   // schema pending delete
+  const [delTyped, setDelTyped] = useState('') // what the user typed
+  const [delErr, setDelErr] = useState('')
+  const deleteMut = useMutation({
+    mutationFn: () => deleteDatabaseSchema(workspace, name, env, delName),
+    onSuccess: () => { setDelName(''); setDelTyped(''); setDelErr(''); qc.invalidateQueries({ queryKey: sKey }); qc.invalidateQueries({ queryKey: uKey }) },
+    onError: (e) => setDelErr(e?.response?.data?.error || 'Delete failed'),
+  })
 
   return (
     <div className="space-y-4">
+      {canManage && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
+          <div className="text-xs text-content-subtle">Browser SQL console, auto-logged-in as the database admin.</div>
+          <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" label="Connect as admin" />
+        </div>
+      )}
+
       <section className="space-y-1.5">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">
           {unit === 'database' ? 'Databases' : 'Schemas'}
@@ -178,40 +273,103 @@ function ManageTab({ workspace, name, env, info, canManage }) {
         ) : (data?.schemas || []).length === 0 ? (
           <p className="text-xs text-content-subtle">None yet.</p>
         ) : (
-          <div className="rounded-lg border border-border-strong overflow-hidden">
+          <div className="rounded-lg border border-border-strong overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-surface-raised/60 text-content-subtle">
-                <tr><th className="text-left px-3 py-1.5 font-medium">Name</th><th className="text-right px-3 py-1.5 font-medium">Tables</th><th className="text-right px-3 py-1.5 font-medium">Size</th></tr>
+                <tr>
+                  <th className="text-left px-3 py-1.5 font-medium">Name</th>
+                  <th className="text-right px-3 py-1.5 font-medium">Tables</th>
+                  <th className="text-right px-3 py-1.5 font-medium">Size</th>
+                  <th className="text-left px-3 py-1.5 font-medium">User</th>
+                  {canManage && <th className="text-left px-3 py-1.5 font-medium">Password</th>}
+                  {webSqlEnabled && <th className="text-right px-3 py-1.5 font-medium">SQL</th>}
+                  {canManage && <th className="px-3 py-1.5"></th>}
+                </tr>
               </thead>
               <tbody>
-                {data.schemas.map(s => (
-                  <tr key={s.name} className="border-t border-border">
-                    <td className="px-3 py-1.5 font-mono text-content-strong">{s.name}</td>
-                    <td className="px-3 py-1.5 text-right text-content">{s.tables}</td>
-                    <td className="px-3 py-1.5 text-right text-content-subtle">{humanBytes(s.bytes)}</td>
-                  </tr>
-                ))}
+                {data.schemas.map(s => {
+                  const u = userBySchema[s.name]
+                  return (
+                    <tr key={s.name} className="border-t border-border">
+                      <td className="px-3 py-1.5 font-mono text-content-strong">{s.name}</td>
+                      <td className="px-3 py-1.5 text-right text-content">{s.tables}</td>
+                      <td className="px-3 py-1.5 text-right text-content-subtle">{humanBytes(s.bytes)}</td>
+                      <td className="px-3 py-1.5 font-mono text-content">{u ? u.username : <span className="text-content-faint">—</span>}</td>
+                      {canManage && <td className="px-3 py-1.5">{u ? <PwCell password={u.password} /> : <span className="text-content-faint">—</span>}</td>}
+                      {webSqlEnabled && (
+                        <td className="px-3 py-1.5 text-right">
+                          {u && adminerUrl
+                            ? <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as={u.username} label="Adminer" compact />
+                            : <span className="text-content-faint">—</span>}
+                        </td>
+                      )}
+                      {canManage && (
+                        <td className="px-3 py-1.5 text-right">
+                          {s.name === info.database || (info.engine === 'postgres' && s.name === 'public')
+                            ? <span className="text-content-faint text-[10px]" title="The primary application database can't be deleted">—</span>
+                            : <button type="button" title={`Delete ${s.name}`} onClick={() => { setDelName(s.name); setDelTyped(''); setDelErr('') }}
+                                className="px-1.5 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/50 text-xs">🗑</button>}
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </section>
 
+      {delName && (
+        <section className="rounded-lg border border-danger-border bg-danger-subtle/30 p-3 space-y-2">
+          <p className="text-xs text-danger-fg">
+            Permanently delete <code className="font-mono">{delName}</code> and everything in it — this cannot be undone.
+            Type <code className="font-mono">{delName}</code> to confirm.
+          </p>
+          <div className="flex items-center gap-2">
+            <input value={delTyped} onChange={e => { setDelTyped(e.target.value); setDelErr('') }} placeholder={delName} autoFocus
+              className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-danger" />
+            <button type="button" disabled={delTyped !== delName || deleteMut.isPending} onClick={() => deleteMut.mutate()}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-danger text-white disabled:opacity-50">
+              {deleteMut.isPending ? 'Deleting…' : 'Delete'}
+            </button>
+            <button type="button" onClick={() => { setDelName(''); setDelTyped(''); setDelErr('') }}
+              className="text-xs px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
+          </div>
+          {delErr && <p className="text-xs text-danger-fg">{delErr}</p>}
+        </section>
+      )}
+
       {canManage && (
         <section className="space-y-2 pt-1 border-t border-border">
           <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">Create {unit}</h3>
           <div className="flex items-center gap-2">
-            <input value={newName} onChange={e => { setNewName(e.target.value); setErr('') }}
+            <input value={newName} onChange={e => { setNewName(e.target.value); setErr(''); if (withUser && !newUser) setNewUser(e.target.value ? `${e.target.value}_user` : '') }}
               placeholder={unit === 'database' ? 'new_database' : 'new_schema'}
               className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-            <button type="button" disabled={!valid || createMut.isPending}
+            <button type="button" disabled={!schemaValid || !userValid || createMut.isPending}
               onClick={() => createMut.mutate()}
               className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
               {createMut.isPending ? 'Creating…' : '+ Create'}
             </button>
           </div>
+          <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer">
+            <input type="checkbox" checked={withUser} onChange={e => setWithUser(e.target.checked)} className="w-3.5 h-3.5 accent-brand-500" />
+            Create a dedicated user and grant it on this {unit}
+          </label>
+          {withUser && (
+            <input value={newUser} onChange={e => { setNewUser(e.target.value); setErr('') }}
+              placeholder="username"
+              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+          )}
+          {created && (
+            <div className="rounded-lg border border-success-border/50 bg-success-subtle/30 p-2 text-xs space-y-1">
+              <p className="text-success-fg">User <code className="font-mono">{created.name}</code> created. Password (shown once):</p>
+              <div className="flex items-center gap-2"><code className="font-mono text-content-strong select-all break-all">{created.password}</code><CopyBtn value={created.password} /></div>
+            </div>
+          )}
           {err && <p className="text-xs text-danger-fg">{err}</p>}
-          <p className="text-[11px] text-content-faint">Letters, digits and underscores (must start with a letter or underscore).</p>
+          <p className="text-[11px] text-content-faint">Names: letters, digits and underscores (start with a letter or underscore). A blank password is auto-generated.</p>
         </section>
       )}
     </div>

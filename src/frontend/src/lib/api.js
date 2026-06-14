@@ -64,6 +64,13 @@ export const fetchDatabaseInfo = (ws, name, env, reveal = false) => api.get(`${p
 // Phase 6 — safe DB management: list schemas/databases (+ table count/size) and create one.
 export const fetchDatabaseSchemas = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/database/schemas`).then(r => r.data)
 export const createDatabaseSchema = (ws, name, env, schemaName) => api.post(`${projBase(ws, name)}/envs/${env}/database/schemas`, { name: schemaName }).then(r => r.data)
+export const deleteDatabaseSchema = (ws, name, env, schemaName) => api.delete(`${projBase(ws, name)}/envs/${env}/database/schemas/${encodeURIComponent(schemaName)}`, { params: { confirm: schemaName } }).then(r => r.data)
+// DB Hosting — managed users + Adminer auto-login. reveal=true (operator+) returns passwords.
+export const fetchDatabaseUsers = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/database/users${reveal ? '?reveal=true' : ''}`).then(r => r.data)
+export const createDatabaseUser = (ws, name, env, body) => api.post(`${projBase(ws, name)}/envs/${env}/database/users`, body).then(r => r.data)
+// adminerLoginHTML returns the auto-submitting login page (fetched authenticated, then
+// written into a window) so the JWT stays in the header and creds never hit the URL.
+export const adminerLoginHTML = (ws, name, env, as, url) => api.get(`${projBase(ws, name)}/envs/${env}/database/adminer-login`, { params: { as, url }, responseType: 'text' }).then(r => r.data)
 export const fetchEnvStatus    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/status`).then(r => r.data)
 export const fetchImageUpdates  = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/image-updates`).then(r => r.data)
 export const fetchContainers    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/containers`).then(r => r.data)
