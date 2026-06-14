@@ -3,7 +3,7 @@ import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  saveToolTemplate, fetchTemplates, fetchTemplateDraft,
+  saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
   startWorkspaceBackup, getBackupJob,
   listWorkspaceArchives, deleteWorkspaceArchive, syncWorkspaceArchive,
   restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchProjects,
@@ -456,6 +456,54 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
   )
 }
 
+// ── Open-existing-template modal (Template Manager source) ──────────────────────
+// Pick an already-saved template and load its full JSON back into the editor so it
+// can be revised. Saving with the same name overwrites it (force); renaming saves
+// a copy.
+function EditTemplateModal({ busy, error, onLoad, onClose }) {
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ['templates'], queryFn: fetchTemplates,
+  })
+  const sorted = [...templates].sort((a, b) => (a.label || a.name).localeCompare(b.label || b.name))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">Open an existing template</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        <p className="text-sm text-content-subtle">
+          Loads the template's full JSON into the editor. Keeping the same <strong className="text-content">name</strong> and saving overwrites it; changing the name saves a copy.
+        </p>
+
+        {isLoading ? (
+          <p className="text-sm text-content-subtle py-4 text-center">Loading templates…</p>
+        ) : sorted.length === 0 ? (
+          <p className="text-sm text-content-muted bg-surface-raised/50 border border-border-strong/60 rounded-lg px-3 py-3">
+            No saved templates yet. Create one from a source below first.
+          </p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto space-y-1.5 -mx-1 px-1">
+            {sorted.map(t => (
+              <button key={t.name} onClick={() => onLoad(t.name)} disabled={busy}
+                className="w-full text-left px-3 py-2 rounded-lg border border-border-strong bg-surface-raised/40 hover:border-brand-500 hover:bg-surface-raised transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-content-strong">{t.label || t.name}</span>
+                  <span className="text-[11px] font-mono text-content-faint">{t.name}</span>
+                  <span className="ml-auto text-[11px] text-content-subtle">{t.image_count} service{t.image_count !== 1 ? 's' : ''}</span>
+                </div>
+                {t.description && <p className="text-xs text-content-subtle mt-0.5 line-clamp-2">{t.description}</p>}
+              </button>
+            ))}
+          </div>
+        )}
+        {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+      </div>
+    </div>
+  )
+}
+
 // ── Convert-Docker-Compose modal (Template Manager source) ──────────────────────
 // Paste/import a docker-compose.yml and convert it to a Rigger template, which is
 // loaded into the editor. Lives in a modal so the editor can use the full width.
@@ -547,6 +595,14 @@ function ComposeToTemplate() {
   const [saveState, setSaveState]   = useState(null)    // null | 'saving' | 'saved' | { error }
   const tplFileRef                  = useRef(null)       // template upload
   const [composeModalOpen, setComposeModalOpen] = useState(false)  // docker-compose convert modal
+  const qc = useQueryClient()
+
+  // "Open existing template" source — re-open a saved template to revise it. When
+  // set, saving under the same name overwrites the file (force); renaming saves a copy.
+  const [editingName, setEditingName] = useState(null)
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editBusy, setEditBusy] = useState(false)
+  const [editError, setEditError] = useState('')
 
   // "From a workspace" source — pick an image stack (in a modal) and pull it in.
   const [wsModalOpen, setWsModalOpen] = useState(false)
@@ -575,9 +631,27 @@ function ComposeToTemplate() {
   }
 
   // Load a template object into the editor (from Convert, Upload or Workspace).
+  // These are all "new template" sources, so clear any prior edit-existing target.
   function loadTemplate(tpl) {
     editJson(JSON.stringify(tpl, null, 2))
     setTagsText(Array.isArray(tpl?.tags) ? tpl.tags.join(', ') : '')
+    setEditingName(null)
+  }
+
+  // Open an already-saved template back into the editor for revision.
+  async function loadExistingTemplate(name) {
+    if (!name) return
+    setEditBusy(true); setEditError('')
+    try {
+      const tpl = await fetchTemplateRaw(name)
+      loadTemplate(tpl)
+      setEditingName(name)   // mark as editing AFTER loadTemplate (which clears it)
+      setEditModalOpen(false)
+    } catch (e) {
+      setEditError(e?.response?.data?.error || e.message)
+    } finally {
+      setEditBusy(false)
+    }
   }
 
   // Pull an image workspace's stack (images + masked env-var defaults) into the
@@ -612,6 +686,7 @@ function ComposeToTemplate() {
     reader.onload = ev => {
       const text = ev.target.result || ''
       editJson(text)
+      setEditingName(null)
       try { const obj = JSON.parse(text); setTagsText(Array.isArray(obj?.tags) ? obj.tags.join(', ') : '') } catch { setTagsText('') }
     }
     reader.readAsText(file)
@@ -655,8 +730,9 @@ function ComposeToTemplate() {
       if (!img?.name)  errors.push(`images[${i}] is missing "name".`)
       if (!img?.image) errors.push(`images[${i}] is missing "image".`)
     })
-    // Name uniqueness — only checked once the name itself is well-formed.
-    if (nm && /^[a-z0-9-]+$/.test(nm)) {
+    // Name uniqueness — only checked once the name itself is well-formed. When
+    // re-editing a template, keeping its own name is allowed (it overwrites).
+    if (nm && /^[a-z0-9-]+$/.test(nm) && nm !== editingName) {
       try {
         const existing = await fetchTemplates()
         if ((existing || []).some(t => t.name === nm)) {
@@ -666,14 +742,19 @@ function ComposeToTemplate() {
         errors.push('Could not verify name uniqueness (failed to load existing templates).')
       }
     }
-    setValidation(errors.length ? { ok: false, errors } : { ok: true, name: nm, services: tpl.images.length })
+    const overwrite = nm === editingName
+    setValidation(errors.length ? { ok: false, errors } : { ok: true, name: nm, services: tpl.images.length, overwrite })
   }
 
   async function saveAsTemplate() {
     if (!validation?.ok || !parsed) return
     setSaveState('saving')
     try {
-      await saveToolTemplate(parsed.name, parsed, false)
+      // Overwrite (force) only when saving back over the template being edited.
+      const force = !!editingName && parsed.name === editingName
+      await saveToolTemplate(parsed.name, parsed, force)
+      qc.invalidateQueries({ queryKey: ['templates'] })
+      setEditingName(parsed.name)  // now editing this saved name (re-save keeps overwriting)
       setSaveState('saved')
     } catch (err) {
       setSaveState({ error: err?.response?.data?.error || err.message })
@@ -686,18 +767,26 @@ function ComposeToTemplate() {
     <div className="space-y-6">
       {/* Description */}
       <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
-        Create a reusable prebuilt template from one of three sources —{' '}
-        <strong className="text-content">Convert Docker Compose</strong>, <strong className="text-content">Upload
-        template</strong>, or <strong className="text-content">Select image project</strong> — then edit the JSON,
-        fill in name / label / description / tags, and <strong className="text-content">Validate</strong> (which also
-        checks the name is unique) to unlock <strong className="text-content">Save as template</strong>.
+        Create or revise a reusable prebuilt template. Start from a source —{' '}
+        <strong className="text-content">Convert Docker Compose</strong>, <strong className="text-content">Select image
+        project</strong>, <strong className="text-content">Open existing template</strong> (to revise one you already
+        saved), or <strong className="text-content">Upload template</strong> — then edit the JSON, fill in
+        name / label / description / tags, and <strong className="text-content">Validate</strong> (which also checks the
+        name is unique) to unlock <strong className="text-content">Save</strong>.
       </div>
 
       {/* ── Template editor (full width) ── */}
       <div className="space-y-2">
         {/* Editor toolbar */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <label className="text-sm font-semibold text-content">Rigger template JSON</label>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-semibold text-content">Rigger template JSON</label>
+            {editingName && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-brand-950 text-brand-300 border border-brand-600/50">
+                ✎ editing <span className="font-mono">{editingName}</span> — saving overwrites it
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => setComposeModalOpen(true)}
               className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
@@ -706,6 +795,10 @@ function ComposeToTemplate() {
             <button onClick={() => { setWsError(''); setWsModalOpen(true) }}
               className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
               ⊞ Select image workspace
+            </button>
+            <button onClick={() => { setEditError(''); setEditModalOpen(true) }}
+              className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
+              ✎ Open existing template
             </button>
             <button onClick={() => tplFileRef.current?.click()}
               className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>
@@ -812,7 +905,7 @@ function ComposeToTemplate() {
                     'border-brand-600 bg-brand-950 text-brand-300 hover:bg-brand-900'
                   }`}
                 >
-                  {saveState === 'saved' ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : '💾 Save as template'}
+                  {saveState === 'saved' ? '✓ Saved' : saveState === 'saving' ? 'Saving…' : validation?.overwrite ? '💾 Update template' : '💾 Save as template'}
                 </button>
                 {validation && !validation.checking && (
                   <span className="text-xs text-content-faint">
@@ -832,7 +925,10 @@ function ComposeToTemplate() {
               )}
               {validation?.ok && saveState !== 'saved' && (
                 <p className="text-xs text-success-fg/80">
-                  ✓ Valid — name <code className="font-mono">{validation.name}</code> is available ({validation.services} service{validation.services !== 1 ? 's' : ''}). Ready to save.
+                  ✓ Valid — {validation.overwrite
+                    ? <>updating existing template <code className="font-mono">{validation.name}</code></>
+                    : <>name <code className="font-mono">{validation.name}</code> is available</>
+                  } ({validation.services} service{validation.services !== 1 ? 's' : ''}). Ready to save.
                 </p>
               )}
 
@@ -862,6 +958,14 @@ function ComposeToTemplate() {
           error={wsError}
           onLoad={loadFromWorkspace}
           onClose={() => setWsModalOpen(false)}
+        />
+      )}
+      {editModalOpen && (
+        <EditTemplateModal
+          busy={editBusy}
+          error={editError}
+          onLoad={loadExistingTemplate}
+          onClose={() => setEditModalOpen(false)}
         />
       )}
     </div>
@@ -1419,7 +1523,7 @@ const TOOLS = [
     id: 'compose-to-template',
     label: 'Template Manager',
     icon: '📝',
-    description: 'Convert a docker-compose.yml, or upload an existing template, then edit, validate and save it as a reusable Rigger prebuilt template.',
+    description: 'Convert a docker-compose.yml, open an existing template to revise it, or upload one — then edit, validate and save it as a reusable Rigger prebuilt template.',
     component: ComposeToTemplate,
   },
 ]

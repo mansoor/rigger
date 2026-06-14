@@ -37,6 +37,8 @@ const projBase = (ws, name) => `/workspaces/${ws}/projects/${name}`
 
 export const fetchTemplates    = ()          => api.get('/templates').then(r => r.data)
 export const fetchTemplate     = (name)      => api.get(`/templates/${name}`).then(r => r.data)
+// Verbatim template JSON (full metadata) for re-opening an existing template in the Template Manager.
+export const fetchTemplateRaw  = (name)      => api.get(`/templates/${name}/raw`).then(r => r.data)
 export const recordTemplateUse = (name)      => api.post(`/templates/${name}/use`).then(r => r.data)
 
 // Workspace tier: list / create / delete the parent-tier workspaces.

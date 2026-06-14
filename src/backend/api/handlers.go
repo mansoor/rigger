@@ -327,6 +327,31 @@ func (h *Handler) GetTemplate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GET /api/templates/{name}/raw — returns the verbatim template JSON file
+// (name/label/description/tags/images/default_env_vars) so the Template Manager
+// can re-open an existing template for editing without losing metadata.
+func (h *Handler) GetTemplateRaw(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	// Guard against path traversal: the stored filename is a slug.
+	for _, c := range name {
+		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid template name"})
+			return
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(h.templatesDir, "stacks", name+".json"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("template %q not found", name)})
+		return
+	}
+	var tpl any
+	if err := json.Unmarshal(data, &tpl); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "template file is not valid JSON"})
+		return
+	}
+	writeJSON(w, http.StatusOK, tpl)
+}
+
 // WS POST /api/workspaces/create — creates workspace from wizard payload, streams bootstrap output
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)

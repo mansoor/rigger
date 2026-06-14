@@ -209,6 +209,9 @@ func main() {
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/templates/") && hasSuffix(r.URL.Path, "/use"):
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			handler.RecordTemplateUse(w, r)
+		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/templates/") && hasSuffix(r.URL.Path, "/raw"):
+			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
+			handler.GetTemplateRaw(w, r)
 		case r.Method == "GET" && matchPrefix(r.URL.Path, "/api/templates/"):
 			r.SetPathValue("name", pathSegment(r.URL.Path, 2))
 			handler.GetTemplate(w, r)
