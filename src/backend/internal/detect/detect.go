@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/blueprints"
@@ -160,6 +161,11 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 		return false
 	}
 	var skippedProfiles []string
+	// renames maps a dropped DB/cache service's compose name (e.g. "db") to the
+	// managed service's name in Rigger's generated compose (e.g. "postgres"), so we
+	// can repoint hardcoded host references in other services' env (e.g. a
+	// DATABASE_URL of ...@db:5432/...) onto the host that actually resolves.
+	renames := map[string]string{}
 	for _, name := range sortedKeys(cf.Services) {
 		cs := cf.Services[name]
 		// Profile-gated services aren't started by a default `docker compose up`
@@ -174,6 +180,11 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 			applyManagedDep(role, d)
 			if _, tag := splitImage(cs.Image); tag != "" && tag != "latest" && d.DBVersion == "" {
 				d.DBVersion = tag
+			}
+			// The managed service is generated under its role name (postgres/mysql/
+			// redis); remember to repoint references to this dropped service's host.
+			if managed := managedServiceName(role, d); name != managed {
+				renames[name] = managed
 			}
 			continue
 		}
@@ -226,6 +237,15 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	}
 	if len(skippedProfiles) > 0 {
 		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default).")
+	}
+	// Repoint hardcoded DB/cache host references onto the managed service names.
+	if n := rebaseManagedHosts(d, renames); n > 0 {
+		var pairs []string
+		for old, neu := range renames {
+			pairs = append(pairs, old+"→"+neu)
+		}
+		sort.Strings(pairs)
+		d.Notes = append(d.Notes, fmt.Sprintf("Repointed %d host reference(s) onto managed service name(s): %s.", n, strings.Join(pairs, ", ")))
 	}
 	pickWebEntry(d)
 	return len(d.Services) > 0
@@ -372,6 +392,70 @@ func applyManagedDep(role string, d *Draft) {
 	case "redis":
 		d.Redis = true
 	}
+}
+
+// managedServiceName returns the compose service name Rigger generates for a
+// managed dependency role, matching internal/composegen (postgres / mysql /
+// redis). mysql and mariadb both surface as the "mysql" engine.
+func managedServiceName(role string, d *Draft) string {
+	switch role {
+	case "postgres":
+		return "postgres"
+	case "mysql":
+		if d.Database == "mariadb" {
+			return "mariadb"
+		}
+		return "mysql"
+	case "redis":
+		return "redis"
+	}
+	return role
+}
+
+// rebaseManagedHosts rewrites references to dropped DB/cache service hostnames
+// (renames: oldName→managedName) inside every service's env values and the
+// env-level seeded env vars, so e.g. a scanned DATABASE_URL of ...@db:5432/...
+// points at the managed service host that actually resolves. Returns the number
+// of values changed.
+func rebaseManagedHosts(d *Draft, renames map[string]string) int {
+	if len(renames) == 0 {
+		return 0
+	}
+	changed := 0
+	apply := func(m map[string]string) {
+		for k, v := range m {
+			nv := v
+			for old, neu := range renames {
+				nv = rebaseHost(nv, old, neu)
+			}
+			if nv != v {
+				m[k] = nv
+				changed++
+			}
+		}
+	}
+	for i := range d.Services {
+		apply(d.Services[i].EnvVars)
+	}
+	apply(d.EnvVars)
+	return changed
+}
+
+// rebaseHost rewrites the host token old→neu inside an env value: a bare host
+// value, or the host position of a URL/DSN (after "@" or "//"). Substrings of
+// longer hostnames are left untouched.
+func rebaseHost(v, old, neu string) string {
+	if old == "" || old == neu {
+		return v
+	}
+	if v == old {
+		return neu
+	}
+	for _, sep := range []string{"@", "//"} {
+		v = strings.ReplaceAll(v, sep+old+":", sep+neu+":")
+		v = strings.ReplaceAll(v, sep+old+"/", sep+neu+"/")
+	}
+	return v
 }
 
 // dbRole classifies a compose service image as a managed dependency, or "".

@@ -152,9 +152,17 @@ func TestManagedDBMariaDBVersionExternal(t *testing.T) {
 		"      - shop_dev_mariadb_data:/var/lib/mysql",
 		"mariadb-admin ping",                     // mariadb healthcheck
 		"  shop_dev_mariadb_data:",               // named volume declared
+		"          - shop_dev_mariadb",           // prefixed network alias → POSTGRES_HOST/DB_HOST style host resolves
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output missing %q\n---\n%s", want, s)
+		}
+	}
+	// The app (build) service also advertises both its short name and prefixed alias.
+	app0 := svcBlock(t, s, "app")
+	for _, want := range []string{"          - app", "          - shop_dev_app"} {
+		if !strings.Contains(app0, want) {
+			t.Errorf("app network aliases missing %q\n%s", want, app0)
 		}
 	}
 	if strings.Contains(s, "--default-authentication-plugin") {

@@ -142,8 +142,10 @@ services:
 	if backend == nil {
 		t.Fatal("backend service missing")
 	}
-	if backend.EnvVars["DATABASE_URL"] != "postgresql://db:5432/app" || backend.EnvVars["MQTT_PORT"] != "1883" || backend.EnvVars["DEBUG"] != "false" {
-		t.Errorf("backend env not captured faithfully: %v", backend.EnvVars)
+	// DATABASE_URL host is rebased from the dropped "db" service onto the managed
+	// "postgres" service name (which resolves); other env values pass through.
+	if backend.EnvVars["DATABASE_URL"] != "postgresql://postgres:5432/app" || backend.EnvVars["MQTT_PORT"] != "1883" || backend.EnvVars["DEBUG"] != "false" {
+		t.Errorf("backend env not captured/rebased faithfully: %v", backend.EnvVars)
 	}
 	if backend.Healthcheck != "curl -f http://localhost:8000/health || exit 1" {
 		t.Errorf("backend healthcheck = %q", backend.Healthcheck)
@@ -305,5 +307,23 @@ func TestDetectUnknown(t *testing.T) {
 	}
 	if len(d.Notes) == 0 {
 		t.Errorf("expected a note explaining nothing was detected")
+	}
+}
+
+// TestRebaseHost verifies host rewriting handles bare values and URL/DSN host
+// positions, and leaves longer hostnames containing the token untouched.
+func TestRebaseHost(t *testing.T) {
+	cases := []struct{ in, old, neu, want string }{
+		{"postgresql+asyncpg://u:p@db:5432/app", "db", "postgres", "postgresql+asyncpg://u:p@postgres:5432/app"},
+		{"mysql://u:p@db/app", "db", "mysql", "mysql://u:p@mysql/app"},
+		{"db", "db", "postgres", "postgres"},                                  // bare host value
+		{"redis://cache:6379", "cache", "redis", "redis://redis:6379"},        // //host: form
+		{"postgresql://u:p@database:5432/x", "db", "postgres", "postgresql://u:p@database:5432/x"}, // substring untouched
+		{"keep@me", "db", "postgres", "keep@me"},                              // unrelated @ untouched
+	}
+	for _, c := range cases {
+		if got := rebaseHost(c.in, c.old, c.neu); got != c.want {
+			t.Errorf("rebaseHost(%q,%q,%q) = %q, want %q", c.in, c.old, c.neu, got, c.want)
+		}
 	}
 }

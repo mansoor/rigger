@@ -120,12 +120,16 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		g.line("    env_file: .env")
 	}
 
-	// Networks — long form with a short-name alias; join the Traefik network when
-	// this service is the web entry under Traefik.
+	// Networks — long form with both the short service-name alias AND the fully
+	// prefixed name ({prefix}_{name}). The prefixed alias makes the in-network host
+	// Rigger advertises (e.g. POSTGRES_HOST={prefix}_postgres) actually resolve, so
+	// apps can reach a service by either name. Join the Traefik network when this
+	// service is the web entry under Traefik.
 	g.line("    networks:")
 	g.line("      " + prefix + "_net:")
 	g.line("        aliases:")
 	g.line("          - " + svc.Name)
+	g.line("          - " + cname)
 	if svc.WebRouted && e.TraefikEnabled {
 		g.line("      " + e.TraefikNetwork + ": {}")
 	}
@@ -405,8 +409,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(g.dbEnvLine("POSTGRES_PASSWORD"))
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_pg_data:/var/lib/postgresql/data")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
+		g.managedNet(prefix, "postgres")
 		g.healthcheck("pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}", "10s", "5s", "5", "30s", "")
 		g.deployBlock(isSwarm, "postgres", "1", "unless-stopped")
 		g.line("")
@@ -433,8 +436,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		}
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_" + engine + "_data:/var/lib/mysql")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
+		g.managedNet(prefix, engine)
 		if engine == "mariadb" {
 			// Newer MariaDB images ship mariadb-admin and may drop the mysqladmin symlink.
 			g.healthcheck("mariadb-admin ping -h localhost --silent 2>/dev/null || mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
@@ -453,8 +455,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("    command: [\"redis-server\", \"--appendonly\", \"yes\"]")
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_redis_data:/data")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
+		g.managedNet(prefix, "redis")
 		g.healthcheck("redis-cli ping | grep -q PONG || exit 1", "10s", "3s", "3", "10s", "")
 		g.deployBlock(isSwarm, "redis", "1", "unless-stopped")
 		g.line("")
@@ -473,8 +474,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("      - ${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro")
 		g.line("    environment:")
 		g.line(g.dbEnvLine("GARAGE_ADMIN_TOKEN"))
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
+		g.managedNet(prefix, "garage")
 		g.healthcheck("curl -sf http://localhost:3903/health -o /dev/null || exit 1", "30s", "5s", "3", "60s", "")
 		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
 		g.line("")
@@ -488,14 +488,24 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("      GARAGE_API_TOKEN: ${GARAGE_ADMIN_TOKEN}")
 		g.line("    depends_on:")
 		g.line("      - garage")
-		g.line("    networks:")
-		g.line("      - " + prefix + "_net")
+		g.managedNet(prefix, "garage_webui")
 		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
 		g.line("")
 	}
 }
 
 // ── small helpers ────────────────────────────────────────────────────────────────
+
+// managedNet writes a managed service's network block. Compose already makes the
+// service reachable by its bare name; we add the fully prefixed {prefix}_{name}
+// alias so the in-network host Rigger advertises in .env (POSTGRES_HOST,
+// GARAGE_HOST, …) and uses in cross-service URLs actually resolves.
+func (g *gen) managedNet(prefix, name string) {
+	g.line("    networks:")
+	g.line("      " + prefix + "_net:")
+	g.line("        aliases:")
+	g.line("          - " + prefix + "_" + name)
+}
 
 // volHost returns the host part of a volume spec (everything before the first colon).
 func volHost(vol string) string {
