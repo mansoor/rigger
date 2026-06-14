@@ -19,6 +19,9 @@ import (
 
 const (
 	CondContainerDown   = "container_down"
+	CondContainerUnhealthy = "container_unhealthy"
+	CondStackPartial    = "stack_partial"
+	CondContainerOOM    = "container_oom_killed"
 	CondRestartCount    = "restart_count"
 	CondDiskAbovePct    = "disk_above_pct"
 	CondBackupFailed    = "backup_failed"
@@ -43,7 +46,8 @@ var numericConditions = map[string]bool{
 }
 
 var validConditions = map[string]bool{
-	CondContainerDown: true, CondRestartCount: true, CondDiskAbovePct: true,
+	CondContainerDown: true, CondContainerUnhealthy: true, CondStackPartial: true, CondContainerOOM: true,
+	CondRestartCount: true, CondDiskAbovePct: true,
 	CondBackupFailed: true, CondBackupStale: true, CondImageUpdate: true, CondImageVersionAvailable: true,
 	CondCPUAbovePct: true, CondMemoryAbovePct: true,
 }

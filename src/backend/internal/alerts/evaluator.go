@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/db"
@@ -146,6 +147,57 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 		}
 		return true, float64(len(down)), fmt.Sprintf("%s/%s: %d container(s) down (%s)",
 			t.ws, t.env, len(down), joinUpTo(down, 4))
+
+	case CondContainerUnhealthy:
+		ctrs := projectContainers(t.project, t.composePath)
+		var bad []string
+		for _, c := range ctrs {
+			if strings.EqualFold(c.Health, "unhealthy") {
+				bad = append(bad, c.Service)
+			}
+		}
+		if len(bad) == 0 {
+			return false, 0, ""
+		}
+		return true, float64(len(bad)), fmt.Sprintf("%s/%s: %d container(s) unhealthy (%s)",
+			t.ws, t.env, len(bad), joinUpTo(bad, 4))
+
+	case CondStackPartial:
+		ctrs := projectContainers(t.project, t.composePath)
+		if len(ctrs) == 0 {
+			return false, 0, "" // never deployed — not "partial"
+		}
+		var down []string
+		running := 0
+		for _, c := range ctrs {
+			if isDownState(c.State) {
+				down = append(down, c.Service)
+			} else {
+				running++
+			}
+		}
+		// Partial = degraded: some up AND some down. Fully up or fully down don't fire
+		// (fully down is container_down's job; a stack you intentionally stopped is fine).
+		if running == 0 || len(down) == 0 {
+			return false, 0, ""
+		}
+		return true, float64(len(down)), fmt.Sprintf("%s/%s: stack partially up — %d of %d running (down: %s)",
+			t.ws, t.env, running, len(ctrs), joinUpTo(down, 4))
+
+	case CondContainerOOM:
+		ctrs := projectContainers(t.project, t.composePath)
+		ids := make([]string, 0, len(ctrs))
+		for _, c := range ctrs {
+			if c.ID != "" {
+				ids = append(ids, c.ID)
+			}
+		}
+		killed := oomKilledContainers(ids)
+		if len(killed) == 0 {
+			return false, 0, ""
+		}
+		return true, float64(len(killed)), fmt.Sprintf("%s/%s: %d container(s) OOM-killed (out of memory): %s",
+			t.ws, t.env, len(killed), joinUpTo(killed, 4))
 
 	case CondRestartCount:
 		ctrs := projectContainers(t.project, t.composePath)

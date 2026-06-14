@@ -160,6 +160,9 @@ func (h *Handler) AlertMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"conditions": []map[string]any{
 			{"value": alerts.CondContainerDown, "label": "Container down", "numeric": false, "scope": "stack"},
+			{"value": alerts.CondStackPartial, "label": "Stack partially up (some containers down)", "numeric": false, "scope": "stack"},
+			{"value": alerts.CondContainerUnhealthy, "label": "Container unhealthy (failing healthcheck)", "numeric": false, "scope": "stack"},
+			{"value": alerts.CondContainerOOM, "label": "Container out of memory (OOM-killed)", "numeric": false, "scope": "stack"},
 			{"value": alerts.CondRestartCount, "label": "Restart count above", "numeric": true, "scope": "stack", "unit": "restarts"},
 			{"value": alerts.CondCPUAbovePct, "label": "CPU usage above", "numeric": true, "scope": "stack", "unit": "%"},
 			{"value": alerts.CondMemoryAbovePct, "label": "Memory usage above", "numeric": true, "scope": "stack", "unit": "%"},

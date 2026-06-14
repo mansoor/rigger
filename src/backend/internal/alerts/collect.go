@@ -54,6 +54,33 @@ func isDownState(state string) bool {
 	}
 }
 
+// oomKilledContainers inspects the given container IDs and returns the names of
+// those whose last run was killed by the OOM killer (State.OOMKilled). A very
+// common home-lab failure: a container hitting its memory limit and getting
+// reaped. The flag reflects the most recent exit, so it's caught while the
+// container is down or shortly after a restart.
+func oomKilledContainers(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	args := append([]string{"inspect", "--format", "{{.State.OOMKilled}} {{.Name}}"}, ids...)
+	out, err := exec.Command("docker", args...).Output()
+	if err != nil {
+		return nil
+	}
+	var killed []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if fields[0] == "true" {
+			killed = append(killed, strings.TrimPrefix(fields[1], "/"))
+		}
+	}
+	return killed
+}
+
 // maxRestartCount inspects the given container IDs and returns the highest
 // RestartCount and the name of the container that holds it.
 func maxRestartCount(ids []string) (int, string) {
