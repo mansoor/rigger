@@ -1917,7 +1917,7 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 
         {/* Refresh hint */}
         <p className="text-xs text-warning-fg/80 flex items-center gap-1.5 mt-2">
-          <span>⚠</span> After saving, use <strong>Deploy ▾ → Refresh</strong> to apply changes to running containers.
+          <span>⚠</span> After saving, click the <strong>Refresh</strong> (↻) action on the environment card to apply changes to running containers.
         </p>
 
         <div className="flex items-center gap-3 mt-3">

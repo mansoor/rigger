@@ -30,7 +30,7 @@ function writeClipboard(text) {
 // ── Compose Viewer (read-only) ────────────────────────────────────────────────
 // docker-compose.yml is a generated artefact derived from config.json.
 // Editing it directly is not supported — use Edit Workspace to modify
-// config.json, then Refresh (Deploy ▾ → Refresh) to regenerate.
+// config.json, then the Refresh (↻) action on the env card to regenerate.
 
 export default function ComposeEditor({ workspace, name, env, onClose, onRefresh }) {
   const { data, isLoading, error } = useQuery({
@@ -138,7 +138,7 @@ export default function ComposeEditor({ workspace, name, env, onClose, onRefresh
           <p className="text-xs text-content-subtle">
             Generated from <code className="font-mono text-content-muted">config.json</code>.
             Use <strong className="text-content-muted">Edit Workspace</strong> to change configuration,
-            then <strong className="text-content-muted">Deploy ▾ → Refresh</strong> to regenerate.
+            then the <strong className="text-content-muted">Refresh</strong> (↻) action on the env card to regenerate.
             Select text in the viewer then click Copy to copy only the selection.
           </p>
         </div>
