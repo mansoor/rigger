@@ -20,22 +20,23 @@ const SERVICE_META = {
   redis:        { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
   garage:       { label: 'Garage (S3)',   port: '3900 / 3903', vars: ['GARAGE_HOST', 'GARAGE_API_PORT', 'GARAGE_S3_PORT', 'GARAGE_ADMIN_TOKEN', 'GARAGE_KEY_ID', 'GARAGE_SECRET_KEY'] },
   garage_webui: { label: 'Garage Web UI', port: '3909',      vars: [], note: 'Browser admin UI for Garage — not used directly by your app.' },
-  cloudbeaver:  { label: 'CloudBeaver',   port: '8978',      vars: [], note: 'Browser SQL client — becomes this project’s web entry.' },
+  adminer:      { label: 'Adminer',       port: '8978',      vars: [], note: 'Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database.' },
+  cloudbeaver:  { label: 'CloudBeaver',   port: '8978',      vars: [], note: 'Browser SQL client (legacy projects) — becomes this project’s web entry.' },
 }
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, garage, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, garage, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
   if (garage) { out.push({ name: 'garage', kind: 'garage' }); out.push({ name: 'garage_webui', kind: 'garage_webui' }) }
-  if (cloudbeaver) out.push({ name: 'cloudbeaver', kind: 'cloudbeaver' })
+  if (webSql || cloudbeaver) out.push({ name: 'adminer', kind: 'adminer' })
   return out
 }
 
 // enabledDependsOnTargets returns the managed-service names a real service may
-// depend_on (excludes UI-only sidecars like garage_webui / cloudbeaver).
+// depend_on (excludes UI-only sidecars like garage_webui / adminer).
 export function enabledDependsOnTargets({ database, redis, garage } = {}) {
   const out = []
   if (database && database !== 'none') out.push(database)
@@ -96,7 +97,7 @@ function ServiceRow({ row, resourcePrefix }) {
   )
 }
 
-export default function ManagedServices({ value, onChange, showCloudbeaver = false, requireDatabase = false, error = '', resourcePrefix = '' }) {
+export default function ManagedServices({ value, onChange, showWebSql = false, requireDatabase = false, error = '', resourcePrefix = '' }) {
   const v = value || {}
   const rows = managedServiceList(v)
   const set = (patch) => onChange({ ...v, ...patch })
@@ -128,13 +129,13 @@ export default function ManagedServices({ value, onChange, showCloudbeaver = fal
         <MiniToggle label="Garage S3" hint="self-hosted object store" checked={!!v.garage} onChange={x => set({ garage: x })} />
       </div>
 
-      {showCloudbeaver && (
+      {showWebSql && (
         <div className="pt-1 border-t border-border">
           <MiniToggle
-            label="CloudBeaver (web SQL client)"
-            hint="Browser-based SQL client — becomes this project’s web entry."
-            checked={!!v.cloudbeaver}
-            onChange={x => set({ cloudbeaver: x })}
+            label="Adminer (web SQL client)"
+            hint="Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."
+            checked={!!v.webSql}
+            onChange={x => set({ webSql: x })}
           />
         </div>
       )}

@@ -36,7 +36,8 @@ type CreateRequest struct {
 	Database     string            `json:"database"`     // none | postgres | mysql | mariadb (custom type)
 	DBVersion    string            `json:"db_version"`   // chosen DB image tag ("" → catalog default)
 	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
-	Cloudbeaver  bool              `json:"cloudbeaver"`  // database stack: add a CloudBeaver web SQL client (becomes the web entry)
+	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
+	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
 	Redis        bool              `json:"redis"`
 	Garage       bool              `json:"garage"`
 	Envs         []EnvRequest      `json:"environments"`
@@ -380,34 +381,40 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 // nginx (+ an optional build "frontend") from the chosen language. This is a
 // transitional mapping of the legacy wizard fields until the blueprint picker
 // (Phase 2a-2b) seeds richer, language-agnostic graphs directly.
-// cloudbeaverService returns the CloudBeaver web SQL client as a web-routed image
-// service that depends on the managed database. As the only web service in a
-// database-hosting project it becomes the web entry (the env's route / HTTP port).
-// First run requires CloudBeaver's one-time admin setup; the DB connection is added
-// from the credentials shown in the Database info tab (host = the engine's alias).
-func cloudbeaverService(engine string) map[string]any {
+// adminerService returns the Adminer web SQL client as a web-routed image service
+// that depends on the managed database. As the only web service in a database-hosting
+// project it becomes the web entry (the env's route / HTTP port). A Rigger-generated
+// auto-login index.php is bind-mounted over Adminer's own (via ${RIGGER_BIND_ROOT}, so
+// the host daemon resolves it): on its own the URL shows the normal login page, and it
+// auto-logs-in only when the Manage Database UI hands it credentials. env_file injects
+// the DB creds + ADMINER_LOGIN_SECRET (used to verify those Rigger-issued links). The
+// image is PINNED — Adminer 5.x changed the plugin/namespacing surface this PHP targets.
+func adminerService(engine string) map[string]any {
 	return map[string]any{
-		"name":       "cloudbeaver",
-		"image":      "dbeaver/cloudbeaver",
-		"tag":        "latest",
-		"port":       "8978",
+		"name":       "adminer",
+		"image":      "adminer",
+		"tag":        "4.8.1",
+		"port":       "8080", // Adminer's native HTTP port (Traefik/healthcheck target)
 		"web_routed": true,
-		// Publish on CloudBeaver's native 8978 by default rather than the env's
-		// HTTP port (8080), which would collide with Rigger itself on a single host.
-		// Editable in Edit Project → Services if 8978 is taken.
+		// Publish on 8978 rather than the env's HTTP port (8080), which would collide
+		// with Rigger itself on a single host. Editable in Edit Project → Services.
 		"host_port":  "8978",
-		"volumes":    []string{"cloudbeaver_data:/opt/cloudbeaver/workspace"},
+		"env_file":   true, // inject the DB creds + ADMINER_LOGIN_SECRET from the env's .env
+		// Drop the auto-login plugin into Adminer's auto-loaded plugins-enabled/ dir
+		// (the stock image globs plugins-enabled/*.php). Bind resolves on the host
+		// daemon via ${RIGGER_BIND_ROOT}.
+		"volumes":    []string{"${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro"},
 		"depends_on": []string{engine},
 	}
 }
 
 func seedServices(req CreateRequest) []map[string]any {
 	// Database-hosting projects have no application services — just the managed DB
-	// (emitted from the env's database/db_version by composegen). Optionally a
-	// CloudBeaver web SQL client is added as the sole web-routed service → web entry.
+	// (emitted from the env's database/db_version by composegen). Optionally an
+	// Adminer web SQL client is added as the sole web-routed service → web entry.
 	if req.Type == "database" {
-		if req.Cloudbeaver && req.Database != "" && req.Database != "none" {
-			return []map[string]any{cloudbeaverService(req.Database)}
+		if (req.WebSQL || req.Cloudbeaver) && req.Database != "" && req.Database != "none" {
+			return []map[string]any{adminerService(req.Database)}
 		}
 		return nil
 	}

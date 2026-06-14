@@ -194,8 +194,10 @@ const EI = {
   vars:    <><path d="M4 8h16M4 16h16" /><circle cx="9" cy="8" r="2.4" fill="currentColor" stroke="none" /><circle cx="15" cy="16" r="2.4" fill="currentColor" stroke="none" /></>,
   compose: <><path d="M9 8l-4 4 4 4" /><path d="M15 8l4 4-4 4" /></>,
   terminal:<><path d="M6 7l5 5-5 5" /><path d="M13 17h6" /></>,
-  backup:  <><ellipse cx="12" cy="6" rx="7" ry="2.6" /><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6" /><path d="M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6" /></>,
-  rollback:<><path d="M3 7v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /></>,
+  // backup = download-to-tray (distinct from the `database` cylinder)
+  backup:  <><path d="M12 3v10" /><path d="M8 9l4 4 4-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></>,
+  // rollback = clock + counter-clockwise arrow (distinct from `restart`'s plain circular arrow)
+  rollback:<><path d="M3 3v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /><path d="M12 8v4l3 2" /></>,
   database:<><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
 }
 function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
@@ -795,6 +797,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {dbInfoOpen && (
         <DatabaseInfoModal workspace={workspace} name={name} env={envName}
           canReveal={canManageDB} canManage={canManageDB}
+          webSqlEnabled={(ws?.config?.services || []).some(s => s.name === 'adminer' || s.name === 'cloudbeaver')}
+          adminerUrl={accessUrls[0]?.href || ''}
           onClose={() => setDbInfoOpen(false)} />
       )}
 
