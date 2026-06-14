@@ -24,3 +24,22 @@ func TestHealthcheckQuoteEscaping(t *testing.T) {
 		t.Errorf("healthcheck quotes not escaped.\nwant line: %s\ngot:\n%s", want, out)
 	}
 }
+
+// TestCommandSingleQuoteEscaping: a service command override is emitted as a
+// single-quoted YAML scalar; embedded single quotes must be doubled ('') so the
+// scalar stays valid.
+func TestCommandSingleQuoteEscaping(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"q","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"worker","image":"busybox","tag":"latest","command":"sh -c 'echo hi'"}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`)
+	out, err := GenerateAt(cfg, "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `    command: 'sh -c ''echo hi'''`
+	if !strings.Contains(string(out), want) {
+		t.Errorf("command single quotes not escaped.\nwant line: %s\ngot:\n%s", want, out)
+	}
+}

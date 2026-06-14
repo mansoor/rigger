@@ -1029,6 +1029,7 @@ function VolBadge({ src }) {
 
 // Full service card matching Edit Workspace ServiceCard appearance
 function ServiceConfigCard({ img, idx, allImages, onChange }) {
+  const [cmdOverride, setCmdOverride] = useState(() => !!img.command)
   const [portRows, setPortRows] = useState(() => {
     const rows = (img.portMappings || [])
     return rows.length ? rows : [{ host: '', container: '' }]
@@ -1151,6 +1152,20 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
           className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
           {RESTART_OPTIONS_WIZ.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
+      </div>
+
+      {/* Command override — explicit toggle; off uses the image's default CMD */}
+      <div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={cmdOverride}
+            onChange={e => { setCmdOverride(e.target.checked); if (!e.target.checked && img.command) upd('command', '') }}
+            className="rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500" />
+          <span className="text-sm text-content">Override default command</span>
+        </label>
+        {cmdOverride && (
+          <input type="text" value={img.command || ''} placeholder="php artisan queue:work"
+            onChange={e => upd('command', e.target.value)} className={`w-full mt-2 ${monoInput}`} />
+        )}
       </div>
 
       {/* Healthcheck */}
@@ -1770,6 +1785,7 @@ export default function NewProjectPage() {
             const ports = (img.portMappings || []).filter(p => p.container)
             return {
               name: img.name, image: img.image, tag: img.tag || 'latest',
+              command: img.command || '',
               port: parseInt((ports[0] || {}).container) || 0,
               host_port: (ports[0] || {}).host || '',
               extra_ports: ports.slice(1).filter(p => p.host && p.container).map(p => `${p.host}:${p.container}`),

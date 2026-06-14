@@ -221,6 +221,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
   const [argRows,    setArgRows]    = useState(() => imgToArgRows(img))
+  // Explicit "override default command" toggle. Kept as local UI state so the input
+  // stays revealed while the field is momentarily empty (before the user types).
+  const [cmdOverride, setCmdOverride] = useState(() => !!img.command)
 
   function syncPorts(rows) {
     setPortRows(rows)
@@ -342,9 +345,21 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         </div>
       )}
 
-      {/* Command — full width */}
-      <div><Label>Command <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-        <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" /></div>
+      {/* Command override — explicit toggle reveals the input; off clears it so the
+          image's own default CMD (or the build's) is used. */}
+      <div>
+        <Toggle label="Override default command"
+          checked={cmdOverride}
+          onChange={v => { setCmdOverride(v); if (!v && img.command) upd('command', '') }} />
+        {cmdOverride && (
+          <div className="mt-2">
+            <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" />
+            <p className="text-xs text-content-subtle mt-1">
+              Replaces the container's default command (compose <code className="font-mono text-xs">command:</code>). Leave the toggle off to keep the image/build default.
+            </p>
+          </div>
+        )}
+      </div>
 
       {/* .env handling — process-env toggle + optional physical-file path (related) */}
       <div className="grid grid-cols-2 gap-3 items-end">

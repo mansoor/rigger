@@ -114,7 +114,9 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line("    image: " + serviceImageRef(svc, rp, registry, tag))
 	g.line("    container_name: " + cname)
 	if svc.Command != "" {
-		g.line("    command: '" + svc.Command + "'")
+		// Single-quoted YAML scalar; escape embedded single quotes ('' is the YAML
+		// escape) so commands like `sh -c 'echo hi'` stay valid.
+		g.line("    command: '" + strings.ReplaceAll(svc.Command, "'", "''") + "'")
 	}
 	if svc.EnvFile {
 		g.line("    env_file: .env")

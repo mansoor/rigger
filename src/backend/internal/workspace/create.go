@@ -69,6 +69,7 @@ type ImageDef struct {
 	Name       string            `json:"name"`
 	Image      string            `json:"image"`
 	Tag        string            `json:"tag"`
+	Command    string            `json:"command,omitempty"` // override the image's default CMD
 	Port       int               `json:"port"`
 	HostPort   string            `json:"host_port"`
 	Volumes    []string          `json:"volumes"`
@@ -426,6 +427,9 @@ func seedServices(req CreateRequest) []map[string]any {
 				tag = "latest"
 			}
 			s := map[string]any{"name": im.Name, "image": im.Image, "tag": tag, "env_file": true}
+			if im.Command != "" {
+				s["command"] = im.Command
+			}
 			if im.Port != 0 {
 				s["port"] = im.Port
 			}
