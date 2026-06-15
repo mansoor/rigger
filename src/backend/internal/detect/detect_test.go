@@ -183,6 +183,39 @@ services:
 	if d.EnvVars["POSTGRES_DB"] != "teslamate" || d.EnvVars["MQTT_HOST"] != "mosquitto" {
 		t.Errorf("env seeded from .env.example wrong: %v", d.EnvVars)
 	}
+
+	// Managed-dependency OFFER: the dropped "db" is recorded as a candidate carrying
+	// the verbatim raw service + the host rewrite, so the wizard can offer keep-own.
+	if len(d.ManagedCandidates) != 1 {
+		t.Fatalf("want 1 managed candidate, got %d: %+v", len(d.ManagedCandidates), d.ManagedCandidates)
+	}
+	mc := d.ManagedCandidates[0]
+	if mc.Role != "postgres" || mc.DetectedName != "db" || mc.ManagedName != "postgres" || mc.Image != "postgres" || mc.Tag != "16-alpine" {
+		t.Errorf("candidate fields wrong: %+v", mc)
+	}
+	if mc.RawService.Image != "postgres" || mc.RawService.Tag != "16-alpine" {
+		t.Errorf("candidate raw service not captured verbatim: %+v", mc.RawService)
+	}
+	// The DATABASE_URL rewrite is recorded both ways so keep-own can reverse it.
+	var found bool
+	for _, rw := range mc.Rewrites {
+		if rw.Service == "backend" && rw.Key == "DATABASE_URL" &&
+			rw.Original == "postgresql://db:5432/app" && rw.Managed == "postgresql://postgres:5432/app" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("DATABASE_URL rewrite not recorded for reversal: %+v", mc.Rewrites)
+	}
+
+	// Profile OMIT: photon surfaced as a structured opt-in candidate (not in services[]).
+	if len(d.ProfileOmitted) != 1 {
+		t.Fatalf("want 1 profile-omitted service, got %d: %+v", len(d.ProfileOmitted), d.ProfileOmitted)
+	}
+	po := d.ProfileOmitted[0]
+	if po.Name != "photon" || len(po.Profiles) != 1 || po.Profiles[0] != "geocoder" || po.Service.Image != "koodinikula/photon" {
+		t.Errorf("profile-omitted photon wrong: %+v", po)
+	}
 }
 
 func TestDetectDockerfileMonorepo(t *testing.T) {

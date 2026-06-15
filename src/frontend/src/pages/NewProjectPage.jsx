@@ -230,6 +230,8 @@ function ScanStack({ data, onChange }) {
     } finally { setBusy(false) }
   }
   const svcs = draft?.services || []
+  const candidates = draft?.managed_candidates || []
+  const omitted = draft?.profile_omitted || []
   // Set the web entry: web_routed=true on the chosen service, false on the rest.
   function pickWeb(idx) {
     if (!draft) return
@@ -239,6 +241,52 @@ function ScanStack({ data, onChange }) {
     })
   }
   const envCount = s => Object.keys(s.env_vars || {}).length
+
+  // ── Managed-dependency offer ──
+  // The default draft already chose "managed" (the container is dropped, host refs
+  // rebased, flag set). "Keep own" is derived from whether the raw container is back
+  // in services[]. Flipping re-adds/removes it and reverses the recorded host
+  // rewrites using the {original,managed} pairs the detector captured.
+  const isKeepOwn = c => svcs.some(s => s.name === c.detected_name)
+  function restoreEnv(s, c, toManaged) {
+    const rws = (c.rewrites || []).filter(rw => rw.service === s.name)
+    if (!rws.length) return s
+    const env_vars = { ...(s.env_vars || {}) }
+    for (const rw of rws) env_vars[rw.key] = toManaged ? rw.managed : rw.original
+    return { ...s, env_vars }
+  }
+  function setChoice(c, keepOwn) {
+    if (!draft || keepOwn === isKeepOwn(c)) return
+    let services
+    if (keepOwn) {
+      services = [...svcs, c.raw_service].map(s => restoreEnv(s, c, false))
+    } else {
+      services = svcs.filter(s => s.name !== c.detected_name).map(s => restoreEnv(s, c, true))
+    }
+    // Env-level (.env) rewrites carry service === "".
+    const env_vars = { ...(draft.env_vars || {}) }
+    for (const rw of (c.rewrites || [])) {
+      if (rw.service === '') env_vars[rw.key] = keepOwn ? rw.original : rw.managed
+    }
+    onChange('scanDraft', { ...draft, services, env_vars })
+    // Clear/restore the flag attributable to THIS candidate only.
+    if (c.role === 'redis') {
+      onChange('redis', !keepOwn)
+    } else {
+      onChange('database', keepOwn ? 'none' : (data.database && data.database !== 'none' ? data.database : c.role))
+      onChange('dbVersion', keepOwn ? '' : (c.db_version || ''))
+    }
+  }
+
+  // ── Profile-gated opt-in ──
+  const isIncluded = o => svcs.some(s => s.name === o.name)
+  function toggleInclude(o, on) {
+    if (!draft) return
+    onChange('scanDraft', {
+      ...draft,
+      services: on ? [...svcs, o.service] : svcs.filter(s => s.name !== o.name),
+    })
+  }
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-[1fr_8rem_auto] gap-2 items-end">
@@ -292,8 +340,43 @@ function ScanStack({ data, onChange }) {
             })}
             {svcs.length === 0 && <p className="text-xs text-content-subtle">No services detected — you can add them in Edit Project after creating.</p>}
           </div>
-          {(draft.database !== 'none' || draft.redis || draft.garage) && (
-            <p className="text-xs text-content-muted">Managed dependencies: {[draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.garage && 'garage'].filter(Boolean).join(', ')}</p>
+          {(data.database !== 'none' || data.redis || draft.garage) && (
+            <p className="text-xs text-content-muted">Managed dependencies: {[data.database !== 'none' && data.database, data.redis && 'redis', draft.garage && 'garage'].filter(Boolean).join(', ') || 'none'}</p>
+          )}
+          {candidates.length > 0 && (
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="text-[11px] text-content-faint uppercase tracking-wide">Detected dependencies — use a Rigger-managed service, or keep your own container:</p>
+              {candidates.map((c, i) => {
+                const keepOwn = isKeepOwn(c)
+                return (
+                  <div key={i} className="text-xs space-y-1">
+                    <div className="font-mono text-content">{c.detected_name}<span className="text-content-faint"> ({c.image}{c.tag ? `:${c.tag}` : ''})</span></div>
+                    <div className="flex flex-col gap-1 pl-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name={`mc-${i}`} checked={!keepOwn} onChange={() => setChoice(c, false)} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                        <span>Use Rigger-managed <span className="font-mono">{c.managed_name}</span> <span className="text-content-faint">(recommended — backups, credentials, versioning)</span></span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name={`mc-${i}`} checked={keepOwn} onChange={() => setChoice(c, true)} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                        <span>Keep my own <span className="font-mono">{c.detected_name}</span> container from the compose file</span>
+                      </label>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {omitted.length > 0 && (
+            <div className="space-y-1.5 border-t border-border pt-3">
+              <p className="text-[11px] text-content-faint uppercase tracking-wide">Profile-gated services (not started by default) — include any you need:</p>
+              {omitted.map((o, i) => (
+                <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={isIncluded(o)} onChange={e => toggleInclude(o, e.target.checked)} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                  <span className="font-mono text-content">{o.name}</span>
+                  <span className="text-content-faint">{o.service?.image ? `image ${o.service.image}` : 'build'} · profile: {(o.profiles || []).join(', ')}</span>
+                </label>
+              ))}
+            </div>
           )}
           {(draft.notes || []).length > 0 && (
             <ul className="text-xs text-content-subtle list-disc pl-4 space-y-0.5">

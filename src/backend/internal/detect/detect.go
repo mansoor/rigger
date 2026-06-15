@@ -101,6 +101,47 @@ type Draft struct {
 	Detected  string            `json:"detected"`            // primary stack label, for display
 	Notes     []string          `json:"notes"`               // human-readable detection notes
 	EnvVars   map[string]string `json:"env_vars,omitempty"`  // seeded from .env.example for the env's .env
+	// ManagedCandidates lists detected containers Rigger CAN manage (postgres/mysql/
+	// redis). The default draft above already chose "managed" (dropped the container,
+	// set the flag, rebased host refs); each candidate carries the verbatim raw
+	// service + the per-env-var rewrites so the wizard can offer "keep your own
+	// container" and reverse the managed choice without re-deriving anything.
+	ManagedCandidates []ManagedCandidate `json:"managed_candidates,omitempty"`
+	// ProfileOmitted lists services skipped because they're gated behind a compose
+	// `profiles:` (not started by a default `up`). Surfaced so the user can opt to
+	// include them.
+	ProfileOmitted []OmittedService `json:"profile_omitted,omitempty"`
+}
+
+// ManagedCandidate is a detected dependency offered as a choice: use Rigger's
+// managed service (default), or keep the user's own container from the compose file.
+type ManagedCandidate struct {
+	Role         string        `json:"role"`          // postgres | mysql | redis
+	DetectedName string        `json:"detected_name"` // the compose service name (dns-safe), e.g. "db"
+	ManagedName  string        `json:"managed_name"`  // Rigger's managed service name, e.g. "postgres"
+	Image        string        `json:"image,omitempty"`
+	Tag          string        `json:"tag,omitempty"`
+	DBVersion    string        `json:"db_version,omitempty"` // version the managed catalog would use
+	RawService   Service       `json:"raw_service"`          // verbatim container (for "keep own")
+	Rewrites     []HostRewrite `json:"rewrites,omitempty"`   // host refs the managed choice rewrote (to reverse)
+}
+
+// HostRewrite records one env value the managed choice rewrote onto the managed
+// service host (e.g. ...@db:5432... → ...@postgres:5432...). Service is "" for an
+// env-level (.env) value. Carries both forms so the wizard can flip either way.
+type HostRewrite struct {
+	Service  string `json:"service"`
+	Key      string `json:"key"`
+	Original string `json:"original"`
+	Managed  string `json:"managed"`
+}
+
+// OmittedService is a compose service skipped due to a `profiles:` gate, with the
+// full parsed service so the user can opt to include it in services[].
+type OmittedService struct {
+	Name     string   `json:"name"`
+	Profiles []string `json:"profiles"`
+	Service  Service  `json:"service"`
 }
 
 // Detect scans a repo directory and returns a draft service graph.
@@ -182,74 +223,45 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	for _, name := range sortedKeys(cf.Services) {
 		cs := cf.Services[name]
 		// Profile-gated services aren't started by a default `docker compose up`
-		// (e.g. an optional geocoder) — skip them, note for the user.
+		// (e.g. an optional geocoder). Keep them OUT of the graph by default, but
+		// surface the full parsed service so the user can opt to include it.
 		if len(cs.Profiles) > 0 {
 			skippedProfiles = append(skippedProfiles, name)
+			d.ProfileOmitted = append(d.ProfileOmitted, OmittedService{
+				Name: dnsName(name), Profiles: cs.Profiles, Service: composeToService(repoDir, name, cs, cf.Services),
+			})
 			continue
 		}
-		// Recognised data services become managed-dependency toggles, not services.
-		// Capture the image tag so the catalog uses the same version (e.g. 16-alpine).
+		// Recognised data services CAN become a managed dependency. Default to that
+		// (drop the container, set the flag, capture the version, rebase host refs
+		// below), but record the candidate + verbatim service so the wizard can offer
+		// "keep your own container" and reverse the choice.
 		if role := dbRole(cs.Image); role != "" {
 			applyManagedDep(role, d)
-			if _, tag := splitImage(cs.Image); tag != "" && tag != "latest" && d.DBVersion == "" {
+			img, tag := splitImage(cs.Image)
+			if tag == "latest" {
+				tag = ""
+			}
+			if tag != "" && d.DBVersion == "" {
 				d.DBVersion = tag
 			}
 			// The managed service is generated under its role name (postgres/mysql/
 			// redis); remember to repoint references to this dropped service's host.
-			if managed := managedServiceName(role, d); name != managed {
+			managed := managedServiceName(role, d)
+			if name != managed {
 				renames[name] = managed
 			}
+			d.ManagedCandidates = append(d.ManagedCandidates, ManagedCandidate{
+				Role: role, DetectedName: dnsName(name), ManagedName: managed,
+				Image: img, Tag: tag, DBVersion: tag,
+				RawService: composeToService(repoDir, name, cs, cf.Services),
+			})
 			continue
 		}
-		s := Service{Name: dnsName(name), Restart: "unless-stopped", EnvFile: true}
-		// Environment (map or list form) — kept literal so ${VAR:-default} still
-		// interpolates at deploy against the seeded .env. Copied first so compose
-		// values win over any blueprint defaults applied below.
-		for k, v := range nodeToEnvMap(cs.Environment) {
-			if s.EnvVars == nil {
-				s.EnvVars = map[string]string{}
-			}
-			s.EnvVars[k] = v
-		}
-		if !cs.Build.IsZero() {
-			ctx, dockerfile, args := composeBuild(cs.Build)
-			s.Build = &Build{Context: ctx, Dockerfile: dockerfile, Args: args}
-			// Identify the framework in the build context so the service carries
-			// its blueprint id (build.template) — envgen reads that to emit the
-			// framework's env contract (DB_*/DATABASE_URL/…). Compose alone
-			// doesn't tell us the stack; the manifests in the context dir do.
-			if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
-				s.Build.Template = id
-				if bp, ok := blueprints.Get(id); ok {
-					applyBlueprintServiceEnv(&s, bp) // fills only keys compose didn't set
-				}
-			}
-		} else if cs.Image != "" {
-			s.Image, s.Tag = splitImage(cs.Image)
-			s.EnvFile = false
-		}
-		if c := scalarOrJoin(cs.Command); c != "" {
-			s.Command = c
-		}
-		// Ports: first container port → Port (+HostPort); the rest → ExtraPorts (raw).
-		if ports := normalizePorts(cs.Ports); len(ports) > 0 {
-			hp, cp := splitPort(ports[0])
-			s.Port = cp
-			if hp != "" {
-				s.HostPort = hp
-			}
-			s.ExtraPorts = append(s.ExtraPorts, ports[1:]...)
-		}
-		if hc, hcfg := parseHealthcheck(cs.Healthcheck); hc != "" {
-			s.Healthcheck = hc
-			s.HealthcheckConfig = hcfg
-		}
-		s.Volumes = cs.Volumes
-		s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), cf.Services)
-		d.Services = append(d.Services, s)
+		d.Services = append(d.Services, composeToService(repoDir, name, cs, cf.Services))
 	}
 	if len(skippedProfiles) > 0 {
-		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default).")
+		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default — include them in the review if you want them).")
 	}
 	// Repoint hardcoded DB/cache host references onto the managed service names.
 	if n := rebaseManagedHosts(d, renames); n > 0 {
@@ -262,6 +274,59 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	}
 	pickWebEntry(d)
 	return len(d.Services) > 0
+}
+
+// composeToService maps one compose service to the unified Service model. Shared by
+// the app-service path, the managed-dependency raw service (for "keep own"), and the
+// profile-omitted service (for opt-in include). all is the full services map, for
+// resolving depends_on. Behaviour for app services is unchanged from the inline
+// mapping it replaced.
+func composeToService(repoDir, name string, cs composeSvc, all map[string]composeSvc) Service {
+	s := Service{Name: dnsName(name), Restart: "unless-stopped", EnvFile: true}
+	// Environment (map or list form) — kept literal so ${VAR:-default} still
+	// interpolates at deploy against the seeded .env. Copied first so compose
+	// values win over any blueprint defaults applied below.
+	for k, v := range nodeToEnvMap(cs.Environment) {
+		if s.EnvVars == nil {
+			s.EnvVars = map[string]string{}
+		}
+		s.EnvVars[k] = v
+	}
+	if !cs.Build.IsZero() {
+		ctx, dockerfile, args := composeBuild(cs.Build)
+		s.Build = &Build{Context: ctx, Dockerfile: dockerfile, Args: args}
+		// Identify the framework in the build context so the service carries its
+		// blueprint id (build.template) — envgen reads that to emit the framework's
+		// env contract. Compose alone doesn't tell us the stack; the manifests do.
+		if id, ok := identify(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(ctx, "./")))); ok {
+			s.Build.Template = id
+			if bp, ok := blueprints.Get(id); ok {
+				applyBlueprintServiceEnv(&s, bp) // fills only keys compose didn't set
+			}
+		}
+	} else if cs.Image != "" {
+		s.Image, s.Tag = splitImage(cs.Image)
+		s.EnvFile = false
+	}
+	if c := scalarOrJoin(cs.Command); c != "" {
+		s.Command = c
+	}
+	// Ports: first container port → Port (+HostPort); the rest → ExtraPorts (raw).
+	if ports := normalizePorts(cs.Ports); len(ports) > 0 {
+		hp, cp := splitPort(ports[0])
+		s.Port = cp
+		if hp != "" {
+			s.HostPort = hp
+		}
+		s.ExtraPorts = append(s.ExtraPorts, ports[1:]...)
+	}
+	if hc, hcfg := parseHealthcheck(cs.Healthcheck); hc != "" {
+		s.Healthcheck = hc
+		s.HealthcheckConfig = hcfg
+	}
+	s.Volumes = cs.Volumes
+	s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), all)
+	return s
 }
 
 // ── Dockerfiles ──────────────────────────────────────────────────────────────
@@ -434,24 +499,49 @@ func rebaseManagedHosts(d *Draft, renames map[string]string) int {
 	if len(renames) == 0 {
 		return 0
 	}
+	// Deterministic rename order so the recorded rewrites + notes are stable.
+	olds := make([]string, 0, len(renames))
+	for old := range renames {
+		olds = append(olds, old)
+	}
+	sort.Strings(olds)
 	changed := 0
-	apply := func(m map[string]string) {
+	apply := func(svc string, m map[string]string) {
 		for k, v := range m {
 			nv := v
-			for old, neu := range renames {
-				nv = rebaseHost(nv, old, neu)
+			matched := ""
+			for _, old := range olds {
+				before := nv
+				nv = rebaseHost(nv, old, renames[old])
+				if nv != before {
+					matched = renames[old]
+				}
 			}
 			if nv != v {
 				m[k] = nv
 				changed++
+				// Record so the wizard can reverse this value if the user keeps their
+				// own container. Attributed to the managed name that changed it.
+				recordRewrite(d, matched, HostRewrite{Service: svc, Key: k, Original: v, Managed: nv})
 			}
 		}
 	}
 	for i := range d.Services {
-		apply(d.Services[i].EnvVars)
+		apply(d.Services[i].Name, d.Services[i].EnvVars)
 	}
-	apply(d.EnvVars)
+	apply("", d.EnvVars) // env-level (.env) values — Service "" marks them
 	return changed
+}
+
+// recordRewrite attaches a host rewrite to the candidate whose managed service name
+// caused it, so the wizard's "keep own" reversal can restore the original value.
+func recordRewrite(d *Draft, managedName string, r HostRewrite) {
+	for i := range d.ManagedCandidates {
+		if d.ManagedCandidates[i].ManagedName == managedName {
+			d.ManagedCandidates[i].Rewrites = append(d.ManagedCandidates[i].Rewrites, r)
+			return
+		}
+	}
 }
 
 // rebaseHost rewrites the host token old→neu inside an env value: a bare host
