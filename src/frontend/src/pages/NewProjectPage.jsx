@@ -1840,9 +1840,10 @@ export default function NewProjectPage() {
         </div>
       </nav>
 
-      {/* Wizard body */}
+      {/* Wizard body — matches the Edit Project content column width (~max-w-7xl page
+          minus the vertical-tab rail) so the two screens feel consistent. */}
       <div className="flex-1 flex items-start justify-center p-8">
-        <div className="w-full max-w-2xl">
+        <div className="w-full max-w-5xl">
           <Stepper current={step} maxVisited={maxVisited} onStepClick={n => setStep(n)} />
 
           <div className="bg-surface border border-border rounded-2xl p-8">

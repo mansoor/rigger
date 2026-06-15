@@ -347,35 +347,26 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
 
       {/* Command override — explicit toggle reveals the input; off clears it so the
           image's own default CMD (or the build's) is used. */}
-      <div>
-        <Toggle label="Override default command"
-          checked={cmdOverride}
-          onChange={v => { setCmdOverride(v); if (!v && img.command) upd('command', '') }} />
-        {cmdOverride && (
-          <div className="mt-2">
+      {/* Service options — consistent rows: label left, toggle aligned on the column
+          boundary, the reveal input in the right column when the toggle is on. */}
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-2 gap-3 items-center">
+          <Toggle label="Override default command"
+            checked={cmdOverride}
+            onChange={v => { setCmdOverride(v); if (!v && img.command) upd('command', '') }} />
+          {cmdOverride && (
             <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" />
-            <p className="text-xs text-content-subtle mt-1">
-              Replaces the container's default command (compose <code className="font-mono text-xs">command:</code>). Leave the toggle off to keep the image/build default.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* .env handling — process-env toggle + optional physical-file path (related) */}
-      <div className="grid grid-cols-2 gap-3 items-end">
-        <div className="flex items-end pb-1">
-          <Toggle label="Mount .env (env_file)" checked={img.env_file !== false && serviceSource(img) !== 'image'} onChange={v => upd('env_file', v)} />
+          )}
         </div>
-        {serviceSource(img) !== 'image' && (
-          <div><Label>Mount .env as a file <span className="font-normal normal-case text-content-faint">(optional path)</span></Label>
-            <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env" />
-            <p className="text-xs text-content-subtle mt-1">
-              For apps that read a physical <code className="font-mono text-xs">.env</code> from disk (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>). The same vars are injected as process env; set a path to also write them to a file (read-only).
-            </p></div>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex items-end pb-1">
+        <div className="grid grid-cols-2 gap-3 items-center">
+          <Toggle label="Mount .env (env_file)"
+            checked={img.env_file !== false && serviceSource(img) !== 'image'}
+            onChange={v => upd('env_file', v)} />
+          {serviceSource(img) !== 'image' && (
+            <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env — also mount as file (optional)" />
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 items-center">
           <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
             if (v) {
               const sub = (img.subdomain || '').trim()
@@ -392,11 +383,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
             }
             upd('web_routed', v)
           }} />
+          {img.web_routed && (
+            <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="subdomain (blank = apex domain)" />
+          )}
         </div>
-        {img.web_routed && (
-          <div><Label>Subdomain <span className="font-normal normal-case text-content-faint">(blank = apex domain)</span></Label>
-            <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="app" /></div>
-        )}
+        <p className="text-xs text-content-subtle pt-0.5">
+          <strong className="text-content-muted">Override command</strong> replaces the image/build default. <strong className="text-content-muted">Mount .env as a file</strong> also writes the env to disk for apps that read a physical <code className="font-mono text-xs">.env</code> (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>).
+        </p>
       </div>
 
       {/* Port mappings */}
@@ -971,7 +964,7 @@ function ProcessesSettings({ cfg, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, gitRepo = '', gitBranch = '' }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
@@ -990,15 +983,22 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <button type="button" onClick={() => setOpen(o => !o)}
             className={`text-content-subtle text-xs transition-transform shrink-0 ${open ? 'rotate-90' : ''}`} title={open ? 'Collapse' : 'Expand'}>▸</button>
           <div className="w-2 h-2 rounded-full bg-surface-overlay shrink-0" />
-          {/* defaultValue (uncontrolled) — React never updates this input's DOM value
-              while the user is typing, so focus is never lost. onBlur fires rename. */}
-          <input
-            key={envName}
-            defaultValue={envName}
-            onBlur={e => { if (e.target.value !== envName) onRename(e.target.value) }}
-            placeholder="prod"
-            className="bg-transparent text-content-strong font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32 shrink-0"
-          />
+          {/* The name identifies the env's folder + Docker resources ({prefix}_{env});
+              renaming an existing one can't be done safely in place (it would orphan
+              its volumes/data), so it's editable only while the env is NEW (unsaved).
+              Existing envs show a read-only name — use "Copy environment" to clone, or
+              Remove to delete. */}
+          {isNew ? (
+            <input
+              key={envName}
+              defaultValue={envName}
+              onBlur={e => { if (e.target.value !== envName) onRename(e.target.value) }}
+              placeholder="prod"
+              className="bg-transparent text-content-strong font-semibold text-base border-b border-transparent focus:border-brand-500 focus:outline-none px-0 py-0.5 w-32 shrink-0"
+            />
+          ) : (
+            <span className="text-content-strong font-semibold text-base px-0 py-0.5 shrink-0" title="Environment name is fixed after creation">{envName}</span>
+          )}
           {isNew && <span className="text-xs text-brand-400 bg-brand-950 px-2 py-0.5 rounded-full shrink-0">new</span>}
           {!open && (
             <span className="text-xs text-content-subtle truncate cursor-pointer" onClick={() => setOpen(true)}>
@@ -1130,27 +1130,27 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             : [...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]} />
       )}
 
-      {/* Git */}
-      <div className="space-y-3 pt-3 border-t border-border-strong/50">
-        <Toggle
-          label="Git sync"
-          hint="Enable ./run.sh sync"
-          checked={!!cfg.git?.enabled}
-          onChange={v => updGit('enabled', v)}
-        />
-        {cfg.git?.enabled && (
+      {/* Build source (Git) — only for projects that build from a repo. The repo is
+          set once at the project level (one repo per project); each environment may
+          override just the branch it builds from (blank = inherit the project default). */}
+      {gitRepo ? (
+        <div className="space-y-2 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-muted uppercase tracking-wider">Build source (Git)</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Repository</Label>
-              <Input value={cfg.git?.repo} onChange={v => updGit('repo', v)} placeholder="git@github.com:org/repo.git" />
+              <Label>Repository <span className="font-normal normal-case text-content-faint">(from Project tab)</span></Label>
+              <div className="px-3 py-2 bg-surface border border-border-strong rounded-lg text-sm text-content-muted font-mono truncate" title={gitRepo}>{gitRepo}</div>
             </div>
             <div>
-              <Label>Branch</Label>
-              <Input value={cfg.git?.branch} onChange={v => updGit('branch', v)} placeholder="main" />
+              <Label>Branch override <span className="font-normal normal-case text-content-faint">(blank = inherit)</span></Label>
+              <Input value={cfg.git?.branch} onChange={v => updGit('branch', v)} placeholder={gitBranch || 'main'} />
             </div>
           </div>
-        )}
-      </div>
+          <p className="text-xs text-content-subtle">
+            This environment builds from the project repo at branch <code className="font-mono text-xs">{cfg.git?.branch || gitBranch || 'main'}</code>. Leave blank to inherit the project default (<code className="font-mono text-xs">{gitBranch || 'main'}</code>).
+          </p>
+        </div>
+      ) : null}
 
       {/* Environment variables */}
       {isNew
@@ -1227,6 +1227,25 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
 // ── New env vars editor — same look as EnvVarsInline for new (unsaved) envs ───
 // Stores vars in cfg._initial_vars (written to .env after save).
 // Matches EnvVarsInline appearance: collapsible, show/hide values toggle.
+// isSystemVar classifies an env var as Rigger-managed ("system") vs application-
+// defined, so the editors can group them. System = the keys Rigger generates: a
+// managed dependency's connection vars (POSTGRES_*/MYSQL_*/MARIADB_*/REDIS_*/
+// GARAGE_*), per-service image pointers (*_IMAGE), and a few platform vars.
+// Everything else is the app's own configuration.
+const SYS_VAR_PREFIXES = ['POSTGRES_', 'MYSQL_', 'MARIADB_', 'REDIS_', 'GARAGE_']
+const SYS_VAR_EXACT = new Set(['ADMINER_LOGIN_SECRET', 'PROJECT_NAME', 'RESOURCE_PREFIX', 'REGISTRY', 'COMPOSE_PROJECT_NAME', 'MAIL_HOST'])
+function isSystemVar(k) {
+  if (SYS_VAR_EXACT.has(k)) return true
+  if (k.endsWith('_IMAGE')) return true
+  return SYS_VAR_PREFIXES.some(p => k.startsWith(p))
+}
+
+// EnvVarGroupLabel is the small subheader shown above the Application / System
+// groups when both are present.
+function EnvVarGroupLabel({ children }) {
+  return <p className="text-[10px] font-semibold uppercase tracking-wider text-content-faint pt-1 first:pt-0">{children}</p>
+}
+
 function NewEnvVarsEditor({ cfg, onChange }) {
   const vars = cfg._initial_vars || {}
   const secretKeys = cfg._secret_keys || []
@@ -1254,6 +1273,27 @@ function NewEnvVarsEditor({ cfg, onChange }) {
   }
 
   const entries = Object.entries(vars)
+  const appEntries = entries.filter(([k]) => !isSystemVar(k))
+  const sysEntries = entries.filter(([k]) => isSystemVar(k))
+  const grouped = appEntries.length > 0 && sysEntries.length > 0
+
+  const renderRow = ([k, v]) => {
+    const secret = secretSet.has(k)
+    return (
+      <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'}`}>
+        <button type="button" onClick={() => toggleSecret(k)} title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
+          className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+          {secret ? '🔒' : '🔓'}
+        </button>
+        <span className="font-mono text-xs text-content w-40 shrink-0 truncate">{k}</span>
+        <input type={secret && !reveal ? 'password' : 'text'} value={v}
+          onChange={e => setVar(k, e.target.value)}
+          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+        <button type="button" onClick={() => removeVar(k)}
+          className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+      </div>
+    )
+  }
 
   return (
     <div className="pt-3 border-t border-border-strong/50">
@@ -1277,23 +1317,14 @@ function NewEnvVarsEditor({ cfg, onChange }) {
             </label>
           </div>
           <div className="space-y-1.5">
-            {entries.map(([k, v]) => {
-              const secret = secretSet.has(k)
-              return (
-                <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'}`}>
-                  <button type="button" onClick={() => toggleSecret(k)} title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
-                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
-                    {secret ? '🔒' : '🔓'}
-                  </button>
-                  <span className="font-mono text-xs text-content w-40 shrink-0 truncate">{k}</span>
-                  <input type={secret && !reveal ? 'password' : 'text'} value={v}
-                    onChange={e => setVar(k, e.target.value)}
-                    className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
-                  <button type="button" onClick={() => removeVar(k)}
-                    className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
-                </div>
-              )
-            })}
+            {grouped ? (
+              <>
+                <EnvVarGroupLabel>Application</EnvVarGroupLabel>
+                {appEntries.map(renderRow)}
+                <EnvVarGroupLabel>System · managed by Rigger</EnvVarGroupLabel>
+                {sysEntries.map(renderRow)}
+              </>
+            ) : entries.map(renderRow)}
           </div>
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={() => setNewSecret(s => !s)} title={newSecret ? 'New var is a secret' : 'Flag new var as secret'}
@@ -1365,6 +1396,39 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
     saveMut.mutate({ updates, dels: [...deletes], secretKeys })
   }
 
+  // One var row; reused for the Application and System groups.
+  const renderRow = ([k, v]) => {
+    const marked = deletes.has(k)
+    // Values arrive as { value, secret } objects; tolerate a bare string too.
+    const val    = typeof v === 'string' ? v : (v?.value ?? '')
+    const secret = isSecret(k)
+    const show   = reveal && !secret
+    return (
+      <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'} ${marked ? 'opacity-40' : ''}`}>
+        <button type="button" onClick={() => toggleSecret(k)} disabled={marked}
+          title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
+          className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+          {secret ? '🔒' : '🔓'}
+        </button>
+        <span className="font-mono text-xs text-content-muted w-32 shrink-0 truncate" title={k}>{k}</span>
+        <input
+          type={show ? 'text' : 'password'}
+          placeholder={show ? val : '••••••••'}
+          value={marked ? '' : (edits[k] ?? (show ? val : ''))}
+          disabled={marked}
+          onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
+          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
+        />
+        <button type="button" onClick={() => toggleDelete(k)}
+          className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
+            marked ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'
+          }`}>
+          {marked ? '↩' : '×'}
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="pt-3 border-t border-border-strong/50">
       <button
@@ -1395,45 +1459,27 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
             ? <p className="text-[11px] text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) on the next deploy.</p>
             : <p className="text-[11px] text-content-faint">🔒 Flag secrets here; deploy with Swarm to store them as encrypted Docker secrets (Compose keeps them in <code className="font-mono">.env</code>).</p>}
 
-          {/* Existing vars */}
+          {/* Existing vars — grouped Application vs System (Rigger-managed) when both present */}
           {isLoading
             ? <p className="text-xs text-content-subtle">Loading…</p>
-            : (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {Object.entries(vars || {}).map(([k, v]) => {
-                  const marked = deletes.has(k)
-                  // Values arrive as { value, secret } objects; tolerate a bare
-                  // string too. Secrets stay masked even when revealing values.
-                  const val    = typeof v === 'string' ? v : (v?.value ?? '')
-                  const secret = isSecret(k)
-                  const show   = reveal && !secret
-                  return (
-                    <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'} ${marked ? 'opacity-40' : ''}`}>
-                      <button type="button" onClick={() => toggleSecret(k)} disabled={marked}
-                        title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
-                        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
-                        {secret ? '🔒' : '🔓'}
-                      </button>
-                      <span className="font-mono text-xs text-content-muted w-32 shrink-0 truncate" title={k}>{k}</span>
-                      <input
-                        type={show ? 'text' : 'password'}
-                        placeholder={show ? val : '••••••••'}
-                        value={marked ? '' : (edits[k] ?? (show ? val : ''))}
-                        disabled={marked}
-                        onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                        className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
-                      />
-                      <button type="button" onClick={() => toggleDelete(k)}
-                        className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
-                          marked ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'
-                        }`}>
-                        {marked ? '↩' : '×'}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            )
+            : (() => {
+                const entries = Object.entries(vars || {})
+                const appEntries = entries.filter(([k]) => !isSystemVar(k))
+                const sysEntries = entries.filter(([k]) => isSystemVar(k))
+                const grouped = appEntries.length > 0 && sysEntries.length > 0
+                return (
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {grouped ? (
+                      <>
+                        <EnvVarGroupLabel>Application</EnvVarGroupLabel>
+                        {appEntries.map(renderRow)}
+                        <EnvVarGroupLabel>System · managed by Rigger</EnvVarGroupLabel>
+                        {sysEntries.map(renderRow)}
+                      </>
+                    ) : entries.map(renderRow)}
+                  </div>
+                )
+              })()
           }
 
           {/* Add new variable */}
@@ -1887,6 +1933,8 @@ export default function EditProjectPage() {
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}
                 projectGarage={!!project?.garage_enabled}
+                gitRepo={project?.git_repo || ''}
+                gitBranch={project?.git_branch || ''}
               />
             ))}
           </div>
