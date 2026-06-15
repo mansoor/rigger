@@ -453,6 +453,16 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	send("\033[32m✓\033[0m config.json written\n")
 
+	// Upload-source projects: adopt the staged archive (from POST /api/upload-source)
+	// into the project's _source/ before bootstrap, so build extracts it into _src.
+	if msg.Workspace.SourceKind == "upload" {
+		if err := h.adoptUploadedSource(wsName, projKey, msg.Workspace.SourceToken); err != nil {
+			send("\033[31m✗ Error: " + err.Error() + "\033[0m\n")
+			return
+		}
+		send("\033[32m✓\033[0m uploaded source stored\n")
+	}
+
 	// Run bootstrap.sh per environment — reads env_vars from config.json
 	// and writes the .env file via env-gen.sh (which now has the smart secrets).
 	pr, pw := io.Pipe()

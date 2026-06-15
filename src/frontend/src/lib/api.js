@@ -191,6 +191,10 @@ export const saveToolTemplate  = (name, content, force = false) =>
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
 export const scanRepo          = (repo, branch) =>
   api.post('/scan-repo', { repo, branch }).then(r => r.data)
+// Upload-source (Custom application): upload an archive → server extracts + detects;
+// returns { draft, upload_token }. The token is sent on create to adopt the archive.
+export const uploadSource      = (formData) =>
+  api.post('/upload-source', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
 // Stack blueprints for the no-repo "start from a template" picker (incl. seeded services[]).
 export const fetchBlueprints   = () => api.get('/blueprints').then(r => r.data)
 // Managed database catalog (engines + selectable versions) for the DB picker.

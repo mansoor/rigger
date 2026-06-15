@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, fetchBlueprints } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, uploadSource, fetchBlueprints } from '../lib/api'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
 import ManagedServices from '../components/ManagedServices'
@@ -13,6 +13,7 @@ import KeyField from '../components/KeyField'
 import TrashIcon from '../components/TrashIcon'
 import PortWarnings from '../components/PortWarnings'
 import { BackupScheduleEditor } from '../components/BackupSchedules'
+import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 
@@ -214,21 +215,56 @@ function BlueprintStack({ data, onChange }) {
 function ScanStack({ data, onChange }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const draft = data.scanDraft
   async function scan() {
     setErr(''); setBusy(true)
     try {
       const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim())
-      onChange('scanDraft', d)
-      onChange('database', d.database || 'none')
-      onChange('dbVersion', d.db_version || '')
-      onChange('redis', !!d.redis)
-      onChange('garage', !!d.garage)
+      applyDraft(onChange, d)
     } catch (e) {
       onChange('scanDraft', null)
       setErr(e?.response?.data?.error || 'Scan failed')
     } finally { setBusy(false) }
   }
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-[1fr_8rem_auto] gap-2 items-end">
+        <div>
+          <Label>Source repository</Label>
+          <Input value={data.source_repo || ''} onChange={v => onChange('source_repo', v)} placeholder="https://github.com/org/app.git" />
+        </div>
+        <div>
+          <Label>Branch</Label>
+          <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="main" />
+        </div>
+        <button type="button" onClick={scan} disabled={busy || !(data.source_repo || '').trim()}
+          className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
+          {busy ? 'Scanning…' : 'Scan'}
+        </button>
+      </div>
+      <p className="text-xs text-content-subtle">Public HTTPS or token URL — Rigger clones it read-only and detects the stack. SSH keys aren't supported yet.</p>
+      {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+      <ScanReview data={data} onChange={onChange} />
+    </div>
+  )
+}
+
+// applyDraft stores a detector draft (from git scan or upload) into wizard state and
+// mirrors its managed-dependency flags, so the shared review + create payload pick
+// them up. The default draft has managed deps chosen; the review can flip them.
+function applyDraft(onChange, d) {
+  onChange('scanDraft', d)
+  onChange('database', d.database || 'none')
+  onChange('dbVersion', d.db_version || '')
+  onChange('redis', !!d.redis)
+  onChange('garage', !!d.garage)
+}
+
+// ScanReview renders the detected-services review for data.scanDraft — the web-entry
+// picker, the managed-dependency offer (managed vs keep-own), and the profile-gated
+// opt-in. Shared by the Git-scan path (ScanStack) and the upload-source path
+// (CustomStack). Renders nothing until a draft exists.
+function ScanReview({ data, onChange }) {
+  const draft = data.scanDraft
   const svcs = draft?.services || []
   const candidates = draft?.managed_candidates || []
   const omitted = draft?.profile_omitted || []
@@ -287,25 +323,8 @@ function ScanStack({ data, onChange }) {
       services: on ? [...svcs, o.service] : svcs.filter(s => s.name !== o.name),
     })
   }
+  if (!draft) return null
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-[1fr_8rem_auto] gap-2 items-end">
-        <div>
-          <Label>Source repository</Label>
-          <Input value={data.source_repo || ''} onChange={v => onChange('source_repo', v)} placeholder="https://github.com/org/app.git" />
-        </div>
-        <div>
-          <Label>Branch</Label>
-          <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="main" />
-        </div>
-        <button type="button" onClick={scan} disabled={busy || !(data.source_repo || '').trim()}
-          className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
-          {busy ? 'Scanning…' : 'Scan'}
-        </button>
-      </div>
-      <p className="text-xs text-content-subtle">Public HTTPS or token URL — Rigger clones it read-only and detects the stack. SSH keys aren't supported yet.</p>
-      {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
-      {draft && (
         <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-content-strong">Detected: {draft.detected || 'services'}</span>
@@ -385,13 +404,48 @@ function ScanStack({ data, onChange }) {
           )}
           <p className="text-xs text-content-faint">Review here, then fine-tune every service in <strong>Edit Project → Services</strong> after creation.</p>
         </div>
-      )}
-    </div>
   )
 }
 
-const BACKEND_OPTIONS  = [{ value: 'laravel', label: 'Laravel (PHP-FPM)' }, { value: 'nodejs', label: 'Node.js (Express / Fastify)' }]
-const FRONTEND_OPTIONS = [{ value: 'none', label: 'None (API only)' }, { value: 'nextjs', label: 'Next.js' }, { value: 'react', label: 'React / Vite SPA' }]
+// CustomStack: upload application source as an archive; Rigger extracts + detects the
+// stack (the same engine the Git-scan path uses), then the shared review applies. The
+// uploaded archive is adopted into the project on create (via the returned token).
+function CustomStack({ data, onChange, error }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  async function upload(file) {
+    if (!file) return
+    setErr(''); setBusy(true)
+    try {
+      const fd = new FormData()
+      fd.append('archive', file)
+      const { draft, upload_token } = await uploadSource(fd)
+      applyDraft(onChange, draft)
+      onChange('sourceUploadToken', upload_token)
+      onChange('sourceFileName', file.name)
+    } catch (e) {
+      onChange('scanDraft', null)
+      onChange('sourceUploadToken', '')
+      setErr(e?.response?.data?.error || 'Upload failed')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="space-y-4">
+      <DropZone onFile={upload} accept=".zip,.tar,.tar.gz,.tgz,.gz" busy={busy}
+        busyLabel="Extracting & detecting…"
+        hint={data.sourceFileName
+          ? `↻ ${data.sourceFileName} uploaded — drop another to replace`
+          : '↑ Drop your app source (.zip / .tar.gz) here, or click to browse'} />
+      <p className="text-xs text-content-subtle">
+        Upload your application source — Rigger extracts it, detects the stack (framework, ports, a Dockerfile if present),
+        and seeds env from its <code className="font-mono text-xs">.env.example</code>. No git repo or Dockerfile required;
+        Rigger scaffolds one for the detected framework when missing.
+      </p>
+      {(err || error) && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err || error}</p>}
+      <ScanReview data={data} onChange={onChange} />
+    </div>
+  )
+}
 
 function TemplateCard({ tmpl, selected, onClick }) {
   const tagColors = ['bg-info-subtle text-info-fg', 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300', 'bg-success-subtle text-success-fg']
@@ -795,16 +849,7 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       {/* Custom stack options. Database/Redis/Garage are chosen on the next step
           (Dependencies) — project-level, consistent across environments. */}
       {data.stackType === 'custom' && (
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Backend</Label>
-            <Select value={data.backend} onChange={v => onChange('backend', v)} options={BACKEND_OPTIONS} />
-          </div>
-          <div>
-            <Label>Frontend</Label>
-            <Select value={data.frontend} onChange={v => onChange('frontend', v)} options={FRONTEND_OPTIONS} />
-          </div>
-        </div>
+        <CustomStack data={data} onChange={onChange} error={errors.source_upload} />
       )}
     </div>
   )
@@ -1549,7 +1594,7 @@ function Step6({ data }) {
     ? `Scanned repo (${data.scanDraft?.detected || 'detected'}): ${(data.scanDraft?.services || []).map(s => s.name).join(', ') || '(no services)'}`
     : data.stackType === 'blueprint'
     ? `Template (${data.blueprintId || 'none'}): ${(data.blueprintServices || []).map(s => s.name).join(', ') || '(no services)'}`
-    : `Custom: ${[data.backend, data.frontend !== 'none' && data.frontend, data.database !== 'none' && data.database].filter(Boolean).join(' · ')}`
+    : `Uploaded source (${data.scanDraft?.detected || 'detected'}): ${(data.scanDraft?.services || []).map(s => s.name).join(', ') || '(no services)'}`
 
   const reviewImages = data.images.filter(i => i.name && i.image)
   const buildLike = data.stackType === 'custom' || data.stackType === 'scan' || data.stackType === 'blueprint'
@@ -1821,6 +1866,9 @@ export default function NewProjectPage() {
       if (!(data.source_repo || '').trim()) e.source_repo = 'Enter a repository URL'
       else if (!data.scanDraft) e.source_repo = 'Click Scan to detect the stack first'
     }
+    if (step === 2 && data.stackType === 'custom') {
+      if (!data.sourceUploadToken || !data.scanDraft) e.source_upload = 'Upload your application source to continue'
+    }
     if (step === 2 && data.stackType === 'blueprint') {
       if (!data.blueprintId) e.blueprint = 'Pick a stack template'
     }
@@ -1846,9 +1894,11 @@ export default function NewProjectPage() {
 
   function buildPayload() {
     const isScan = data.stackType === 'scan'
+    const isUpload = data.stackType === 'custom' // Custom application = uploaded source (detect-driven)
     const isBlueprint = data.stackType === 'blueprint'
     const isDatabase = data.stackType === 'database'
     const isImage = !isScan && !isBlueprint && !isDatabase && (data.stackType === 'prebuilt' || data.stackType === 'image')
+    const detected = isScan || isUpload // both pre-fill from a detector draft
     return {
       workspace: workspace, // parent-tier workspace KEY
       name: data.name.trim(), // free-form display name
@@ -1860,9 +1910,11 @@ export default function NewProjectPage() {
       template: data.stackType === 'prebuilt' ? data.template : '',
       // Repo-scan sends the detected graph; blueprint sends the seeded graph.
       // Blueprint has no repo — Dockerfiles scaffold from the template on bootstrap.
-      services: isScan ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
+      services: detected ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
       source_repo: isScan ? (data.source_repo || '').trim() : '',
       source_branch: isScan ? (data.source_branch || '').trim() : '',
+      source_kind: isUpload ? 'upload' : '',
+      source_token: isUpload ? (data.sourceUploadToken || '') : '',
       images: data.stackType === 'image'
         ? data.images.filter(img => img.name && img.image).map(img => {
             const ports = (img.portMappings || []).filter(p => p.container)
@@ -1883,10 +1935,10 @@ export default function NewProjectPage() {
       custom_env_vars: data.stackType === 'image' ? data.customEnvVars : {},
       // Repo scan seeds the env's .env from the repo's .env.example so ${VAR} refs in
       // the imported compose `environment:` resolve (and secrets get generated).
-      initial_env_vars: isScan ? (data.scanDraft?.env_vars || {}) : {},
+      initial_env_vars: detected ? (data.scanDraft?.env_vars || {}) : {},
       named_volumes: data.volumes.filter(v => v.name && v.mountPath),
-      backend: (isImage || isScan || isDatabase) ? '' : data.backend,
-      frontend: (isImage || isScan || isDatabase) ? 'none' : data.frontend,
+      backend: (isImage || isScan || isUpload || isDatabase) ? '' : data.backend,
+      frontend: (isImage || isScan || isUpload || isDatabase) ? 'none' : data.frontend,
       database: isImage ? 'none' : data.database,
       db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
       web_sql: (!isImage && data.database && data.database !== 'none') ? !!data.webSql : false,
