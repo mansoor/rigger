@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/detect"
 	"github.com/mansoor/rigger/ui/internal/srcarchive"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -112,6 +113,64 @@ func (h *Handler) adoptUploadedSource(workspace, projectKey, token string) error
 	}
 	os.RemoveAll(filepath.Join(h.sourceUploadsDir(), token))
 	return nil
+}
+
+// ReplaceSource overwrites an upload-source project's stored archive with a freshly
+// uploaded one (validated by a throwaway extraction). The next Build wipes _src and
+// re-extracts it — so updating an uploaded app is: replace source, then build.
+// POST /api/workspaces/{workspace}/projects/{name}/source  (multipart: "archive")
+func (h *Handler) ReplaceSource(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSourceBytes+(1<<20))
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "upload too large or malformed: " + err.Error()})
+		return
+	}
+	file, _, err := r.FormFile("archive")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "archive field required"})
+		return
+	}
+	defer file.Close()
+
+	tmpDir, err := os.MkdirTemp("", "rigger-resrc-*")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+	archiveTmp := filepath.Join(tmpDir, "archive")
+	dst, err := os.Create(archiveTmp)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if _, err := io.Copy(dst, file); err != nil {
+		dst.Close()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to store upload (too large?): " + err.Error()})
+		return
+	}
+	dst.Close()
+	// Validate it's a real, safe archive before overwriting the project's source.
+	if err := srcarchive.Extract(archiveTmp, filepath.Join(tmpDir, "verify")); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "couldn't read the archive: " + err.Error()})
+		return
+	}
+
+	dest := wspath.SourceArchive(h.workspacesDir, ws, name)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := copyFile(archiveTmp, dest, 0o644); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced — build to apply the new source"})
 }
 
 // reapSourceUploads removes staging dirs older than 2h (abandoned scans that never

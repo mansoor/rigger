@@ -195,6 +195,9 @@ export const scanRepo          = (repo, branch) =>
 // returns { draft, upload_token }. The token is sent on create to adopt the archive.
 export const uploadSource      = (formData) =>
   api.post('/upload-source', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+// Replace an upload-source project's stored archive; the next build re-extracts it.
+export const replaceProjectSource = (ws, name, formData) =>
+  api.post(`/workspaces/${ws}/projects/${name}/source`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
 // Stack blueprints for the no-repo "start from a template" picker (incl. seeded services[]).
 export const fetchBlueprints   = () => api.get('/blueprints').then(r => r.data)
 // Managed database catalog (engines + selectable versions) for the DB picker.

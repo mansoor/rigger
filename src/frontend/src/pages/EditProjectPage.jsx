@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource } from '../lib/api'
+import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
@@ -699,6 +700,38 @@ function stable(v) {
 function changedFields(a, b) {
   const norm = (x) => (x === undefined || x === '' || x === 0 ? null : x)
   return SVC_DIFF_FIELDS.filter(k => stable(norm(a?.[k])) !== stable(norm(b?.[k])))
+}
+
+// ReplaceSourceCard lets an upload-source project's owner replace the stored archive.
+// The next Build wipes _src and re-extracts it, so updating is: replace, then build.
+function ReplaceSourceCard({ workspace, name }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null) // { ok, text }
+  async function upload(file) {
+    if (!file) return
+    setBusy(true); setMsg(null)
+    try {
+      const fd = new FormData(); fd.append('archive', file)
+      await replaceProjectSource(workspace, name, fd)
+      setMsg({ ok: true, text: `${file.name} uploaded — Build each environment to apply.` })
+    } catch (e) {
+      setMsg({ ok: false, text: e?.response?.data?.error || 'Upload failed' })
+    } finally { setBusy(false) }
+  }
+  return (
+    <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4 space-y-2">
+      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Application source (uploaded)</p>
+      <p className="text-xs text-content-subtle">
+        This project builds from an uploaded archive. Replace it with a new
+        <code className="font-mono text-xs"> .zip</code>/<code className="font-mono text-xs">.tar.gz</code>, then <strong>Build</strong> each
+        environment to apply.
+      </p>
+      <DropZone onFile={upload} accept=".zip,.tar,.tar.gz,.tgz,.gz" busy={busy}
+        busyLabel="Uploading & validating…"
+        hint="↑ Drop a new source archive here, or click to browse" />
+      {msg && <p className={`text-xs ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.text}</p>}
+    </div>
+  )
 }
 
 // diffServices buckets detected services against the current graph by name.
@@ -2018,6 +2051,10 @@ export default function EditProjectPage() {
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
               </div>
+            )}
+
+            {project?.source_kind === 'upload' && (
+              <ReplaceSourceCard workspace={workspace} name={name} />
             )}
 
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
