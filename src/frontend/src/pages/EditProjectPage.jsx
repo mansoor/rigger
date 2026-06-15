@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment } from '../lib/api'
 import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
@@ -964,9 +964,57 @@ function ProcessesSettings({ cfg, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, gitRepo = '', gitBranch = '' }) {
+// CopyEnvModal clones an existing environment into a new one (Phase 1: config +
+// regenerated .env/compose + bind config; fresh empty volumes; source untouched).
+function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose, onCopied }) {
+  const [newEnv, setNewEnv] = useState('')
+  const [regen, setRegen]   = useState(true)
+  const [err, setErr]       = useState('')
+  const [busy, setBusy]     = useState(false)
+  const nm = newEnv.trim().toLowerCase()
+  const valid = /^[a-z][a-z0-9-]{0,29}$/.test(nm) && !existingNames.includes(nm)
+  async function go() {
+    if (!valid) return
+    setBusy(true); setErr('')
+    try {
+      await copyEnvironment(workspace, project, srcEnv, nm, regen)
+      onCopied(nm)
+    } catch (e) {
+      setErr(e?.response?.data?.error || e.message)
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">Copy environment “{srcEnv}”</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+        <p className="text-sm text-content-subtle">
+          Creates a new environment from <strong className="text-content">{srcEnv}</strong>’s configuration and env vars. Volume <strong className="text-content">data is not copied</strong> — the new env starts with fresh, empty volumes. The source is left untouched.
+        </p>
+        <div>
+          <Label required>New environment name</Label>
+          <Input value={newEnv} onChange={setNewEnv} placeholder="prod" />
+          {nm && !valid && <p className="text-danger-fg text-xs mt-1">{existingNames.includes(nm) ? 'That environment already exists.' : 'Lowercase letters, digits, hyphens; must start with a letter.'}</p>}
+        </div>
+        <Toggle label="Regenerate secrets" hint="Fresh DB passwords / tokens for the new env (recommended)" checked={regen} onChange={setRegen} />
+        {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2 whitespace-pre-wrap">{err}</p>}
+        <button onClick={go} disabled={!valid || busy}
+          className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+          {busy ? 'Copying…' : 'Copy environment'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+  const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
+  const [copyOpen, setCopyOpen] = useState(false)
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
   const updGit = (k, v) => onChange({ ...cfg, git: { ...(cfg.git || {}), [k]: v } })
   const updReplicas = (k, v) => onChange({ ...cfg, replicas: { ...(cfg.replicas || {}), [k]: parseInt(v) || 1 } })
@@ -1006,20 +1054,43 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={async () => {
-            if (await confirm({
-              title: 'Remove environment?',
-              message: `Remove the "${envName}" environment from this project? When you save, its containers are stopped and removed and its files are deleted. This can't be undone.`,
-              confirmLabel: 'Remove',
-            })) onRemove()
-          }}
-          disabled={isOnlyEnv}
-          title={isOnlyEnv ? 'Cannot remove the only environment' : undefined}
-          className={`text-xs transition-colors shrink-0 ${isOnlyEnv ? 'text-content-faint cursor-not-allowed' : 'text-danger-fg hover:text-danger-fg'}`}
-        >Remove</button>
+        <div className="flex items-center gap-3 shrink-0">
+          {/* Copy: clone this env into a new one. Disabled while the page has unsaved
+              edits (the copy reads the last SAVED config) and for brand-new envs. */}
+          {!isNew && (
+            <button
+              type="button"
+              onClick={() => setCopyOpen(true)}
+              disabled={dirty}
+              title={dirty ? 'Save changes before copying' : 'Copy this environment to a new one'}
+              className={`text-xs transition-colors ${dirty ? 'text-content-faint cursor-not-allowed' : 'text-content-subtle hover:text-brand-400'}`}
+            >Copy</button>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              if (await confirm({
+                title: 'Remove environment?',
+                message: `Remove the "${envName}" environment from this project? When you save, its containers are stopped and removed and its files are deleted. This can't be undone.`,
+                confirmLabel: 'Remove',
+              })) onRemove()
+            }}
+            disabled={isOnlyEnv}
+            title={isOnlyEnv ? 'Cannot remove the only environment' : undefined}
+            className={`text-xs transition-colors ${isOnlyEnv ? 'text-content-faint cursor-not-allowed' : 'text-danger-fg hover:text-danger-fg'}`}
+          >Remove</button>
+        </div>
       </div>
+      {copyOpen && (
+        <CopyEnvModal
+          workspace={workspace}
+          project={workspaceName}
+          srcEnv={envName}
+          existingNames={existingNames}
+          onClose={() => setCopyOpen(false)}
+          onCopied={() => { setCopyOpen(false); if (onCopied) onCopied() }}
+        />
+      )}
 
       {open && (<div className="px-5 pb-5 space-y-4 border-t border-border-strong/50 pt-4">
       <div className="grid grid-cols-2 gap-4">
@@ -1935,6 +2006,9 @@ export default function EditProjectPage() {
                 projectGarage={!!project?.garage_enabled}
                 gitRepo={project?.git_repo || ''}
                 gitBranch={project?.git_branch || ''}
+                dirty={dirty}
+                existingNames={currentEnvNames}
+                onCopied={() => window.location.reload()}
               />
             ))}
           </div>

@@ -809,6 +809,7 @@ func main() {
 	// Phase 9e: per-env deploy history + rollback (authed; per-project RBAC inside).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/rollback", authSvc.Middleware(http.HandlerFunc(handler.RollbackEnv)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/copy", authSvc.Middleware(http.HandlerFunc(handler.CopyEnvironment)))
 	// Build-image lifecycle (#): per-env pointer status + catch-up to latest.
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database", authSvc.Middleware(http.HandlerFunc(handler.GetDatabaseInfo)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseSchemas)))
