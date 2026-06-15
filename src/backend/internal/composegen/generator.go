@@ -370,8 +370,8 @@ func (g *gen) emitExtraCompose(raw string) {
 	}
 }
 
-// sortedKeys returns map keys sorted ascending (matches jq `keys[]`).
-func sortedKeys(m map[string]flexStr) []string {
+// sortedStringKeys returns map keys sorted ascending (string-valued variant).
+func sortedStringKeys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

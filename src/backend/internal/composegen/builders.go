@@ -173,11 +173,13 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		g.envCfgUsed = true
 	}
 
-	// Environment (keys sorted for deterministic output).
-	if keys := sortedKeys(svc.EnvVars); len(keys) > 0 {
+	// Environment (keys sorted for deterministic output). Service links are merged
+	// into the same keyspace — an explicit link wins over an env_vars key of the
+	// same name — so we never emit a duplicate (invalid) YAML map key.
+	if env := g.serviceEnv(prefix, svc); len(env) > 0 {
 		g.line("    environment:")
-		for _, k := range keys {
-			g.line("      - " + k + "=" + string(svc.EnvVars[k]))
+		for _, k := range sortedStringKeys(env) {
+			g.line("      - " + k + "=" + env[k])
 		}
 	}
 
@@ -494,6 +496,85 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
 		g.line("")
 	}
+}
+
+// ── Service links ─────────────────────────────────────────────────────────────────
+
+// serviceEnv merges a service's static EnvVars with its resolved service-link URLs
+// into one string map. A link wins over an env_vars key of the same name, so the
+// caller emits a single sorted environment: block with no duplicate (invalid) keys.
+func (g *gen) serviceEnv(prefix string, svc Service) map[string]string {
+	out := make(map[string]string, len(svc.EnvVars)+len(svc.Links))
+	for k, v := range svc.EnvVars {
+		out[k] = string(v)
+	}
+	for k, v := range g.resolveLinks(prefix, svc) {
+		out[k] = v
+	}
+	return out
+}
+
+// resolveLinks builds the env-var → URL map a service's links emit. The host is the
+// fully prefixed {prefix}_{target} network alias (resolvable for both app and
+// managed services — see managedNet / buildService aliases). The port defaults to
+// the target service's own Port, or the managed-dep default when the target has no
+// Service entry; if neither is known the :port segment is omitted. Links with an
+// empty EnvVar or Service are skipped.
+func (g *gen) resolveLinks(prefix string, svc Service) map[string]string {
+	if len(svc.Links) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(svc.Links))
+	for _, ln := range svc.Links {
+		if ln.EnvVar == "" || ln.Service == "" {
+			continue
+		}
+		scheme := ln.Scheme
+		if scheme == "" {
+			scheme = "http"
+		}
+		port := ln.Port
+		if port == "" {
+			port = g.targetPort(ln.Service)
+		}
+		url := scheme + "://" + prefix + "_" + ln.Service
+		if port != "" {
+			url += ":" + port
+		}
+		url += ln.Path
+		out[ln.EnvVar] = url
+	}
+	return out
+}
+
+// targetPort returns the in-network port for a link target: the matching app
+// service's Port, else the managed-dependency default (managed deps have no Service
+// entry — they're synthesized in buildManagedDeps).
+func (g *gen) targetPort(name string) string {
+	for _, s := range g.cfg.Services {
+		if s.Name == name {
+			return string(s.Port)
+		}
+	}
+	return managedDepPort(name)
+}
+
+// managedDepPort maps a managed-dependency / Adminer target name to its in-network
+// port, for resolving a service link whose target has no Service entry.
+func managedDepPort(name string) string {
+	switch name {
+	case "postgres":
+		return "5432"
+	case "mysql", "mariadb":
+		return "3306"
+	case "redis":
+		return "6379"
+	case "garage":
+		return "3900"
+	case "adminer":
+		return "8080"
+	}
+	return ""
 }
 
 // ── small helpers ────────────────────────────────────────────────────────────────

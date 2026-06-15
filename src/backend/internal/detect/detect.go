@@ -43,6 +43,19 @@ type Service struct {
 	Restart           string             `json:"restart,omitempty"`
 	ConfigTemplate    string             `json:"config_template,omitempty"`
 	EnvVars           map[string]string  `json:"env_vars,omitempty"`
+	Links             []ServiceLink      `json:"links,omitempty"`
+}
+
+// ServiceLink mirrors composegen's ServiceLink — a declared dependency on another
+// service's in-network URL, injected as an env var. The detector leaves this empty
+// today (users add links in Edit Project); the field exists so links round-trip
+// through the scan draft straight into config.json.
+type ServiceLink struct {
+	Service string `json:"service"`
+	EnvVar  string `json:"env_var"`
+	Port    string `json:"port,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Scheme  string `json:"scheme,omitempty"`
 }
 
 // HealthcheckConfig mirrors composegen's per-service healthcheck timing.

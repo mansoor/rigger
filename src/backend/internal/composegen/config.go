@@ -121,8 +121,23 @@ type Service struct {
 	EnvFile           bool               `json:"env_file,omitempty"`            // inject the env's .env as process env (env_file:)
 	EnvFileMount      string             `json:"env_file_mount,omitempty"`      // also bind the env's .env as a physical file at this container path (ro)
 	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
+	Links             []ServiceLink      `json:"links,omitempty"` // service→service URL wiring, emitted into environment:
 	ExtraCompose      string             `json:"extra_compose,omitempty"`
 	Replicas          flexStr            `json:"replicas,omitempty"` // default; per-env override via Swarm.Services
+}
+
+// ServiceLink declares that THIS service needs another service's in-network URL,
+// injected as an environment variable. Rigger emits
+// {EnvVar}={Scheme}://{prefix}_{Service}:{Port}{Path} into the service's
+// environment: block (which overrides env_file), so a multi-service app can reach a
+// sibling without the user hand-computing the in-network host. Manual env vars still
+// work — links are an opt-in convenience, detector-proposed but never forced.
+type ServiceLink struct {
+	Service string `json:"service"`          // target service short name (app or managed dep)
+	EnvVar  string `json:"env_var"`          // env key injected into THIS service
+	Port    string `json:"port,omitempty"`   // default = target's port (managed-dep default if managed)
+	Path    string `json:"path,omitempty"`   // optional suffix, e.g. "/api"
+	Scheme  string `json:"scheme,omitempty"` // default "http"
 }
 
 // BuildSpec describes how a Build service's image is built.

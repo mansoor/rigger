@@ -206,6 +206,37 @@ function argRowsToObject(rows) {
   return Object.keys(out).length ? out : undefined
 }
 
+// Service links round-trip between the links[] array and editable rows. A link
+// declares an env var pointing at another service's in-network URL; Rigger emits
+// {env_var}={scheme}://{prefix}_{service}:{port}{path}. One trailing blank row is
+// kept so + behaves like ports/args.
+function imgToLinkRows(img) {
+  const rows = (img.links || []).map(l => ({
+    env_var: l.env_var || '', service: l.service || '',
+    port: l.port || '', path: l.path || '', scheme: l.scheme || '',
+  }))
+  if (!rows.length) return [{ env_var: '', service: '', port: '', path: '', scheme: '' }]
+  return rows
+}
+
+function linkRowsToArray(rows) {
+  const out = []
+  for (const r of rows) {
+    const ev = (r.env_var || '').trim()
+    const svc = (r.service || '').trim()
+    if (!ev || !svc) continue
+    const link = { service: svc, env_var: ev }
+    if ((r.port || '').trim()) link.port = r.port.trim()
+    if ((r.path || '').trim()) link.path = r.path.trim()
+    if ((r.scheme || '').trim() && r.scheme.trim() !== 'http') link.scheme = r.scheme.trim()
+    out.push(link)
+  }
+  return out.length ? out : undefined
+}
+
+// Standard in-network ports for managed-dependency link targets (no service entry).
+const MANAGED_LINK_PORT = { postgres: '5432', mysql: '3306', mariadb: '3306', redis: '6379', garage: '3900', adminer: '8080' }
+
 // ── Image stack editor ────────────────────────────────────────────────────────
 
 const RESTART_OPTIONS = [
@@ -224,6 +255,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
   const [argRows,    setArgRows]    = useState(() => imgToArgRows(img))
+  const [linkRows,   setLinkRows]   = useState(() => imgToLinkRows(img))
   // Explicit "override default command" toggle. Kept as local UI state so the input
   // stays revealed while the field is momentarily empty (before the user types).
   const [cmdOverride, setCmdOverride] = useState(() => !!img.command)
@@ -239,6 +271,10 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
   function syncArgs(rows) {
     setArgRows(rows)
     onUpdate(idx, { ...img, build: { ...(img.build || {}), args: argRowsToObject(rows) } })
+  }
+  function syncLinks(rows) {
+    setLinkRows(rows)
+    onUpdate(idx, { ...img, links: linkRowsToArray(rows) })
   }
   function upd(field, val) {
     onUpdate(idx, { ...img, [field]: val })
@@ -564,6 +600,50 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         </div>
       )}
 
+      {/* Service links — wire an env var to another service's in-network URL. */}
+      <div>
+        <Label>Service links</Label>
+        <p className="text-xs text-content-subtle mb-2">
+          Inject another service's in-network URL as an environment variable, e.g. a
+          frontend reaching its API. Rigger emits{' '}
+          <code className="font-mono text-xs">ENV_VAR=http://{'{service}'}:{'{port}'}{'{path}'}</code>{' '}
+          (the value overrides any matching <code className="font-mono text-xs">.env</code> key). Optional — you can also set the URL by hand as an env var.
+        </p>
+        {depOptions.length === 0
+          ? <p className="text-xs text-content-faint">Add another service or managed dependency first to link to it.</p>
+          : (<div className="space-y-1.5">
+          {linkRows.map((row, ri) => {
+            const targetPort = (allImages.find(m => m.name === row.service)?.port) || MANAGED_LINK_PORT[row.service] || ''
+            return (
+              <div key={ri} className="flex items-center gap-2">
+                <input type="text" value={row.env_var}
+                  onChange={e => { const r = linkRows.map((x,j)=>j===ri?{...x,env_var:e.target.value}:x); syncLinks(r) }}
+                  placeholder="API_URL" className={`flex-1 ${monoInput}`} />
+                <span className="text-content-subtle font-bold shrink-0">=</span>
+                <select value={row.service}
+                  onChange={e => { const r = linkRows.map((x,j)=>j===ri?{...x,service:e.target.value}:x); syncLinks(r) }}
+                  className={`shrink-0 ${monoInput}`}>
+                  <option value="">— service —</option>
+                  {depOptions.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span className="text-content-subtle shrink-0">:</span>
+                <input type="text" value={row.port}
+                  onChange={e => { const r = linkRows.map((x,j)=>j===ri?{...x,port:e.target.value}:x); syncLinks(r) }}
+                  placeholder={targetPort || 'port'} className={`w-16 ${monoInput}`} />
+                <input type="text" value={row.path}
+                  onChange={e => { const r = linkRows.map((x,j)=>j===ri?{...x,path:e.target.value}:x); syncLinks(r) }}
+                  placeholder="/api" className={`w-20 ${monoInput}`} />
+                <button type="button" title="Remove link"
+                  onClick={() => { const r = linkRows.filter((_,j)=>j!==ri); syncLinks(r.length ? r : [{ env_var:'', service:'', port:'', path:'', scheme:'' }]) }}
+                  className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+              </div>
+            )
+          })}
+          <button type="button" onClick={() => syncLinks([...linkRows, { env_var:'', service:'', port:'', path:'', scheme:'' }])}
+            className="mt-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add service link</button>
+        </div>)}
+      </div>
+
       {/* Advanced — extra_compose YAML */}
       <details className="group">
         <summary className="text-xs text-content-subtle cursor-pointer hover:text-content transition-colors select-none list-none flex items-center gap-1">
@@ -601,7 +681,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
 const SVC_DIFF_FIELDS = [
   'build', 'image', 'image_from', 'tag', 'command', 'port', 'host_port',
   'extra_ports', 'web_routed', 'subdomain', 'healthcheck', 'env_file',
-  'env_file_mount', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars',
+  'env_file_mount', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars', 'links',
 ]
 
 // stable serialises a value with object keys sorted at every depth, so two

@@ -543,3 +543,41 @@ func TestServicesEnvFileMount(t *testing.T) {
 		t.Errorf("no configs expected when EnvFile content is empty\n%s", out3)
 	}
 }
+
+// Service links emit {ENV_VAR}={scheme}://{prefix}_{target}:{port}{path} into the
+// service's environment block: port defaults to the target service's own port (or a
+// managed-dep default when the target has no service entry), and a link wins over an
+// env_vars key of the same name (merged into one sorted keyspace, no dup key).
+func TestServiceLinks(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [
+			{"name":"backend","build":{},"port":"8000"},
+			{"name":"frontend","build":{},"port":"3000","web_routed":true,
+			 "env_vars":{"STATIC":"x","API_URL":"http://override-me"},
+			 "links":[
+				{"service":"backend","env_var":"API_URL","path":"/api"},
+				{"service":"postgres","env_var":"PG_URL","scheme":"postgres","port":"","path":"/db"}
+			 ]}
+		],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080","database":"postgres"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe := svcBlock(t, string(out), "frontend")
+	for _, want := range []string{
+		"- API_URL=http://app_dev_backend:8000/api",   // target port (8000) + path; link beats override-me
+		"- PG_URL=postgres://app_dev_postgres:5432/db", // managed-dep default port + custom scheme
+		"- STATIC=x",                                   // static env preserved
+	} {
+		if !strings.Contains(fe, want) {
+			t.Errorf("frontend env missing %q\n---\n%s", want, fe)
+		}
+	}
+	// No duplicate/clobbered key: the override-me literal must not survive.
+	if strings.Contains(fe, "http://override-me") {
+		t.Errorf("link did not override the static env var\n---\n%s", fe)
+	}
+}
