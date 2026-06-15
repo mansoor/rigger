@@ -218,6 +218,24 @@ services:
 	}
 }
 
+// Port specs with an env-var default (${APP_PORT:-80}) must not be split on the colon
+// inside ${...} — a common shape in uploaded compose files.
+func TestSplitPortEnvDefault(t *testing.T) {
+	cases := []struct{ in, host, cont string }{
+		{"${APP_PORT:-80}:80", "${APP_PORT:-80}", "80"},
+		{"8080:${VITE_PORT}", "8080", "${VITE_PORT}"},
+		{"8080:${VITE_PORT:-5173}", "8080", "${VITE_PORT:-5173}"},
+		{"80", "", "80"},
+		{"127.0.0.1:8080:80", "8080", "80"},
+	}
+	for _, c := range cases {
+		h, cont := splitPort(c.in)
+		if h != c.host || cont != c.cont {
+			t.Errorf("splitPort(%q) = (%q,%q), want (%q,%q)", c.in, h, cont, c.host, c.cont)
+		}
+	}
+}
+
 func TestDetectDockerfileMonorepo(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"apps/api/Dockerfile": "FROM golang:1.25\nEXPOSE 9090\n",

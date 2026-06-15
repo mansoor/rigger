@@ -99,6 +99,22 @@ function serviceSource(s) {
 
 // ── Helpers: port rows ↔ img fields ──────────────────────────────────────────
 
+// splitPortSpec splits a "host:container" port spec on ':' OUTSIDE ${...}, so an
+// env-var default like ${APP_PORT:-80} (whose inner colon is not a field break) isn't
+// mangled. Mirrors the backend detector's splitColonOutsideBraces.
+function splitPortSpec(s) {
+  const parts = []
+  let depth = 0, start = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '{') depth++
+    else if (c === '}') { if (depth > 0) depth-- }
+    else if (c === ':' && depth === 0) { parts.push(s.slice(start, i)); start = i + 1 }
+  }
+  parts.push(s.slice(start))
+  return parts
+}
+
 function imgToPortRows(img) {
   const rows = []
   const linkSet = new Set((img.link_ports || []).map(String))
@@ -109,7 +125,7 @@ function imgToPortRows(img) {
     rows.push({ host: h, container: String(img.port || ''), link: useDefault ? !!h : linkSet.has(h) })
   }
   for (const ep of (img.extra_ports || [])) {
-    const p = ep.split(':')
+    const p = splitPortSpec(String(ep))
     const h = p.length === 2 ? p[0] : ''
     rows.push(p.length === 2
       ? { host: h, container: p[1], link: linkSet.has(h) }

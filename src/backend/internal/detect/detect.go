@@ -787,9 +787,11 @@ func normalizePorts(ports []string) []string {
 	return out
 }
 
-// splitPort returns (hostPort, containerPort) from "h:c", "ip:h:c", or "c".
+// splitPort returns (hostPort, containerPort) from "h:c", "ip:h:c", or "c". It splits
+// only on colons OUTSIDE ${...}, so a compose port spec with an env-var default
+// (e.g. "${APP_PORT:-80}:80") isn't mangled by the colon inside ${...}.
 func splitPort(p string) (host, container string) {
-	parts := strings.Split(strings.Trim(p, `"' `), ":")
+	parts := splitColonOutsideBraces(strings.Trim(p, `"' `))
 	switch len(parts) {
 	case 1:
 		return "", parts[0]
@@ -798,6 +800,30 @@ func splitPort(p string) (host, container string) {
 	default:
 		return parts[len(parts)-2], parts[len(parts)-1]
 	}
+}
+
+// splitColonOutsideBraces splits s on ':' but ignores colons inside ${...} — compose
+// port/value specs use env-var defaults like ${APP_PORT:-80} whose inner colon must
+// not be treated as a host:container break.
+func splitColonOutsideBraces(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+			}
+		case ':':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
 }
 
 var ingressImageRE = regexp.MustCompile(`nginx|caddy|traefik|httpd|haproxy`)
