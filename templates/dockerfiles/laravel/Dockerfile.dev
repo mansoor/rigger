@@ -15,7 +15,7 @@ ENV APP_ENV=local \
 RUN apk add --no-cache \
       libpng-dev libjpeg-turbo-dev libwebp-dev freetype-dev \
       zip unzip libzip-dev postgresql-dev oniguruma-dev git \
-    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
+    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS linux-headers \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" \
          pdo pdo_pgsql pdo_mysql gd mbstring bcmath zip opcache pcntl \
