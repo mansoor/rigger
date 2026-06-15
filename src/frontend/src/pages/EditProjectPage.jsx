@@ -38,9 +38,12 @@ function Input({ value, onChange, placeholder, type = 'text', ...rest }) {
   )
 }
 
-function Toggle({ label, hint, checked, onChange, disabled = false }) {
+// Toggle: label + switch. Default spreads them (justify-between) for full-width
+// setting rows; `inline` packs the switch right after the label (compact, for
+// grid/aligned layouts).
+function Toggle({ label, hint, checked, onChange, disabled = false, inline = false }) {
   return (
-    <div className={`flex items-center justify-between ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`flex items-center ${inline ? 'gap-2.5' : 'justify-between'} ${disabled ? 'opacity-50' : ''}`}>
       <div>
         <p className="text-sm text-content">{label}</p>
         {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
@@ -347,50 +350,46 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
 
       {/* Command override — explicit toggle reveals the input; off clears it so the
           image's own default CMD (or the build's) is used. */}
-      {/* Service options — consistent rows: label left, toggle aligned on the column
-          boundary, the reveal input in the right column when the toggle is on. */}
-      <div className="space-y-2.5">
-        <div className="grid grid-cols-2 gap-3 items-center">
-          <Toggle label="Override default command"
-            checked={cmdOverride}
-            onChange={v => { setCmdOverride(v); if (!v && img.command) upd('command', '') }} />
-          {cmdOverride && (
-            <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" />
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3 items-center">
-          <Toggle label="Mount .env (env_file)"
-            checked={img.env_file !== false && serviceSource(img) !== 'image'}
-            onChange={v => upd('env_file', v)} />
-          {serviceSource(img) !== 'image' && (
-            <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env — also mount as file (optional)" />
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-3 items-center">
-          <Toggle label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
-            if (v) {
-              const sub = (img.subdomain || '').trim()
-              const clash = allImages.find((m, j) => j !== idx && m.web_routed && (m.subdomain || '').trim() === sub)
-              if (clash) {
-                const host = sub ? `the "${sub}" subdomain` : 'the apex domain'
-                const ok = await confirm({
-                  title: 'Another service already routes here',
-                  message: `"${clash.name || 'another service'}" is already the web entry on ${host}. Two services on the same host collide in Traefik — give one a distinct subdomain to run both. Enable anyway?`,
-                  confirmLabel: 'Enable anyway',
-                })
-                if (!ok) return
-              }
+      {/* Service options — toggles in one aligned column (switch hugs its label),
+          the reveal input in the right column when the toggle is on. */}
+      <div className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-3 items-center">
+        <Toggle inline label="Override default command"
+          checked={cmdOverride}
+          onChange={v => { setCmdOverride(v); if (!v && img.command) upd('command', '') }} />
+        {cmdOverride
+          ? <Input value={img.command} onChange={v => upd('command', v)} placeholder="php artisan queue:work" />
+          : <div />}
+
+        <Toggle inline label="Mount .env (env_file)"
+          checked={img.env_file !== false && serviceSource(img) !== 'image'}
+          onChange={v => upd('env_file', v)} />
+        {serviceSource(img) !== 'image'
+          ? <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env — also mount as file (optional)" />
+          : <div />}
+
+        <Toggle inline label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
+          if (v) {
+            const sub = (img.subdomain || '').trim()
+            const clash = allImages.find((m, j) => j !== idx && m.web_routed && (m.subdomain || '').trim() === sub)
+            if (clash) {
+              const host = sub ? `the "${sub}" subdomain` : 'the apex domain'
+              const ok = await confirm({
+                title: 'Another service already routes here',
+                message: `"${clash.name || 'another service'}" is already the web entry on ${host}. Two services on the same host collide in Traefik — give one a distinct subdomain to run both. Enable anyway?`,
+                confirmLabel: 'Enable anyway',
+              })
+              if (!ok) return
             }
-            upd('web_routed', v)
-          }} />
-          {img.web_routed && (
-            <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="subdomain (blank = apex domain)" />
-          )}
-        </div>
-        <p className="text-xs text-content-subtle pt-0.5">
-          <strong className="text-content-muted">Override command</strong> replaces the image/build default. <strong className="text-content-muted">Mount .env as a file</strong> also writes the env to disk for apps that read a physical <code className="font-mono text-xs">.env</code> (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>).
-        </p>
+          }
+          upd('web_routed', v)
+        }} />
+        {img.web_routed
+          ? <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="subdomain (blank = apex domain)" />
+          : <div />}
       </div>
+      <p className="text-xs text-content-subtle">
+        <strong className="text-content-muted">Override command</strong> replaces the image/build default. <strong className="text-content-muted">Mount .env as a file</strong> also writes the env to disk for apps that read a physical <code className="font-mono text-xs">.env</code> (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>).
+      </p>
 
       {/* Port mappings */}
       <div>
