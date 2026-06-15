@@ -94,6 +94,11 @@ type Project struct {
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
 	Garage    bool   `json:"garage_enabled,omitempty"`
+	// WebSQL adds an Adminer web-SQL client to the project (the unified flag, like
+	// Redis/Garage). composegen synthesizes the service from it for any stack with a
+	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
+	// treats both as present. See [[adminer]] in composegen.buildAdminer.
+	WebSQL bool `json:"web_sql,omitempty"`
 }
 
 // SourceRepo returns the project's source repository URL ("" if none).
@@ -146,6 +151,21 @@ func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled
 
 // EffGarage reports whether Garage is enabled (project-level OR legacy per-env).
 func (c *Config) EffGarage(e Env) bool { return c.Project.Garage || e.GarageEnabled }
+
+// HasAdminer reports whether the project exposes the Adminer web-SQL client: the
+// project-level web_sql flag (unified), or a legacy literal "adminer" service in
+// services[]. Gates adminer-login.php generation + the ADMINER_LOGIN_SECRET in .env.
+func (c *Config) HasAdminer() bool {
+	if c.Project.WebSQL {
+		return true
+	}
+	for _, s := range c.Services {
+		if s.Name == "adminer" {
+			return true
+		}
+	}
+	return false
+}
 
 type Version struct {
 	Major int `json:"major"`

@@ -47,6 +47,9 @@ type Project struct {
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
 	Garage    bool   `json:"garage_enabled,omitempty"`
+	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
+	// this to render the Adminer toggle + Manage-DB connect links.
+	WebSQL    bool   `json:"web_sql,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the
@@ -393,11 +396,22 @@ func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, err
 			// An apex web service that sets its own host_port publishes on THAT port
 			// (composegen prefers it over the env HTTP port), so the access URL must
 			// use it too. Mirrors emitServicePorts' "host_port wins" rule.
+			apexRouted, hasAdminerSvc := false, false
 			for _, svc := range cfg.Services {
-				if svc.WebRouted && svc.Subdomain == "" && svc.HostPort != "" {
-					info.HTTPPort = resolve(svc.HostPort)
-					break
+				if svc.Name == "adminer" {
+					hasAdminerSvc = true
 				}
+				if svc.WebRouted && svc.Subdomain == "" {
+					apexRouted = true
+					if svc.HostPort != "" {
+						info.HTTPPort = resolve(svc.HostPort)
+					}
+				}
+			}
+			// A flag-synthesized Adminer (web_sql, no services[] entry) owns the apex
+			// web entry when no app service routes there — it publishes on 8978.
+			if !apexRouted && cfg.Project.WebSQL && !hasAdminerSvc {
+				info.HTTPPort = "8978"
 			}
 			// Full Traefik route URL — incl. the auto-derived {prefix}-{env}.
 			// {base|localhost} when Traefik is on and no explicit domain is set.

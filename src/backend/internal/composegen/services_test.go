@@ -263,6 +263,74 @@ func TestAdminerWebSQLService(t *testing.T) {
 	}
 }
 
+// Adminer synthesized from the project web_sql flag (the unified path): for a pure
+// database-hosting project (no app service) it claims the apex web entry; the block
+// matches the legacy literal-adminer shape (image/host_port/env_file/volume).
+func TestAdminerSynthApex(t *testing.T) {
+	cfg := `{
+		"project": {"name":"db1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true},
+		"environments": {"dev": {"deployment":"compose","http_port":"8080","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"db1.example.com"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := svcBlock(t, string(out), "adminer")
+	for _, want := range []string{
+		"image: adminer:4.8.1",
+		"container_name: db1_dev_adminer",
+		"    env_file: .env",
+		"      - ${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro",
+		"    depends_on:\n      postgres:",                          // waits for the managed DB
+		"routers.db1_dev_adminer.rule=Host(`db1.example.com`)", // apex (no subdomain)
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("synth adminer (apex) missing %q\n---\n%s", want, a)
+		}
+	}
+	// web_sql with NO database → no adminer (nothing to connect to).
+	noDB := strings.Replace(cfg, `"database":"postgres",`, "", 1)
+	out2, _ := GenerateAt([]byte(noDB), "dev", time.Unix(0, 0).UTC())
+	if strings.Contains(string(out2), "adminer:") {
+		t.Errorf("adminer should not be synthesized without a database\n%s", out2)
+	}
+}
+
+// On a stack that already has an app web entry, the synthesized Adminer routes on the
+// "adminer" subdomain so it doesn't collide with the app at the apex.
+func TestAdminerSynthSubdomain(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := svcBlock(t, string(out), "adminer")
+	if !strings.Contains(a, "routers.app1_dev_adminer.rule=Host(`adminer.app1.example.com`)") {
+		t.Errorf("synth adminer should route on the adminer subdomain\n---\n%s", a)
+	}
+}
+
+// A legacy project that carries a literal "adminer" service AND the web_sql flag must
+// render exactly ONE adminer service (synth skipped — no duplicate, invalid key).
+func TestAdminerNoDoubleEmit(t *testing.T) {
+	cfg := `{
+		"project": {"name":"db2","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true},
+		"services": [{"name":"adminer","image":"adminer","tag":"4.8.1","port":"8080","web_routed":true,"host_port":"8978","env_file":true}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(out), "  adminer:\n"); n != 1 {
+		t.Errorf("want exactly 1 adminer service, got %d\n%s", n, out)
+	}
+}
+
 // A self-serving app (Spring Boot / Go / .NET shape): one build service routed by
 // Traefik on its own port, no nginx. Verifies traefik labels + traefik network join.
 func TestServicesSelfServingTraefik(t *testing.T) {

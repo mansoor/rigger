@@ -129,11 +129,13 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         <MiniToggle label="Garage S3" hint="self-hosted object store" checked={!!v.garage} onChange={x => set({ garage: x })} />
       </div>
 
-      {showWebSql && (
+      {(showWebSql || (v.database && v.database !== 'none')) && (
         <div className="pt-1 border-t border-border">
           <MiniToggle
             label="Adminer (web SQL client)"
-            hint="Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."
+            hint={showWebSql
+              ? "Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."
+              : "Browser SQL client for this project’s database — routed at the adminer subdomain; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."}
             checked={!!v.webSql}
             onChange={x => set({ webSql: x })}
           />

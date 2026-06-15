@@ -2012,8 +2012,9 @@ export default function EditProjectPage() {
             {project?.type !== 'image' && (
               <div className="mb-5">
                 <ManagedServices
-                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, garage: project?.garage_enabled }}
-                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, garage_enabled: !!v.garage }))}
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, garage: project?.garage_enabled, webSql: project?.web_sql }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, garage_enabled: !!v.garage, web_sql: !!v.webSql }))}
+                  showWebSql={project?.type === 'database'}
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
               </div>

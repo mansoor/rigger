@@ -131,7 +131,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	// stock login page; it auto-logs-in only when the Manage Database UI POSTs a
 	// Rigger-signed payload (the plugin fills + submits Adminer's own login form, so
 	// the POST carries Adminer's valid CSRF token; creds never touch the URL).
-	if hasServiceNamed(cfg, "adminer") {
+	if cfg.HasAdminer() {
 		if err := os.WriteFile(filepath.Join(outDir, "adminer-login.php"), []byte(adminerLoginPHP()), 0o644); err != nil {
 			return err
 		}
@@ -239,17 +239,6 @@ error_document = "404.html"
 [admin]
 api_bind_addr = "0.0.0.0:3903"
 `, domain, domain)
-}
-
-// hasServiceNamed reports whether the project's service graph contains a service
-// with the given name (e.g. "adminer").
-func hasServiceNamed(cfg *wsconfig.Config, name string) bool {
-	for _, s := range cfg.Services {
-		if s.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // adminerLoginPHP renders an Adminer plugin (dropped into plugins-enabled/) that

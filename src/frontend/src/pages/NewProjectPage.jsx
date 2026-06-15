@@ -1889,7 +1889,7 @@ export default function NewProjectPage() {
       frontend: (isImage || isScan || isDatabase) ? 'none' : data.frontend,
       database: isImage ? 'none' : data.database,
       db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
-      web_sql: isDatabase ? data.webSql : false,
+      web_sql: (!isImage && data.database && data.database !== 'none') ? !!data.webSql : false,
       redis: (isImage || isDatabase) ? false : data.redis,
       garage: (isImage || isDatabase) ? false : data.garage,
       environments: data.environments.filter(e => e.name).map(e => ({

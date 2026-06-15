@@ -46,6 +46,10 @@ type Project struct {
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
 	Garage    bool   `json:"garage_enabled,omitempty"`
+	// WebSQL synthesizes an Adminer web-SQL service (see buildAdminer) — the unified
+	// flag, like Redis/Garage. Legacy projects carry a literal "adminer" service in
+	// Services instead; buildAdminer skips synthesis when one already exists.
+	WebSQL bool `json:"web_sql,omitempty"`
 }
 
 type Version struct {

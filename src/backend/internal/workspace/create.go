@@ -322,6 +322,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			if req.DBVersion != "" {
 				project["db_version"] = req.DBVersion
 			}
+			// Adminer is a project-level flag (like redis/garage); composegen
+			// synthesizes the service for any stack with a database. Accept the legacy
+			// `cloudbeaver` alias from older clients.
+			if req.WebSQL || req.Cloudbeaver {
+				project["web_sql"] = true
+			}
 		}
 		if req.Redis {
 			project["redis_enabled"] = true

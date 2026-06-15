@@ -797,8 +797,16 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {dbInfoOpen && (
         <DatabaseInfoModal workspace={workspace} name={name} env={envName}
           canReveal={canManageDB} canManage={canManageDB}
-          webSqlEnabled={(ws?.config?.services || []).some(s => s.name === 'adminer' || s.name === 'cloudbeaver')}
-          adminerUrl={accessUrls[0]?.href || ''}
+          webSqlEnabled={(ws?.config?.services || []).some(s => s.name === 'adminer' || s.name === 'cloudbeaver') || !!ws?.config?.project?.web_sql}
+          adminerUrl={(() => {
+            // Apex when Adminer owns the web entry (pure DB-hosting); else it routes
+            // on the "adminer" subdomain (an app service holds the apex). Mirrors
+            // composegen.buildAdminer's apex-vs-subdomain rule.
+            const apex = accessUrls[0]?.href || ''
+            if (!apex) return ''
+            const appWeb = (ws?.config?.services || []).some(s => s.web_routed && s.name !== 'adminer')
+            return appWeb ? apex.replace(/^(https?:\/\/)/, '$1adminer.') : apex
+          })()}
           onClose={() => setDbInfoOpen(false)} />
       )}
 

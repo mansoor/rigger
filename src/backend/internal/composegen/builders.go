@@ -33,6 +33,62 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 		g.buildService(prefix, rp, registry, tag, svc, isSwarm)
 	}
 	g.buildManagedDeps(prefix, isSwarm)
+	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
+}
+
+// buildAdminer synthesizes the Adminer web-SQL service from the project-level
+// web_sql flag — the unified representation, emitted for ANY stack that has a
+// database. Reuses buildService so its routing/ports/networks/env match an app
+// service: apex web entry on a pure database-hosting project (no app service routes),
+// else the "adminer" subdomain so it coexists with the app's web entry. Skipped when
+// a literal "adminer" service already exists in Services (legacy projects — that
+// service already rendered), avoiding a duplicate (invalid) compose key.
+func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
+	if !g.cfg.Project.WebSQL || g.hasService("adminer") {
+		return
+	}
+	engine := g.dbEngine()
+	if engine == "" || engine == "none" {
+		return // Adminer needs a database to connect to
+	}
+	svc := Service{
+		Name:      "adminer",
+		Image:     "adminer",
+		Tag:       "4.8.1", // PINNED — 5.x changed the plugin surface the login PHP targets
+		Port:      "8080",  // Adminer's native HTTP port (Traefik / host-port target)
+		WebRouted: true,
+		HostPort:  "8978", // host publish for the no-Traefik case (8080 would clash with Rigger)
+		EnvFile:   true,   // inject DB creds + ADMINER_LOGIN_SECRET from .env
+		Volumes:   []string{"${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro"},
+		DependsOn: []string{engine},
+	}
+	// If an app service already owns the apex web entry, route Adminer on a subdomain
+	// so the two don't collide in Traefik.
+	if g.hasAppWebEntry() {
+		svc.Subdomain = "adminer"
+	}
+	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
+}
+
+// hasService reports whether a service with the given name exists in the graph.
+func (g *gen) hasService(name string) bool {
+	for _, s := range g.cfg.Services {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAppWebEntry reports whether any app service is web-routed (so a synthesized
+// Adminer must take a subdomain rather than the apex domain).
+func (g *gen) hasAppWebEntry() bool {
+	for _, s := range g.cfg.Services {
+		if s.WebRouted {
+			return true
+		}
+	}
+	return false
 }
 
 // emitVolumes writes the top-level volumes block: named volumes referenced by

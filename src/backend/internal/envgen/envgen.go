@@ -338,12 +338,10 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	// Adminer auto-login HMAC secret — shared between the bind-mounted Adminer plugin
 	// (which reads it via env_file) and Rigger's adminer-login endpoint (which signs
-	// links). Only emitted when an Adminer web-SQL service is present.
-	for _, s := range cfg.Services {
-		if s.Name == "adminer" {
-			p("ADMINER_LOGIN_SECRET=%s\n", get("ADMINER_LOGIN_SECRET", hexN(r, 32)))
-			break
-		}
+	// links). Emitted when Adminer is present via the project web_sql flag or a legacy
+	// literal "adminer" service.
+	if cfg.HasAdminer() {
+		p("ADMINER_LOGIN_SECRET=%s\n", get("ADMINER_LOGIN_SECRET", hexN(r, 32)))
 	}
 	p("\n")
 
