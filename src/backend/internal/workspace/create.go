@@ -27,6 +27,8 @@ type CreateRequest struct {
 	Registry     string            `json:"registry"`
 	SourceRepo   string            `json:"source_repo"`   // project-level git repo (one per project)
 	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
+	SourceKind   string            `json:"source_kind"`   // "upload" → build source came from an uploaded archive (see SourceToken)
+	SourceToken  string            `json:"source_token"`  // staging token from POST /api/upload-source; archive moved into the project on create
 	Services     []map[string]any  `json:"services"`      // unified services[] (repo-scan path); else seeded from legacy fields
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
@@ -354,6 +356,11 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			srcBranch = "main"
 		}
 		project["git_branch"] = srcBranch
+	}
+	// Uploaded-source projects record source_kind; the archive itself is moved into
+	// the project's _source/ by the create handler (using SourceToken) before bootstrap.
+	if req.SourceKind == "upload" {
+		project["source_kind"] = "upload"
 	}
 	// Host-side folder path, resolved once by the API layer at creation.
 	if req.ProjectRootDir != "" {

@@ -1193,6 +1193,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		// Ensure the project's registry is authenticated before any push/pull. The

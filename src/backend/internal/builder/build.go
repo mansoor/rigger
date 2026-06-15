@@ -9,7 +9,9 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/gitsync"
+	"github.com/mansoor/rigger/ui/internal/srcarchive"
 	"github.com/mansoor/rigger/ui/internal/version"
+	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -80,14 +82,20 @@ func (o Options) build() error {
 		return nil
 	}
 
-	// If the project has a source repo, check it out once for this env; each build
-	// service then builds from a subdir of the checkout (using the repo's own
-	// Dockerfile). Otherwise services build from the scaffolded context dir.
+	// Materialize the project's source into this env's _src once, then each build
+	// service builds from a subdir of it. Source comes from a git clone OR an
+	// uploaded archive; both wipe + repopulate _src (idempotent). A pure greenfield
+	// project (no source) leaves srcDir empty and builds from its scaffolded context.
 	srcDir := ""
+	envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
 	if repo := cfg.SourceRepo(); repo != "" {
-		envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
 		var serr error
 		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.Stdout); serr != nil {
+			return serr
+		}
+	} else if cfg.SourceKind() == "upload" {
+		var serr error
+		if srcDir, serr = srcarchive.ExtractToSrc(envDir, wspath.SourceArchive(o.WorkspacesDir, o.Workspace, o.Project), o.Stdout); serr != nil {
 			return serr
 		}
 	}
@@ -127,6 +135,18 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	}
 	if fi, err := os.Stat(ctxDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("build context not found: %s (configure a source repo or run init)", ctxDir)
+	}
+	// Source-backed projects (git or upload) may ship source but NO Dockerfile (e.g. a
+	// CodeCanyon Laravel app). When the context lacks one and the service declares a
+	// blueprint template, scaffold that template's Dockerfile into the context so the
+	// build can proceed (mirrors the greenfield scaffold, but into _src/{context}).
+	if _, err := os.Stat(filepath.Join(ctxDir, dockerfile)); err != nil {
+		if srcDir != "" && svc.Build != nil && svc.Build.Template != "" && o.TemplatesDir != "" {
+			o.info("No %s in %s — scaffolding the %s blueprint Dockerfile", dockerfile, svc.Name, svc.Build.Template)
+			if serr := workspace.ScaffoldDockerfile(o.TemplatesDir, svc.Build.Template, ctxDir, o.Env); serr != nil {
+				return serr
+			}
+		}
 	}
 	if _, err := os.Stat(filepath.Join(ctxDir, dockerfile)); err != nil {
 		return fmt.Errorf("%s not found in build context %s", dockerfile, ctxDir)

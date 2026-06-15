@@ -41,6 +41,13 @@ func EnvsDir(root, workspace, project string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "envs")
 }
 
+// SourceArchive is the canonical path of an upload-source project's stored archive
+// (project-level, NOT under any env dir, so it survives env copies). The bytes are
+// format-sniffed at extraction, so the fixed name carries no extension.
+func SourceArchive(root, workspace, project string) string {
+	return filepath.Join(ProjectDir(root, workspace, project), "_source", "archive")
+}
+
 // EnvDir is the directory of one environment within a project.
 func EnvDir(root, workspace, project, env string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "envs", env)

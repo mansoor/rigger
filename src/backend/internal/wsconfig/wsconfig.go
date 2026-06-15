@@ -80,6 +80,10 @@ type Project struct {
 	// envs/{env}/_src before build. Empty ⇒ build services use scaffolded Dockerfiles.
 	GitRepo   string `json:"git_repo,omitempty"`
 	GitBranch string `json:"git_branch,omitempty"`
+	// SourceKind selects where build services get their source. "" / "git" → the
+	// GitRepo above (cloned into _src). "upload" → an uploaded archive stored under
+	// the project (_source/), extracted into _src at build time (see internal/srcarchive).
+	SourceKind string `json:"source_kind,omitempty"`
 	// EnvOrder is the explicit deploy-tier order of this project's environments
 	// (low→high, e.g. ["dev","staging","prod"]). Empty ⇒ order is auto-guessed
 	// from env names. Drives the release pipeline and the project-page env strip.
@@ -103,6 +107,15 @@ type Project struct {
 
 // SourceRepo returns the project's source repository URL ("" if none).
 func (c *Config) SourceRepo() string { return c.Project.GitRepo }
+
+// SourceKind reports how build services obtain their source: "upload" when source
+// was uploaded as an archive, else "git" (the default — GitRepo, or none).
+func (c *Config) SourceKind() string {
+	if c.Project.SourceKind == "upload" {
+		return "upload"
+	}
+	return "git"
+}
 
 // Branch returns the git branch to build env from: the env override, else the
 // project default, else "main".

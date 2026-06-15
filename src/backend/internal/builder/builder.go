@@ -32,6 +32,9 @@ type Options struct {
 	// BaseDomain is the workspace's apps base domain (DB-sourced). Used to resolve
 	// the ${ROUTE_URL} build-arg token to the env's public route at build time.
 	BaseDomain string
+	// TemplatesDir is the toolkit's templates/ dir, used to scaffold a blueprint
+	// Dockerfile into a source build context that ships source but no Dockerfile.
+	TemplatesDir string
 	Stdout        io.Writer
 	Stderr        io.Writer
 

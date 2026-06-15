@@ -50,6 +50,9 @@ type Project struct {
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
 	WebSQL    bool   `json:"web_sql,omitempty"`
+	// SourceKind is "upload" when build source came from an uploaded archive (else
+	// "git"/empty). The UI reads it to show the source origin + "Replace source".
+	SourceKind string `json:"source_kind,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the

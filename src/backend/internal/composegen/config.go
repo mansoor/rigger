@@ -34,6 +34,9 @@ type Project struct {
 	// source is checked out to envs/{env}/_src, so repo-relative bind-mount sources
 	// (e.g. ./mosquitto/mosquitto.conf) are re-rooted there. See gen.bindSource.
 	GitRepo string `json:"git_repo,omitempty"`
+	// SourceKind "upload" means source came from an uploaded archive (extracted into
+	// _src at build time, like a clone) — so bind sources re-root under _src too.
+	SourceKind string `json:"source_kind,omitempty"`
 	// LocalTLS: when an env auto-routes on *.localhost (no workspace base domain),
 	// serve it over Traefik's self-signed cert instead of plain HTTP — for apps
 	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.

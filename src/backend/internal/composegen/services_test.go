@@ -63,6 +63,27 @@ func TestBindSourceScannedRootedAtSrc(t *testing.T) {
 	}
 }
 
+// An uploaded-source project (source_kind=upload, no git_repo) extracts into _src at
+// build time, so its relative bind sources must re-root under _src just like a scanned
+// git repo's do.
+func TestBindSourceUploadRootedAtSrc(t *testing.T) {
+	cfg := `{
+		"project": {"name":"wea","source_kind":"upload","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [
+			{"name":"proxy","image":"caddy:2-alpine","port":"80","web_routed":true,
+			 "volumes":["./Caddyfile:/etc/caddy/Caddyfile:ro"]}
+		],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "      - ${RIGGER_BIND_ROOT:-.}/_src/Caddyfile:/etc/caddy/Caddyfile:ro"; !strings.Contains(string(out), want) {
+		t.Errorf("upload-source bind not rooted at _src; want %q\n---\n%s", want, out)
+	}
+}
+
 func TestServicesCustomShape(t *testing.T) {
 	out, err := GenerateAt([]byte(shopCfg), "dev", time.Unix(0, 0).UTC())
 	if err != nil {

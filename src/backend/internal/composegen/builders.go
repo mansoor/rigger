@@ -677,13 +677,14 @@ func isNamedVolume(host string) bool {
 // Bridge.hostBindRoot); it is left unset for a non-containerised or remote Rigger,
 // where the default `.` resolves correctly against the compose project dir.
 //
-// For a source-repo (scanned) project the referenced files live in the checkout at
-// envs/{env}/_src, so a repo-relative source ("./mosquitto/mosquitto.conf") is
-// re-rooted there ("${RIGGER_BIND_ROOT:-.}/_src/mosquitto/mosquitto.conf").
+// For a source-backed project (a scanned git repo OR an uploaded archive) the
+// referenced files live in the env checkout at envs/{env}/_src, so a relative source
+// ("./mosquitto/mosquitto.conf") is re-rooted there
+// ("${RIGGER_BIND_ROOT:-.}/_src/mosquitto/mosquitto.conf").
 func (g *gen) bindSource(host string) string {
 	rel := strings.TrimPrefix(host, "./")
 	base := "${RIGGER_BIND_ROOT:-.}"
-	if g.cfg.Project.GitRepo != "" {
+	if g.cfg.Project.GitRepo != "" || g.cfg.Project.SourceKind == "upload" {
 		return base + "/_src/" + rel
 	}
 	return base + "/" + rel

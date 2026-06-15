@@ -88,23 +88,23 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	//    UNLESS the project has a source repo, in which case the repo's own
 	//    Dockerfiles are used (cloned into envs/{env}/_src at build time). A build
 	//    service with no template and no repo expects a user-supplied Dockerfile.
-	if cfg.SourceRepo() == "" {
+	// A source-backed project (git OR uploaded archive) materializes its source into
+	// envs/{env}/_src at build time; Dockerfiles come from there (the repo's own, or
+	// scaffolded into _src/{context} by the builder when missing). Only a pure
+	// greenfield project (no source) scaffolds Dockerfiles into the env's service dirs here.
+	if cfg.SourceRepo() == "" && cfg.SourceKind() != "upload" {
 		for _, svc := range cfg.BuildServices() {
 			tmpl := svc.Build.Template
 			if tmpl == "" {
 				continue
 			}
-			tmplDir := filepath.Join(templatesDir, "dockerfiles", tmpl)
-			if !isDir(tmplDir) {
-				return fmt.Errorf("no Dockerfile template %q for service %q: %s", tmpl, svc.Name, tmplDir)
-			}
-			if err := installDockerfile(tmplDir, filepath.Join(outDir, svc.ContextDir()), env); err != nil {
-				return err
+			if err := ScaffoldDockerfile(templatesDir, tmpl, filepath.Join(outDir, svc.ContextDir()), env); err != nil {
+				return fmt.Errorf("service %q: %w", svc.Name, err)
 			}
 			fmt.Fprintf(out, "  %s Dockerfile (%s) installed\n", svc.Name, tmpl)
 		}
 	} else {
-		fmt.Fprintf(out, "  source repo configured — Dockerfiles come from the repo at build time\n")
+		fmt.Fprintf(out, "  source configured — Dockerfiles come from the source at build time\n")
 	}
 
 	// 4. nginx.conf for any service that fronts the app (config_template set).
@@ -156,6 +156,18 @@ func writeEnv(cfg *wsconfig.Config, env, outDir, envFile string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, ".env.example"), []byte(exampleOut), 0o644)
+}
+
+// ScaffoldDockerfile installs the blueprint template's Dockerfile (+ .dockerignore)
+// into dest for the given env. Exported so the builder can scaffold a missing
+// Dockerfile into a source-backed build context (envs/{env}/_src/{context}) — e.g. a
+// CodeCanyon app that ships source but no Dockerfile. Errors if the template is unknown.
+func ScaffoldDockerfile(templatesDir, tmpl, dest, env string) error {
+	tmplDir := filepath.Join(templatesDir, "dockerfiles", tmpl)
+	if !isDir(tmplDir) {
+		return fmt.Errorf("no Dockerfile template %q: %s", tmpl, tmplDir)
+	}
+	return installDockerfile(tmplDir, dest, env)
 }
 
 // installDockerfile copies the Dockerfile (preferring Dockerfile.dev for dev) and
