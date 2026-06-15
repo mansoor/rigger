@@ -167,7 +167,14 @@ func ScaffoldDockerfile(templatesDir, tmpl, dest, env string) error {
 	if !isDir(tmplDir) {
 		return fmt.Errorf("no Dockerfile template %q: %s", tmpl, tmplDir)
 	}
-	return installDockerfile(tmplDir, dest, env)
+	if err := installDockerfile(tmplDir, dest, env); err != nil {
+		return err
+	}
+	// Mark the Dockerfile as Rigger-generated, so the builder may re-scaffold it on a
+	// later build (to pick up template updates) without ever clobbering an app's own
+	// Dockerfile. See builder.buildService.
+	_ = os.WriteFile(filepath.Join(dest, ".rigger-scaffolded"), []byte(tmpl+"\n"), 0o644)
+	return nil
 }
 
 // installDockerfile copies the Dockerfile (preferring Dockerfile.dev for dev) and

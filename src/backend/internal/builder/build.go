@@ -137,18 +137,20 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 		return fmt.Errorf("build context not found: %s (configure a source repo or run init)", ctxDir)
 	}
 	// Source-backed projects (git or upload) may ship source but NO Dockerfile (e.g. a
-	// CodeCanyon Laravel app). When the context lacks one and the service declares a
-	// blueprint template, scaffold that template's Dockerfile into the context so the
-	// build can proceed (mirrors the greenfield scaffold, but into _src/{context}).
-	if _, err := os.Stat(filepath.Join(ctxDir, dockerfile)); err != nil {
-		if srcDir != "" && svc.Build != nil && svc.Build.Template != "" && o.TemplatesDir != "" {
-			o.info("No %s in %s — scaffolding the %s blueprint Dockerfile", dockerfile, svc.Name, svc.Build.Template)
-			if serr := workspace.ScaffoldDockerfile(o.TemplatesDir, svc.Build.Template, ctxDir, o.Env); serr != nil {
-				return serr
-			}
+	// CodeCanyon Laravel app) — scaffold the service's blueprint Dockerfile into the
+	// context. Re-scaffold (overwrite) a previously Rigger-generated one (marked by
+	// .rigger-scaffolded) so template fixes apply even though _src isn't re-extracted
+	// every build; an app's OWN Dockerfile (no marker) is never touched.
+	dfPath := filepath.Join(ctxDir, dockerfile)
+	_, dfErr := os.Stat(dfPath)
+	_, markerErr := os.Stat(filepath.Join(ctxDir, ".rigger-scaffolded"))
+	if (dfErr != nil || markerErr == nil) && srcDir != "" && svc.Build != nil && svc.Build.Template != "" && o.TemplatesDir != "" {
+		o.info("Scaffolding the %s Dockerfile for %s", svc.Build.Template, svc.Name)
+		if serr := workspace.ScaffoldDockerfile(o.TemplatesDir, svc.Build.Template, ctxDir, o.Env); serr != nil {
+			return serr
 		}
 	}
-	if _, err := os.Stat(filepath.Join(ctxDir, dockerfile)); err != nil {
+	if _, err := os.Stat(dfPath); err != nil {
 		return fmt.Errorf("%s not found in build context %s", dockerfile, ctxDir)
 	}
 

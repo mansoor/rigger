@@ -1,9 +1,8 @@
 # =============================================================================
-# Laravel (PHP-FPM) — Development Dockerfile
-# Includes: Xdebug, dev dependencies, hot-reload support
-# Source code is bind-mounted — no COPY needed
+# Laravel — self-contained DEV image (Xdebug + dev dependencies), served via PHP's
+# built-in server on :80. Builds an ARBITRARY Laravel app with NO app-specific
+# config files. Replace with your own php-fpm + nginx Dockerfile for production.
 # =============================================================================
-
 FROM php:8.3-fpm-alpine
 
 ARG BUILD_ENV=development
@@ -11,32 +10,41 @@ ENV APP_ENV=local \
     APP_DEBUG=true \
     PHP_MEMORY_LIMIT=512M
 
+# Runtime libs + PHP extensions. PECL compiles (redis, xdebug) need a toolchain
+# ($PHPIZE_DEPS = autoconf, gcc, make, …) — installed virtually and removed after.
 RUN apk add --no-cache \
-      libpng-dev libjpeg-turbo-dev libwebp-dev \
-      freetype-dev zip libzip-dev \
-      postgresql-dev oniguruma-dev \
-      git curl nodejs npm \
-    && docker-php-ext-configure gd \
-         --with-freetype --with-jpeg --with-webp \
+      libpng-dev libjpeg-turbo-dev libwebp-dev freetype-dev \
+      zip unzip libzip-dev postgresql-dev oniguruma-dev git \
+    && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" \
-         pdo pdo_pgsql pdo_mysql \
-         gd mbstring bcmath zip opcache pcntl \
-    && pecl install xdebug redis \
-    && docker-php-ext-enable xdebug redis
+         pdo pdo_pgsql pdo_mysql gd mbstring bcmath zip opcache pcntl \
+    && pecl install redis xdebug \
+    && docker-php-ext-enable redis xdebug \
+    && apk del .build-deps \
+    && rm -rf /tmp/pear
 
-# Xdebug config
-COPY docker/php/xdebug.ini /usr/local/etc/php/conf.d/xdebug.ini
-
-# Install Composer
 COPY --from=composer:2.7 /usr/bin/composer /usr/local/bin/composer
 
-WORKDIR /app
+WORKDIR /var/www/html
 
-# Install dependencies inside the container on startup via entrypoint
-COPY docker/entrypoint-dev.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Application source (vendor/, node_modules/, .git, .env excluded via .dockerignore).
+COPY . .
 
-EXPOSE 9000
+# PHP dependencies (incl. dev) — from the lock if present, else resolved.
+RUN if [ -f composer.json ]; then \
+      composer install --no-interaction --prefer-dist --no-scripts \
+      || composer update --no-interaction --prefer-dist --no-scripts; \
+    fi
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["php-fpm"]
+# Front-end assets — only when the app defines a build.
+RUN if [ -f package.json ]; then \
+      apk add --no-cache nodejs npm \
+      && npm install --no-audit --no-fund \
+      && (npm run build || echo "no usable npm build script — skipping asset build"); \
+    fi
+
+RUN chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+
+EXPOSE 80
+CMD ["sh", "-c", "php artisan serve --host=0.0.0.0 --port=80"]

@@ -197,9 +197,11 @@ func envDotnet(db *DBFacts, redis *RedisFacts) map[string]string {
 // registry is keyed by blueprint ID.
 var registry = map[string]Blueprint{
 	"laravel": {
-		ID: "laravel", Label: "Laravel (PHP-FPM)", Language: "php",
-		Port: "9000", Healthcheck: "php -r 'exit(0);' 2>/dev/null || exit 1",
-		WebRouted: false, NeedsNginx: true, NginxConf: "laravel", Template: "laravel",
+		ID: "laravel", Label: "Laravel (PHP)", Language: "php",
+		// The scaffolded Laravel image is self-contained and serves via `php artisan
+		// serve` on :80 (no separate nginx/php-fpm) — see templates/dockerfiles/laravel.
+		Port: "80", Healthcheck: "php -r 'exit(0);' 2>/dev/null || exit 1",
+		WebRouted: true, NeedsNginx: false, NginxConf: "", Template: "laravel",
 		EnvVars: envLaravel,
 	},
 	"nodejs": {
