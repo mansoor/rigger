@@ -19,7 +19,7 @@ import (
 )
 
 // command set this package owns (routed from the shell bridge).
-var ownedCommands = map[string]bool{"backup": true, "restore": true}
+var ownedCommands = map[string]bool{"backup": true, "restore": true, "migrate": true}
 
 // Handles reports whether this package owns a command.
 func Handles(cmd string) bool { return ownedCommands[cmd] }
@@ -29,9 +29,17 @@ type Options struct {
 	WorkspacesDir string
 	Workspace     string // parent tier
 	Project       string // project name
-	Command       string // "backup" | "restore"
-	Env           string
+	Command       string // "backup" | "restore" | "migrate"
+	Env           string // backup/restore: the env; migrate: the TARGET env (data written here)
 	Extra         []string // backup: [target]; restore: [snapshot]
+	// SourceEnv (restore/migrate only) is the env whose snapshot archive is READ.
+	// Empty ⇒ same as Env (normal in-place restore). When it differs from Env, the
+	// archive is read from SourceEnv's backups + filenames, but volumes/DB are
+	// written to Env's resources — i.e. cross-env data migration.
+	SourceEnv string
+	// SkipTargetBackup (migrate only) skips the safety backup of the target taken
+	// before its data is overwritten. Default false ⇒ the migration is reversible.
+	SkipTargetBackup bool
 	EnvVars       []string // child-process environment
 	Stdout        io.Writer
 	Stderr        io.Writer
@@ -69,6 +77,8 @@ func Run(opts Options) (bool, error) {
 		return true, runBackup(opts, cfg)
 	case "restore":
 		return true, runRestore(opts, cfg)
+	case "migrate":
+		return true, runMigrate(opts, cfg)
 	}
 	return false, nil
 }
@@ -132,7 +142,8 @@ type ctx struct {
 	cfg     *wsConfig
 	runner  executor.Executor
 	project string
-	env     string
+	env     string  // the env data is written to (restore/migrate target)
+	srcEnv  string  // the env whose archive is read (= env, unless cross-env migrate)
 	prefix  string // {project}_{env} — compose project + service prefix
 	envDir  string
 	envVars map[string]string // parsed .env (DB credentials etc.)
@@ -169,12 +180,17 @@ func newCtx(opts Options, cfg *wsConfig) *ctx {
 	if rp == "" {
 		rp = cfg.Project.Name
 	}
+	srcEnv := opts.SourceEnv
+	if srcEnv == "" {
+		srcEnv = opts.Env
+	}
 	return &ctx{
 		opts:     opts,
 		cfg:      cfg,
 		runner:   executor.Default(opts.Exec),
 		project:  cfg.Project.Name,
 		env:      opts.Env,
+		srcEnv:   srcEnv,
 		prefix:   rp + "_" + opts.Env,
 		envDir:   envDir,
 		envVars:  envVars,

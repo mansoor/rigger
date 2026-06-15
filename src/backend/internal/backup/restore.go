@@ -22,12 +22,18 @@ func runRestore(opts Options, cfg *wsConfig) error {
 		return fmt.Errorf("restore requires a snapshot date")
 	}
 	snapshot := opts.Extra[0]
-	backupDir := filepath.Join(wspath.EnvBackupsDir(opts.WorkspacesDir, opts.Workspace, opts.Project, opts.Env), snapshot)
+	// Read the archive from the SOURCE env (= target for a normal in-place restore;
+	// a different env for a cross-env migration).
+	backupDir := filepath.Join(wspath.EnvBackupsDir(opts.WorkspacesDir, opts.Workspace, opts.Project, c.srcEnv), snapshot)
 	if fi, err := os.Stat(backupDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("backup snapshot not found: %s", backupDir)
 	}
 
-	c.info("Restore: %s ← %s", opts.Env, snapshot)
+	if c.srcEnv != c.env {
+		c.info("Restore (migrate): %s ← %s/%s", c.env, c.srcEnv, snapshot)
+	} else {
+		c.info("Restore: %s ← %s", c.env, snapshot)
+	}
 
 	// Step 1 — stop the stack (containers are kept so --volumes-from can reach
 	// their mounts during the data restore).
@@ -239,7 +245,8 @@ func (c *ctx) restoreContainerMounts(snapshot, backupDir string) int {
 		container := c.prefix + "_" + img.Name
 		for _, m := range c.inspectMounts(container) {
 			volLabel := strings.TrimPrefix(strings.ReplaceAll(m.Destination, "/", "_"), "_")
-			archive := fmt.Sprintf("%s_%s_%s_%s_%s.tar.gz", c.project, c.env, img.Name, volLabel, snapshot)
+			// Archive filenames carry the SOURCE env (what was backed up).
+			archive := fmt.Sprintf("%s_%s_%s_%s_%s.tar.gz", c.project, c.srcEnv, img.Name, volLabel, snapshot)
 			path := filepath.Join(backupDir, archive)
 			if _, err := os.Stat(path); err != nil {
 				continue // no archive for this mount in this snapshot
@@ -273,9 +280,10 @@ func (c *ctx) restoreNamedVolumes(snapshot, backupDir string) int {
 		if !strings.HasSuffix(name, ".tar.gz") {
 			continue
 		}
-		// {project}_{env}_{label}_{snapshot}.tar.gz → label
+		// {project}_{srcEnv}_{label}_{snapshot}.tar.gz → label (archive carries the
+		// SOURCE env); the volume is created under the TARGET's prefix.
 		base := strings.TrimSuffix(name, ".tar.gz")
-		base = strings.TrimPrefix(base, c.project+"_"+c.env+"_")
+		base = strings.TrimPrefix(base, c.project+"_"+c.srcEnv+"_")
 		volLabel := strings.TrimSuffix(base, "_"+snapshot)
 		fullVol := c.prefix + "_" + volLabel
 

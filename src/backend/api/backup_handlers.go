@@ -43,6 +43,7 @@ type BackupJob struct {
 	Project   string     `json:"project,omitempty"`
 	Status    string     `json:"status"` // running | completed | failed
 	Error     string     `json:"error,omitempty"`
+	Log       string     `json:"log,omitempty"`     // captured output (used by data migration)
 	Archive   string     `json:"archive,omitempty"` // basename of archive file when done
 	SizeBytes int64      `json:"size_bytes,omitempty"`
 	StartedAt time.Time  `json:"started_at"`

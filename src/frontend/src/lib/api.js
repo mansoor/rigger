@@ -43,6 +43,10 @@ export const recordTemplateUse = (name)      => api.post(`/templates/${name}/use
 // Copy an environment (Phase 1: config + regenerated .env/compose + bind config; fresh volumes).
 export const copyEnvironment   = (ws, project, srcEnv, newEnv, regenerateSecrets) =>
   api.post(`${projBase(ws, project)}/envs/${encodeURIComponent(srcEnv)}/copy`, { new_env: newEnv, regenerate_secrets: regenerateSecrets }).then(r => r.data)
+// Migrate DATA from one env to another within a project (backup source → restore into target).
+// Returns { id }; poll getBackupJob(id) for status.
+export const migrateEnvData    = (ws, project, body) =>
+  api.post(`${projBase(ws, project)}/migrate-data`, body).then(r => r.data)
 
 // Workspace tier: list / create / delete the parent-tier workspaces.
 export const fetchWorkspaces      = ()      => api.get('/workspaces').then(r => r.data)

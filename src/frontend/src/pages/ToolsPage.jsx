@@ -8,6 +8,7 @@ import {
   listWorkspaceArchives, deleteWorkspaceArchive, syncWorkspaceArchive,
   restoreWorkspaceFromArchive, uploadWorkspaceArchive, fetchProjects,
   createWorkspaceSnapshot, fetchWorkspaceSnapshots, deleteWorkspaceSnapshot, rollbackWorkspaceSnapshot, uploadWorkspaceSnapshot,
+  fetchConfig, migrateEnvData,
 } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
@@ -1509,6 +1510,151 @@ function WorkspaceBackup() {
   )
 }
 
+// ── Migrate data between environments ───────────────────────────────────────────
+// Thin wrapper over the backup→restore engine: copy one env's DATA into another
+// (e.g. refresh staging from prod). Source is never modified; the target is
+// overwritten (a default safety backup + typed confirm guard it).
+function MigrateData() {
+  const currentWs = useWorkspaceStore(s => s.current)
+  const [project, setProject] = useState('')
+  const [sourceEnv, setSourceEnv] = useState('')
+  const [targetEnv, setTargetEnv] = useState('')
+  const [skipBackup, setSkipBackup] = useState(false)
+  const [confirm, setConfirm] = useState('')
+  const [jobId, setJobId] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects', currentWs], queryFn: () => fetchProjects(currentWs),
+    enabled: !!currentWs, staleTime: 30_000,
+  })
+  // Env list for the selected project (from its config.json).
+  const { data: cfg } = useQuery({
+    queryKey: ['config', currentWs, project],
+    queryFn: () => fetchConfig(currentWs, project),
+    enabled: !!currentWs && !!project,
+  })
+  const envs = cfg?.environments ? Object.keys(cfg.environments) : []
+
+  // Poll the migration job until it finishes.
+  const { data: job } = useQuery({
+    queryKey: ['backup-job', jobId],
+    queryFn: () => getBackupJob(jobId),
+    enabled: !!jobId,
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'running' ? false : 2000),
+  })
+  const running = !!jobId && (!job || job.status === 'running')
+
+  const valid = project && sourceEnv && targetEnv && sourceEnv !== targetEnv && confirm.trim() === targetEnv
+
+  async function go() {
+    if (!valid) return
+    setBusy(true); setErr(''); setJobId(null)
+    try {
+      const res = await migrateEnvData(currentWs, project, {
+        source_env: sourceEnv, target_env: targetEnv, confirm: confirm.trim(),
+        skip_target_backup: skipBackup,
+      })
+      setJobId(res.id)
+    } catch (e) {
+      setErr(e?.response?.data?.error || e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectCls = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50'
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
+        Copy an environment’s <strong className="text-content">data</strong> (database + volumes) into another environment of the
+        same project — e.g. refresh <em>staging</em> from <em>prod</em>. The source is read-only; the target’s data is
+        <strong className="text-content"> overwritten</strong>. A safety backup of the target is taken first (so it’s reversible),
+        and the target should already be deployed at least once. Config/secrets are <strong className="text-content">not</strong> touched —
+        only data. Use <strong className="text-content">Copy environment</strong> (Edit Project) to clone configuration.
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl p-4 space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-content-muted mb-1.5">Project</label>
+          <select value={project} className={selectCls}
+            onChange={e => { setProject(e.target.value); setSourceEnv(''); setTargetEnv(''); setConfirm('') }}>
+            <option value="">— select a project —</option>
+            {projects.map(p => <option key={p.name} value={p.name}>{p.config?.project?.name || p.name} ({p.name})</option>)}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto_1fr] gap-3 items-end">
+          <div>
+            <label className="block text-xs font-medium text-content-muted mb-1.5">Source (data copied FROM)</label>
+            <select value={sourceEnv} disabled={!project} className={selectCls}
+              onChange={e => setSourceEnv(e.target.value)}>
+              <option value="">— source env —</option>
+              {envs.map(en => <option key={en} value={en}>{en}</option>)}
+            </select>
+          </div>
+          <div className="pb-2 text-content-subtle text-lg">→</div>
+          <div>
+            <label className="block text-xs font-medium text-content-muted mb-1.5">Target (overwritten)</label>
+            <select value={targetEnv} disabled={!project} className={selectCls}
+              onChange={e => { setTargetEnv(e.target.value); setConfirm('') }}>
+              <option value="">— target env —</option>
+              {envs.filter(en => en !== sourceEnv).map(en => <option key={en} value={en}>{en}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={skipBackup} onChange={e => setSkipBackup(e.target.checked)}
+            className="rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500" />
+          <span className="text-sm text-content">Skip the target safety backup <span className="text-danger-fg">(not reversible)</span></span>
+        </label>
+
+        {targetEnv && (
+          <div className="rounded-lg border border-warning-border/50 bg-warning-subtle/30 p-3 space-y-2">
+            <p className="text-xs text-warning-fg">
+              ⚠ This will <strong>overwrite all data</strong> in <code className="font-mono">{targetEnv}</code> with a copy of <code className="font-mono">{sourceEnv || '…'}</code>’s data. Type <code className="font-mono">{targetEnv}</code> to confirm:
+            </p>
+            <input type="text" value={confirm} onChange={e => setConfirm(e.target.value)}
+              placeholder={targetEnv}
+              className="w-full px-3 py-2 bg-surface border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+          </div>
+        )}
+
+        <button onClick={go} disabled={!valid || busy || running}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            !valid || busy || running ? 'bg-surface-overlay text-content-faint cursor-not-allowed' : 'bg-brand-600 hover:bg-brand-700 text-white'
+          }`}>
+          {running ? 'Migrating…' : busy ? 'Starting…' : 'Migrate data'}
+        </button>
+        {err && <p className="text-xs text-danger-fg">{err}</p>}
+      </div>
+
+      {/* Job status */}
+      {jobId && job && (
+        <div className={`rounded-xl border p-4 ${
+          job.status === 'completed' ? 'border-success-border/50 bg-success-subtle/20' :
+          job.status === 'failed' ? 'border-danger-border/50 bg-danger-subtle/20' :
+          'border-border-strong bg-surface-raised/30'
+        }`}>
+          <p className="text-sm font-semibold text-content-strong mb-1">
+            {job.status === 'completed' ? '✓ Migration complete' : job.status === 'failed' ? '✗ Migration failed' : '⏳ Migrating…'}
+          </p>
+          {job.error && <p className="text-xs text-danger-fg mb-2 whitespace-pre-wrap">{job.error}</p>}
+          {job.log && (
+            <pre className="text-[11px] text-content-subtle bg-canvas/60 border border-border-strong/40 rounded-lg p-3 max-h-72 overflow-auto whitespace-pre-wrap font-mono">{job.log}</pre>
+          )}
+          {job.status === 'completed' && (
+            <p className="text-xs text-content-subtle mt-2">Deploy / refresh <code className="font-mono">{targetEnv}</code> to bring services up on the migrated data.</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -1518,6 +1664,13 @@ const TOOLS = [
     icon: '🧰',
     description: 'Snapshot or roll back project configuration, and create/restore full project backups (config + data).',
     component: WorkspaceBackup,
+  },
+  {
+    id: 'migrate-data',
+    label: 'Migrate Data',
+    icon: '🔀',
+    description: 'Copy one environment’s data (database + volumes) into another — e.g. refresh staging from prod. Source is read-only; the target is overwritten (with a safety backup first).',
+    component: MigrateData,
   },
   {
     id: 'compose-to-template',

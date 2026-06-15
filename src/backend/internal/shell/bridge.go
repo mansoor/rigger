@@ -41,6 +41,7 @@ var allowedCommands = map[string]bool{
 	"refresh": true,
 	"backup":  true,
 	"restore": true,
+	"migrate": true, // cross-env data migration (backup source → restore into target)
 	"init":    true,
 	"version": true,
 	"build":   true,
@@ -1023,6 +1024,11 @@ type RunOptions struct {
 	ScheduleName string
 	Trigger      string // "scheduled" | "manual"
 
+	// Migrate-only: SourceEnv is the env whose data is copied INTO Env (the target).
+	// SkipTargetBackup skips the pre-migration safety backup of the target.
+	SourceEnv        string
+	SkipTargetBackup bool
+
 	// Script-stage only (Phase 9 tool stage): run a one-off tool container with the
 	// env's context injected.
 	ScriptImage   string // tool container image (e.g. aquasec/trivy)
@@ -1283,6 +1289,8 @@ func (b *Bridge) Run(opts RunOptions) error {
 			ScheduleID:    opts.ScheduleID,
 			ScheduleName:  opts.ScheduleName,
 			Trigger:       opts.Trigger,
+			SourceEnv:        opts.SourceEnv,
+			SkipTargetBackup: opts.SkipTargetBackup,
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
