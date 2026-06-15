@@ -32,15 +32,27 @@ var (
 	maxEntries    = 200_000
 )
 
-// ExtractToSrc extracts archivePath into SrcDir(envDir) (envs/{env}/_src), wiping
-// it first, so an uploaded source is byte-for-byte indistinguishable from a git
-// checkout to the build pipeline. Mirrors gitsync.Sync's contract (same return,
-// same idempotent-wipe behaviour). Returns the source dir.
+// ExtractToSrc extracts archivePath into SrcDir(envDir) (envs/{env}/_src) so an
+// uploaded source feeds the same _src → build pipeline a git checkout does. It skips
+// re-extraction when the stored archive is UNCHANGED since the last extraction
+// (recorded in a sibling .src-stamp): re-extracting an unchanged tree every build is
+// needless and very slow on network / Windows bind mounts (where even `du` times out
+// for a large source). Replace-source writes a new archive ⇒ a new stamp ⇒ re-extract.
 func ExtractToSrc(envDir, archivePath string, out io.Writer) (string, error) {
 	if out == nil {
 		out = io.Discard
 	}
 	src := gitsync.SrcDir(envDir)
+	stampPath := filepath.Join(envDir, ".src-stamp")
+	want := archiveStamp(archivePath)
+
+	if want != "" && dirHasFiles(src) {
+		if got, _ := os.ReadFile(stampPath); string(got) == want {
+			fmt.Fprintf(out, "✓ Uploaded source unchanged — reusing existing checkout\n")
+			return src, nil
+		}
+	}
+
 	fmt.Fprintf(out, "⟳ Extracting uploaded source → %s\n", filepath.Base(src))
 	_ = os.RemoveAll(src)
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -50,7 +62,25 @@ func ExtractToSrc(envDir, archivePath string, out io.Writer) (string, error) {
 		_ = os.RemoveAll(src) // don't leave a half-extracted tree
 		return "", err
 	}
+	if want != "" {
+		_ = os.WriteFile(stampPath, []byte(want), 0o644)
+	}
 	return src, nil
+}
+
+// archiveStamp identifies an archive by size + mod time (enough to detect a
+// Replace-source). Empty if the archive can't be stat'd.
+func archiveStamp(p string) string {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d-%d", fi.Size(), fi.ModTime().UnixNano())
+}
+
+func dirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	return err == nil && len(entries) > 0
 }
 
 // Extract unpacks a .zip or .tar(.gz) archive into destDir. The format is sniffed

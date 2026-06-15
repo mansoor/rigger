@@ -326,7 +326,58 @@ func composeToService(repoDir, name string, cs composeSvc, all map[string]compos
 	}
 	s.Volumes = cs.Volumes
 	s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), all)
+	normalizeUploadedBuild(&s, repoDir)
 	return s
+}
+
+// normalizeUploadedBuild rewrites a build service whose compose build.context is a
+// dev-harness artifact into a clean "build from the repo root with a scaffolded
+// Dockerfile". The canonical case is Laravel Sail: an app's docker-compose.yml builds
+// from ./vendor/laravel/sail/runtimes/<v>, but CodeCanyon/marketplace apps ship NO
+// vendor/, so that context can't build. Triggers when the context is under
+// vendor//node_modules/, doesn't exist in the source, or the service is Sail-flagged.
+// Also strips Sail's dev-only env and the whole-repo source bind (which would overlay
+// the built image with un-built source).
+func normalizeUploadedBuild(s *Service, repoDir string) {
+	if s.Build == nil {
+		return
+	}
+	// Only rewrite a build context that is clearly a dependency/dev-harness artifact —
+	// under vendor//node_modules/, or a Laravel Sail service. A legitimate monorepo
+	// subdir context (./api, ./backend) is left untouched.
+	ctx := filepath.ToSlash(strings.TrimPrefix(s.Build.Context, "./"))
+	underDep := strings.HasPrefix(ctx, "vendor/") || strings.Contains(ctx, "/vendor/") ||
+		strings.HasPrefix(ctx, "node_modules/") || strings.Contains(ctx, "/node_modules/")
+	sail := s.EnvVars["LARAVEL_SAIL"] != "" || strings.Contains(ctx, "laravel/sail")
+	if !(underDep || sail) {
+		return
+	}
+	// Build from the repo root with the detected framework's scaffolded Dockerfile.
+	id, _ := identify(repoDir)
+	s.Build = &Build{Context: ".", Template: id} // Dockerfile scaffolded at build time
+	if bp, ok := blueprints.Get(id); ok {
+		applyBlueprintServiceEnv(s, bp)
+	}
+	for _, k := range []string{"LARAVEL_SAIL", "XDEBUG_MODE", "XDEBUG_CONFIG", "WWWUSER", "WWWGROUP", "IGNITION_LOCAL_SITES_PATH"} {
+		delete(s.EnvVars, k)
+	}
+	// Drop a whole-repo source bind (e.g. ".:/var/www/html") — dev-only; it would
+	// overlay the built image with the un-built source.
+	var vols []string
+	for _, v := range s.Volumes {
+		if h := volHostPart(v); h == "." || h == "./" {
+			continue
+		}
+		vols = append(vols, v)
+	}
+	s.Volumes = vols
+}
+
+func volHostPart(v string) string {
+	if i := strings.Index(v, ":"); i >= 0 {
+		return v[:i]
+	}
+	return v
 }
 
 // ── Dockerfiles ──────────────────────────────────────────────────────────────

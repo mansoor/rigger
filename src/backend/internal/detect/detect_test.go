@@ -236,6 +236,48 @@ func TestSplitPortEnvDefault(t *testing.T) {
 	}
 }
 
+// A Laravel Sail docker-compose.yml builds from ./vendor/laravel/sail/runtimes/<v>,
+// but marketplace apps ship no vendor/. The detector must rewrite it to a clean root
+// Laravel build (scaffolded Dockerfile) and strip Sail's dev env + the source bind.
+func TestDetectLaravelSailRewrite(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"artisan":       "#!/usr/bin/env php",
+		"composer.json": `{"require":{"laravel/framework":"^11"}}`,
+		"docker-compose.yml": `
+services:
+  laravel.test:
+    build:
+      context: ./vendor/laravel/sail/runtimes/8.3
+      dockerfile: Dockerfile
+      args:
+        WWWGROUP: '${WWWGROUP}'
+    ports:
+      - '${APP_PORT:-80}:80'
+    environment:
+      LARAVEL_SAIL: 1
+      XDEBUG_MODE: '${SAIL_XDEBUG_MODE:-off}'
+    volumes:
+      - '.:/var/www/html'
+`,
+	})
+	d := Detect(dir)
+	if len(d.Services) != 1 {
+		t.Fatalf("want 1 service, got %d: %+v", len(d.Services), d.Services)
+	}
+	svc := d.Services[0]
+	if svc.Build == nil || svc.Build.Context != "." || svc.Build.Template != "laravel" {
+		t.Fatalf("Sail service not rewritten to a root laravel build: %+v", svc.Build)
+	}
+	if svc.EnvVars["LARAVEL_SAIL"] != "" || svc.EnvVars["XDEBUG_MODE"] != "" {
+		t.Errorf("Sail dev env not stripped: %v", svc.EnvVars)
+	}
+	for _, v := range svc.Volumes {
+		if v == ".:/var/www/html" {
+			t.Errorf("whole-repo source bind should be dropped: %v", svc.Volumes)
+		}
+	}
+}
+
 func TestDetectDockerfileMonorepo(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"apps/api/Dockerfile": "FROM golang:1.25\nEXPOSE 9090\n",
