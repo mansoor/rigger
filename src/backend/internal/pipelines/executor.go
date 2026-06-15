@@ -203,7 +203,7 @@ func Execute(ctx context.Context, bridge BridgeRunner, p Pipeline, out io.Writer
 
 		// Record the stage as running and publish progress before it executes, so
 		// the UI shows the current step pulsing immediately.
-		results = append(results, StageResult{Type: s.Type, Env: s.Env, Label: label, Status: "running"})
+		results = append(results, StageResult{Type: s.Type, Env: s.Env, Label: label, Status: "running", StartedAt: time.Now().UnixMilli()})
 		cur := &results[len(results)-1]
 		emit()
 
@@ -221,6 +221,7 @@ func Execute(ctx context.Context, bridge BridgeRunner, p Pipeline, out io.Writer
 		start := time.Now()
 		err := bridge.Run(opts)
 		cur.MS = time.Since(start).Milliseconds()
+		cur.FinishedAt = time.Now().UnixMilli()
 
 		// If the run was cancelled, the stage error is just the killed process —
 		// classify it as cancelled (not a real failure) and stop here.

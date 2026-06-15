@@ -961,8 +961,15 @@ function ReleasePipeline({ ws }) {
   return (
     <div className="bg-surface border border-border rounded-xl p-5">
       <div className="flex items-center justify-between gap-3 mb-5">
-        <h2 className="text-sm font-semibold text-content flex items-center gap-2"><span className="text-xs">○</span> Release pipeline</h2>
-        <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-content flex items-center gap-2 min-w-0">
+          <span className="text-xs">○</span> Release pipeline
+          {latestRun && (
+            <span className="text-[11px] font-normal text-content-faint truncate" title={`Last run ${new Date(latestRun.started_at).toLocaleString()}${latestRun.username ? ` by ${latestRun.username}` : ''}`}>
+              (last run {new Date(latestRun.started_at).toLocaleString()}{latestRun.status && latestRun.status !== 'ok' ? ` · ${latestRun.status}` : ''})
+            </span>
+          )}
+        </h2>
+        <div className="flex items-center gap-2 shrink-0">
           {pipes.length > 1 && (
             <select value={pipeline?.id || ''} onChange={e => setSelId(Number(e.target.value))}
               className="px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content">

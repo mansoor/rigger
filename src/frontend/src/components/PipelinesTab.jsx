@@ -27,6 +27,18 @@ const STAGE_TYPES = [
 ]
 export const STAGE_ICON = { deploy: '🚀', refresh: '♻️', update: '⬆️', build: '🧱', restart: '🔄', backup: '💾', test: '🧪', script: '🛠️', version: '🔖', push: '📤', gate: '⏸️' }
 
+// fmtClock formats an epoch-ms instant as a short local wall-clock time.
+const fmtClock = (ms) => (ms ? new Date(ms).toLocaleTimeString() : '')
+// fmtDur turns a millisecond duration into a compact human string.
+const fmtDur = (ms) => {
+  if (!ms || ms < 0) return ''
+  if (ms < 1000) return `${ms} ms`
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${Math.round(s % 60)}s`
+}
+
 // Script-stage presets prefill the tool image + command (env context is injected
 // as RIGGER_* vars; secrets like a Sonar token are inlined by the user).
 const SCRIPT_PRESETS = [
@@ -484,7 +496,11 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                   <span className="text-xs">{STAGE_ICON[typeAt(i)] || '•'}</span>
                   <span className="text-xs font-medium text-content-strong">{labelAt(i)}</span>
                   <span className={`px-1.5 py-0.5 rounded border text-[10px] ${statusChipCls(st)}`}>{st === 'running' ? 'running…' : st}</span>
-                  {r?.ms ? <span className="text-[10px] text-content-faint">{r.ms} ms</span> : null}
+                  {r?.started_at ? (
+                    <span className="text-[10px] text-content-faint">
+                      {fmtClock(r.started_at)}{r.finished_at ? ` → ${fmtClock(r.finished_at)}` : ''}{r.ms ? ` · ${fmtDur(r.ms)}` : ''}
+                    </span>
+                  ) : r?.ms ? <span className="text-[10px] text-content-faint">{fmtDur(r.ms)}</span> : null}
                 </div>
                 {/* Terminal box: the background is always dark, so the text must be a
                     fixed light colour — `text-content` is dark in light theme and would

@@ -61,12 +61,14 @@ type Pipeline struct {
 
 // StageResult is the recorded outcome of one stage within a run.
 type StageResult struct {
-	Type   string `json:"type"`
-	Env    string `json:"env"`
-	Label  string `json:"label"`
-	Status string `json:"status"` // ok | fail | skipped
-	Output string `json:"output"`
-	MS     int64  `json:"ms"`
+	Type       string `json:"type"`
+	Env        string `json:"env"`
+	Label      string `json:"label"`
+	Status     string `json:"status"` // ok | fail | skipped
+	Output     string `json:"output"`
+	MS         int64  `json:"ms"`
+	StartedAt  int64  `json:"started_at,omitempty"`  // epoch ms (0 = not started / skipped)
+	FinishedAt int64  `json:"finished_at,omitempty"` // epoch ms (0 while running / skipped)
 }
 
 // Run is one execution of a pipeline.
