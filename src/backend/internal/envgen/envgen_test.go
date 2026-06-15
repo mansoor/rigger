@@ -380,3 +380,47 @@ func TestRebaseImageRegistry(t *testing.T) {
 		t.Error("expected no change re-basing to the same registry")
 	}
 }
+
+// A scanned repo's .env.example routinely ships MYSQL_*/DB_* defaults. Those land in
+// the env's config.json env_vars and MUST NOT override Rigger's managed-DB contract —
+// otherwise the DB container initializes with the repo's creds while the app connects
+// with Rigger's (the "Access denied" failure). Non-infra extras still pass through.
+func TestExtraVarsDoNotOverrideManagedDB(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "myapp",
+        "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "dev": {
+        "database": "mysql", "deployment": "compose",
+        "env_vars": {
+          "MYSQL_USER": "weather", "MYSQL_PASSWORD": "weatherpass",
+          "MYSQL_DATABASE": "weather_dashboard", "DB_PASSWORD": "weatherpass",
+          "MAIL_HOST": "smtp.example.com", "WEATHER_LAT": "51.5"
+        }
+      } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+
+	// Managed DB creds win; the repo defaults must not leak in or duplicate.
+	if m["MYSQL_USER"] != "myapp_user" {
+		t.Errorf("MYSQL_USER=%q, want managed myapp_user", m["MYSQL_USER"])
+	}
+	if m["MYSQL_PASSWORD"] == "weatherpass" || m["MYSQL_DATABASE"] == "weather_dashboard" {
+		t.Errorf("repo MYSQL_* overrode the managed contract: %v", m)
+	}
+	if n := strings.Count(env, "\nMYSQL_USER="); n != 1 {
+		t.Errorf("MYSQL_USER emitted %d times, want 1 (duplicate keys let the last win)", n)
+	}
+	// Framework DB contract (DB_PASSWORD) is also protected.
+	if m["DB_PASSWORD"] == "weatherpass" {
+		t.Errorf("DB_PASSWORD overridden by extra var: %q", m["DB_PASSWORD"])
+	}
+	// Non-infra extras remain user-overridable.
+	if m["MAIL_HOST"] != "smtp.example.com" || m["WEATHER_LAT"] != "51.5" {
+		t.Errorf("non-infra extras should pass through: MAIL_HOST=%q WEATHER_LAT=%q", m["MAIL_HOST"], m["WEATHER_LAT"])
+	}
+}

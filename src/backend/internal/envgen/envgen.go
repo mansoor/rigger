@@ -116,6 +116,44 @@ func isSkipKey(key string) bool {
 	return false
 }
 
+// managedContractKeys returns the env keys Rigger owns authoritatively for the env's
+// active managed dependencies, so scanned/extra seed values can't silently override
+// them (see the Extra-variables loop in Generate). Covers the framework DB contract
+// (fe), the raw managed-DB keys, redis, garage, and the Adminer secret — each gated
+// on the dependency actually being active for this env.
+func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]string) map[string]bool {
+	out := make(map[string]bool, len(fe)+24)
+	for k := range fe {
+		out[k] = true
+	}
+	if eng := cfg.EffDatabase(e); eng != "" && eng != "none" {
+		for _, k := range []string{
+			"DATABASE", "DATABASE_URL", "DB_EXTERNAL_PORT",
+			"MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
+			"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
+		} {
+			out[k] = true
+		}
+	}
+	if cfg.EffRedis(e) {
+		for _, k := range []string{"REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_URL"} {
+			out[k] = true
+		}
+	}
+	if cfg.EffGarage(e) {
+		for _, k := range []string{
+			"GARAGE_ENABLED", "GARAGE_HOST", "GARAGE_API_PORT", "GARAGE_S3_PORT", "GARAGE_WEB_PORT",
+			"GARAGE_ADMIN_TOKEN", "GARAGE_KEY_ID", "GARAGE_SECRET_KEY", "GARAGE_BUCKET", "GARAGE_ENDPOINT",
+		} {
+			out[k] = true
+		}
+	}
+	if cfg.HasAdminer() {
+		out["ADMINER_LOGIN_SECRET"] = true
+	}
+	return out
+}
+
 // frameworkEnv unions the blueprint-declared env contracts of every build
 // service in the config, resolved against the active env's managed-dep facts
 // (db engine/host/credentials, redis). Build services carry their framework via
@@ -400,7 +438,8 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// arbitrary scanned repo wires up to the db/redis without the user hand-
 	// mapping Rigger's MYSQL_*/POSTGRES_* onto the framework's keys. The keys
 	// stay language-specific in the blueprint; envgen stays generic.
-	if fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword); len(fe) > 0 {
+	fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword)
+	if len(fe) > 0 {
 		p("# ── Framework env contract (blueprint-declared) ────────────\n")
 		keys := make([]string, 0, len(fe))
 		for k := range fe {
@@ -436,13 +475,31 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 
 	// Append extra env_vars from config, auto-resolving placeholder secrets (the
 	// former image-stack secret generation) and preserving any existing values.
+	//
+	// CRITICAL: skip keys that duplicate Rigger's managed-infrastructure contract
+	// (managed DB creds/host, redis, garage, the framework DB contract). A duplicate
+	// key later in .env silently overrides the earlier one (last wins) — and a scanned
+	// repo's .env.example routinely ships MYSQL_*/DB_* defaults (e.g. weather/weatherpass).
+	// If those won, the managed DB container would initialize with the repo's creds while
+	// the app connects with Rigger's → "Access denied". The managed contract MUST be
+	// authoritative; app-level keys (MAIL_*, APP_*, feature flags) stay user-overridable.
 	if len(e.EnvVars) > 0 {
+		reserved := managedContractKeys(cfg, e, fe)
 		keys := make([]string, 0, len(e.EnvVars))
+		var skipped []string
 		for k := range e.EnvVars {
+			if reserved[k] {
+				skipped = append(skipped, k)
+				continue
+			}
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
+		sort.Strings(skipped)
 		p("\n# ── Extra variables (from config.json env_vars) ───────────────────\n")
+		if len(skipped) > 0 {
+			p("# (skipped %d key(s) owned by Rigger's managed services: %s)\n", len(skipped), strings.Join(skipped, ", "))
+		}
 		for _, k := range keys {
 			p("%s=%s\n", k, ResolveImageValue(k, e.EnvVars[k].String(), existing, r))
 		}
