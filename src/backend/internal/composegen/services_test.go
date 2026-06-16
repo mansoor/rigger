@@ -335,6 +335,75 @@ func TestAdminerSynthSubdomain(t *testing.T) {
 	}
 }
 
+// The Garage web UI synthesizes as a Traefik-routed service on the "garage" subdomain
+// (correct image, no host port under Traefik) — gated on the garage_web_ui flag.
+func TestGarageWebUISubdomain(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"garage_enabled":true,"garage_web_ui":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := svcBlock(t, string(out), "garage_webui")
+	for _, want := range []string{
+		"image: khairul169/garage-webui",
+		"routers.app1_dev_garage_webui.rule=Host(`garage.app1.example.com`)",
+		"- API_BASE_URL=http://app1_dev_garage:3903",
+		"- S3_ENDPOINT_URL=http://app1_dev_garage:3900",
+	} {
+		if !strings.Contains(g, want) {
+			t.Errorf("garage_webui block missing %q\n---\n%s", want, g)
+		}
+	}
+	// Under Traefik it must NOT publish a host port (no multi-instance collision).
+	if strings.Contains(g, "ports:") {
+		t.Errorf("garage_webui should not publish a host port under Traefik\n%s", g)
+	}
+	// With the flag off, no garage_webui service.
+	off := strings.Replace(cfg, `"garage_web_ui":true`, `"garage_web_ui":false`, 1)
+	out2, _ := GenerateAt([]byte(off), "dev", time.Unix(0, 0).UTC())
+	if strings.Contains(string(out2), "garage_webui:") {
+		t.Errorf("garage_webui must not render when the flag is off\n%s", out2)
+	}
+}
+
+// With protect_admin_uis on, the admin sidecars (Adminer + Garage UI) get a Traefik
+// basic-auth middleware referencing ${ADMIN_UI_USERS}; the app's own web entry does NOT.
+func TestProtectAdminUIs(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true,"garage_enabled":true,"garage_web_ui":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","protect_admin_uis":true}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"adminer", "garage_webui"} {
+		b := svcBlock(t, string(out), name)
+		mw := "middlewares.app1_dev_" + name + "_auth.basicauth.users=${ADMIN_UI_USERS}"
+		if !strings.Contains(b, mw) {
+			t.Errorf("%s should carry the basic-auth middleware\n---\n%s", name, b)
+		}
+		if !strings.Contains(b, "routers.app1_dev_"+name+".middlewares=app1_dev_"+name+"_auth") {
+			t.Errorf("%s router should reference the auth middleware\n---\n%s", name, b)
+		}
+	}
+	// The app's own web entry must never be auth-gated.
+	if strings.Contains(svcBlock(t, string(out), "web"), "basicauth") {
+		t.Errorf("app service must NOT get basic-auth")
+	}
+	// Flag off → no basicauth anywhere.
+	off := strings.Replace(cfg, `,"protect_admin_uis":true`, "", 1)
+	out2, _ := GenerateAt([]byte(off), "dev", time.Unix(0, 0).UTC())
+	if strings.Contains(string(out2), "basicauth") {
+		t.Errorf("no basic-auth expected when protect_admin_uis is off\n%s", out2)
+	}
+}
+
 // A legacy project that carries a literal "adminer" service AND the web_sql flag must
 // render exactly ONE adminer service (synth skipped — no duplicate, invalid key).
 func TestAdminerNoDoubleEmit(t *testing.T) {

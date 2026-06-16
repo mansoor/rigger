@@ -16,7 +16,6 @@ const (
 	dashMySQL       = 54
 	dashRedis       = 54
 	dashGarage      = 38
-	dashGarageWebUI = 61
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
@@ -34,6 +33,7 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	}
 	g.buildManagedDeps(prefix, isSwarm)
 	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
+	g.buildGarageWebUI(prefix, rp, registry, tag, isSwarm)
 }
 
 // buildAdminer synthesizes the Adminer web-SQL service from the project-level
@@ -61,11 +61,48 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 		EnvFile:   true,   // inject DB creds + ADMINER_LOGIN_SECRET from .env
 		Volumes:   []string{"${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro"},
 		DependsOn: []string{engine},
+		// Admin UI → eligible for the per-env basic-auth middleware (gated on ProtectAdminUIs).
+		AuthProtect: true,
 	}
 	// If an app service already owns the apex web entry, route Adminer on a subdomain
 	// so the two don't collide in Traefik.
 	if g.hasAppWebEntry() {
 		svc.Subdomain = "adminer"
+	}
+	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
+}
+
+// buildGarageWebUI synthesizes the optional Garage web admin UI as a Service routed
+// through Traefik (subdomain "garage"), reusing buildService so it gets the same
+// routing/ports/networks as Adminer. It's a root-mounted SPA, so it's ALWAYS a
+// subdomain (never apex / never a stripped path). With Traefik off it falls back to
+// publishing host port 3909 (dev-only). Gated on the project's GarageWebUI flag +
+// Garage being enabled. See [[garage-webui-optional]].
+func (g *gen) buildGarageWebUI(prefix, rp, registry, tag string, isSwarm bool) {
+	if !g.cfg.Project.GarageWebUI || !g.garageOn() {
+		return
+	}
+	ver := g.cfg.version("garage_webui", "latest")
+	svc := Service{
+		Name:      "garage_webui",
+		Image:     "khairul169/garage-webui",
+		Tag:       ver,
+		Port:      "3909", // the UI's listen port (Traefik / host-port target)
+		WebRouted: true,
+		Subdomain: "garage", // always a subdomain — the SPA assumes it's served at /
+		HostPort:  "3909",   // host publish only when Traefik is off (no collisions under Traefik)
+		DependsOn: []string{"garage"},
+		Volumes:   []string{"${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro"},
+		// khairul169/garage-webui contract: admin API (3903) + key, S3 endpoint (3900);
+		// region matches the generated garage.toml ([s3_api] s3_region="garage").
+		EnvVars: map[string]flexStr{
+			"API_BASE_URL":    flexStr("http://" + prefix + "_garage:3903"),
+			"API_ADMIN_KEY":   flexStr("${GARAGE_ADMIN_TOKEN}"),
+			"S3_ENDPOINT_URL": flexStr("http://" + prefix + "_garage:3900"),
+			"S3_REGION":       flexStr("garage"),
+		},
+		// Admin UI → eligible for the per-env basic-auth middleware (Slice 2).
+		AuthProtect: true,
 	}
 	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
 }
@@ -277,7 +314,9 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		if svc.Subdomain != "" && e.Domain != "" {
 			host = svc.Subdomain + "." + e.Domain
 		}
-		g.traefikLabels(router, host, port)
+		// Admin sidecars (Adminer / Garage UI) get a basic-auth middleware when this
+		// env opts into protection; real app services never do.
+		g.traefikLabels(router, host, port, svc.AuthProtect && e.ProtectAdminUIs)
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins
 		// (the user's chosen port), else the env HTTP port. Subdomain web services
@@ -453,7 +492,6 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	engine := g.dbEngine()
 	verRedis := c.version("redis", "7-alpine")
 	verGarage := c.version("garage", "v1.0.1")
-	verGarageWebUI := c.version("garage_webui", "latest")
 
 	if engine == "postgres" {
 		eng, _ := databases.Get("postgres")
@@ -538,33 +576,6 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.healthcheck("curl -sf http://localhost:3903/health -o /dev/null || exit 1", "30s", "5s", "3", "60s", "")
 		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
 		g.line("")
-
-		if g.cfg.Project.GarageWebUI {
-			g.line(sectionComment("Garage WebUI", dashGarageWebUI))
-			g.line("  garage_webui:")
-			g.line("    image: khairul169/garage-webui:" + verGarageWebUI)
-			g.line("    container_name: " + prefix + "_garage_webui")
-			// Published on the host so the UI is reachable without Traefik (the UI listens
-			// on :3909). One host binding per host — multi-env collisions are possible, as
-			// with the Adminer host-port case.
-			g.line("    ports:")
-			g.line("      - \"3909:3909\"")
-			g.line("    environment:")
-			// khairul169/garage-webui contract: admin API (3903) + key, S3 endpoint (3900),
-			// region matches the generated garage.toml ([s3_api] s3_region="garage").
-			g.line("      API_BASE_URL: http://" + prefix + "_garage:3903")
-			g.line("      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN}")
-			g.line("      S3_ENDPOINT_URL: http://" + prefix + "_garage:3900")
-			g.line("      S3_REGION: garage")
-			// The UI also reads the same garage.toml for config it can't get from the API.
-			g.line("    volumes:")
-			g.line("      - ${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro")
-			g.line("    depends_on:")
-			g.line("      - garage")
-			g.managedNet(prefix, "garage_webui")
-			g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
-			g.line("")
-		}
 	}
 }
 

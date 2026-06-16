@@ -75,16 +75,20 @@ type NamedVolume struct {
 // (project level); per-env knobs live here. Database/Redis/Garage stay as simple
 // managed-dependency toggles until Phase 3 folds them into the service graph.
 type Env struct {
-	Domain         string  `json:"domain"`
-	HTTPPort       flexStr `json:"http_port"`
-	Database       string  `json:"database"` // none | postgres | mysql | mariadb
-	DBVersion      string  `json:"db_version,omitempty"`
-	DBExternal     bool    `json:"db_external,omitempty"`
-	RedisEnabled   bool    `json:"redis_enabled"`
-	GarageEnabled  bool    `json:"garage_enabled"`
-	TraefikEnabled bool    `json:"traefik_enabled"`
-	TraefikNetwork string  `json:"traefik_network"`
-	SSLEnabled     bool    `json:"ssl_enabled"`
+	Domain     string  `json:"domain"`
+	HTTPPort   flexStr `json:"http_port"`
+	Database   string  `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion  string  `json:"db_version,omitempty"`
+	DBExternal bool    `json:"db_external,omitempty"`
+	// ProtectAdminUIs gates the synthesized admin sidecars (Adminer / Garage UI) behind
+	// Traefik HTTP basic-auth for THIS environment (creds generated into .env by envgen).
+	// Only enforceable under Traefik routing; a no-Traefik host-port env can't apply it.
+	ProtectAdminUIs bool   `json:"protect_admin_uis,omitempty"`
+	RedisEnabled    bool   `json:"redis_enabled"`
+	GarageEnabled   bool   `json:"garage_enabled"`
+	TraefikEnabled  bool   `json:"traefik_enabled"`
+	TraefikNetwork  string `json:"traefik_network"`
+	SSLEnabled      bool   `json:"ssl_enabled"`
 	// SSLSelfSigned routes HTTPS through Traefik's default (self-signed) cert
 	// instead of Let's Encrypt — used for local *.localhost envs that need HTTPS
 	// (e.g. Vaultwarden) but can't get a public cert. Ignored unless SSLEnabled.
@@ -130,12 +134,16 @@ type Service struct {
 	Volumes           []string           `json:"volumes,omitempty"`
 	DependsOn         []string           `json:"depends_on,omitempty"` // short service / managed-dep names
 	Restart           string             `json:"restart,omitempty"`
-	EnvFile           bool               `json:"env_file,omitempty"`            // inject the env's .env as process env (env_file:)
-	EnvFileMount      string             `json:"env_file_mount,omitempty"`      // also bind the env's .env as a physical file at this container path (ro)
+	EnvFile           bool               `json:"env_file,omitempty"`       // inject the env's .env as process env (env_file:)
+	EnvFileMount      string             `json:"env_file_mount,omitempty"` // also bind the env's .env as a physical file at this container path (ro)
 	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
 	Links             []ServiceLink      `json:"links,omitempty"` // service→service URL wiring, emitted into environment:
-	ExtraCompose      string             `json:"extra_compose,omitempty"`
-	Replicas          flexStr            `json:"replicas,omitempty"` // default; per-env override via Swarm.Services
+	// AuthProtect marks a synthesized admin sidecar (Adminer / Garage UI) as eligible
+	// for the per-env basic-auth middleware. Not persisted on real services — set only
+	// by buildAdminer/buildGarageWebUI; gated further on Env.ProtectAdminUIs + Traefik.
+	AuthProtect  bool    `json:"-"`
+	ExtraCompose string  `json:"extra_compose,omitempty"`
+	Replicas     flexStr `json:"replicas,omitempty"` // default; per-env override via Swarm.Services
 }
 
 // ServiceLink declares that THIS service needs another service's in-network URL,

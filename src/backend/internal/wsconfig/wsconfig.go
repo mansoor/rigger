@@ -45,7 +45,7 @@ type Build struct {
 	Dockerfile string            `json:"dockerfile,omitempty"` // default "Dockerfile"
 	Template   string            `json:"template,omitempty"`   // templates/dockerfiles/<template> to scaffold
 	Target     string            `json:"target,omitempty"`
-	Args       map[string]string `json:"args,omitempty"`       // --build-arg KEY=VALUE; values may use ${ENV}/${VERSION}/${ROUTE_URL}
+	Args       map[string]string `json:"args,omitempty"` // --build-arg KEY=VALUE; values may use ${ENV}/${VERSION}/${ROUTE_URL}
 }
 
 // BuildServices returns the services that build from source (Build != nil).
@@ -103,6 +103,8 @@ type Project struct {
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
 	// treats both as present. See [[adminer]] in composegen.buildAdminer.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// GarageWebUI adds the optional Garage web admin UI sidecar (when Garage is on).
+	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 	// DBSeed, when set, points at a bundled SQL dump (stored at _source/seed.sql,
 	// found by the detector in an uploaded marketplace app) to import into the managed
 	// database. Auto=true imports it automatically on first deploy of an empty DB;
@@ -204,23 +206,26 @@ type Version struct {
 // Env is one environment's config. App services are project-level (Config.Services);
 // database/redis/garage stay as managed-dependency toggles.
 type Env struct {
-	Domain   string `json:"domain"`
-	HTTPPort Str    `json:"http_port"`
-	HTTPSPort Str   `json:"https_port"`
+	Domain    string `json:"domain"`
+	HTTPPort  Str    `json:"http_port"`
+	HTTPSPort Str    `json:"https_port"`
 	// Managed database (catalog-driven, one per env). Database is the engine id
 	// (none|postgres|mysql|mariadb); DBVersion is the chosen image tag ("" → the
 	// catalog default); DBExternal publishes the DB port on the host so external
 	// clients can connect. Older configs only have Database (string) — DBVersion/
 	// DBExternal default to "" / false, preserving prior behaviour.
-	Database       string         `json:"database"` // none | postgres | mysql | mariadb
-	DBVersion      string         `json:"db_version,omitempty"`
-	DBExternal     bool           `json:"db_external,omitempty"`
-	RedisEnabled   bool           `json:"redis_enabled"`
-	GarageEnabled  bool           `json:"garage_enabled"`
-	TraefikEnabled bool           `json:"traefik_enabled"`
-	Deployment     string         `json:"deployment"`
-	Git            EnvGit         `json:"git"`
-	EnvVars        map[string]Str `json:"env_vars"`
+	Database   string `json:"database"` // none | postgres | mysql | mariadb
+	DBVersion  string `json:"db_version,omitempty"`
+	DBExternal bool   `json:"db_external,omitempty"`
+	// ProtectAdminUIs gates the admin sidecars (Adminer / Garage UI) behind Traefik
+	// basic-auth for this env; envgen generates the credential into .env.
+	ProtectAdminUIs bool           `json:"protect_admin_uis,omitempty"`
+	RedisEnabled    bool           `json:"redis_enabled"`
+	GarageEnabled   bool           `json:"garage_enabled"`
+	TraefikEnabled  bool           `json:"traefik_enabled"`
+	Deployment      string         `json:"deployment"`
+	Git             EnvGit         `json:"git"`
+	EnvVars         map[string]Str `json:"env_vars"`
 }
 
 // EnvGit is the per-env git override (branch). The repo is project-level.

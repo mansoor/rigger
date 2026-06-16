@@ -291,7 +291,7 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 //     its default cert) — for local *.localhost envs that need HTTPS.
 // The per-router redirect replaces Traefik's old global web→websecure redirect,
 // so HTTP-only (local) envs are no longer forced onto a cert-less HTTPS.
-func (g *gen) traefikLabels(router, host, port string) {
+func (g *gen) traefikLabels(router, host, port string, auth bool) {
 	if !g.e.TraefikEnabled {
 		return
 	}
@@ -301,12 +301,21 @@ func (g *gen) traefikLabels(router, host, port string) {
 	rule := "Host(`" + host + "`)"
 	g.line("    labels:")
 	g.line("      - \"traefik.enable=true\"")
+	// Optional HTTP basic-auth middleware (admin sidecars when the env protects them).
+	// The htpasswd line comes from .env (${ADMIN_UI_USERS}) so the bcrypt '$' chars are
+	// inserted literally rather than written inline (which would need '$$' doubling).
+	if auth {
+		g.line("      - \"traefik.http.middlewares." + router + "_auth.basicauth.users=${ADMIN_UI_USERS}\"")
+	}
 	if g.e.SSLEnabled {
 		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=websecure\"")
 		g.line("      - \"traefik.http.routers." + router + ".tls=true\"")
 		if !g.e.SSLSelfSigned {
 			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=letsencrypt\"")
+		}
+		if auth {
+			g.line("      - \"traefik.http.routers." + router + ".middlewares=" + router + "_auth\"")
 		}
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
 		// Companion HTTP router → redirect to HTTPS (per-router, not global).
@@ -317,6 +326,9 @@ func (g *gen) traefikLabels(router, host, port string) {
 	} else {
 		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=web\"")
+		if auth {
+			g.line("      - \"traefik.http.routers." + router + ".middlewares=" + router + "_auth\"")
+		}
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
 	}
 }

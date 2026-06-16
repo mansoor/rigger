@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 )
 
@@ -422,6 +424,46 @@ func TestExtraVarsDoNotOverrideManagedDB(t *testing.T) {
 	// Non-infra extras remain user-overridable.
 	if m["MAIL_HOST"] != "smtp.example.com" || m["WEATHER_LAT"] != "51.5" {
 		t.Errorf("non-infra extras should pass through: MAIL_HOST=%q WEATHER_LAT=%q", m["MAIL_HOST"], m["WEATHER_LAT"])
+	}
+}
+
+// TestProtectAdminUIsCreds verifies that an env opting into admin-UI protection gets a
+// generated basic-auth credential: a revealable plaintext password + an htpasswd line
+// (bcrypt) that validates it, single-quoted so the dotenv parser keeps the '$' literal.
+func TestProtectAdminUIsCreds(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "myapp", "database": "postgres", "web_sql": true,
+        "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "prod": { "deployment": "compose", "protect_admin_uis": true } }
+    }`)
+	env, _, err := Generate(c, "prod", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	if m["ADMIN_UI_USER"] != "admin" || m["ADMIN_UI_PASSWORD"] == "" {
+		t.Fatalf("expected admin user + password, got user=%q pass=%q", m["ADMIN_UI_USER"], m["ADMIN_UI_PASSWORD"])
+	}
+	// ADMIN_UI_USERS is single-quoted in the file so '$' isn't dotenv-expanded.
+	if !strings.Contains(env, "ADMIN_UI_USERS='admin:$2") {
+		t.Errorf("ADMIN_UI_USERS should be single-quoted bcrypt htpasswd, got:\n%s", env)
+	}
+	// The hash must validate the emitted plaintext password.
+	users := strings.TrimPrefix(strings.Trim(m["ADMIN_UI_USERS"], "'"), "admin:")
+	if err := bcrypt.CompareHashAndPassword([]byte(users), []byte(m["ADMIN_UI_PASSWORD"])); err != nil {
+		t.Errorf("htpasswd hash does not validate the plaintext password: %v", err)
+	}
+	// Off by default: no creds when the flag is absent.
+	c2 := cfg(t, `{
+      "project": { "name": "myapp", "database": "postgres", "web_sql": true,
+        "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "dev": { "deployment": "compose" } }
+    }`)
+	env2, _, _ := Generate(c2, "dev", nil, fixedRand)
+	if strings.Contains(env2, "ADMIN_UI_USERS") {
+		t.Errorf("no admin-UI creds expected without protect_admin_uis\n%s", env2)
 	}
 }
 

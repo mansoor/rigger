@@ -22,6 +22,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/mansoor/rigger/ui/internal/blueprints"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 )
@@ -154,6 +156,11 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 	}
 	if cfg.HasAdminer() {
 		out["ADMINER_LOGIN_SECRET"] = true
+	}
+	if e.ProtectAdminUIs {
+		for _, k := range []string{"ADMIN_UI_USER", "ADMIN_UI_PASSWORD", "ADMIN_UI_USERS"} {
+			out[k] = true
+		}
 	}
 	return out
 }
@@ -397,6 +404,27 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// literal "adminer" service.
 	if cfg.HasAdminer() {
 		p("ADMINER_LOGIN_SECRET=%s\n", get("ADMINER_LOGIN_SECRET", hexN(r, 32)))
+	}
+	// Admin-UI basic-auth credential (per env, when protection is enabled and the
+	// project has an admin sidecar). ADMIN_UI_USERS is the htpasswd line Traefik's
+	// basicauth middleware reads; single-quoted at emit time so the dotenv parser
+	// doesn't try to expand the bcrypt hash's '$' segments. The plaintext password is
+	// preserved across regen (read from the existing .env) so a regen doesn't lock the
+	// user out — only the hash re-derives.
+	if e.ProtectAdminUIs && (cfg.HasAdminer() || cfg.Project.GarageWebUI) {
+		adminPass := ""
+		if existing != nil {
+			adminPass = existing["ADMIN_UI_PASSWORD"]
+		}
+		if adminPass == "" {
+			adminPass = "rigger-" + hexN(r, 9)
+		}
+		hash, herr := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+		if herr == nil {
+			p("ADMIN_UI_USER=admin\n")
+			p("ADMIN_UI_PASSWORD=%s\n", adminPass)
+			p("ADMIN_UI_USERS='admin:%s'\n", string(hash))
+		}
 	}
 	p("\n")
 
