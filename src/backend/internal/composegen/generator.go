@@ -105,15 +105,29 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 // (multi-service stacks must pick a web entry explicitly) and defaults the
 // container port to 80 when unset. No-op when a web entry already exists.
 func applyWebEntryFallback(cfg *Config, e Env) {
-	if !e.TraefikEnabled || e.Domain == "" || len(cfg.Services) != 1 {
+	if !e.TraefikEnabled || e.Domain == "" {
 		return
 	}
-	if cfg.Services[0].WebRouted {
-		return
+	web := -1
+	for i := range cfg.Services {
+		if cfg.Services[i].WebRouted {
+			web = i
+			break
+		}
 	}
-	cfg.Services[0].WebRouted = true
-	if string(cfg.Services[0].Port) == "" {
-		cfg.Services[0].Port = flexStr("80")
+	if web == -1 {
+		// Nothing marked — promote the sole service (multi-service stacks must
+		// pick a web entry explicitly, so leave those alone).
+		if len(cfg.Services) != 1 {
+			return
+		}
+		cfg.Services[0].WebRouted = true
+		web = 0
+	}
+	// A web entry with no container port can't form a valid Traefik service port —
+	// default to 80 (the near-universal HTTP default for images like nginx).
+	if string(cfg.Services[web].Port) == "" {
+		cfg.Services[web].Port = flexStr("80")
 	}
 }
 
@@ -434,6 +448,35 @@ func (g *gen) healthcheck(cmd, interval, timeout, retries, startPeriod, startInt
 	if startInterval != "" {
 		g.line("      start_interval: " + startInterval)
 	}
+}
+
+// healthcheckExec emits an exec-form (CMD) healthcheck — no shell. Required for
+// distroless images that ship only their binary (no /bin/sh, no curl), where the
+// default CMD-SHELL form can't run at all and the container is wrongly reported
+// unhealthy forever (e.g. dxflrs/garage).
+func (g *gen) healthcheckExec(args []string, interval, timeout, retries, startPeriod string) {
+	if interval == "" {
+		interval = "30s"
+	}
+	if timeout == "" {
+		timeout = "10s"
+	}
+	if retries == "" {
+		retries = "3"
+	}
+	if startPeriod == "" {
+		startPeriod = "30s"
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "\"" + strings.ReplaceAll(a, "\"", "\\\"") + "\""
+	}
+	g.raw("    healthcheck:\n" +
+		"      test: [\"CMD\", " + strings.Join(quoted, ", ") + "]\n" +
+		"      interval: " + interval + "\n" +
+		"      timeout: " + timeout + "\n" +
+		"      retries: " + retries + "\n" +
+		"      start_period: " + startPeriod + "\n")
 }
 
 // sectionComment emits a "  # ── <label> <N dashes>" service separator. The

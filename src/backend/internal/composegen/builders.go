@@ -592,7 +592,9 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(g.dbEnvLine("GARAGE_ADMIN_TOKEN"))
 		g.line(g.dbEnvLine("GARAGE_RPC_SECRET")) // required by garage; from .env (not the regenerated toml)
 		g.managedNet(prefix, "garage")
-		g.healthcheck("curl -sf http://localhost:3903/health -o /dev/null || exit 1", "30s", "5s", "3", "60s", "")
+		// The garage image is distroless (no shell/curl), so a CMD-SHELL curl check
+		// can't run → always unhealthy. Use the garage binary itself (exec form).
+		g.healthcheckExec([]string{"/garage", "status"}, "30s", "10s", "3", "60s")
 		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
 		g.line("")
 	}
