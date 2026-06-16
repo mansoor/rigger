@@ -99,10 +99,22 @@ services:
       - --providers.docker.endpoint=tcp://socket-proxy:2375
       - --providers.docker.network=traefik_net
       - --providers.docker.exposedbydefault=false
-      # ── Let's Encrypt ACME (HTTP-01 challenge) ──
+      # ── Let's Encrypt ACME (HTTP-01 challenge) — per-host certs ──
+      # Used for custom domains + base-domain envs when no DNS provider is set.
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
       - --certificatesresolvers.letsencrypt.acme.storage=/certs/acme.json
       - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      # ── Let's Encrypt ACME (DNS-01 challenge) — WILDCARD certs ──
+      # Lets Traefik issue *.{apps_base_domain} via the DNS provider's API (no
+      # port-80 challenge), so every app under the base domain shares ONE cert.
+      # Only used by routers composegen emits with certresolver=dns (when the
+      # admin sets a DNS provider in Settings → General). Cloudflare reads the
+      # token from CF_DNS_API_TOKEN (set in src/.env). Empty token ⇒ resolver
+      # exists but is never exercised, so this is harmless when DNS-01 is unused.
+      - --certificatesresolvers.dns.acme.email=${ACME_EMAIL:-admin@example.com}
+      - --certificatesresolvers.dns.acme.storage=/certs/acme-dns.json
+      - --certificatesresolvers.dns.acme.dnschallenge=true
+      - --certificatesresolvers.dns.acme.dnschallenge.provider=cloudflare
       # HTTP→HTTPS redirect is now per-router (emitted by composegen for SSL
       # envs only), so HTTP-only local envs (*.localhost) aren't forced onto a
       # cert-less HTTPS. Do NOT re-add a global web→websecure redirection here.
@@ -112,6 +124,10 @@ services:
       # ── Dashboard (disabled by default) ──
       # To enable: change to --api.dashboard=true and add labels to this service.
       - --api.dashboard=false
+    environment:
+      # Cloudflare DNS-01 API token for the wildcard cert (see the `dns` resolver
+      # above). Set CF_DNS_API_TOKEN in src/.env; leave blank to disable DNS-01.
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
     volumes:
       # Certificate storage — mount a named volume so certs survive restarts
       - traefik-certs:/certs

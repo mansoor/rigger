@@ -595,6 +595,38 @@ func TestServicesMagicDNSRoute(t *testing.T) {
 	mustContain(t, svcBlock(t, string(out4), "nginx"), "Host(`mcl-wda-dev.localhost`)")
 }
 
+// With a base domain + a DNS provider, the apex web router uses the DNS-01
+// certresolver and requests ONE wildcard cert (*.{base}); without a provider it
+// stays on per-host letsencrypt (HTTP-01) — golden behaviour.
+func TestServicesWildcardCert(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"app","resource_prefix":"mcl_wda","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"nginx","image":"nginx","tag":"alpine","web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	// DNS provider set → dns resolver + wildcard SANs on the apex router.
+	out, err := GenerateRouted(cfg, "dev", RouteOpts{BaseDomain: "onrigger.com", DNSProvider: "cloudflare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(out), "nginx")
+	for _, want := range []string{
+		"Host(`mcl-wda-dev.onrigger.com`)",
+		"tls.certresolver=dns",
+		"tls.domains[0].main=onrigger.com",
+		"tls.domains[0].sans=*.onrigger.com",
+	} {
+		mustContain(t, app, want)
+	}
+	mustNotContain(t, app, "certresolver=letsencrypt")
+
+	// No provider → unchanged per-host HTTP-01 (golden behaviour, no wildcard SANs).
+	out2, _ := GenerateRouted(cfg, "dev", RouteOpts{BaseDomain: "onrigger.com"})
+	app2 := svcBlock(t, string(out2), "nginx")
+	mustContain(t, app2, "certresolver=letsencrypt")
+	mustNotContain(t, app2, "tls.domains")
+}
+
 // project.local_tls makes an auto-routed *.localhost env use self-signed HTTPS.
 func TestServicesLocalTLS(t *testing.T) {
 	cfg := []byte(`{

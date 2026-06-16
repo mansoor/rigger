@@ -316,7 +316,13 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		}
 		// Admin sidecars (Adminer / Garage UI) get a basic-auth middleware when this
 		// env opts into protection; real app services never do.
-		g.traefikLabels(router, host, port, svc.AuthProtect && e.ProtectAdminUIs)
+		// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
+		// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
+		wildcard := ""
+		if e.wildcardBase != "" && svc.Subdomain == "" {
+			wildcard = e.wildcardBase
+		}
+		g.traefikLabels(router, host, port, svc.AuthProtect && e.ProtectAdminUIs, e.certResolver, wildcard)
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins
 		// (the user's chosen port), else the env HTTP port. Subdomain web services

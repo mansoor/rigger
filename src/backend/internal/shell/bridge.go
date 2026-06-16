@@ -1251,6 +1251,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
 			AutoURLMode:   settings.AutoURLMode(b.db),
 			AutoURLHost:   settings.AutoURLHost(b.db),
+			DNSProvider:   settings.AppsDNSProvider(b.db),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {

@@ -473,6 +473,12 @@ func AutoURLMode(d *db.DB) string {
 	return "localhost"
 }
 
+// AppsDNSProvider returns the configured DNS-01 provider for wildcard certs
+// (e.g. "cloudflare"), or "" when none — the signal composegen uses to emit a
+// wildcard cert for base-domain envs (vs per-host HTTP-01). The provider's API
+// token lives in the Rigger stack's env (e.g. CF_DNS_API_TOKEN), not the DB.
+func AppsDNSProvider(d *db.DB) string { return AppSetting(d, "apps_dns_provider") }
+
 // AutoURLHost returns the IP/host embedded in a magic-DNS auto-URL
 // ({prefix}-{env}.<host>.sslip.io) — the admin sets the LAN/public/Tailscale IP
 // other machines use to reach this host. "" ⇒ magic-DNS modes fall back to localhost.

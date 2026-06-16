@@ -57,6 +57,8 @@ type Options struct {
 	// env is reachable cross-machine without a real domain. See composegen.RouteOpts.
 	AutoURLMode string
 	AutoURLHost string
+	// DNSProvider ("cloudflare"|"") switches base-domain envs to a DNS-01 wildcard cert.
+	DNSProvider string
 
 	// Exec runs the docker commands. nil → local daemon (executor.Local). Set to
 	// a remotehost executor for cross-host operations (Phase 7).
@@ -121,7 +123,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, EnvFile: readDotenv(envDir)})
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, DNSProvider: opts.DNSProvider, EnvFile: readDotenv(envDir)})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -379,7 +381,7 @@ func (r *runner) logs() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, EnvFile: readDotenv(filepath.Dir(r.composePath))})
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, EnvFile: readDotenv(filepath.Dir(r.composePath))})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}

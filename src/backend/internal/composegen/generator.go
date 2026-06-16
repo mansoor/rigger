@@ -22,6 +22,10 @@ type RouteOpts struct {
 	// magic-DNS modes degrade to *.localhost.
 	AutoURLMode string
 	AutoURLHost string
+	// DNSProvider, when set (e.g. "cloudflare"), switches base-domain envs to the
+	// Traefik DNS-01 certresolver and requests a single wildcard cert *.{base}
+	// instead of per-host HTTP-01. "" ⇒ per-host Let's Encrypt (unchanged).
+	DNSProvider string
 	// EnvFile is the env's generated .env content. When a service sets
 	// env_file_mount, the generator embeds this verbatim as a compose `config`
 	// (content:) and mounts it at the target path. Delivered as inline content —
@@ -127,6 +131,13 @@ func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
 		e.Domain = label + "." + ro.BaseDomain
 		e.SSLEnabled = true
 		e.SSLSelfSigned = false
+		// With a DNS provider configured, issue ONE wildcard cert (*.{base}) via DNS-01
+		// instead of a per-host HTTP-01 cert per app. The apex router carries the
+		// wildcard request; sibling apex domains reuse the same cert.
+		if ro.DNSProvider != "" {
+			e.certResolver = "dns"
+			e.wildcardBase = ro.BaseDomain
+		}
 	case magicSuffix != "":
 		// Cross-machine magic-DNS auto-URL. HTTP in Phase 1 (real certs for these come
 		// later: per-host LE if publicly reachable, or traefik.me's shared cert).
@@ -323,12 +334,15 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 //     its default cert) — for local *.localhost envs that need HTTPS.
 // The per-router redirect replaces Traefik's old global web→websecure redirect,
 // so HTTP-only (local) envs are no longer forced onto a cert-less HTTPS.
-func (g *gen) traefikLabels(router, host, port string, auth bool) {
+func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, wildcard string) {
 	if !g.e.TraefikEnabled {
 		return
 	}
 	if port == "" {
 		port = "80"
+	}
+	if certResolver == "" {
+		certResolver = "letsencrypt" // per-host HTTP-01 (default; DNS-01 sets "dns")
 	}
 	rule := "Host(`" + host + "`)"
 	g.line("    labels:")
@@ -344,7 +358,12 @@ func (g *gen) traefikLabels(router, host, port string, auth bool) {
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=websecure\"")
 		g.line("      - \"traefik.http.routers." + router + ".tls=true\"")
 		if !g.e.SSLSelfSigned {
-			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=letsencrypt\"")
+			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=" + certResolver + "\"")
+			// Request a single wildcard cert for the apex base-domain router (DNS-01).
+			if wildcard != "" {
+				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].main=" + wildcard + "\"")
+				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].sans=*." + wildcard + "\"")
+			}
 		}
 		if auth {
 			g.line("      - \"traefik.http.routers." + router + ".middlewares=" + router + "_auth\"")

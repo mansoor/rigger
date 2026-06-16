@@ -104,6 +104,14 @@ type Env struct {
 	// Only consulted for swarm deployments; ignored for compose.
 	SecretKeys     []string       `json:"secret_keys"`
 	SecretVersions map[string]int `json:"secret_versions"`
+
+	// ── Transient routing state (set by resolveRoute, never parsed from config) ──
+	// certResolver is the Traefik ACME resolver an SSL router should use:
+	// "letsencrypt" (per-host HTTP-01) or "dns" (DNS-01, enables wildcards).
+	certResolver string
+	// wildcardBase, when set, makes the apex web router request a wildcard cert
+	// (tls.domains main={base} sans=*.{base}) so all base-domain apps share one cert.
+	wildcardBase string
 }
 
 // Service is one entry in config.json services[] — the unified app-service model
