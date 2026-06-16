@@ -10,6 +10,7 @@ package detect
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -111,6 +112,19 @@ type Draft struct {
 	// `profiles:` (not started by a default `up`). Surfaced so the user can opt to
 	// include them.
 	ProfileOmitted []OmittedService `json:"profile_omitted,omitempty"`
+	// SeedCandidates lists bundled SQL dumps found in the source (e.g. a CodeCanyon
+	// app's database.sql + demo variants). The user picks one in the wizard to import
+	// into the managed database on first deploy (see the v3 DB-seed hook). Advisory:
+	// detection only finds them; the choice + auto-import toggle live in the UI.
+	SeedCandidates []SeedCandidate `json:"seed_candidates,omitempty"`
+}
+
+// SeedCandidate is a bundled SQL dump offered for import into the managed database.
+// Path is relative to the source root; Bytes is its on-disk size (used to rank the
+// real dump above tiny stubs and to show a human size in the picker).
+type SeedCandidate struct {
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
 }
 
 // ManagedCandidate is a detected dependency offered as a choice: use Rigger's
@@ -157,6 +171,7 @@ func Detect(repoDir string) Draft {
 			d.Detected = "docker-compose"
 			d.Notes = append([]string{"Detected " + filepath.Base(cf) + " — mapped its services."}, d.Notes...)
 			detectManagedDeps(repoDir, &d)
+			detectSeedDumps(repoDir, &d)
 			return d
 		}
 	}
@@ -185,7 +200,99 @@ func Detect(repoDir string) Draft {
 
 	// 5. Managed-dependency hints.
 	detectManagedDeps(repoDir, &d)
+	// 6. Bundled SQL dumps the user may want to seed the managed DB with.
+	detectSeedDumps(repoDir, &d)
 	return d
+}
+
+// seedDirs are the directories (besides the repo root) where a bundled SQL dump
+// is conventionally shipped. seedExcludeDirs are subtrees that hold Laravel
+// migration/seeder/factory CODE — small `.sql` is rare there but exclude them so a
+// stray fixture never masquerades as the database dump.
+var seedDirs = map[string]bool{
+	"database": true, "db": true, "sql": true, "install": true,
+	"_install": true, "setup": true, "dump": true, "dumps": true,
+}
+var seedExcludeDirs = map[string]bool{
+	"database/migrations": true, "database/factories": true, "database/seeders": true,
+	"db/migrations": true,
+}
+
+// seedMinBytes is the floor below which a `.sql` is treated as a stub (a single
+// migration / fixture), not a real database dump worth offering to import.
+const seedMinBytes = 8 * 1024
+
+// detectSeedDumps finds bundled SQL dumps in the source (repo root or a known
+// seed dir), excluding migration/seeder code and tiny stubs. CodeCanyon-style apps
+// ship the database as e.g. database.sql (+ demo variants); the wizard offers the
+// largest as the default import. Pure file reads — never executed.
+func detectSeedDumps(repoDir string, d *Draft) {
+	var cands []SeedCandidate
+	_ = filepath.WalkDir(repoDir, func(p string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel := filepath.ToSlash(relOrEmpty(repoDir, p))
+		if rel == "" || rel == "." {
+			return nil
+		}
+		if e.IsDir() {
+			switch e.Name() {
+			case "vendor", "node_modules", ".git", "tests", "test":
+				return fs.SkipDir
+			}
+			if seedExcludeDirs[rel] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(e.Name()), ".sql") {
+			return nil
+		}
+		// Location rule: at the repo root, or directly/indirectly under a known seed dir.
+		seg := rel
+		if i := strings.IndexByte(rel, '/'); i >= 0 {
+			seg = rel[:i]
+		} else {
+			seg = "" // root file (no slash)
+		}
+		if seg != "" && !seedDirs[seg] {
+			return nil
+		}
+		info, ierr := e.Info()
+		if ierr != nil || info.Size() < seedMinBytes {
+			return nil
+		}
+		cands = append(cands, SeedCandidate{Path: rel, Bytes: info.Size()})
+		return nil
+	})
+	if len(cands) == 0 {
+		return
+	}
+	// Largest first (the real dump; demo variants follow), ties broken by path for
+	// deterministic ordering.
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].Bytes != cands[j].Bytes {
+			return cands[i].Bytes > cands[j].Bytes
+		}
+		return cands[i].Path < cands[j].Path
+	})
+	if len(cands) > 10 {
+		cands = cands[:10]
+	}
+	d.SeedCandidates = cands
+	d.Notes = append(d.Notes, fmt.Sprintf(
+		"Found %d SQL dump%s — choose one to import into the managed database.", len(cands), plural(len(cands))))
+}
+
+// relOrEmpty returns the slash-free relative path of p under base, or "" if it
+// can't be computed (defensive — WalkDir paths are always under base).
+func relOrEmpty(base, p string) string {
+	rel, err := filepath.Rel(base, p)
+	if err != nil {
+		return ""
+	}
+	return rel
 }
 
 // ── Compose ──────────────────────────────────────────────────────────────────

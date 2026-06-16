@@ -313,7 +313,10 @@ func TestDetectManifestGo(t *testing.T) {
 	}
 }
 
-func TestDetectLaravelAddsNginx(t *testing.T) {
+// TestDetectLaravelSelfContained guards the Laravel blueprint shape: it's now a
+// self-contained image served via `php artisan serve` (web-routed directly, NO
+// separate nginx front — see templates/dockerfiles/laravel + the blueprint rework).
+func TestDetectLaravelSelfContained(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"artisan":      "#!/usr/bin/env php\n",
 		"composer.json": `{"require":{"laravel/framework":"^11","doctrine/dbal":"*"},"name":"app"}`,
@@ -324,12 +327,11 @@ func TestDetectLaravelAddsNginx(t *testing.T) {
 	if app == nil || app.Build == nil || app.Build.Template != "laravel" {
 		t.Fatalf("expected laravel app service, got %+v", app)
 	}
-	if app.WebRouted {
-		t.Errorf("php-fpm app should not be web-routed directly")
+	if !app.WebRouted {
+		t.Errorf("self-contained laravel app should be web-routed directly")
 	}
-	nginx := svcByName(d, "app-nginx")
-	if nginx == nil || !nginx.WebRouted || nginx.ConfigTemplate != "laravel" {
-		t.Fatalf("expected an nginx front service for laravel, got %+v", nginx)
+	if nginx := svcByName(d, "app-nginx"); nginx != nil {
+		t.Errorf("self-contained laravel must NOT add an nginx front, got %+v", nginx)
 	}
 	if d.Database != "postgres" {
 		t.Errorf("expected postgres, got %q", d.Database)
@@ -400,6 +402,43 @@ func TestDetectUnknown(t *testing.T) {
 	}
 	if len(d.Notes) == 0 {
 		t.Errorf("expected a note explaining nothing was detected")
+	}
+}
+
+// TestDetectSeedDumps verifies bundled SQL dumps are surfaced from the repo root
+// and known seed dirs, ranked largest-first, with migration code and tiny stubs
+// excluded.
+func TestDetectSeedDumps(t *testing.T) {
+	big := strings.Repeat("INSERT INTO x VALUES (1);\n", 1000)    // ~26 KiB > floor
+	bigger := strings.Repeat("INSERT INTO x VALUES (1);\n", 2000) // ~52 KiB
+	d := Detect(repo(t, map[string]string{
+		"composer.json":                        `{"require":{"php":"^8.2"}}`,
+		"database.sql":                          big,
+		"database-home2.sql":                    bigger,
+		"install/seed.sql":                      big,
+		"database/migrations/0001_create.sql":   big, // excluded: migration code
+		"database/migrations/0001_create.php":   "<?php",
+		"stub.sql":                              "SELECT 1;", // excluded: below size floor
+		"app/Models/User.php":                   "<?php",
+	}))
+	got := map[string]bool{}
+	for _, c := range d.SeedCandidates {
+		got[c.Path] = true
+	}
+	for _, want := range []string{"database.sql", "database-home2.sql", "install/seed.sql"} {
+		if !got[want] {
+			t.Errorf("expected seed candidate %q, got %+v", want, d.SeedCandidates)
+		}
+	}
+	if got["database/migrations/0001_create.sql"] {
+		t.Errorf("migration .sql must be excluded, got %+v", d.SeedCandidates)
+	}
+	if got["stub.sql"] {
+		t.Errorf("below-floor stub.sql must be excluded, got %+v", d.SeedCandidates)
+	}
+	// Largest first: database-home2.sql (~52 KiB) outranks database.sql (~26 KiB).
+	if len(d.SeedCandidates) == 0 || d.SeedCandidates[0].Path != "database-home2.sql" {
+		t.Errorf("expected largest dump first (database-home2.sql), got %+v", d.SeedCandidates)
 	}
 }
 
