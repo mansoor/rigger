@@ -145,7 +145,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 	if cfg.EffGarage(e) {
 		for _, k := range []string{
 			"GARAGE_ENABLED", "GARAGE_HOST", "GARAGE_API_PORT", "GARAGE_S3_PORT", "GARAGE_WEB_PORT",
-			"GARAGE_ADMIN_TOKEN", "GARAGE_KEY_ID", "GARAGE_SECRET_KEY", "GARAGE_BUCKET", "GARAGE_ENDPOINT",
+			"GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET", "GARAGE_KEY_ID", "GARAGE_SECRET_KEY", "GARAGE_BUCKET", "GARAGE_ENDPOINT",
 			// The framework S3 contract (e.g. Laravel) maps Garage onto AWS_* keys — reserve
 			// them so a repo's .env.example AWS_* defaults can't shadow the managed values.
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_BUCKET",
@@ -322,6 +322,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	dbRootPassword := get(prefixUpper+"_DB_ROOT_PASSWORD", "changeme_"+hexN(r, 8))
 	appKey := get(prefixUpper+"_APP_KEY", "base64:"+base64N(r, 32))
 	garageAdminToken := get(prefixUpper+"_GARAGE_ADMIN_TOKEN", hexN(r, 16))
+	garageRPCSecret := get(prefixUpper+"_GARAGE_RPC_SECRET", hexN(r, 32)) // garage requires a 32-byte hex rpc_secret
 	garageKeyID := get(prefixUpper+"_GARAGE_KEY_ID", hexN(r, 8))
 	garageSecretKey := get(prefixUpper+"_GARAGE_SECRET_KEY", hexN(r, 32))
 
@@ -467,6 +468,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("GARAGE_S3_PORT=3901\n")
 		p("GARAGE_WEB_PORT=3903\n")
 		p("GARAGE_ADMIN_TOKEN=%s\n", garageAdminToken)
+		p("GARAGE_RPC_SECRET=%s\n", garageRPCSecret)
 		p("GARAGE_KEY_ID=%s\n", garageKeyID)
 		p("GARAGE_SECRET_KEY=%s\n", garageSecretKey)
 		// S3 bucket names allow lowercase + hyphens only — derive from the safe

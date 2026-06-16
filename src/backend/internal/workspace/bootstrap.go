@@ -241,8 +241,11 @@ data_dir     = "/data"
 db_engine    = "lmdb"
 replication_factor = 1
 
-[rpc_bind_addr]
-addr = "0.0.0.0:3901"
+# rpc_bind_addr is a plain socket-address string, NOT a [table] — garage rejects
+# the table form with "invalid type: map, expected socket address". The required
+# rpc_secret is injected via the GARAGE_RPC_SECRET env var (see envgen + the
+# garage service block) so it stays in .env, not this regenerated file.
+rpc_bind_addr = "0.0.0.0:3901"
 
 [s3_api]
 s3_region     = "garage"
