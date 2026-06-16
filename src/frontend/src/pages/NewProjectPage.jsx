@@ -969,9 +969,10 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           hint="Route traffic via Traefik instead of direct port binding"
           checked={env.traefik}
           onChange={v => {
-            upd('traefik', v)
-            // Clear SSL when Traefik is disabled
-            if (!v) upd('ssl_enabled', false)
+            // Single update — two sequential upd() calls would each spread the
+            // stale `env`, so the second clobbers the first (turning Traefik off
+            // would silently revert). Clear SSL in the same change when disabling.
+            onChange(idx, { ...env, traefik: v, ...(v ? {} : { ssl_enabled: false }) })
           }}
         />
 
@@ -1965,12 +1966,18 @@ export default function NewProjectPage() {
       // Bundled SQL dump chosen in the scan review (only with a managed DB).
       db_seed_file: (isUpload && data.database && data.database !== 'none') ? (data.dbSeedFile || '') : '',
       db_seed_auto: data.dbSeedAuto ?? true,
-      images: data.stackType === 'image'
-        ? data.images.filter(img => img.name && img.image).map(img => {
+      images: (() => {
+        if (data.stackType !== 'image') return []
+        const imgs = data.images.filter(img => img.name && img.image)
+        return imgs.map(img => {
             const ports = (img.portMappings || []).filter(p => p.container)
             return {
               name: img.name, image: img.image, tag: img.tag || 'latest',
               command: img.command || '',
+              // A single-image stack is the web entry by default, so enabling
+              // Traefik routes to it (composegen defaults its port to 80 when
+              // unset). Multi-image stacks set the web entry in Edit Project.
+              web_routed: !!img.web_routed || imgs.length === 1,
               port: parseInt((ports[0] || {}).container) || 0,
               host_port: (ports[0] || {}).host || '',
               extra_ports: ports.slice(1).filter(p => p.host && p.container).map(p => `${p.host}:${p.container}`),
@@ -1981,7 +1988,7 @@ export default function NewProjectPage() {
               healthcheck_config: img.healthcheck_config || {},
             }
           })
-        : [],
+      })(),
       custom_env_vars: data.stackType === 'image' ? data.customEnvVars : {},
       // Repo scan seeds the env's .env from the repo's .env.example so ${VAR} refs in
       // the imported compose `environment:` resolve (and secrets get generated).

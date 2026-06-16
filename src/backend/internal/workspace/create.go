@@ -77,6 +77,8 @@ type ImageDef struct {
 	Command    string            `json:"command,omitempty"` // override the image's default CMD
 	Port       int               `json:"port"`
 	HostPort   string            `json:"host_port"`
+	WebRouted  bool              `json:"web_routed"` // primary HTTP entry (Traefik / host-port routing)
+	Subdomain  string            `json:"subdomain,omitempty"`
 	Volumes    []string          `json:"volumes"`
 	EnvVars    map[string]string `json:"env_vars"`
 	DependsOn  []string          `json:"depends_on"`
@@ -459,6 +461,12 @@ func seedServices(req CreateRequest) []map[string]any {
 			}
 			if im.HostPort != "" {
 				s["host_port"] = im.HostPort
+			}
+			if im.WebRouted {
+				s["web_routed"] = true
+			}
+			if im.Subdomain != "" {
+				s["subdomain"] = im.Subdomain
 			}
 			if len(im.ExtraPorts) > 0 {
 				s["extra_ports"] = im.ExtraPorts

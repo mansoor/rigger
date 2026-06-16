@@ -1680,6 +1680,9 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// local host and the dashboard is reached via a proxy domain (so the browser's
 	// hostname is the proxy, not the Docker host).
 	out.AppHost = h.appSetting("app_host")
+	// Auto-URL context so Edit Project's route preview matches the deploy.
+	out.AutoURLMode = settings.AutoURLMode(h.db)
+	out.AppsBaseDomain = settings.AppSetting(h.db, "apps_base_domain")
 	writeJSON(w, http.StatusOK, out)
 }
 

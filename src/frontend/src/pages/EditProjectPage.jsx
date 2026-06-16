@@ -1190,7 +1190,7 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, projectWebSql = false, projectGarageWebUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, projectWebSql = false, projectGarageWebUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -1312,7 +1312,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           }}
         />
         {(() => {
-          const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS)
+          const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS, autoUrlMode, appHost)
           return route ? (
             <p className="text-xs text-content-subtle">
               Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
@@ -1838,7 +1838,9 @@ export default function EditProjectPage() {
   const { data: wsHosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
   // Workspace apps base domain — drives env auto-routing URLs ({proj}-{env}.{base}).
   const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
-  const baseDomain = (wsSettings?.domain || '').trim()
+  // Effective base domain: workspace override → global apps base domain (mirrors
+  // the backend's EffectiveBaseDomain so the route preview matches the deploy).
+  const baseDomain = (wsSettings?.domain || project?.apps_base_domain || '').trim()
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -2224,6 +2226,8 @@ export default function EditProjectPage() {
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
                 resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 baseDomain={baseDomain}
+                autoUrlMode={project?.auto_url_mode || ''}
+                appHost={project?.app_host || ''}
                 localTLS={!!project?.local_tls}
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}

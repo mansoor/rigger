@@ -232,6 +232,11 @@ type Workspace struct {
 	EnvHosts map[string]EnvHostRef `json:"env_hosts,omitempty"` // env name → host
 	MyRole   string                `json:"my_role,omitempty"`   // caller's effective role (Phase 5.2b); set by the API layer
 	AppHost  string                `json:"app_host,omitempty"`  // configured host/IP for direct service links (local envs); set by the API layer
+	// Auto-URL context for the route preview (set by the API layer) so Edit Project
+	// shows the same URL the deploy will use: the magic-DNS mode + the global apps
+	// base domain (workspace `domain` overrides it, like EffectiveBaseDomain).
+	AutoURLMode    string `json:"auto_url_mode,omitempty"`
+	AppsBaseDomain string `json:"apps_base_domain,omitempty"`
 }
 
 // EnvHostRef is the host an environment runs on (omitted ⇒ local).
