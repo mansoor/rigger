@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import VerticalTabs from '../components/VerticalTabs'
@@ -745,6 +745,58 @@ function ReplaceSourceCard({ workspace, name }) {
       <DropZone onFile={upload} accept=".zip,.tar,.tar.gz,.tgz,.gz" busy={busy}
         busyLabel="Uploading & validating…"
         hint="↑ Drop a new source archive here, or click to browse" />
+      {msg && <p className={`text-xs ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.text}</p>}
+    </div>
+  )
+}
+
+// SeedDatabaseCard surfaces a project's bundled SQL dump: toggle auto-import (saved
+// with the project config) and import it on demand per environment. Import refuses a
+// non-empty DB (409) unless the user confirms an overwrite. Shown for upload-source
+// projects that have a configured seed + a managed database.
+function SeedDatabaseCard({ workspace, name, seed, database, envNames, onToggleAuto }) {
+  const confirm = useConfirm()
+  const [busyEnv, setBusyEnv] = useState('')
+  const [msg, setMsg] = useState(null) // { ok, text }
+  async function runImport(env, force) {
+    setBusyEnv(env); setMsg(null)
+    try {
+      const res = await seedDatabase(workspace, name, env, { force })
+      setMsg({ ok: true, text: `Imported into ${env} — ${res.tables} table(s).` })
+    } catch (e) {
+      if (e?.response?.status === 409 && !force) {
+        const ok = await confirm({
+          title: 'Database is not empty',
+          message: `${env}'s database already has ${e?.response?.data?.tables ?? 'some'} table(s). Re-importing the dump may overwrite or duplicate data. Import anyway?`,
+          confirmLabel: 'Import anyway', danger: true,
+        })
+        if (ok) { return runImport(env, true) }
+        setBusyEnv(''); return
+      }
+      setMsg({ ok: false, text: e?.response?.data?.error || 'Import failed' })
+    } finally { setBusyEnv('') }
+  }
+  return (
+    <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4 space-y-3">
+      <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Database seed</p>
+      <p className="text-xs text-content-subtle">
+        A bundled SQL dump (<code className="font-mono text-xs">{seed?.file || 'seed.sql'}</code>) imports into the managed {database}.
+        Import only runs into an empty database unless you confirm an overwrite; the dump is loaded as-is.
+      </p>
+      <label className="flex items-center gap-2 text-xs cursor-pointer">
+        <input type="checkbox" checked={!!seed?.auto} onChange={e => onToggleAuto(e.target.checked)}
+          className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+        <span>Auto-import on first deploy <span className="text-content-faint">(when the database is empty — save to apply)</span></span>
+      </label>
+      <div className="flex flex-wrap gap-2">
+        {envNames.map(env => (
+          <button key={env} type="button" disabled={!!busyEnv}
+            onClick={() => runImport(env, false)}
+            className="px-2.5 py-1 text-xs rounded-md border border-border hover:bg-surface-hover disabled:opacity-50">
+            {busyEnv === env ? 'Importing…' : `Import now → ${env}`}
+          </button>
+        ))}
+      </div>
       {msg && <p className={`text-xs ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.text}</p>}
     </div>
   )
@@ -2071,6 +2123,12 @@ export default function EditProjectPage() {
 
             {project?.source_kind === 'upload' && (
               <ReplaceSourceCard workspace={workspace} name={name} />
+            )}
+
+            {project?.source_kind === 'upload' && project?.db_seed && project?.database && project?.database !== 'none' && (
+              <SeedDatabaseCard workspace={workspace} name={name} seed={project.db_seed} database={project.database}
+                envNames={Object.keys(project?.environments || {})}
+                onToggleAuto={on => setProject(p => ({ ...p, db_seed: { ...(p.db_seed || { file: 'seed.sql' }), auto: on } }))} />
             )}
 
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>

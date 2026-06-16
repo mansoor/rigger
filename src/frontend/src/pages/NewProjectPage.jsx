@@ -323,6 +323,26 @@ function ScanReview({ data, onChange }) {
       services: on ? [...svcs, o.service] : svcs.filter(s => s.name !== o.name),
     })
   }
+
+  // ── DB-seed offer (v3) ──
+  // Bundled SQL dumps the detector found. Only relevant with a managed DB. Default to
+  // the largest dump + auto-import on; the user can switch to "Don't import" (manual
+  // later) or toggle auto off.
+  const seedCands = draft?.seed_candidates || []
+  const hasManagedDB = data.database && data.database !== 'none'
+  const showSeed = hasManagedDB && seedCands.length > 0
+  const seedSel = data.dbSeedFile ?? (showSeed ? seedCands[0].path : '')
+  const seedAuto = data.dbSeedAuto ?? true
+  useEffect(() => {
+    // Seed a sensible default once candidates appear with a managed DB.
+    if (showSeed && data.dbSeedFile === undefined) {
+      onChange('dbSeedFile', seedCands[0].path)
+      if (data.dbSeedAuto === undefined) onChange('dbSeedAuto', true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSeed, seedCands.length])
+  const fmtBytes = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+
   if (!draft) return null
   return (
         <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
@@ -395,6 +415,33 @@ function ScanReview({ data, onChange }) {
                   <span className="text-content-faint">{o.service?.image ? `image ${o.service.image}` : 'build'} · profile: {(o.profiles || []).join(', ')}</span>
                 </label>
               ))}
+            </div>
+          )}
+          {showSeed && (
+            <div className="space-y-2 border-t border-border pt-3">
+              <p className="text-[11px] text-content-faint uppercase tracking-wide">Database seed — found a bundled SQL dump; import it into the managed {data.database}:</p>
+              <div className="flex flex-col gap-1 pl-2 text-xs">
+                {seedCands.map((c, i) => (
+                  <label key={i} className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="dbseed" checked={seedSel === c.path}
+                      onChange={() => onChange('dbSeedFile', c.path)} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                    <span className="font-mono text-content">{c.path}</span>
+                    <span className="text-content-faint">({fmtBytes(c.bytes)})</span>
+                  </label>
+                ))}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="dbseed" checked={!seedSel}
+                    onChange={() => onChange('dbSeedFile', '')} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                  <span>Don't import <span className="text-content-faint">(seed manually later from Edit Project)</span></span>
+                </label>
+              </div>
+              {seedSel && (
+                <label className="flex items-center gap-2 text-xs cursor-pointer pl-2">
+                  <input type="checkbox" checked={seedAuto} onChange={e => onChange('dbSeedAuto', e.target.checked)}
+                    className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                  <span>Auto-import on first deploy <span className="text-content-faint">(only when the database is empty; imported as-is)</span></span>
+                </label>
+              )}
             </div>
           )}
           {(draft.notes || []).length > 0 && (
@@ -1915,6 +1962,9 @@ export default function NewProjectPage() {
       source_branch: isScan ? (data.source_branch || '').trim() : '',
       source_kind: isUpload ? 'upload' : '',
       source_token: isUpload ? (data.sourceUploadToken || '') : '',
+      // Bundled SQL dump chosen in the scan review (only with a managed DB).
+      db_seed_file: (isUpload && data.database && data.database !== 'none') ? (data.dbSeedFile || '') : '',
+      db_seed_auto: data.dbSeedAuto ?? true,
       images: data.stackType === 'image'
         ? data.images.filter(img => img.name && img.image).map(img => {
             const ports = (img.portMappings || []).filter(p => p.container)

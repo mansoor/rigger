@@ -74,6 +74,9 @@ export const fetchDatabaseInfo = (ws, name, env, reveal = false) => api.get(`${p
 export const fetchDatabaseSchemas = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/database/schemas`).then(r => r.data)
 export const createDatabaseSchema = (ws, name, env, schemaName) => api.post(`${projBase(ws, name)}/envs/${env}/database/schemas`, { name: schemaName }).then(r => r.data)
 export const deleteDatabaseSchema = (ws, name, env, schemaName) => api.delete(`${projBase(ws, name)}/envs/${env}/database/schemas/${encodeURIComponent(schemaName)}`, { params: { confirm: schemaName } }).then(r => r.data)
+// Import the project's bundled SQL dump into the managed DB. force overrides the
+// non-empty-DB guard (409 → retry with force).
+export const seedDatabase = (ws, name, env, { force = false } = {}) => api.post(`${projBase(ws, name)}/envs/${env}/database/seed`, { force }).then(r => r.data)
 // DB Hosting — managed users + Adminer auto-login. reveal=true (operator+) returns passwords.
 export const fetchDatabaseUsers = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/database/users${reveal ? '?reveal=true' : ''}`).then(r => r.data)
 export const createDatabaseUser = (ws, name, env, body) => api.post(`${projBase(ws, name)}/envs/${env}/database/users`, body).then(r => r.data)
