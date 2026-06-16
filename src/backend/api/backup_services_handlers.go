@@ -34,8 +34,8 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	var cfg struct {
 		// Managed deps are project-level now; per-env fields kept for back-compat.
 		Project struct {
-			Database string `json:"database"`
-			Garage   bool   `json:"garage_enabled"`
+			Database      string `json:"database"`
+			ObjectStorage string `json:"object_storage"` // ""/none | local | minio
 		} `json:"project"`
 		Services []struct {
 			Name  string          `json:"name"`
@@ -43,8 +43,7 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 			Build json.RawMessage `json:"build"`
 		} `json:"services"`
 		Environments map[string]struct {
-			Database      string `json:"database"`
-			GarageEnabled bool   `json:"garage_enabled"`
+			Database string `json:"database"`
 		} `json:"environments"`
 	}
 	_ = json.Unmarshal(raw, &cfg)
@@ -54,7 +53,6 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	if database == "" {
 		database = e.Database
 	}
-	garageOn := cfg.Project.Garage || e.GarageEnabled
 	var out []backupServiceInfo
 	hasBuild := false
 
@@ -88,8 +86,11 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	if hasBuild {
 		out = append(out, backupServiceInfo{ID: "uploads", Label: "App uploads", Kind: "volume", Hint: "Uploads volume"})
 	}
-	if garageOn {
-		out = append(out, backupServiceInfo{ID: "garage", Label: "Garage S3 data", Kind: "volume", Hint: "Garage object-store volumes"})
+	switch cfg.Project.ObjectStorage {
+	case "minio":
+		out = append(out, backupServiceInfo{ID: "minio", Label: "MinIO S3 data", Kind: "volume", Hint: "MinIO object-store volume"})
+	case "local":
+		out = append(out, backupServiceInfo{ID: "storage", Label: "Local storage", Kind: "volume", Hint: "App storage volume"})
 	}
 	if out == nil {
 		out = []backupServiceInfo{}

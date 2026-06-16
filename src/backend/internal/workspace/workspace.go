@@ -46,11 +46,19 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
-	Garage    bool   `json:"garage_enabled,omitempty"`
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
-	WebSQL    bool   `json:"web_sql,omitempty"`
-	// GarageWebUI adds the optional Garage web admin UI sidecar (when Garage is on).
+	WebSQL bool `json:"web_sql,omitempty"`
+	// ObjectStorage selects the project's file/object storage: ""/"none", "local"
+	// (FILESYSTEM_DISK=local + persistent volume at StoragePath), or "minio" (managed
+	// MinIO S3 + mc bucket-init). Replaces the retired Garage. The UI renders the picker
+	// + derived service rows from these.
+	ObjectStorage string `json:"object_storage,omitempty"`
+	StorageBucket string `json:"storage_bucket,omitempty"` // minio: bucket-name override (env auto-suffixed)
+	StoragePath   string `json:"storage_path,omitempty"`   // local: container mount path (default /var/www/html/storage)
+	StorageUI     bool   `json:"storage_ui,omitempty"`     // minio: opens3/console admin sidecar
+	// Deprecated: legacy Garage toggles — kept so old config.json unmarshals; ignored.
+	Garage      bool `json:"garage_enabled,omitempty"`
 	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 	// SourceKind is "upload" when build source came from an uploaded archive (else
 	// "git"/empty). The UI reads it to show the source origin + "Replace source".
@@ -123,10 +131,10 @@ type Config struct {
 }
 
 // managedDepServices returns synthetic (managed) service rows for the project's
-// active managed dependencies, so the DB/Redis/Garage appear in the Services list.
-// Engine/redis/garage are project-level; for configs written before the move they
-// fall back to any environment's legacy per-env value. Rows are skipped when a real
-// service of the same name already exists (e.g. an image-stack postgres).
+// active managed dependencies, so the DB/Redis/object-storage appear in the Services
+// list. Engine/redis are project-level; for configs written before the move they fall
+// back to any environment's legacy per-env value. Rows are skipped when a real service
+// of the same name already exists (e.g. an image-stack postgres).
 func managedDepServices(c *Config) []ConfigService {
 	have := map[string]bool{}
 	for _, s := range c.Services {
@@ -134,13 +142,11 @@ func managedDepServices(c *Config) []ConfigService {
 	}
 	engine := c.Project.Database
 	redis := c.Project.Redis
-	garage := c.Project.Garage
 	for _, ec := range c.Environments { // legacy per-env fallback
 		if engine == "" && ec.Database != "" && ec.Database != "none" {
 			engine = ec.Database
 		}
 		redis = redis || ec.RedisEnabled
-		garage = garage || ec.GarageEnabled
 	}
 	var out []ConfigService
 	add := func(name, kind string) {
@@ -156,11 +162,14 @@ func managedDepServices(c *Config) []ConfigService {
 	if redis {
 		add("redis", "redis")
 	}
-	if garage {
-		add("garage", "garage")
-		if c.Project.GarageWebUI {
-			add("garage_webui", "garage")
+	switch c.Project.ObjectStorage {
+	case "minio":
+		add("minio", "minio")
+		if c.Project.StorageUI {
+			add("storage_console", "minio")
 		}
+	case "local":
+		add("storage", "local") // a persistent local volume (no container)
 	}
 	return out
 }
@@ -177,11 +186,11 @@ type ConfigService struct {
 	// for pull-only (image / database) services.
 	Build json.RawMessage `json:"build,omitempty"`
 	// Managed marks a synthetic row derived from a project-level managed dependency
-	// (database/redis/garage). The UI lists these alongside real services but hides
-	// the delete affordance — they're removed by unchecking the dependency. Until the
-	// full service-graph fold, these are NOT persisted to config.json services[].
+	// (database/redis/object-storage). The UI lists these alongside real services but
+	// hides the delete affordance — they're removed by unchecking the dependency. Until
+	// the full service-graph fold, these are NOT persisted to config.json services[].
 	Managed bool   `json:"managed,omitempty"`
-	Engine  string `json:"engine,omitempty"` // managed rows: the dependency kind (postgres|redis|garage|…)
+	Engine  string `json:"engine,omitempty"` // managed rows: the dependency kind (postgres|redis|minio|local|…)
 }
 
 // ConfigImage is the read-only view of an image service as stored in config.json.

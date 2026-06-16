@@ -52,8 +52,8 @@ type Options struct {
 	// host-authoritative .env for cross-host backup/restore (Phase 7).
 	DotEnv map[string]string
 
-	// Services restricts the backup to these service names (image-stack image
-	// names, or "database"/"uploads"/"garage" for custom stacks). Empty = all.
+	// Services restricts the backup to these service names (image-stack image names,
+	// or "database"/"uploads"/"minio"/"storage" for custom stacks). Empty = all.
 	Services []string
 	// Schedule metadata recorded in the snapshot manifest (Phase 11 per-env
 	// schedules). Trigger is "scheduled" | "manual".
@@ -91,8 +91,9 @@ type wsConfig struct {
 		Type           string `json:"type"`
 		ResourcePrefix string `json:"resource_prefix"`
 		// Managed deps are project-level now; per-env fields kept for back-compat.
-		Database string `json:"database"`
-		Garage   bool   `json:"garage_enabled"`
+		Database      string `json:"database"`
+		ObjectStorage string `json:"object_storage"` // ""/none | local | minio (replaces Garage)
+		Garage        bool   `json:"garage_enabled"` // deprecated: ignored, kept for unmarshal
 	} `json:"project"`
 	Images []struct {
 		Name  string `json:"name"`
@@ -107,9 +108,8 @@ type wsConfig struct {
 	} `json:"backup"`
 }
 
-// effDatabase / effGarage resolve the managed dependency for an env: project-level
-// value if set, else the legacy per-env value (configs written before deps moved
-// to the project level).
+// effDatabase resolves the managed DB for an env: project-level value if set, else
+// the legacy per-env value (configs written before deps moved to the project level).
 func (c *wsConfig) effDatabase(env string) string {
 	if c.Project.Database != "" {
 		return c.Project.Database
@@ -117,8 +117,14 @@ func (c *wsConfig) effDatabase(env string) string {
 	return c.Environments[env].Database
 }
 
-func (c *wsConfig) effGarage(env string) bool {
-	return c.Project.Garage || c.Environments[env].GarageEnabled
+// effObjectStorage returns the project's object-storage mode (none|local|minio).
+// Legacy garage flags are ignored (garage retired). The env arg is unused (storage
+// is project-level) but kept for call-site symmetry.
+func (c *wsConfig) effObjectStorage(_ string) string {
+	if c.Project.ObjectStorage != "" {
+		return c.Project.ObjectStorage
+	}
+	return "none"
 }
 
 func loadConfig(workspacesDir, workspace, project string) (*wsConfig, error) {

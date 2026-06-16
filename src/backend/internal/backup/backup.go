@@ -238,7 +238,7 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 		return
 	}
 
-	// Custom stack: uploads volume (+ garage if enabled).
+	// Custom stack: uploads volume (+ object storage if enabled).
 	if c.wants("uploads") {
 		c.info("Archiving upload volume...")
 		uploadFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_uploads_%s.tar.gz", c.project, c.env, dateDir))
@@ -249,17 +249,27 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 		}
 	}
 
-	if c.wants("garage") && c.cfg.effGarage(c.env) {
-		c.info("Archiving Garage S3 data...")
-		garageFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_garage_%s.tar.gz", c.project, c.env, dateDir))
-		mounts := map[string]string{
-			c.prefix + "_garage_data": "/garage-data",
-			c.prefix + "_garage_meta": "/garage-meta",
+	// Object storage: minio → the S3 data volume; local → the persistent storage volume.
+	switch c.cfg.effObjectStorage(c.env) {
+	case "minio":
+		if c.wants("minio") {
+			c.info("Archiving MinIO S3 data...")
+			minioFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_minio_%s.tar.gz", c.project, c.env, dateDir))
+			if c.archiveNamedVolumes(minioFile, "/data", map[string]string{c.prefix + "_minio_data": "/data"}, ".") {
+				c.success("MinIO archive: %s", filepath.Base(minioFile))
+			} else {
+				c.warn("Could not archive MinIO volume")
+			}
 		}
-		if c.archiveNamedVolumes(garageFile, "/", mounts, "garage-data", "garage-meta") {
-			c.success("Garage archive: %s", filepath.Base(garageFile))
-		} else {
-			c.warn("Could not archive Garage volumes")
+	case "local":
+		if c.wants("storage") {
+			c.info("Archiving local storage volume...")
+			storeFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_storage_%s.tar.gz", c.project, c.env, dateDir))
+			if c.archiveNamedVolumes(storeFile, "/data", map[string]string{c.prefix + "_storage": "/data"}, ".") {
+				c.success("Storage archive: %s", filepath.Base(storeFile))
+			} else {
+				c.warn("Could not archive storage volume")
+			}
 		}
 	}
 }

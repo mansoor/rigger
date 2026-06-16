@@ -97,8 +97,8 @@ type Draft struct {
 	Services  []Service         `json:"services"`
 	Database  string            `json:"database"`             // none | postgres | mysql
 	DBVersion string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
-	Redis     bool              `json:"redis"`
-	Garage    bool              `json:"garage"`
+	Redis         bool          `json:"redis"`
+	ObjectStorage string        `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
 	Detected  string            `json:"detected"`            // primary stack label, for display
 	Notes     []string          `json:"notes"`               // human-readable detection notes
 	EnvVars   map[string]string `json:"env_vars,omitempty"`  // seeded from .env.example for the env's .env

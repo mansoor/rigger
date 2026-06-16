@@ -1033,7 +1033,7 @@ func buildArgKeyOK(s string) bool {
 // source per service; image_from/depends_on must reference a real service (or, for
 // depends_on, an enabled managed dependency).
 func validateConfigServices(content []byte) string {
-	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "garage": true, "garage_webui": true}
+	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "minio": true, "minio_init": true, "storage_console": true}
 	var doc struct {
 		Services []struct {
 			Name  string `json:"name"`
@@ -1050,14 +1050,13 @@ func validateConfigServices(content []byte) string {
 		// Managed deps are project-level now; the per-env fields are still read as a
 		// fallback for configs written before the move.
 		Project struct {
-			Database string `json:"database"`
-			Redis    bool   `json:"redis_enabled"`
-			Garage   bool   `json:"garage_enabled"`
+			Database      string `json:"database"`
+			Redis         bool   `json:"redis_enabled"`
+			ObjectStorage string `json:"object_storage"`
 		} `json:"project"`
 		Environments map[string]struct {
-			Database      string `json:"database"`
-			RedisEnabled  bool   `json:"redis_enabled"`
-			GarageEnabled bool   `json:"garage_enabled"`
+			Database     string `json:"database"`
+			RedisEnabled bool   `json:"redis_enabled"`
 		} `json:"environments"`
 	}
 	if err := json.Unmarshal(content, &doc); err != nil {
@@ -1112,8 +1111,8 @@ func validateConfigServices(content []byte) string {
 			if doc.Project.Redis {
 				return true
 			}
-		case "garage":
-			if doc.Project.Garage {
+		case "minio", "storage_console":
+			if doc.Project.ObjectStorage == "minio" {
 				return true
 			}
 		}
@@ -1125,10 +1124,6 @@ func validateConfigServices(content []byte) string {
 				}
 			case "redis":
 				if ec.RedisEnabled {
-					return true
-				}
-			case "garage":
-				if ec.GarageEnabled {
 					return true
 				}
 			}

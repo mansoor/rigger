@@ -43,8 +43,10 @@ type CreateRequest struct {
 	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
 	Redis        bool              `json:"redis"`
-	Garage       bool              `json:"garage"`
-	GarageWebUI  bool              `json:"garage_web_ui"` // optional Garage web admin UI sidecar (when Garage on)
+	ObjectStorage string           `json:"object_storage"` // ""/none | local | minio
+	StorageBucket string           `json:"storage_bucket"` // minio: bucket-name override (env auto-suffixed)
+	StoragePath   string           `json:"storage_path"`   // local: container mount path (default /var/www/html/storage)
+	StorageUI     bool             `json:"storage_ui"`     // minio: opens3/console admin sidecar
 	Envs         []EnvRequest      `json:"environments"`
 	Versions     map[string]string `json:"versions"`
 	CustomEnvVars  map[string]string `json:"custom_env_vars"`  // user-supplied env vars for image stacks (Step 2)
@@ -115,8 +117,9 @@ var defaultVersions = map[string]string{
 	"postgres":     "15-alpine",
 	"mysql":        "8.0",
 	"redis":        "7-alpine",
-	"garage":       "v1.0.1",
-	"garage_webui": "latest",
+	"minio":           "latest",
+	"minio_mc":        "latest",
+	"storage_console": "latest",
 	"nginx":        "1.25-alpine",
 	"node":         "20-alpine",
 	"php":          "8.3-fpm-alpine",
@@ -339,10 +342,19 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		if req.Redis {
 			project["redis_enabled"] = true
 		}
-		if req.Garage {
-			project["garage_enabled"] = true
-			if req.GarageWebUI {
-				project["garage_web_ui"] = true
+		switch req.ObjectStorage {
+		case "minio":
+			project["object_storage"] = "minio"
+			if req.StorageBucket != "" {
+				project["storage_bucket"] = req.StorageBucket
+			}
+			if req.StorageUI {
+				project["storage_ui"] = true
+			}
+		case "local":
+			project["object_storage"] = "local"
+			if req.StoragePath != "" {
+				project["storage_path"] = req.StoragePath
 			}
 		}
 	}
