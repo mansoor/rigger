@@ -693,6 +693,7 @@ function GeneralTab() {
   const [appsBaseDomain, setAppsBaseDomain] = useState('')
   const [autoUrlMode, setAutoUrlMode] = useState('localhost')
   const [autoUrlHost, setAutoUrlHost] = useState('')
+  const [dnsProvider, setDnsProvider] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
@@ -705,6 +706,7 @@ function GeneralTab() {
       apps_base_domain: appsBaseDomain.trim(),
       auto_url_mode: autoUrlMode,
       auto_url_host: autoUrlHost.trim(),
+      apps_dns_provider: dnsProvider,
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
@@ -721,6 +723,7 @@ function GeneralTab() {
     setAppsBaseDomain(cfg.apps_base_domain || '')
     setAutoUrlMode(cfg.auto_url_mode || 'localhost')
     setAutoUrlHost(cfg.auto_url_host || '')
+    setDnsProvider(cfg.apps_dns_provider || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
@@ -828,10 +831,26 @@ function GeneralTab() {
             <Input value={appsBaseDomain} onChange={setAppsBaseDomain} placeholder="onrigger.com" />
             <p className="text-xs text-content-subtle mt-1">
               Point a wildcard DNS record <code className="font-mono text-xs">*.{appsBaseDomain || 'onrigger.com'}</code> at
-              this server. Routes get HTTPS via Let's Encrypt (wildcard cert needs DNS-01 — coming next).
-              Leave blank to use the auto-URL fallback instead.
+              this server. Leave blank to use the auto-URL fallback instead.
             </p>
           </div>
+          {appsBaseDomain.trim() && (
+            <div>
+              <Label>Wildcard cert (DNS-01)</Label>
+              <select value={dnsProvider} onChange={e => setDnsProvider(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-raised border border-border rounded-lg text-sm text-content">
+                <option value="">Per-host certs (HTTP-01 — needs public port 80)</option>
+                <option value="cloudflare">Cloudflare — one wildcard cert for *.{appsBaseDomain.trim()}</option>
+              </select>
+              <p className="text-xs text-content-subtle mt-1">
+                With Cloudflare DNS-01, Traefik issues a single <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> cert
+                (no port-80 challenge, no per-app rate limits). Set the API token as{' '}
+                <code className="font-mono text-xs">CF_DNS_API_TOKEN</code> in <code className="font-mono text-xs">src/.env</code> and
+                rebuild rigger — create it at Cloudflare → My Profile → API Tokens with <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>,
+                scoped to <code className="font-mono text-xs">{appsBaseDomain.trim()}</code>. (The token is read by Traefik from src/.env, not stored here.)
+              </p>
+            </div>
+          )}
           <div>
             <Label>Auto-URL fallback (when no base domain)</Label>
             <select value={autoUrlMode} onChange={e => setAutoUrlMode(e.target.value)}
