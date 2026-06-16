@@ -89,7 +89,7 @@ const BUILD_TEMPLATES = [
   { value: 'react', label: 'React / Vite' },
 ]
 // Managed-dependency service names a service may depend_on.
-const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'garage']
+const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'minio']
 
 function serviceSource(s) {
   if (s.build) return 'build'
@@ -252,7 +252,7 @@ function linkRowsToArray(rows) {
 }
 
 // Standard in-network ports for managed-dependency link targets (no service entry).
-const MANAGED_LINK_PORT = { postgres: '5432', mysql: '3306', mariadb: '3306', redis: '6379', garage: '3900', adminer: '8080' }
+const MANAGED_LINK_PORT = { postgres: '5432', mysql: '3306', mariadb: '3306', redis: '6379', minio: '9000', adminer: '8080' }
 
 // ── Image stack editor ────────────────────────────────────────────────────────
 
@@ -429,7 +429,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                 Bind the .env writable (not read-only) and skip process-env injection, so an app
                 that writes its own <code className="font-mono text-xs">.env</code> at runtime — a
                 CodeCanyon installer setting <code className="font-mono text-xs">INSTALLED=true</code> —
-                persists. Rigger still re-asserts managed DB/Redis/Garage keys on redeploy.
+                persists. Rigger still re-asserts managed DB/Redis/storage keys on redeploy.
               </p>
             </>
           : null}
@@ -932,8 +932,8 @@ function ScanRepoModal({ gitRepo, gitBranch, images, onApply, onClose }) {
                 <p className="text-xs text-content-subtle">Kept (not in scan): <span className="font-mono">{diff.onlyLocal.join(', ')}</span></p>
               )}
 
-              {(draft.database !== 'none' || draft.redis || draft.garage) && (
-                <p className="text-xs text-content-muted">Detected managed deps: {[draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.garage && 'garage'].filter(Boolean).join(', ')} — toggle these per environment below if needed.</p>
+              {(draft.database !== 'none' || draft.redis || (draft.object_storage && draft.object_storage !== 'none')) && (
+                <p className="text-xs text-content-muted">Detected managed deps: {[draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.object_storage && draft.object_storage !== 'none' && draft.object_storage].filter(Boolean).join(', ')} — toggle these per environment below if needed.</p>
               )}
               {(draft.notes || []).length > 0 && (
                 <ul className="text-xs text-content-subtle list-disc pl-4 space-y-0.5">
@@ -1204,7 +1204,7 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, projectWebSql = false, projectGarageWebUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -1396,22 +1396,22 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             onChange={v => upd('db_external', v)}
           />
           <p className="text-xs text-content-subtle">
-            The managed {projectDatabase} (and any Redis / Garage) is provisioned project-wide — configure it in the{' '}
+            The managed {projectDatabase} (and any Redis / object storage) is provisioned project-wide — configure it in the{' '}
             <strong>Services</strong> tab → <em>Project dependencies</em>.
           </p>
         </div>
       )}
 
-      {/* Security — per-env protection for the admin sidecars (Adminer / Garage UI).
+      {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
           Only meaningful when this env routes through Traefik (basic-auth is a Traefik
           edge middleware) and the project actually has an admin UI. */}
-      {(projectWebSql || projectGarageWebUi) && (
+      {(projectWebSql || projectStorageUi) && (
         <div className="space-y-2 pt-3 border-t border-border-strong/50">
           <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Security</p>
           <Toggle
-            label="Protect admin UIs (Adminer / Garage UI)"
+            label="Protect admin UIs (Adminer / MinIO console)"
             hint={cfg.traefik_enabled
-              ? "Require HTTP basic-auth at the Traefik edge before reaching Adminer / the Garage UI. Recommended for prod. Credentials are generated on deploy — view them in this env's Env Vars (ADMIN_UI_USER / ADMIN_UI_PASSWORD)."
+              ? "Require HTTP basic-auth at the Traefik edge before reaching Adminer / the MinIO console. Recommended for prod. Credentials are generated on deploy — view them in this env's Env Vars (ADMIN_UI_USER / ADMIN_UI_PASSWORD)."
               : "Needs domain routing — enable Traefik above to protect the admin UIs (basic-auth is a Traefik middleware; host-port mode can't enforce it)."}
             checked={!!cfg.protect_admin_uis}
             disabled={!cfg.traefik_enabled}
@@ -1424,8 +1424,8 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {cfg.deployment === 'swarm' && (
         <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames}
           managedDeps={projectDatabase && projectDatabase !== 'none'
-            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]
-            : [...(projectRedis ? ['redis'] : []), ...(projectGarage ? ['garage'] : [])]} />
+            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]
+            : [...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]} />
       )}
 
       {/* Build source (Git) — only for projects that build from a repo. The repo is
@@ -1963,7 +1963,6 @@ export default function EditProjectPage() {
       // project-level and shared across envs).
       database: firstEnv.database || 'none',
       redis_enabled: !!firstEnv.redis_enabled,
-      garage_enabled: !!firstEnv.garage_enabled,
     }
     // firstEnvVars is the API shape { KEY: { value, secret } }; flatten it to the
     // plain { KEY: value } map _initial_vars expects, and carry over secret flags.
@@ -2154,7 +2153,7 @@ export default function EditProjectPage() {
         )}
 
         {/* Services — the unified service graph (build / pull / worker) +
-            project-level managed dependencies (DB / Redis / Garage). */}
+            project-level managed dependencies (DB / Redis / object storage). */}
         {tab === 'services' && (
           <section className="mb-6">
             {/* Managed services (project-level). Hidden for image / pre-built stacks
@@ -2162,8 +2161,8 @@ export default function EditProjectPage() {
             {project?.type !== 'image' && (
               <div className="mb-5">
                 <ManagedServices
-                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, garage: project?.garage_enabled, garageWebUi: project?.garage_web_ui, webSql: project?.web_sql }}
-                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, garage_enabled: !!v.garage, garage_web_ui: !!v.garage && !!v.garageWebUi, web_sql: !!v.webSql }))}
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, objectStorage: project?.object_storage, storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, object_storage: v.objectStorage || 'none', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (v.objectStorage === 'minio' && !!v.storageUi), web_sql: !!v.webSql }))}
                   showWebSql={project?.type === 'database'}
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
@@ -2183,7 +2182,7 @@ export default function EditProjectPage() {
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages}
               gitRepo={project?.git_repo} gitBranch={project?.git_branch}
-              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, garage: project?.garage_enabled })} />
+              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, objectStorage: project?.object_storage })} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
@@ -2245,9 +2244,9 @@ export default function EditProjectPage() {
                 localTLS={!!project?.local_tls}
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}
-                projectGarage={!!project?.garage_enabled}
+                projectObjectStorage={project?.object_storage || ''}
                 projectWebSql={!!project?.web_sql}
-                projectGarageWebUi={!!project?.garage_web_ui}
+                projectStorageUi={!!project?.storage_ui}
                 gitRepo={project?.git_repo || ''}
                 gitBranch={project?.git_branch || ''}
                 dirty={dirty}

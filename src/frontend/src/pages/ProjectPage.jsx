@@ -2068,7 +2068,8 @@ export default function ProjectPage() {
     const dbEng = proj.database || firstEnvCfg.database // project-level, legacy fallback
     if (dbEng && dbEng !== 'none') stackParts.push(capitalize(dbEng))
     if (proj.redis_enabled || firstEnvCfg.redis_enabled) stackParts.push('Redis')
-    if (proj.garage_enabled || firstEnvCfg.garage_enabled) stackParts.push('Garage')
+    if (proj.object_storage === 'minio') stackParts.push('MinIO')
+    else if (proj.object_storage === 'local') stackParts.push('Local storage')
   }
 
   return (

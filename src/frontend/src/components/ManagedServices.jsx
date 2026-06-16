@@ -2,49 +2,53 @@ import { useState } from 'react'
 import DatabaseSelect from './DatabaseSelect'
 
 // ManagedServices is the shared editor for a project's managed services (database,
-// Redis, Garage object storage). They are PROJECT-level — consistent across every
+// Redis, object/file storage). They are PROJECT-level — consistent across every
 // environment — and surface as services. Used identically by the New Project wizard
 // (Services step) and Edit Project (Services tab) so create/edit stay in sync.
 //
-// `value` is the normalized shape {database, dbVersion, redis, garage, cloudbeaver};
-// callers map it to their own state. onChange receives the full updated value.
+// `value` is the normalized shape {database, dbVersion, redis, objectStorage,
+// storageBucket, storagePath, storageUi, webSql, cloudbeaver}; callers map it to their
+// own state. onChange receives the full updated value.
 
 // Connection contract per managed service: what an app needs to talk to it
 // in-network. The exact values (db name, credentials, tokens) are auto-generated
 // PER ENVIRONMENT and live in each env's .env / the project's Database tab — here we
 // document the env-var names + host/port pattern so app authors know what to read.
 const SERVICE_META = {
-  postgres:     { label: 'PostgreSQL',    port: '5432',      vars: ['POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD'], creds: true },
-  mysql:        { label: 'MySQL',         port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
-  mariadb:      { label: 'MariaDB',       port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
-  redis:        { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
-  garage:       { label: 'Garage (S3)',   port: '3900 / 3903', vars: ['GARAGE_HOST', 'GARAGE_API_PORT', 'GARAGE_S3_PORT', 'GARAGE_ADMIN_TOKEN', 'GARAGE_KEY_ID', 'GARAGE_SECRET_KEY'] },
-  garage_webui: { label: 'Garage Web UI', port: '3909',      vars: [], note: 'Browser admin UI for Garage — not used directly by your app.' },
-  adminer:      { label: 'Adminer',       port: '8978',      vars: [], note: 'Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database.' },
-  cloudbeaver:  { label: 'CloudBeaver',   port: '8978',      vars: [], note: 'Browser SQL client (legacy projects) — becomes this project’s web entry.' },
+  postgres:        { label: 'PostgreSQL',    port: '5432',      vars: ['POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD'], creds: true },
+  mysql:           { label: 'MySQL',         port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
+  mariadb:         { label: 'MariaDB',       port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
+  redis:           { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
+  minio:           { label: 'MinIO (S3)',    port: '9000',      vars: ['AWS_ENDPOINT', 'AWS_BUCKET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_USE_PATH_STYLE_ENDPOINT'], note: 'S3-compatible object store. The bucket is auto-created on first deploy; AWS_* credentials are the MinIO root user/password (revealable on the Database/Storage tab).' },
+  storage_console: { label: 'MinIO Console', port: '9090',      vars: [], note: 'Browser admin UI for MinIO (opens3/console) — routed at the storage subdomain. Log in with the MinIO root credentials. Not used directly by your app.' },
+  storage:         { label: 'Local volume',  volume: true,      vars: [], note: 'Uploads persist to a local named volume mounted at the app’s storage path — no S3 container. FILESYSTEM_DISK=local.' },
+  adminer:         { label: 'Adminer',       port: '8978',      vars: [], note: 'Browser SQL client — becomes this project’s web entry; one-click auto-login from Manage Database.' },
+  cloudbeaver:     { label: 'CloudBeaver',   port: '8978',      vars: [], note: 'Browser SQL client (legacy projects) — becomes this project’s web entry.' },
 }
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, garage, garageWebUi, webSql, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, objectStorage, storageUi, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
-  if (garage) {
-    out.push({ name: 'garage', kind: 'garage' })
-    if (garageWebUi) out.push({ name: 'garage_webui', kind: 'garage_webui' })
+  if (objectStorage === 'minio') {
+    out.push({ name: 'minio', kind: 'minio' })
+    if (storageUi) out.push({ name: 'storage_console', kind: 'storage_console' })
+  } else if (objectStorage === 'local') {
+    out.push({ name: 'storage', kind: 'storage' })
   }
   if (webSql || cloudbeaver) out.push({ name: 'adminer', kind: 'adminer' })
   return out
 }
 
 // enabledDependsOnTargets returns the managed-service names a real service may
-// depend_on (excludes UI-only sidecars like garage_webui / adminer).
-export function enabledDependsOnTargets({ database, redis, garage } = {}) {
+// depend_on (excludes UI-only sidecars / the local-volume pseudo-service).
+export function enabledDependsOnTargets({ database, redis, objectStorage } = {}) {
   const out = []
   if (database && database !== 'none') out.push(database)
   if (redis) out.push('redis')
-  if (garage) out.push('garage')
+  if (objectStorage === 'minio') out.push('minio')
   return out
 }
 
@@ -68,7 +72,7 @@ function MiniToggle({ label, hint, checked, onChange }) {
 function ServiceRow({ row, resourcePrefix }) {
   const [open, setOpen] = useState(false)
   const meta = SERVICE_META[row.kind] || { label: row.kind, vars: [] }
-  const host = `${resourcePrefix || '<prefix>'}_<env>_${row.name}`
+  const ident = `${resourcePrefix || '<prefix>'}_<env>_${row.name}`
   return (
     <div className="bg-surface-raised/30 border border-border-strong/60 rounded-xl overflow-hidden">
       <button type="button" onClick={() => setOpen(o => !o)}
@@ -81,7 +85,8 @@ function ServiceRow({ row, resourcePrefix }) {
       {open && (
         <div className="px-4 pb-3 pt-1 text-xs text-content-subtle space-y-2 border-t border-border-strong/40">
           <div>
-            In-network host <code className="font-mono text-content">{host}</code>
+            {meta.volume ? <>Persistent volume </> : <>In-network host </>}
+            <code className="font-mono text-content">{ident}</code>
             {meta.port && <> · port <code className="font-mono text-content">{meta.port}</code></>}
           </div>
           {meta.vars.length > 0 && (
@@ -104,6 +109,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
   const v = value || {}
   const rows = managedServiceList(v)
   const set = (patch) => onChange({ ...v, ...patch })
+  const storage = v.objectStorage || 'none'
   return (
     <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-4">
       <div>
@@ -129,8 +135,55 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
           {error && <p className="text-danger-fg text-xs mt-1">{error}</p>}
         </div>
         <MiniToggle label="Redis" hint="redis:7-alpine" checked={!!v.redis} onChange={x => set({ redis: x })} />
-        <MiniToggle label="Garage S3" hint="self-hosted object store" checked={!!v.garage} onChange={x => set({ garage: x })} />
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Object storage</label>
+          <select
+            value={storage}
+            onChange={e => set({ objectStorage: e.target.value })}
+            className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500"
+          >
+            <option value="none">None</option>
+            <option value="local">Local volume</option>
+            <option value="minio">MinIO (S3)</option>
+          </select>
+        </div>
       </div>
+
+      {storage === 'local' && (
+        <div className="pt-1 border-t border-border">
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Storage path (in container)</label>
+          <input
+            type="text"
+            value={v.storagePath || ''}
+            placeholder="/var/www/html/storage"
+            onChange={e => set({ storagePath: e.target.value })}
+            className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+          />
+          <p className="text-xs text-content-subtle mt-1">A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</p>
+        </div>
+      )}
+
+      {storage === 'minio' && (
+        <div className="pt-1 border-t border-border space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Bucket name</label>
+            <input
+              type="text"
+              value={v.storageBucket || ''}
+              placeholder={`${resourcePrefix || '<project>'}-<env>  (auto)`}
+              onChange={e => set({ storageBucket: e.target.value })}
+              className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+            />
+            <p className="text-xs text-content-subtle mt-1">Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</p>
+          </div>
+          <MiniToggle
+            label="MinIO admin console"
+            hint="Optional browser admin UI (opens3/console) at the storage subdomain. Leave off for S3 only. Protect the route (internal/VPN, or the per-env basic-auth) in production."
+            checked={!!v.storageUi}
+            onChange={x => set({ storageUi: x })}
+          />
+        </div>
+      )}
 
       {(showWebSql || (v.database && v.database !== 'none')) && (
         <div className="pt-1 border-t border-border">
@@ -141,17 +194,6 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
               : "Browser SQL client for this project’s database — routed at the adminer subdomain; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."}
             checked={!!v.webSql}
             onChange={x => set({ webSql: x })}
-          />
-        </div>
-      )}
-
-      {v.garage && (
-        <div className="pt-1 border-t border-border">
-          <MiniToggle
-            label="Garage Web UI"
-            hint="Optional browser admin UI for Garage (khairul169/garage-webui) on :3909. Leave off for S3 support only. Protect the route (internal/VPN) in production."
-            checked={!!v.garageWebUi}
-            onChange={x => set({ garageWebUi: x })}
           />
         </div>
       )}
