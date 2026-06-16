@@ -12,10 +12,11 @@
       "name": "app",
       "image": "louislam/uptime-kuma",
       "tag": "1",
-      "port": 3001,
-      "host_port": "${KUMA_PORT}",
+      "port": 3000,
+      "web_routed": true,
+      "host_port": "3001",
       "command": "",
-      "healthcheck": "curl -sf http://localhost:3001/ -o /dev/null || exit 1",
+      "healthcheck": "curl -sf http://localhost:3000/ -o /dev/null || exit 1",
       "healthcheck_config": {
         "interval": "30s",
         "timeout": "10s",
@@ -30,7 +31,5 @@
       "env_vars": {}
     }
   ],
-  "default_env_vars": {
-    "KUMA_PORT": "3001"
-  }
+  "default_env_vars": {}
 }
