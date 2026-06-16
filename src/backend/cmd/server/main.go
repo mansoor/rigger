@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mansoor/rigger/ui/api"
@@ -20,6 +21,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/notify"
 	"github.com/mansoor/rigger/ui/internal/pipelines"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
+	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
 
@@ -38,6 +40,16 @@ func main() {
 	database, err := db.Open(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("db: %v", err)
+	}
+
+	// Seed the app_host setting from the installer-detected host IP on first boot.
+	// The containerized server can't detect the host's LAN/public IP itself (it
+	// only sees its bridge IP), so the installer captures it and passes it via
+	// RIGGER_APP_HOST. Only seed when unset — never clobber an admin's edit.
+	if hostIP := strings.TrimSpace(os.Getenv("RIGGER_APP_HOST")); hostIP != "" && settings.AppSetting(database, "app_host") == "" {
+		if err := settings.SetAppSetting(database, "app_host", hostIP); err == nil {
+			log.Printf("settings: seeded app_host=%s from RIGGER_APP_HOST", hostIP)
+		}
 	}
 
 	// Any pipeline run left "running" was stranded by a previous shutdown (its

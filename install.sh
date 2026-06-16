@@ -283,6 +283,13 @@ fi
 
 ENV_FILE="${RIGGER_DIR}/src/.env"
 
+# Detect this host's primary LAN IP so apps deployed locally get a reachable
+# "App host" out of the box. The running server lives in a container and can only
+# see its 172.x bridge IP, so it can't detect this itself — we capture it here on
+# the host and hand it to the server via RIGGER_APP_HOST (seeded into the app_host
+# setting on first boot; editable later in Settings → General).
+HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || HOST_IP=""
+
 if [[ ! -f "$ENV_FILE" ]]; then
   step "Generating configuration"
 
@@ -299,6 +306,11 @@ JWT_SECRET=${JWT_SECRET}
 
 # Let's Encrypt contact email (required for SSL certificates on workspace domains)
 ACME_EMAIL=${ACME_EMAIL:-your@email.com}
+
+# This host's LAN/public address — seeds the "App host" used to build app links
+# and magic-DNS (sslip/nip) URLs for locally-deployed envs. Detected at install;
+# edit in Settings → General if wrong (e.g. a public IP or a different interface).
+RIGGER_APP_HOST=${HOST_IP}
 EOF
 
   success "Configuration written to ${ENV_FILE}"

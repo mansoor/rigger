@@ -41,6 +41,11 @@ services:
       # `apprise` service below and set APPRISE_URL to point at it:
       # - APPRISE_URL=http://apprise:8000
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      # Host LAN/public address detected by the installer — seeded into the
+      # `app_host` setting on first boot (used for local app links + magic-DNS
+      # URLs). The containerized server can't detect the host IP itself. Empty ⇒
+      # links fall back to the browser hostname; edit in Settings → General.
+      - RIGGER_APP_HOST=${RIGGER_APP_HOST:-}
     networks:
       - traefik_net
     # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.
