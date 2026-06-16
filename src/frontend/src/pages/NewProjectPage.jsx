@@ -929,23 +929,12 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           <Label required>Name</Label>
           <Input value={env.name} onChange={v => upd('name', v)} placeholder="dev" />
         </div>
-        <div>
-          <Label>Domain</Label>
-          <Input value={env.domain} onChange={v => upd('domain', v)} placeholder="example.com" />
-        </div>
         {/* HTTP port — only relevant for custom stacks without Traefik (direct Nginx binding) */}
         {!env.traefik && stackType !== 'image' && (
           <div>
             <Label>HTTP port</Label>
             <Input type="number" value={env.http_port} onChange={v => upd('http_port', parseInt(v) || 8080)} placeholder="8080" />
             <p className="text-xs text-content-subtle mt-1">Host port Nginx binds to — access your app at <code className="font-mono text-xs">host:{env.http_port || 8080}</code></p>
-          </div>
-        )}
-        {env.traefik && (
-          <div className="col-span-2">
-            <p className="text-xs text-content-subtle flex items-center gap-1.5 px-3 py-2 bg-surface-raised/60 rounded-lg border border-border-strong/60">
-              <span>ℹ</span> Traefik handles ports 80 / 443 — set a domain above for routing.
-            </p>
           </div>
         )}
         <div>
@@ -975,6 +964,19 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
             onChange(idx, { ...env, traefik: v, ...(v ? {} : { ssl_enabled: false }) })
           }}
         />
+
+        {/* Domain — only relevant under Traefik; blank yields an automatic URL. */}
+        {env.traefik && (
+          <div>
+            <Label>Domain <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+            <Input value={env.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" />
+            {!env.domain && (
+              <p className="text-xs text-content-subtle mt-1">
+                Blank → an automatic URL (base domain if the admin set one, else the sslip/nip auto-URL, else <code className="font-mono text-xs">*.localhost</code>). Set a value only for your own custom domain.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* SSL checkbox — only shown when Traefik is on AND a domain is entered */}
         {env.traefik && (
@@ -1017,23 +1019,30 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
             )}
           </div>
         )}
-        <Toggle
-          label="Git sync"
-          hint="Enable ./run.sh sync for this environment"
-          checked={env.git_enabled}
-          onChange={v => upd('git_enabled', v)}
-        />
-        {env.git_enabled && (
-          <div className="grid grid-cols-2 gap-3 pl-1">
-            <div>
-              <Label>Git repo</Label>
-              <Input value={env.git_repo} onChange={v => upd('git_repo', v)} placeholder="git@github.com:org/repo.git" />
-            </div>
-            <div>
-              <Label>Branch</Label>
-              <Input value={env.git_branch} onChange={v => upd('git_branch', v)} placeholder="main" />
-            </div>
-          </div>
+        {/* Git sync only applies to source-code projects (built from a repo) — not
+            image/prebuilt (no source) or database stacks. Matches Edit Project,
+            which exposes the git repo only for source-code projects. */}
+        {['custom', 'scan', 'blueprint'].includes(stackType) && (
+          <>
+            <Toggle
+              label="Git sync"
+              hint="Pull this environment's source from a git repo on deploy"
+              checked={env.git_enabled}
+              onChange={v => upd('git_enabled', v)}
+            />
+            {env.git_enabled && (
+              <div className="grid grid-cols-2 gap-3 pl-1">
+                <div>
+                  <Label>Git repo</Label>
+                  <Input value={env.git_repo} onChange={v => upd('git_repo', v)} placeholder="git@github.com:org/repo.git" />
+                </div>
+                <div>
+                  <Label>Branch</Label>
+                  <Input value={env.git_branch} onChange={v => upd('git_branch', v)} placeholder="main" />
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -2021,11 +2030,19 @@ export default function NewProjectPage() {
     <div className="min-h-screen bg-canvas flex flex-col">
       {/* Nav bar (same style as Layout) */}
       <nav className="border-b border-border bg-surface shrink-0">
-        <div className="px-6 h-12 flex items-center justify-between">
+        <div className="px-6 h-12 flex items-center justify-between relative">
           <div className="flex items-center gap-2.5">
             <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
-            <span className="text-content-muted text-sm">New project{workspace ? ` · ${workspace}` : ''}</span>
+            {workspace && (
+              <span
+                className="text-sm text-content px-2.5 py-1 rounded-lg bg-surface-raised border border-border-strong"
+                title="Workspace (fixed for this wizard)"
+              >
+                {workspace}
+              </span>
+            )}
           </div>
+          <span className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-content-strong">New Project</span>
           {step < 7
             ? <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg transition-colors">Cancel</button>
             : <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-border-strong bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Close</button>

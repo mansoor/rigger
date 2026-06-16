@@ -1840,7 +1840,7 @@ export default function EditProjectPage() {
   const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
   // Effective base domain: workspace override → global apps base domain (mirrors
   // the backend's EffectiveBaseDomain so the route preview matches the deploy).
-  const baseDomain = (wsSettings?.domain || project?.apps_base_domain || '').trim()
+  const baseDomain = (wsSettings?.domain || ws?.apps_base_domain || '').trim()
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -2226,8 +2226,8 @@ export default function EditProjectPage() {
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
                 resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 baseDomain={baseDomain}
-                autoUrlMode={project?.auto_url_mode || ''}
-                appHost={project?.app_host || ''}
+                autoUrlMode={ws?.auto_url_mode || ''}
+                appHost={ws?.app_host || ''}
                 localTLS={!!project?.local_tls}
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}
