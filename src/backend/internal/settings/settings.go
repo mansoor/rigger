@@ -479,10 +479,39 @@ func AutoURLMode(d *db.DB) string {
 // token lives in the Rigger stack's env (e.g. CF_DNS_API_TOKEN), not the DB.
 func AppsDNSProvider(d *db.DB) string { return AppSetting(d, "apps_dns_provider") }
 
-// AutoURLHost returns the IP/host embedded in a magic-DNS auto-URL
-// ({prefix}-{env}.<host>.sslip.io) — the admin sets the LAN/public/Tailscale IP
-// other machines use to reach this host. "" ⇒ magic-DNS modes fall back to localhost.
-func AutoURLHost(d *db.DB) string { return AppSetting(d, "auto_url_host") }
+// AppHost is the single "address users reach this Rigger host's apps at" — the
+// Docker host's LAN/public IP or hostname. It feeds BOTH the port-based "Open
+// app" links AND the magic-DNS auto-URL ({prefix}-{env}.<host>.sslip.io) for
+// LOCALLY-hosted envs. Remote-host envs always use their own host's Address, so
+// this only matters for the control-plane host. It is seeded at install from the
+// detected HOST_IP (RIGGER_APP_HOST) and can be set/auto-suggested in Settings.
+// "" ⇒ port links use the browser hostname and magic-DNS falls back to localhost.
+func AppHost(d *db.DB) string {
+	if h := AppSetting(d, "app_host"); h != "" {
+		return h
+	}
+	// Legacy fallback: earlier builds stored the magic-DNS host under a separate
+	// `auto_url_host` key before the two were consolidated into `app_host`.
+	return AppSetting(d, "auto_url_host")
+}
+
+// AutoURLHost is the address embedded in a magic-DNS auto-URL for a LOCAL env.
+// Consolidated onto AppHost (the two were the same fact — see AppHost). Kept as a
+// named accessor for the routing call sites; remote envs supply their own host
+// address at the deploy site instead of this value.
+func AutoURLHost(d *db.DB) string { return AppHost(d) }
+
+// SetAppSetting upserts one global (instance-wide) setting in app_settings.
+func SetAppSetting(d *db.DB, key, value string) error {
+	if d == nil {
+		return nil
+	}
+	_, err := d.Exec(
+		`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`,
+		key, value)
+	return err
+}
 
 // SetWorkspaceSetting upserts one workspace-scoped setting.
 func SetWorkspaceSetting(d *db.DB, wsKey, key, value string) error {

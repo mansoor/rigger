@@ -870,6 +870,40 @@ func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 	}
 }
 
+// refineRemoteEnvURLs corrects the displayed route URL for envs bound to a remote
+// host. workspace.load computes each env's URL with the local app_host (the only
+// value it's given), so a remote env in magic-DNS mode would show the wrong host.
+// Now that annotateHosts has filled EnvHosts with per-env addresses, recompute
+// those envs' URLs using their own host's address. (Base-domain and *.localhost
+// URLs don't depend on the host, so this only changes magic-DNS URLs.) Call after
+// annotateHosts.
+func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
+	for i := range wss {
+		if len(wss[i].EnvHosts) == 0 || len(wss[i].EnvAccess) == 0 {
+			continue
+		}
+		data, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wss[i].WorkspaceName, wss[i].Name))
+		if err != nil {
+			continue
+		}
+		baseDomain := settings.EffectiveBaseDomain(h.db, wss[i].WorkspaceName)
+		autoMode := settings.AutoURLMode(h.db)
+		for env, hostRef := range wss[i].EnvHosts {
+			if hostRef.Address == "" {
+				continue
+			}
+			info, ok := wss[i].EnvAccess[env]
+			if !ok {
+				continue
+			}
+			if url, routed := composegen.EnvRouteURL(data, env, baseDomain, autoMode, hostRef.Address); routed {
+				info.URL = url
+				wss[i].EnvAccess[env] = info
+			}
+		}
+	}
+}
+
 // GET /api/workspaces/{name}/envs/{env}/compose  — returns docker-compose.yml content
 func (h *Handler) GetCompose(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
@@ -1627,6 +1661,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)
+	h.refineRemoteEnvURLs(wss) // remote envs: show their own host in the route URL
 	out := wss[0]
 	// Surface the host-side folder path so the UI can show where the workspace
 	// actually lives (not the container's /toolkit path). Prefer the value stamped

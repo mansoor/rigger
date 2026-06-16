@@ -113,6 +113,23 @@ func (b *Bridge) resourcePrefix(workspaceName, project string) string {
 	return project
 }
 
+// magicDNSHost resolves the address to embed in an env's magic-DNS auto-URL
+// ({prefix}-{env}.<host>.sslip.io). The address is per-LOCATION, not global: an
+// env bound to a remote host uses THAT host's address (it's where the workload —
+// and its published ports — actually run); a local env uses the configured
+// app_host. "" ⇒ the magic-DNS modes degrade to *.localhost. This is what makes
+// the auto-URL correct in a mixed local+remote fleet (a single global IP can't
+// be right once a second host exists).
+func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
+	if b.db == nil {
+		return ""
+	}
+	if host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env); err == nil && host != nil {
+		return host.Address
+	}
+	return settings.AppHost(b.db)
+}
+
 func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarget, error) {
 	if b.db == nil || b.pool == nil {
 		return nil, nil
@@ -1194,7 +1211,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
 			AutoURLMode:   settings.AutoURLMode(b.db),
-			AutoURLHost:   settings.AutoURLHost(b.db),
+			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
@@ -1250,7 +1267,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
 			AutoURLMode:   settings.AutoURLMode(b.db),
-			AutoURLHost:   settings.AutoURLHost(b.db),
+			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
