@@ -1,11 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/databases"
@@ -98,6 +102,65 @@ func (c *dbExecCtx) run(sql string) ([]byte, error) {
 			"mysql", "-uroot", "-N", "-B", "-e", sql}
 	}
 	return c.exec.DockerOutput(executor.Spec{Args: args})
+}
+
+// countTables returns the number of user tables in the application database — the
+// "is it empty?" signal the DB-seed hook uses (import only into an empty DB). System
+// schemas are excluded. A connection error propagates (so callers can treat the DB as
+// not-yet-ready vs genuinely empty).
+func (c *dbExecCtx) countTables() (int, error) {
+	var sql string
+	if c.engine == "postgres" {
+		sql = `SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace ` +
+			`WHERE c.relkind IN ('r','p') AND n.nspname NOT IN ('pg_catalog','information_schema') ` +
+			`AND n.nspname NOT LIKE 'pg\_%'`
+	} else {
+		sql = fmt.Sprintf("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='%s'", c.dbName)
+	}
+	out, err := c.run(sql)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
+	}
+	n, perr := strconv.Atoi(strings.TrimSpace(string(out)))
+	if perr != nil {
+		return 0, fmt.Errorf("unexpected table-count output: %q", strings.TrimSpace(string(out)))
+	}
+	return n, nil
+}
+
+// importSQL streams a SQL dump into the engine client over stdin (no temp file in the
+// container), running it against the application database. progress (stdout+stderr) is
+// streamed to out. mysql/mariadb connect as root; postgres as the app user with
+// ON_ERROR_STOP so a broken dump fails loudly instead of half-importing.
+func (c *dbExecCtx) importSQL(r io.Reader, out io.Writer) error {
+	var args []string
+	if c.engine == "postgres" {
+		args = []string{"exec", "-i", "-e", "PGPASSWORD=" + c.password, c.container,
+			"psql", "-U", c.user, "-d", c.dbName, "-v", "ON_ERROR_STOP=1"}
+	} else {
+		args = []string{"exec", "-i", "-e", "MYSQL_PWD=" + c.rootPass, c.container,
+			"mysql", "-uroot", c.dbName}
+	}
+	return c.exec.Docker(executor.Spec{Args: args, Stdin: r, Stdout: out, Stderr: out})
+}
+
+// waitDBReady polls until the DB answers a query (it's accepting connections and the
+// app database exists) or timeout elapses — the managed container may still be
+// initializing right after `compose up -d`.
+func (c *dbExecCtx) waitDBReady(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var last error
+	for {
+		if _, err := c.countTables(); err == nil {
+			return nil
+		} else {
+			last = err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("database not ready after %s: %w", timeout, last)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // ListDatabaseSchemas — GET …/envs/{env}/database/schemas. Lists schemas
@@ -245,4 +308,124 @@ func (h *Handler) DeleteDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "name": name})
+}
+
+// SeedDatabase — POST …/envs/{env}/database/seed {force}. Imports the project's
+// configured SQL dump (_source/seed.sql) into the managed database. Refuses a
+// non-empty database with 409 unless force=true (the dump may re-create/overwrite).
+// operator+. This is the manual counterpart to the auto-on-first-deploy hook.
+func (h *Handler) SeedDatabase(w http.ResponseWriter, r *http.Request) {
+	workspace, project, env := r.PathValue("workspace"), r.PathValue("name"), r.PathValue("env")
+	if !auth.AtLeast(h.pipelineRole(r, workspace, project), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	var body struct {
+		Force bool `json:"force"`
+	}
+	_ = readJSON(r, &body)
+
+	cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, workspace, project))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "project not found"})
+		return
+	}
+	if cfg.SeedSpec() == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no database seed is configured for this project"})
+		return
+	}
+	f, err := os.Open(wspath.SeedFile(h.workspacesDir, workspace, project))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "seed file not found — re-upload the source with a database dump"})
+		return
+	}
+	defer f.Close()
+
+	c, err := h.dbExecContext(workspace, project, env)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := c.waitDBReady(60 * time.Second); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	n, err := c.countTables()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if n > 0 && !body.Force {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": fmt.Sprintf("database already has %d table(s) — pass force to import anyway", n), "tables": n})
+		return
+	}
+	var out bytes.Buffer
+	if err := c.importSQL(f, &out); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": "import failed: " + strings.TrimSpace(out.String()+" "+err.Error())})
+		return
+	}
+	after, _ := c.countTables()
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		h.db.Exec( //nolint:errcheck
+			"INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)",
+			claims.UserID, claims.Username, h.resourcePrefix(workspace, project), "db-seed", env,
+		)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "imported", "tables": after})
+}
+
+// maybeAutoSeed imports the project's configured SQL dump after a successful deploy,
+// but ONLY when auto-import is enabled AND the application database is currently empty
+// (zero tables) — so a fresh deploy is seeded once and a redeploy never clobbers data.
+// A teardown that drops the DB volume makes it empty again, so it re-seeds naturally.
+// Best-effort: every outcome is reported to out; a failure never affects the deploy.
+func (h *Handler) maybeAutoSeed(workspace, project, env string, out io.Writer) {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, workspace, project))
+	if err != nil {
+		return
+	}
+	spec := cfg.SeedSpec()
+	if spec == nil || !spec.Auto {
+		return
+	}
+	ec, ok := cfg.Environments[env]
+	if !ok {
+		return
+	}
+	if eng := cfg.EffDatabase(ec); eng == "" || eng == "none" {
+		return
+	}
+	f, err := os.Open(wspath.SeedFile(h.workspacesDir, workspace, project))
+	if err != nil {
+		fmt.Fprintf(out, "\n\033[33m⚠ auto-seed skipped: seed file not found\033[0m\n")
+		return
+	}
+	defer f.Close()
+	c, err := h.dbExecContext(workspace, project, env)
+	if err != nil {
+		fmt.Fprintf(out, "\n\033[33m⚠ auto-seed skipped: %s\033[0m\n", err.Error())
+		return
+	}
+	if err := c.waitDBReady(90 * time.Second); err != nil {
+		fmt.Fprintf(out, "\n\033[33m⚠ auto-seed skipped: %s\033[0m\n", err.Error())
+		return
+	}
+	n, err := c.countTables()
+	if err != nil {
+		fmt.Fprintf(out, "\n\033[33m⚠ auto-seed skipped: %s\033[0m\n", err.Error())
+		return
+	}
+	if n > 0 {
+		fmt.Fprintf(out, "\n\033[36mℹ database already has %d table(s) — skipping auto-seed.\033[0m\n", n)
+		return
+	}
+	fmt.Fprintf(out, "\n\033[36m▶ importing database seed (%s)...\033[0m\n", spec.File)
+	if err := c.importSQL(f, out); err != nil {
+		fmt.Fprintf(out, "\033[33m⚠ seed import failed (deploy is unaffected): %s\033[0m\n", err.Error())
+		return
+	}
+	after, _ := c.countTables()
+	fmt.Fprintf(out, "\033[32m✓ database seeded — %d table(s).\033[0m\n", after)
 }

@@ -818,6 +818,7 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseSchemas)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseSchema)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/schemas/{schema}", authSvc.Middleware(http.HandlerFunc(handler.DeleteDatabaseSchema)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/seed", authSvc.Middleware(http.HandlerFunc(handler.SeedDatabase)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseUsers)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseUser)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/adminer-login", authSvc.Middleware(http.HandlerFunc(handler.AdminerLogin)))

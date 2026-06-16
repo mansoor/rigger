@@ -105,6 +105,9 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 				uname = claims.Username
 			}
 			h.recordDeploy(wsName, name, env, uname)
+			// Auto-import the bundled DB seed on a fresh deploy (empty DB + opt-in).
+			// Best-effort, streamed to the same output; never affects deploy status.
+			h.maybeAutoSeed(wsName, name, env, out)
 		}
 		if body.Command == "update" && env != "" {
 			h.imgCache.Invalidate(wsName, name, env)
