@@ -13,8 +13,15 @@ import (
 // workspace's apps base domain (DB setting) and whether local *.localhost envs
 // should use self-signed HTTPS. Zero value = local HTTP on *.localhost.
 type RouteOpts struct {
-	BaseDomain string // e.g. "apps.example.com"; "" → local *.localhost
+	BaseDomain string // e.g. "apps.example.com"; "" → fall back to AutoURL/localhost
 	LocalTLS   bool   // serve the local *.localhost route over self-signed HTTPS
+	// AutoURLMode / AutoURLHost build a cross-machine auto-URL when no base domain is
+	// set (the magic-DNS fallback). Mode: "sslip"|"nip"|"traefikme"|"localhost"|"off"
+	// (default "localhost"). Host is the IP other machines reach this host on
+	// (LAN/public/Tailscale) embedded into {label}.{host}.sslip.io. Empty host ⇒
+	// magic-DNS modes degrade to *.localhost.
+	AutoURLMode string
+	AutoURLHost string
 	// EnvFile is the env's generated .env content. When a service sets
 	// env_file_mount, the generator embeds this verbatim as a compose `config`
 	// (content:) and mounts it at the target path. Delivered as inline content —
@@ -98,11 +105,36 @@ func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
 		return
 	}
 	label := strings.ReplaceAll(rp, "_", "-") + "-" + env
-	if ro.BaseDomain != "" {
+	// magicSuffix is the wildcard-DNS suffix for an auto-URL mode, or "" if the mode
+	// isn't a magic-DNS one (or no host is configured to embed).
+	magicSuffix := func() string {
+		if ro.AutoURLHost == "" {
+			return ""
+		}
+		switch ro.AutoURLMode {
+		case "sslip":
+			return ro.AutoURLHost + ".sslip.io"
+		case "nip":
+			return ro.AutoURLHost + ".nip.io"
+		case "traefikme":
+			return ro.AutoURLHost + ".traefik.me"
+		}
+		return ""
+	}()
+	switch {
+	case ro.BaseDomain != "":
+		// Real domain (admin global default or workspace override) → HTTPS via Let's Encrypt.
 		e.Domain = label + "." + ro.BaseDomain
 		e.SSLEnabled = true
 		e.SSLSelfSigned = false
-	} else {
+	case magicSuffix != "":
+		// Cross-machine magic-DNS auto-URL. HTTP in Phase 1 (real certs for these come
+		// later: per-host LE if publicly reachable, or traefik.me's shared cert).
+		e.Domain = label + "." + magicSuffix
+		e.SSLEnabled = false
+		e.SSLSelfSigned = false
+	default:
+		// Host-local default (also when a magic-DNS mode is selected but no host set).
 		e.Domain = label + ".localhost"
 		e.SSLEnabled = ro.LocalTLS
 		e.SSLSelfSigned = ro.LocalTLS

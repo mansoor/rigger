@@ -427,10 +427,9 @@ func GetWorkspaceSettings(d *db.DB, wsKey string) (map[string]string, error) {
 	return out, rows.Err()
 }
 
-// WorkspaceBaseDomain returns the workspace's apps base domain (the `domain`
-// setting) used to derive env routes ({prefix}-{env}.{base}). Returns "" when
-// the db is nil (local-only mode) or no base domain is set — callers then fall
-// back to the local *.localhost default.
+// WorkspaceBaseDomain returns the workspace's own base-domain override (the
+// `domain` setting), or "" when unset. Most callers want EffectiveBaseDomain,
+// which layers the global default underneath this.
 func WorkspaceBaseDomain(d *db.DB, wsKey string) string {
 	if d == nil {
 		return ""
@@ -441,6 +440,43 @@ func WorkspaceBaseDomain(d *db.DB, wsKey string) string {
 	}
 	return strings.TrimSpace(vals["domain"])
 }
+
+// AppSetting returns a global (instance-wide) setting value from app_settings, or
+// "" when the db is nil or the key is unset. The admin General tab owns these keys.
+func AppSetting(d *db.DB, key string) string {
+	if d == nil {
+		return ""
+	}
+	var v string
+	d.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, key).Scan(&v) //nolint:errcheck
+	return strings.TrimSpace(v)
+}
+
+// EffectiveBaseDomain resolves the apps base domain for a workspace: the workspace's
+// own `domain` override wins, else the global `apps_base_domain` (admin default), else
+// "" (callers then derive a magic-DNS / *.localhost auto-URL — see AutoURLMode).
+// This is the value env routes are built on: {prefix}-{env}.{base}.
+func EffectiveBaseDomain(d *db.DB, wsKey string) string {
+	if ws := WorkspaceBaseDomain(d, wsKey); ws != "" {
+		return ws
+	}
+	return AppSetting(d, "apps_base_domain")
+}
+
+// AutoURLMode returns how to build an env URL when no base domain is set:
+// "sslip" | "nip" | "traefikme" | "localhost" | "off". Defaults to "localhost"
+// (the historical behaviour) when unset.
+func AutoURLMode(d *db.DB) string {
+	if m := AppSetting(d, "auto_url_mode"); m != "" {
+		return m
+	}
+	return "localhost"
+}
+
+// AutoURLHost returns the IP/host embedded in a magic-DNS auto-URL
+// ({prefix}-{env}.<host>.sslip.io) — the admin sets the LAN/public/Tailscale IP
+// other machines use to reach this host. "" ⇒ magic-DNS modes fall back to localhost.
+func AutoURLHost(d *db.DB) string { return AppSetting(d, "auto_url_host") }
 
 // SetWorkspaceSetting upserts one workspace-scoped setting.
 func SetWorkspaceSetting(d *db.DB, wsKey, key, value string) error {

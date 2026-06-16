@@ -564,6 +564,37 @@ func TestServicesAutoRoute(t *testing.T) {
 	mustContain(t, app, "certresolver=letsencrypt")
 }
 
+// Magic-DNS fallback: no base domain + auto_url_mode → a cross-machine {label}.{ip}.sslip.io
+// host over HTTP. A base domain still wins over the auto-URL; empty host degrades to localhost.
+func TestServicesMagicDNSRoute(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"weather app","resource_prefix":"mcl_wda","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"nginx","image":"nginx","tag":"alpine","web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	// sslip with a host → cross-machine host over HTTP.
+	out, err := GenerateRouted(cfg, "dev", RouteOpts{AutoURLMode: "sslip", AutoURLHost: "10.10.10.111"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(out), "nginx")
+	mustContain(t, app, "Host(`mcl-wda-dev.10.10.10.111.sslip.io`)")
+	mustContain(t, app, "entrypoints=web")
+	mustNotContain(t, app, "certresolver") // HTTP in Phase 1
+
+	// nip variant.
+	out2, _ := GenerateRouted(cfg, "dev", RouteOpts{AutoURLMode: "nip", AutoURLHost: "10.10.10.111"})
+	mustContain(t, svcBlock(t, string(out2), "nginx"), "Host(`mcl-wda-dev.10.10.10.111.nip.io`)")
+
+	// A base domain wins over the auto-URL mode.
+	out3, _ := GenerateRouted(cfg, "dev", RouteOpts{BaseDomain: "onrigger.com", AutoURLMode: "sslip", AutoURLHost: "10.10.10.111"})
+	mustContain(t, svcBlock(t, string(out3), "nginx"), "Host(`mcl-wda-dev.onrigger.com`)")
+
+	// Magic-DNS mode but no host → degrade to localhost (unchanged default).
+	out4, _ := GenerateRouted(cfg, "dev", RouteOpts{AutoURLMode: "sslip"})
+	mustContain(t, svcBlock(t, string(out4), "nginx"), "Host(`mcl-wda-dev.localhost`)")
+}
+
 // project.local_tls makes an auto-routed *.localhost env use self-signed HTTPS.
 func TestServicesLocalTLS(t *testing.T) {
 	cfg := []byte(`{

@@ -180,7 +180,7 @@ func (b *Bridge) Migrate(workspaceName, project string, targetHostID int64, out 
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("migration requires multi-host support")
 	}
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
@@ -775,7 +775,7 @@ func (b *Bridge) ExecForEnv(workspaceName, project, env string) (executor.Execut
 // encrypted at rest in its Raft store. Idempotent (a no-op if it already
 // exists, since Swarm secrets are immutable).
 func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value string, version int) (string, error) {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return "", err
 	}
@@ -793,7 +793,7 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value strin
 // RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
 // fails if the secret is still referenced by a running service).
 func (b *Bridge) RemoveSwarmSecret(workspaceName, project, env, key string, version int) error {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.WorkspaceBaseDomain(b.db, workspaceName))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName))
 	if err != nil {
 		return err
 	}
@@ -872,7 +872,7 @@ func (b *Bridge) Bootstrap(workspaceName, project, env string, stdout, stderr io
 
 func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, out io.Writer) error {
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
-	baseDomain := settings.WorkspaceBaseDomain(b.db, workspaceName)
+	baseDomain := settings.EffectiveBaseDomain(b.db, workspaceName)
 	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, out)
 }
 
@@ -1192,7 +1192,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
-			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
@@ -1246,7 +1246,9 @@ func (b *Bridge) Run(opts RunOptions) error {
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
-			BaseDomain:    settings.WorkspaceBaseDomain(b.db, opts.Workspace),
+			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
+			AutoURLMode:   settings.AutoURLMode(b.db),
+			AutoURLHost:   settings.AutoURLHost(b.db),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {

@@ -48,10 +48,15 @@ type Options struct {
 	Stdout        io.Writer
 	Stderr        io.Writer
 
-	// BaseDomain is the workspace's apps base domain (DB-sourced), used to derive
-	// env routes when Traefik is on and the env has no explicit domain. Empty ⇒
-	// local *.localhost default.
+	// BaseDomain is the effective apps base domain (workspace override → global
+	// default), used to derive env routes when Traefik is on and the env has no
+	// explicit domain. Empty ⇒ AutoURL/localhost fallback.
 	BaseDomain string
+	// AutoURLMode / AutoURLHost are the magic-DNS fallback used when BaseDomain is
+	// empty (e.g. "sslip" + "10.10.10.111" → {label}.10.10.10.111.sslip.io), so an
+	// env is reachable cross-machine without a real domain. See composegen.RouteOpts.
+	AutoURLMode string
+	AutoURLHost string
 
 	// Exec runs the docker commands. nil → local daemon (executor.Local). Set to
 	// a remotehost executor for cross-host operations (Phase 7).
@@ -116,7 +121,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, EnvFile: readDotenv(envDir)})
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, EnvFile: readDotenv(envDir)})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -374,7 +379,7 @@ func (r *runner) logs() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, EnvFile: readDotenv(filepath.Dir(r.composePath))})
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, EnvFile: readDotenv(filepath.Dir(r.composePath))})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}
