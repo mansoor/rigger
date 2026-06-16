@@ -1,10 +1,10 @@
 # =============================================================================
-# .dockerignore.dev — Laravel  (dev environment)
-# Source is bind-mounted at runtime — Dockerfile.dev only needs:
-#   composer.json / composer.lock  (for composer install)
-#   package.json / package-lock.json  (for npm install, if applicable)
-#   docker/  (php.ini, xdebug.ini, www.conf, entrypoint)
-# Everything else is excluded to keep the build context lean.
+# .dockerignore.dev — Laravel (dev environment)
+# The dev image is now SELF-CONTAINED (Dockerfile.dev does `COPY . .` and serves
+# via `php artisan serve` — no runtime bind mount), so the application source
+# MUST be baked into the build context. This file therefore only excludes what's
+# reinstalled or regenerated inside the container — NOT app code. It keeps tests
+# and dev config (this is a dev image with Xdebug), which the prod variant strips.
 # =============================================================================
 
 # ── Secrets ───────────────────────────────────────────────────────────────────
@@ -16,28 +16,29 @@
 vendor
 node_modules
 
-# ── Source code (bind-mounted at runtime, not baked into dev image) ───────────
-app
-bootstrap/cache
-config
-database
-lang
-public
-resources
-routes
-storage
-tests
+# ── Laravel runtime cache (recreated at build/startup) ────────────────────────
+storage/logs/*
+storage/framework/cache/*
+storage/framework/sessions/*
+storage/framework/views/*
+bootstrap/cache/*.php
 
 # ── Version control & CI ──────────────────────────────────────────────────────
 .git
 .gitignore
 .github
 
-# ── Build artefacts ───────────────────────────────────────────────────────────
+# ── Build artefacts (compiled inside the container) ───────────────────────────
 public/build
 public/hot
+public/mix-manifest.json
+
+# ── Docker / compose scaffolding (not needed inside the image) ───────────────
+docker-compose*.yml
 
 # ── OS noise ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 *.log
+*.swp
+*.swo
