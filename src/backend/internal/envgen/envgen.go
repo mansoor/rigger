@@ -547,7 +547,19 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		if len(skipped) > 0 {
 			p("# (skipped %d key(s) owned by Rigger's managed services: %s)\n", len(skipped), strings.Join(skipped, ", "))
 		}
+		// In writable-.env mode the app owns its .env at runtime (e.g. an installer
+		// writing INSTALLED=true), so a regen must PRESERVE the app's current value
+		// for app-level keys rather than reset them to the config.json default.
+		// Managed-infra keys are reserved above (skipped here) and re-asserted from
+		// Rigger's values, so they stay authoritative even in this mode.
+		writableEnv := cfg.HasWritableEnvFile()
 		for _, k := range keys {
+			if writableEnv && existing != nil {
+				if ev, ok := existing[k]; ok {
+					p("%s=%s\n", k, ev)
+					continue
+				}
+			}
 			p("%s=%s\n", k, ResolveImageValue(k, e.EnvVars[k].String(), existing, r))
 		}
 	}

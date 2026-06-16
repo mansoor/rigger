@@ -211,7 +211,10 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		// escape) so commands like `sh -c 'echo hi'` stay valid.
 		g.line("    command: '" + strings.ReplaceAll(svc.Command, "'", "''") + "'")
 	}
-	if svc.EnvFile {
+	// envWritable: the app owns its .env at runtime — delivered as a writable bind
+	// (below) instead of process env, so the app's own writes aren't overridden.
+	envWritable := svc.EnvFileWritable && svc.EnvFileMount != ""
+	if svc.EnvFile && !envWritable {
 		g.line("    env_file: .env")
 	}
 
@@ -232,15 +235,19 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.emitDependsOn(prefix, svc.DependsOn, isSwarm)
 
 	// Volumes (named volumes get the prefix; bind/env-var mounts pass through).
-	firstVol := true
+	// volumes: is opened lazily so the writable-.env bind below can share the block.
+	volumesOpen := false
+	openVolumes := func() {
+		if !volumesOpen {
+			g.line("    volumes:")
+			volumesOpen = true
+		}
+	}
 	for _, vol := range svc.Volumes {
 		if vol == "" {
 			continue
 		}
-		if firstVol {
-			g.line("    volumes:")
-			firstVol = false
-		}
+		openVolumes()
 		if host := volHost(vol); isNamedVolume(host) {
 			g.line("      - " + prefix + "_" + host + ":" + volRest(vol))
 		} else if strings.HasPrefix(host, ".") {
@@ -251,15 +258,20 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 			g.line("      - " + vol) // absolute path or ${VAR} — pass through unchanged
 		}
 	}
-	// Optionally materialise the env's generated .env as a physical file in the
-	// app's workdir. Some frameworks re-read .env from disk and ignore process
-	// env — notably Laravel's `php artisan serve`, whose request subprocess only
-	// sees keys present in a .env file. The vars are always injected as process
-	// env via env_file; this also delivers them on disk (read-only) via a compose
-	// `config` carrying the .env content inline. Inline content (not a host bind)
-	// because Rigger runs in a container and the host daemon can't resolve a
-	// Rigger-side bind path. Skipped when no .env content was supplied.
-	if svc.EnvFileMount != "" && g.envFile != "" {
+	// Materialise the env's generated .env as a physical file at EnvFileMount. Two modes:
+	//   - WRITABLE (env_file_writable): bind the env's real .env file rw so the app can
+	//     persist its own writes (a CodeCanyon installer writing INSTALLED=true). The
+	//     bind lives in the env dir → survives recreate AND migrates with the env on a
+	//     host move (a named volume would not). Rooted at ${RIGGER_BIND_ROOT} like every
+	//     other bind so the host daemon resolves it. Process env (env_file:) is suppressed
+	//     above so nothing overrides the file's values.
+	//   - READ-ONLY (default): deliver the .env as an inline compose `config` (some
+	//     frameworks re-read .env from disk; Laravel's `php artisan serve` subprocess).
+	switch {
+	case envWritable:
+		openVolumes()
+		g.line("      - ${RIGGER_BIND_ROOT:-.}/.env:" + svc.EnvFileMount)
+	case svc.EnvFileMount != "" && g.envFile != "":
 		g.line("    configs:")
 		g.line("      - source: " + prefix + "_dotenv")
 		g.line("        target: " + svc.EnvFileMount)

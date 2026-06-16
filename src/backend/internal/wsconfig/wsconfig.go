@@ -37,6 +37,20 @@ type Service struct {
 	ImageFrom      string `json:"image_from,omitempty"`
 	Tag            string `json:"tag,omitempty"`
 	ConfigTemplate string `json:"config_template,omitempty"` // bootstrap renders templates/nginx/<x>.conf → nginx.conf
+	EnvFileMount   string `json:"env_file_mount,omitempty"`   // container path the env's .env is delivered at
+	EnvFileWritable bool  `json:"env_file_writable,omitempty"` // deliver .env writable (app owns it) — see composegen
+}
+
+// HasWritableEnvFile reports whether any service owns its .env at runtime (writable
+// bind + suppressed process env). Such an env's .env is regenerated in MERGE mode:
+// managed keys are re-asserted but the app's own writes are preserved.
+func (c *Config) HasWritableEnvFile() bool {
+	for _, s := range c.Services {
+		if s.EnvFileWritable && s.EnvFileMount != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Build describes how a build service's image is produced.

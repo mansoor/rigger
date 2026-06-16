@@ -420,6 +420,20 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           ? <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env — also mount as file (optional)" />
           : <div />}
 
+        {serviceSource(img) !== 'image' && (img.env_file_mount || '').trim()
+          ? <>
+              <Toggle inline label="App owns .env (writable)"
+                checked={!!img.env_file_writable}
+                onChange={v => upd('env_file_writable', v)} />
+              <p className="text-xs text-content-subtle self-center">
+                Bind the .env writable (not read-only) and skip process-env injection, so an app
+                that writes its own <code className="font-mono text-xs">.env</code> at runtime — a
+                CodeCanyon installer setting <code className="font-mono text-xs">INSTALLED=true</code> —
+                persists. Rigger still re-asserts managed DB/Redis/Garage keys on redeploy.
+              </p>
+            </>
+          : null}
+
         <Toggle inline label="Web entry (route traffic here)" checked={!!img.web_routed} onChange={async v => {
           if (v) {
             const sub = (img.subdomain || '').trim()
@@ -698,7 +712,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
 const SVC_DIFF_FIELDS = [
   'build', 'image', 'image_from', 'tag', 'command', 'port', 'host_port',
   'extra_ports', 'web_routed', 'subdomain', 'healthcheck', 'env_file',
-  'env_file_mount', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars', 'links',
+  'env_file_mount', 'env_file_writable', 'depends_on', 'volumes', 'restart', 'config_template', 'env_vars', 'links',
 ]
 
 // stable serialises a value with object keys sorted at every depth, so two

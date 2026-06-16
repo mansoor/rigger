@@ -143,7 +143,17 @@ type Service struct {
 	DependsOn         []string           `json:"depends_on,omitempty"` // short service / managed-dep names
 	Restart           string             `json:"restart,omitempty"`
 	EnvFile           bool               `json:"env_file,omitempty"`       // inject the env's .env as process env (env_file:)
-	EnvFileMount      string             `json:"env_file_mount,omitempty"` // also bind the env's .env as a physical file at this container path (ro)
+	EnvFileMount      string             `json:"env_file_mount,omitempty"` // also bind the env's .env as a physical file at this container path
+	// EnvFileWritable changes env_file_mount delivery from a read-only inline config
+	// to a WRITABLE bind of the env's real .env (rooted at ${RIGGER_BIND_ROOT}), and
+	// suppresses process-env (env_file:) injection for this service. For apps that own
+	// their .env at runtime — e.g. CodeCanyon web installers that write INSTALLED=true
+	// to .env: process env would otherwise override that write, so it could never
+	// "stick". The bind lives in the env dir, so writes persist across recreate and
+	// migrate with the env on a host move (a named volume would not). Requires
+	// EnvFileMount. Rigger re-asserts managed-infra keys on regen but preserves the
+	// app's own keys (see envgen merge mode).
+	EnvFileWritable   bool               `json:"env_file_writable,omitempty"`
 	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
 	Links             []ServiceLink      `json:"links,omitempty"` // service→service URL wiring, emitted into environment:
 	// AuthProtect marks a synthesized admin sidecar (Adminer / Garage UI) as eligible
