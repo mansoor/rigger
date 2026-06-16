@@ -53,6 +53,11 @@ type Project struct {
 	// flag, like Redis/Garage. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// GarageWebUI adds the optional Garage web admin UI sidecar (khairul169/garage-webui)
+	// when Garage is enabled — the S3 store itself is always headless. Off by default
+	// (Garage alone = S3 support); the wizard/Edit Project expose it as a toggle under
+	// Garage, mirroring WebSQL/Adminer under the database.
+	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 }
 
 type Version struct {

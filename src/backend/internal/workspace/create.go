@@ -44,6 +44,7 @@ type CreateRequest struct {
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
 	Redis        bool              `json:"redis"`
 	Garage       bool              `json:"garage"`
+	GarageWebUI  bool              `json:"garage_web_ui"` // optional Garage web admin UI sidecar (when Garage on)
 	Envs         []EnvRequest      `json:"environments"`
 	Versions     map[string]string `json:"versions"`
 	CustomEnvVars  map[string]string `json:"custom_env_vars"`  // user-supplied env vars for image stacks (Step 2)
@@ -338,6 +339,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		}
 		if req.Garage {
 			project["garage_enabled"] = true
+			if req.GarageWebUI {
+				project["garage_web_ui"] = true
+			}
 		}
 	}
 	// Project-level source repo (one repo per project). Prefer the explicit field;

@@ -26,11 +26,14 @@ const SERVICE_META = {
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, garage, webSql, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, garage, garageWebUi, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
-  if (garage) { out.push({ name: 'garage', kind: 'garage' }); out.push({ name: 'garage_webui', kind: 'garage_webui' }) }
+  if (garage) {
+    out.push({ name: 'garage', kind: 'garage' })
+    if (garageWebUi) out.push({ name: 'garage_webui', kind: 'garage_webui' })
+  }
   if (webSql || cloudbeaver) out.push({ name: 'adminer', kind: 'adminer' })
   return out
 }
@@ -138,6 +141,17 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
               : "Browser SQL client for this project’s database — routed at the adminer subdomain; one-click auto-login from Manage Database. Protect the route (internal/VPN) for production DBs."}
             checked={!!v.webSql}
             onChange={x => set({ webSql: x })}
+          />
+        </div>
+      )}
+
+      {v.garage && (
+        <div className="pt-1 border-t border-border">
+          <MiniToggle
+            label="Garage Web UI"
+            hint="Optional browser admin UI for Garage (khairul169/garage-webui) on :3909. Leave off for S3 support only. Protect the route (internal/VPN) in production."
+            checked={!!v.garageWebUi}
+            onChange={x => set({ garageWebUi: x })}
           />
         </div>
       )}

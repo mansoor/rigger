@@ -539,18 +539,32 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
 		g.line("")
 
-		g.line(sectionComment("Garage WebUI", dashGarageWebUI))
-		g.line("  garage_webui:")
-		g.line("    image: khofesh/garage-webui:" + verGarageWebUI)
-		g.line("    container_name: " + prefix + "_garage_webui")
-		g.line("    environment:")
-		g.line("      GARAGE_API_URL: http://" + prefix + "_garage:3900")
-		g.line("      GARAGE_API_TOKEN: ${GARAGE_ADMIN_TOKEN}")
-		g.line("    depends_on:")
-		g.line("      - garage")
-		g.managedNet(prefix, "garage_webui")
-		g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
-		g.line("")
+		if g.cfg.Project.GarageWebUI {
+			g.line(sectionComment("Garage WebUI", dashGarageWebUI))
+			g.line("  garage_webui:")
+			g.line("    image: khairul169/garage-webui:" + verGarageWebUI)
+			g.line("    container_name: " + prefix + "_garage_webui")
+			// Published on the host so the UI is reachable without Traefik (the UI listens
+			// on :3909). One host binding per host — multi-env collisions are possible, as
+			// with the Adminer host-port case.
+			g.line("    ports:")
+			g.line("      - \"3909:3909\"")
+			g.line("    environment:")
+			// khairul169/garage-webui contract: admin API (3903) + key, S3 endpoint (3900),
+			// region matches the generated garage.toml ([s3_api] s3_region="garage").
+			g.line("      API_BASE_URL: http://" + prefix + "_garage:3903")
+			g.line("      API_ADMIN_KEY: ${GARAGE_ADMIN_TOKEN}")
+			g.line("      S3_ENDPOINT_URL: http://" + prefix + "_garage:3900")
+			g.line("      S3_REGION: garage")
+			// The UI also reads the same garage.toml for config it can't get from the API.
+			g.line("    volumes:")
+			g.line("      - ${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro")
+			g.line("    depends_on:")
+			g.line("      - garage")
+			g.managedNet(prefix, "garage_webui")
+			g.deployBlock(isSwarm, "garage_webui", "1", "unless-stopped")
+			g.line("")
+		}
 	}
 }
 

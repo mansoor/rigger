@@ -50,6 +50,8 @@ type Project struct {
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
 	WebSQL    bool   `json:"web_sql,omitempty"`
+	// GarageWebUI adds the optional Garage web admin UI sidecar (when Garage is on).
+	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 	// SourceKind is "upload" when build source came from an uploaded archive (else
 	// "git"/empty). The UI reads it to show the source origin + "Replace source".
 	SourceKind string `json:"source_kind,omitempty"`
@@ -156,7 +158,9 @@ func managedDepServices(c *Config) []ConfigService {
 	}
 	if garage {
 		add("garage", "garage")
-		add("garage_webui", "garage")
+		if c.Project.GarageWebUI {
+			add("garage_webui", "garage")
+		}
 	}
 	return out
 }
