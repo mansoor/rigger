@@ -11,16 +11,16 @@ import (
 // (no historical parity to match — the unified model regenerates goldens); the
 // managed-dependency widths are kept from the old output for tidy diffs.
 const (
-	dashService     = 50
-	dashPostgres    = 48
-	dashMySQL       = 54
-	dashRedis       = 54
-	dashGarage      = 38
+	dashService  = 50
+	dashPostgres = 48
+	dashMySQL    = 54
+	dashRedis    = 54
+	dashStorage  = 38
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
 // every app service in cfg.Services, then the managed-dependency toggles
-// (database / redis / garage) which stay as env flags until Phase 3.
+// (database / redis / object storage) which stay as env flags until Phase 3.
 func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	g.emitVolumes(prefix)
 	g.line("services:")
@@ -33,7 +33,7 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	}
 	g.buildManagedDeps(prefix, isSwarm)
 	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
-	g.buildGarageWebUI(prefix, rp, registry, tag, isSwarm)
+	g.buildStorageConsole(prefix, rp, registry, tag, isSwarm)
 }
 
 // buildAdminer synthesizes the Adminer web-SQL service from the project-level
@@ -72,36 +72,35 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
 }
 
-// buildGarageWebUI synthesizes the optional Garage web admin UI as a Service routed
-// through Traefik (subdomain "garage"), reusing buildService so it gets the same
-// routing/ports/networks as Adminer. It's a root-mounted SPA, so it's ALWAYS a
-// subdomain (never apex / never a stripped path). With Traefik off it falls back to
-// publishing host port 3909 (dev-only). Gated on the project's GarageWebUI flag +
-// Garage being enabled. See [[garage-webui-optional]].
-func (g *gen) buildGarageWebUI(prefix, rp, registry, tag string, isSwarm bool) {
-	if !g.cfg.Project.GarageWebUI || !g.garageOn() {
+// buildStorageConsole synthesizes the optional MinIO admin console (opens3/console —
+// the community fork that preserves the full pre-trim MinIO console feature set) as a
+// Service routed through Traefik on the "storage" subdomain, reusing buildService so it
+// gets the same routing/ports/networks as Adminer. It's a root-mounted SPA, so it's
+// ALWAYS a subdomain. With Traefik off it falls back to publishing host port 9090
+// (dev-only). Gated on the project's StorageUI flag + MinIO being enabled. The user logs
+// into it with the MinIO root creds (shown in the managed-services info row).
+func (g *gen) buildStorageConsole(prefix, rp, registry, tag string, isSwarm bool) {
+	if !g.cfg.Project.StorageUI || !g.minioOn() {
 		return
 	}
-	ver := g.cfg.version("garage_webui", "latest")
+	ver := g.cfg.version("storage_console", "latest")
 	svc := Service{
-		Name:      "garage_webui",
-		Image:     "khairul169/garage-webui",
+		Name:      "storage_console",
+		Image:     "opens3/console",
 		Tag:       ver,
-		Port:      "3909", // the UI's listen port (Traefik / host-port target)
+		Port:      "9090", // the console's listen port (Traefik / host-port target)
 		WebRouted: true,
-		Subdomain: "garage", // always a subdomain — the SPA assumes it's served at /
-		HostPort:  "3909",   // host publish only when Traefik is off (no collisions under Traefik)
-		DependsOn: []string{"garage"},
-		Volumes:   []string{"${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro"},
-		// khairul169/garage-webui contract: admin API (3903) + key, S3 endpoint (3900);
-		// region matches the generated garage.toml ([s3_api] s3_region="garage").
+		Subdomain: "storage", // always a subdomain — the SPA assumes it's served at /
+		HostPort:  "9090",    // host publish only when Traefik is off (no collisions under Traefik)
+		DependsOn: []string{"minio"},
+		// opens3/console contract: point it at the in-network MinIO S3 API; the PBKDF
+		// passphrase/salt (session crypto) come from .env via compose interpolation.
 		EnvVars: map[string]flexStr{
-			"API_BASE_URL":    flexStr("http://" + prefix + "_garage:3903"),
-			"API_ADMIN_KEY":   flexStr("${GARAGE_ADMIN_TOKEN}"),
-			"S3_ENDPOINT_URL": flexStr("http://" + prefix + "_garage:3900"),
-			"S3_REGION":       flexStr("garage"),
+			"CONSOLE_MINIO_SERVER":     flexStr("http://" + prefix + "_minio:9000"),
+			"CONSOLE_PBKDF_PASSPHRASE": flexStr("${MINIO_CONSOLE_PASSPHRASE}"),
+			"CONSOLE_PBKDF_SALT":       flexStr("${MINIO_CONSOLE_SALT}"),
 		},
-		// Admin UI → eligible for the per-env basic-auth middleware (Slice 2).
+		// Admin UI → eligible for the per-env basic-auth middleware.
 		AuthProtect: true,
 	}
 	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
@@ -164,9 +163,11 @@ func (g *gen) emitVolumes(prefix string) {
 	if g.redisOn() {
 		add(prefix + "_redis_data")
 	}
-	if g.garageOn() {
-		add(prefix + "_garage_data")
-		add(prefix + "_garage_meta")
+	if g.minioOn() {
+		add(prefix + "_minio_data")
+	}
+	if g.localStorageOn() {
+		add(prefix + "_storage")
 	}
 	for _, nv := range c.NamedVolumes {
 		if nv.Name == "" || strings.HasPrefix(nv.Name, ".") || strings.HasPrefix(nv.Name, "/") {
@@ -258,6 +259,15 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 			g.line("      - " + vol) // absolute path or ${VAR} — pass through unchanged
 		}
 	}
+	// Local object storage: persist the app's storage dir on a named volume so uploads
+	// survive recreate/redeploy (an image-baked CodeCanyon app would otherwise lose them
+	// on every deploy). Attached to app services (build or image-reuse) — never pulled
+	// images / synthesized admin sidecars. Workers reusing the app image share the volume.
+	if g.localStorageOn() && (svc.Build != nil || svc.ImageFrom != "") {
+		openVolumes()
+		g.line("      - " + prefix + "_storage:" + g.storageMountPath())
+	}
+
 	// Materialise the env's generated .env as a physical file at EnvFileMount. Two modes:
 	//   - WRITABLE (env_file_writable): bind the env's real .env file rw so the app can
 	//     persist its own writes (a CodeCanyon installer writing INSTALLED=true). The
@@ -405,9 +415,10 @@ func (g *gen) depHasHealthcheck(name string) bool {
 		}
 	}
 	switch name {
-	case "postgres", "mysql", "mariadb", "redis", "garage":
-		return true // managed deps always carry a healthcheck (see buildManagedDeps)
+	case "postgres", "mysql", "mariadb", "redis":
+		return true // these managed deps carry a healthcheck (see buildManagedDeps)
 	}
+	// minio (and its mc-init) intentionally have NO healthcheck — see buildManagedDeps.
 	return false
 }
 
@@ -476,9 +487,22 @@ func (g *gen) dbEngine() string {
 	return g.e.Database
 }
 
-// redisOn / garageOn report whether the dependency is enabled (project OR legacy env).
-func (g *gen) redisOn() bool  { return g.cfg.Project.Redis || g.e.RedisEnabled }
-func (g *gen) garageOn() bool { return g.cfg.Project.Garage || g.e.GarageEnabled }
+// redisOn reports whether Redis is enabled (project OR legacy env).
+func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
+
+// minioOn / localStorageOn report the active object-storage backend (project-level).
+// Legacy Garage flags are ignored (garage retired) — object_storage is the source of truth.
+func (g *gen) minioOn() bool        { return g.cfg.Project.ObjectStorage == "minio" }
+func (g *gen) localStorageOn() bool { return g.cfg.Project.ObjectStorage == "local" }
+
+// storageMountPath is the container path the local persistent volume mounts at,
+// defaulting to Laravel's storage dir (the common CodeCanyon case) when unset.
+func (g *gen) storageMountPath() string {
+	if p := g.cfg.Project.StoragePath; p != "" {
+		return p
+	}
+	return "/var/www/html/storage"
+}
 
 // dbVersion resolves the managed DB's image tag: the project's explicit DBVersion
 // (else the legacy per-env one), else the project versions map, else the catalog
@@ -509,7 +533,6 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	c := g.cfg
 	engine := g.dbEngine()
 	verRedis := c.version("redis", "7-alpine")
-	verGarage := c.version("garage", "v1.0.1")
 
 	if engine == "postgres" {
 		eng, _ := databases.Get("postgres")
@@ -577,25 +600,40 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
-	if g.garageOn() {
-		g.line(sectionComment("Garage "+verGarage+" (S3-compatible)", dashGarage))
-		g.line("  garage:")
-		g.line("    image: dxflrs/garage:" + verGarage)
-		g.line("    container_name: " + prefix + "_garage")
-		g.line("    volumes:")
-		g.line("      - " + prefix + "_garage_data:/data")
-		g.line("      - " + prefix + "_garage_meta:/meta")
-		// garage.toml is Rigger-generated in the env dir root (not _src), so root it
-		// at ${RIGGER_BIND_ROOT} directly so the host daemon can resolve it.
-		g.line("      - ${RIGGER_BIND_ROOT:-.}/garage.toml:/etc/garage.toml:ro")
+	if g.minioOn() {
+		verMinIO := c.version("minio", "latest")
+		verMC := c.version("minio_mc", "latest")
+		g.line(sectionComment("MinIO "+verMinIO+" (S3-compatible)", dashStorage))
+		g.line("  minio:")
+		g.line("    image: minio/minio:" + verMinIO)
+		g.line("    container_name: " + prefix + "_minio")
+		// S3 API on :9000, built-in console on :9001 (the rich admin UI is the opt-in
+		// opens3/console sidecar; this stock one is fine for a quick look).
+		g.line("    command: server /data --console-address \":9001\"")
 		g.line("    environment:")
-		g.line(g.dbEnvLine("GARAGE_ADMIN_TOKEN"))
-		g.line(g.dbEnvLine("GARAGE_RPC_SECRET")) // required by garage; from .env (not the regenerated toml)
-		g.managedNet(prefix, "garage")
-		// The garage image is distroless (no shell/curl), so a CMD-SHELL curl check
-		// can't run → always unhealthy. Use the garage binary itself (exec form).
-		g.healthcheckExec([]string{"/garage", "status"}, "30s", "10s", "3", "60s")
-		g.deployBlock(isSwarm, "garage", "1", "unless-stopped")
+		g.line(g.dbEnvLine("MINIO_ROOT_USER"))
+		g.line(g.dbEnvLine("MINIO_ROOT_PASSWORD"))
+		g.line("    volumes:")
+		g.line("      - " + prefix + "_minio_data:/data")
+		g.managedNet(prefix, "minio")
+		// No Docker healthcheck: the minio image is distroless-ish (no curl/shell), so a
+		// CMD-SHELL probe would fail and Traefik would drop it. A container with NO
+		// healthcheck reads as healthy; the mc-init below retry-loops until MinIO is up.
+		g.deployBlock(isSwarm, "minio", "1", "unless-stopped")
+		g.line("")
+
+		// One-shot bucket init: wait for MinIO, then create the app's bucket (idempotent).
+		// minio/mc ships /bin/sh; $$VAR keeps the .env values for the SHELL (compose would
+		// otherwise interpolate $VAR at parse time). restart:"no" so it runs once and exits.
+		g.line(sectionComment("MinIO bucket init (one-shot)", dashStorage))
+		g.line("  minio_init:")
+		g.line("    image: minio/mc:" + verMC)
+		g.line("    container_name: " + prefix + "_minio_init")
+		g.emitDependsOn(prefix, []string{"minio"}, isSwarm)
+		g.managedNet(prefix, "minio_init")
+		g.line("    env_file: .env")
+		g.line("    entrypoint: [\"/bin/sh\", \"-c\", \"until mc alias set rigger http://" + prefix + "_minio:9000 \\\"$$MINIO_ROOT_USER\\\" \\\"$$MINIO_ROOT_PASSWORD\\\"; do echo 'waiting for minio...'; sleep 2; done; mc mb --ignore-existing rigger/\\\"$$MINIO_BUCKET\\\"; echo 'bucket ready'; exit 0\"]")
+		g.line("    restart: \"no\"")
 		g.line("")
 	}
 }
@@ -671,8 +709,8 @@ func managedDepPort(name string) string {
 		return "3306"
 	case "redis":
 		return "6379"
-	case "garage":
-		return "3900"
+	case "minio":
+		return "9000"
 	case "adminer":
 		return "8080"
 	}

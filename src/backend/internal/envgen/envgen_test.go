@@ -96,7 +96,7 @@ func TestCustomPostgresEnv(t *testing.T) {
       ],
       "environments": { "prod": {
         "domain": "myapp.com", "http_port": 80, "https_port": 443,
-        "database": "postgres", "redis_enabled": true, "garage_enabled": false,
+        "database": "postgres", "redis_enabled": true,
         "deployment": "compose",
         "env_vars": { "CUSTOM_FLAG": "yes" }
       } }
@@ -126,7 +126,7 @@ func TestCustomPostgresEnv(t *testing.T) {
 		"APP_URL":              "http://myapp.com",
 		"REDIS_ENABLED":        "true",
 		"REDIS_HOST":           "myapp_prod_redis",
-		"GARAGE_ENABLED":       "false",
+		"OBJECT_STORAGE":       "none",
 		"NODE_ENV":             "production",
 		"PORT":                 "3000",
 		"CUSTOM_FLAG":          "yes",
@@ -142,9 +142,9 @@ func TestCustomPostgresEnv(t *testing.T) {
 	if !strings.HasPrefix(m["APP_KEY"], "base64:") {
 		t.Errorf("APP_KEY = %q, want base64: prefix", m["APP_KEY"])
 	}
-	// Garage disabled → no garage vars.
-	if _, ok := m["GARAGE_HOST"]; ok {
-		t.Error("GARAGE_HOST present but garage disabled")
+	// No object storage → no MinIO vars.
+	if _, ok := m["MINIO_ROOT_USER"]; ok {
+		t.Error("MINIO_ROOT_USER present but object storage disabled")
 	}
 
 	// example masks the DB password.
@@ -268,13 +268,14 @@ func TestFrameworkEnvURLRedaction(t *testing.T) {
 	}
 }
 
-func TestCustomDevAndMysqlAndGarage(t *testing.T) {
+func TestCustomDevAndMysqlAndMinIO(t *testing.T) {
 	c := cfg(t, `{
       "project": { "name": "app", "type": "custom", "registry": "reg",
+        "object_storage": "minio",
         "version": { "major": 0, "minor": 1, "patch": 0, "build": 0 } },
       "environments": { "dev": {
         "domain": "dev.app", "backend": "php", "frontend_enabled": false,
-        "database": "mysql", "redis_enabled": false, "garage_enabled": true,
+        "database": "mysql", "redis_enabled": false,
         "deployment": "compose", "replicas": { "backend": 1, "frontend": 1 }
       } }
     }`)
@@ -300,8 +301,11 @@ func TestCustomDevAndMysqlAndGarage(t *testing.T) {
 	if _, ok := m["FRONTEND_IMAGE"]; ok {
 		t.Error("FRONTEND_IMAGE present but frontend disabled")
 	}
-	if m["GARAGE_BUCKET"] != "app-dev" {
-		t.Errorf("GARAGE_BUCKET = %q, want app-dev", m["GARAGE_BUCKET"])
+	if m["MINIO_BUCKET"] != "app-dev" {
+		t.Errorf("MINIO_BUCKET = %q, want app-dev", m["MINIO_BUCKET"])
+	}
+	if m["MINIO_ROOT_USER"] == "" || m["MINIO_ROOT_PASSWORD"] == "" {
+		t.Errorf("MinIO root creds missing: user=%q", m["MINIO_ROOT_USER"])
 	}
 	if _, ok := m["REDIS_HOST"]; ok {
 		t.Error("REDIS_HOST present but redis disabled")
@@ -467,12 +471,13 @@ func TestProtectAdminUIsCreds(t *testing.T) {
 	}
 }
 
-// TestGarageWiresLaravelS3 verifies the Garage→Laravel S3 contract: when Garage is
+// TestMinIOWiresLaravelS3 verifies the MinIO→Laravel S3 contract: when MinIO is
 // enabled, the Laravel framework env contract emits AWS_*/FILESYSTEM_DISK pointing at
-// the managed Garage bucket, and a repo's .env.example AWS_* can't shadow them.
-func TestGarageWiresLaravelS3(t *testing.T) {
+// the managed MinIO bucket (creds = MinIO root), and a repo's .env.example AWS_* can't
+// shadow them.
+func TestMinIOWiresLaravelS3(t *testing.T) {
 	c := cfg(t, `{
-      "project": { "name": "myapp", "garage_enabled": true,
+      "project": { "name": "myapp", "object_storage": "minio",
         "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
       "services": [{"name":"backend","build":{"template":"laravel"}}],
       "environments": { "dev": {
@@ -489,13 +494,14 @@ func TestGarageWiresLaravelS3(t *testing.T) {
 		t.Errorf("FILESYSTEM_DISK=%q, want s3 (managed contract must win over the repo's 'local')", m["FILESYSTEM_DISK"])
 	}
 	if m["AWS_BUCKET"] == "leaked" || m["AWS_BUCKET"] == "" {
-		t.Errorf("AWS_BUCKET=%q, want the managed Garage bucket (repo value must not leak)", m["AWS_BUCKET"])
+		t.Errorf("AWS_BUCKET=%q, want the managed MinIO bucket (repo value must not leak)", m["AWS_BUCKET"])
 	}
 	if m["AWS_ENDPOINT"] == "" || m["AWS_USE_PATH_STYLE_ENDPOINT"] != "true" {
-		t.Errorf("expected Garage S3 endpoint + path-style; got endpoint=%q pathstyle=%q", m["AWS_ENDPOINT"], m["AWS_USE_PATH_STYLE_ENDPOINT"])
+		t.Errorf("expected MinIO S3 endpoint + path-style; got endpoint=%q pathstyle=%q", m["AWS_ENDPOINT"], m["AWS_USE_PATH_STYLE_ENDPOINT"])
 	}
-	if m["AWS_ACCESS_KEY_ID"] == "" || m["AWS_SECRET_ACCESS_KEY"] == "" {
-		t.Errorf("expected AWS credentials from Garage facts, got id=%q", m["AWS_ACCESS_KEY_ID"])
+	// The S3 access key/secret ARE the MinIO root creds.
+	if m["AWS_ACCESS_KEY_ID"] != m["MINIO_ROOT_USER"] || m["AWS_SECRET_ACCESS_KEY"] != m["MINIO_ROOT_PASSWORD"] {
+		t.Errorf("expected AWS creds to equal MinIO root creds, got id=%q user=%q", m["AWS_ACCESS_KEY_ID"], m["MINIO_ROOT_USER"])
 	}
 	// No duplicate FILESYSTEM_DISK (the repo extra must be skipped, not appended).
 	if n := strings.Count(env, "\nFILESYSTEM_DISK="); n != 1 {

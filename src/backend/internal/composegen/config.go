@@ -42,21 +42,34 @@ type Project struct {
 	// that require HTTPS locally (e.g. Vaultwarden). Ignored once a base domain is set.
 	LocalTLS bool `json:"local_tls,omitempty"`
 	// Managed dependencies are project-level (consistent across envs): the DB engine
-	// + version and the Redis/Garage toggles. Only per-env DBExternal stays on Env.
-	// Legacy per-env Env.Database/DBVersion/Redis/Garage are read as a fallback so
-	// pre-move configs generate identical YAML — see gen.dbEngine/redisOn/garageOn.
+	// + version and the Redis toggle. Only per-env DBExternal stays on Env.
+	// Legacy per-env Env.Database/DBVersion/Redis are read as a fallback so
+	// pre-move configs generate identical YAML — see gen.dbEngine/redisOn.
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
-	Garage    bool   `json:"garage_enabled,omitempty"`
 	// WebSQL synthesizes an Adminer web-SQL service (see buildAdminer) — the unified
-	// flag, like Redis/Garage. Legacy projects carry a literal "adminer" service in
+	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
 	WebSQL bool `json:"web_sql,omitempty"`
-	// GarageWebUI adds the optional Garage web admin UI sidecar (khairul169/garage-webui)
-	// when Garage is enabled — the S3 store itself is always headless. Off by default
-	// (Garage alone = S3 support); the wizard/Edit Project expose it as a toggle under
-	// Garage, mirroring WebSQL/Adminer under the database.
+	// ObjectStorage selects the project's file/object-storage backend (project-level):
+	//   ""/"none" → no managed storage
+	//   "local"   → FILESYSTEM_DISK=local + a persistent named volume at StoragePath
+	//   "minio"   → managed MinIO S3 (server + one-shot mc bucket-init) wired via AWS_*
+	// Replaces the retired Garage. Legacy Garage/GarageWebUI below are kept only so old
+	// config.json unmarshals; they are NOT mapped to a mode (garage generation removed).
+	ObjectStorage string `json:"object_storage,omitempty"`
+	// StorageBucket overrides the auto-derived MinIO bucket base ({prefix}); the env
+	// name is always appended ({base}-{env}). Blank → derived. minio only.
+	StorageBucket string `json:"storage_bucket,omitempty"`
+	// StoragePath is the container path the local persistent volume mounts at (default
+	// /var/www/html/storage). local only.
+	StoragePath string `json:"storage_path,omitempty"`
+	// StorageUI adds the opens3/console admin sidecar (routed on the "storage"
+	// subdomain) when ObjectStorage=minio. Off by default (MinIO alone = S3 only).
+	StorageUI bool `json:"storage_ui,omitempty"`
+	// Deprecated: legacy Garage toggles — read only for back-compat unmarshal; ignored.
+	Garage      bool `json:"garage_enabled,omitempty"`
 	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 }
 

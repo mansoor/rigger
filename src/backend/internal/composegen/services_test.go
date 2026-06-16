@@ -335,11 +335,61 @@ func TestAdminerSynthSubdomain(t *testing.T) {
 	}
 }
 
-// The Garage web UI synthesizes as a Traefik-routed service on the "garage" subdomain
-// (correct image, no host port under Traefik) — gated on the garage_web_ui flag.
-func TestGarageWebUISubdomain(t *testing.T) {
+// object_storage=minio emits the MinIO server + a one-shot mc bucket-init; neither
+// carries a Docker healthcheck (so Traefik won't drop them). object_storage=local emits
+// no storage container but mounts a persistent volume over the app's storage dir.
+func TestObjectStorageMinIOAndLocal(t *testing.T) {
+	minioCfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"object_storage":"minio"},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose"}}
+	}`
+	out, err := GenerateAt([]byte(minioCfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	m := svcBlock(t, s, "minio")
+	for _, want := range []string{"image: minio/minio:", "server /data --console-address", "- app1_dev_minio_data:/data"} {
+		if !strings.Contains(m, want) {
+			t.Errorf("minio block missing %q\n---\n%s", want, m)
+		}
+	}
+	if strings.Contains(m, "healthcheck:") {
+		t.Errorf("minio must NOT carry a healthcheck (distroless → Traefik would drop it)\n%s", m)
+	}
+	init := svcBlock(t, s, "minio_init")
+	for _, want := range []string{"image: minio/mc:", "mc mb --ignore-existing", "$$MINIO_BUCKET", "restart: \"no\""} {
+		if !strings.Contains(init, want) {
+			t.Errorf("minio_init block missing %q\n---\n%s", want, init)
+		}
+	}
+
+	// local: no minio container, but the app service gets the storage volume at the default path.
+	localCfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"object_storage":"local"},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose"}}
+	}`
+	out2, err := GenerateAt([]byte(localCfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2 := string(out2)
+	if strings.Contains(s2, "  minio:") {
+		t.Errorf("local storage must not emit a minio container\n%s", s2)
+	}
+	if !strings.Contains(svcBlock(t, s2, "web"), "- app1_dev_storage:/var/www/html/storage") {
+		t.Errorf("local storage must mount the persistent volume on the app service\n%s", s2)
+	}
+}
+
+// The MinIO admin console (opens3/console) synthesizes as a Traefik-routed service on
+// the "storage" subdomain (correct image, no host port under Traefik) — gated on the
+// storage_ui flag + object_storage=minio.
+func TestStorageConsoleSubdomain(t *testing.T) {
 	cfg := `{
-		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"garage_enabled":true,"garage_web_ui":true},
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"object_storage":"minio","storage_ui":true},
 		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
 		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com"}}
 	}`
@@ -347,34 +397,33 @@ func TestGarageWebUISubdomain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := svcBlock(t, string(out), "garage_webui")
+	g := svcBlock(t, string(out), "storage_console")
 	for _, want := range []string{
-		"image: khairul169/garage-webui",
-		"routers.app1_dev_garage_webui.rule=Host(`garage.app1.example.com`)",
-		"- API_BASE_URL=http://app1_dev_garage:3903",
-		"- S3_ENDPOINT_URL=http://app1_dev_garage:3900",
+		"image: opens3/console",
+		"routers.app1_dev_storage_console.rule=Host(`storage.app1.example.com`)",
+		"- CONSOLE_MINIO_SERVER=http://app1_dev_minio:9000",
 	} {
 		if !strings.Contains(g, want) {
-			t.Errorf("garage_webui block missing %q\n---\n%s", want, g)
+			t.Errorf("storage_console block missing %q\n---\n%s", want, g)
 		}
 	}
 	// Under Traefik it must NOT publish a host port (no multi-instance collision).
 	if strings.Contains(g, "ports:") {
-		t.Errorf("garage_webui should not publish a host port under Traefik\n%s", g)
+		t.Errorf("storage_console should not publish a host port under Traefik\n%s", g)
 	}
-	// With the flag off, no garage_webui service.
-	off := strings.Replace(cfg, `"garage_web_ui":true`, `"garage_web_ui":false`, 1)
+	// With the flag off, no storage_console service.
+	off := strings.Replace(cfg, `"storage_ui":true`, `"storage_ui":false`, 1)
 	out2, _ := GenerateAt([]byte(off), "dev", time.Unix(0, 0).UTC())
-	if strings.Contains(string(out2), "garage_webui:") {
-		t.Errorf("garage_webui must not render when the flag is off\n%s", out2)
+	if strings.Contains(string(out2), "storage_console:") {
+		t.Errorf("storage_console must not render when the flag is off\n%s", out2)
 	}
 }
 
-// With protect_admin_uis on, the admin sidecars (Adminer + Garage UI) get a Traefik
+// With protect_admin_uis on, the admin sidecars (Adminer + MinIO console) get a Traefik
 // basic-auth middleware referencing ${ADMIN_UI_USERS}; the app's own web entry does NOT.
 func TestProtectAdminUIs(t *testing.T) {
 	cfg := `{
-		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true,"garage_enabled":true,"garage_web_ui":true},
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true,"object_storage":"minio","storage_ui":true},
 		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
 		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","protect_admin_uis":true}}
 	}`
@@ -382,7 +431,7 @@ func TestProtectAdminUIs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"adminer", "garage_webui"} {
+	for _, name := range []string{"adminer", "storage_console"} {
 		b := svcBlock(t, string(out), name)
 		mw := "middlewares.app1_dev_" + name + "_auth.basicauth.users=${ADMIN_UI_USERS}"
 		if !strings.Contains(b, mw) {

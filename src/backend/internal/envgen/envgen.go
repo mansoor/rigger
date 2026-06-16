@@ -142,17 +142,22 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			out[k] = true
 		}
 	}
-	if cfg.EffGarage(e) {
+	switch cfg.EffObjectStorage(e) {
+	case "minio":
 		for _, k := range []string{
-			"GARAGE_ENABLED", "GARAGE_HOST", "GARAGE_API_PORT", "GARAGE_S3_PORT", "GARAGE_WEB_PORT",
-			"GARAGE_ADMIN_TOKEN", "GARAGE_RPC_SECRET", "GARAGE_KEY_ID", "GARAGE_SECRET_KEY", "GARAGE_BUCKET", "GARAGE_ENDPOINT",
-			// The framework S3 contract (e.g. Laravel) maps Garage onto AWS_* keys — reserve
+			"OBJECT_STORAGE", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BUCKET",
+			"MINIO_ENDPOINT", "MINIO_REGION", "MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
+			// The framework S3 contract (e.g. Laravel) maps MinIO onto AWS_* keys — reserve
 			// them so a repo's .env.example AWS_* defaults can't shadow the managed values.
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_BUCKET",
 			"AWS_ENDPOINT", "AWS_USE_PATH_STYLE_ENDPOINT", "FILESYSTEM_DISK",
 		} {
 			out[k] = true
 		}
+	case "local":
+		// local persists files to a volume; the framework contract sets FILESYSTEM_DISK=local.
+		out["OBJECT_STORAGE"] = true
+		out["FILESYSTEM_DISK"] = true
 	}
 	if cfg.HasAdminer() {
 		out["ADMINER_LOGIN_SECRET"] = true
@@ -171,7 +176,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 // build.template (set by the detector or the blueprint picker); services without
 // a recognised blueprint contribute nothing. On a key clash between two
 // frameworks the first service's value wins.
-func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword, garageKeyID, garageSecretKey string) map[string]string {
+func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword, minioUser, minioPassword, minioBucket string) map[string]string {
 	// User must match the account the managed-db container provisions, which
 	// envgen writes as MYSQL_USER/POSTGRES_USER = "<dbBase>_user".
 	dbUser := dbBase + "_user"
@@ -189,18 +194,23 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 	if cfg.EffRedis(e) {
 		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
 	}
-	// Garage facts mirror the GARAGE_* block emitted in generate(): same bucket
-	// (dns-safe, hyphenated), same in-network S3 endpoint. Region is a placeholder
-	// SDKs require but Garage ignores.
-	var garage *blueprints.GarageFacts
-	if cfg.EffGarage(e) {
-		garage = &blueprints.GarageFacts{
-			KeyID:     garageKeyID,
-			SecretKey: garageSecretKey,
-			Bucket:    strings.ReplaceAll(dbBase, "_", "-") + "-" + env,
-			Endpoint:  "http://" + prefix + "_garage:3901",
+	// Storage facts drive the framework's file/object-storage wiring: local → just
+	// FILESYSTEM_DISK=local; minio → the S3 (AWS_*) contract. The S3 access key/secret
+	// ARE the MinIO root creds; endpoint is the in-network MinIO S3 API. Region is a
+	// placeholder SDKs require but MinIO ignores.
+	var storage *blueprints.StorageFacts
+	switch cfg.EffObjectStorage(e) {
+	case "minio":
+		storage = &blueprints.StorageFacts{
+			Mode:      "s3",
+			KeyID:     minioUser,
+			SecretKey: minioPassword,
+			Bucket:    minioBucket,
+			Endpoint:  "http://" + prefix + "_minio:9000",
 			Region:    "us-east-1",
 		}
+	case "local":
+		storage = &blueprints.StorageFacts{Mode: "local"}
 	}
 
 	out := map[string]string{}
@@ -214,7 +224,7 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 		if !ok || bp.EnvVars == nil {
 			continue
 		}
-		for k, v := range bp.EnvVars(db, redis, garage) {
+		for k, v := range bp.EnvVars(db, redis, storage) {
 			if _, exists := out[k]; !exists {
 				out[k] = v
 			}
@@ -336,10 +346,13 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	dbPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD")
 	dbRootPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_ROOT_PASSWORD")
 	appKey := getOut("base64:"+base64N(r, 32), "APP_KEY")
-	garageAdminToken := getOut(hexN(r, 16), "GARAGE_ADMIN_TOKEN")
-	garageRPCSecret := getOut(hexN(r, 32), "GARAGE_RPC_SECRET") // garage requires a 32-byte hex rpc_secret
-	garageKeyID := getOut(hexN(r, 8), "GARAGE_KEY_ID")
-	garageSecretKey := getOut(hexN(r, 32), "GARAGE_SECRET_KEY")
+	// MinIO root credentials double as the app's S3 access key/secret (AWS_*). They
+	// must be preserved across regen — the bucket/data volume is provisioned with them.
+	minioUser := getOut("rigger", "MINIO_ROOT_USER")
+	minioPassword := getOut("rigger-"+hexN(r, 16), "MINIO_ROOT_PASSWORD") // MinIO requires ≥8 chars
+	// opens3/console session crypto (CONSOLE_PBKDF_*). Stable per env so sessions survive regen.
+	minioConsolePass := getOut(hexN(r, 16), "MINIO_CONSOLE_PASSPHRASE")
+	minioConsoleSalt := getOut(hexN(r, 16), "MINIO_CONSOLE_SALT")
 
 	var b strings.Builder
 	p := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
@@ -427,7 +440,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// doesn't try to expand the bcrypt hash's '$' segments. The plaintext password is
 	// preserved across regen (read from the existing .env) so a regen doesn't lock the
 	// user out — only the hash re-derives.
-	if e.ProtectAdminUIs && (cfg.HasAdminer() || cfg.Project.GarageWebUI) {
+	if e.ProtectAdminUIs && (cfg.HasAdminer() || cfg.Project.StorageUI) {
 		adminPass := ""
 		if existing != nil {
 			adminPass = existing["ADMIN_UI_PASSWORD"]
@@ -474,22 +487,29 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	p("\n")
 
-	garageOn := cfg.EffGarage(e)
-	p("# ── Garage (S3-compatible storage) ─────────────────────────\n")
-	p("GARAGE_ENABLED=%t\n", garageOn)
-	if garageOn {
-		p("GARAGE_HOST=%s_garage\n", prefix)
-		p("GARAGE_API_PORT=3900\n")
-		p("GARAGE_S3_PORT=3901\n")
-		p("GARAGE_WEB_PORT=3903\n")
-		p("GARAGE_ADMIN_TOKEN=%s\n", garageAdminToken)
-		p("GARAGE_RPC_SECRET=%s\n", garageRPCSecret)
-		p("GARAGE_KEY_ID=%s\n", garageKeyID)
-		p("GARAGE_SECRET_KEY=%s\n", garageSecretKey)
-		// S3 bucket names allow lowercase + hyphens only — derive from the safe
-		// prefix, not the free-form display name.
-		p("GARAGE_BUCKET=%s-%s\n", strings.ReplaceAll(dbBase, "_", "-"), env)
-		p("GARAGE_ENDPOINT=http://%s_garage:3901\n", prefix)
+	// ── Object / file storage ──────────────────────────────────────────────────
+	// none → nothing; local → FILESYSTEM_DISK=local (emitted via the framework
+	// contract) + a persistent volume; minio → managed MinIO S3. The S3 access
+	// key/secret ARE the MinIO root creds (simplest single-node setup). Bucket name
+	// is lowercase+hyphens only — derive from the safe prefix (or the override), env-suffixed.
+	storageMode := cfg.EffObjectStorage(e)
+	bucketBase := strings.ReplaceAll(dbBase, "_", "-")
+	if b := cfg.Project.StorageBucket; b != "" {
+		bucketBase = strings.ReplaceAll(strings.ToLower(b), "_", "-")
+	}
+	minioBucket := bucketBase + "-" + env
+	p("# ── Object storage ─────────────────────────────────────────\n")
+	p("OBJECT_STORAGE=%s\n", storageMode)
+	if storageMode == "minio" {
+		p("MINIO_ROOT_USER=%s\n", minioUser)
+		p("MINIO_ROOT_PASSWORD=%s\n", minioPassword)
+		p("MINIO_BUCKET=%s\n", minioBucket)
+		p("MINIO_ENDPOINT=http://%s_minio:9000\n", prefix)
+		p("MINIO_REGION=us-east-1\n")
+		if cfg.Project.StorageUI {
+			p("MINIO_CONSOLE_PASSPHRASE=%s\n", minioConsolePass)
+			p("MINIO_CONSOLE_SALT=%s\n", minioConsoleSalt)
+		}
 	}
 	p("\n")
 
@@ -500,7 +520,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// arbitrary scanned repo wires up to the db/redis without the user hand-
 	// mapping Rigger's MYSQL_*/POSTGRES_* onto the framework's keys. The keys
 	// stay language-specific in the blueprint; envgen stays generic.
-	fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword, garageKeyID, garageSecretKey)
+	fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword, minioUser, minioPassword, minioBucket)
 	if len(fe) > 0 {
 		p("# ── Framework env contract (blueprint-declared) ────────────\n")
 		keys := make([]string, 0, len(fe))
@@ -591,10 +611,9 @@ var examplePlaceholder = map[string]string{
 	"MYSQL_ROOT_PASSWORD":        "CHANGE_ME_ROOT_PASSWORD",
 	"DB_PASSWORD":                "CHANGE_ME_DB_PASSWORD",
 	"SPRING_DATASOURCE_PASSWORD": "CHANGE_ME_DB_PASSWORD",
-	"APP_KEY":             "base64:CHANGE_ME",
-	"GARAGE_ADMIN_TOKEN":  "CHANGE_ME_GARAGE_TOKEN",
-	"GARAGE_KEY_ID":       "CHANGE_ME_KEY_ID",
-	"GARAGE_SECRET_KEY":   "CHANGE_ME_SECRET_KEY",
+	"APP_KEY":                  "base64:CHANGE_ME",
+	"MINIO_ROOT_PASSWORD":      "CHANGE_ME_MINIO_PASSWORD",
+	"MINIO_CONSOLE_PASSPHRASE": "CHANGE_ME",
 }
 
 // urlCredRE matches the password in a URL userinfo (scheme://user:PASS@host).

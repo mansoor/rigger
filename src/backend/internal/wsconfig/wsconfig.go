@@ -105,19 +105,33 @@ type Project struct {
 	EnvOrder []string `json:"env_order,omitempty"`
 	// Managed dependencies are PROJECT-level (consistent across all environments):
 	// the database engine (none|postgres|mysql|mariadb), its catalog version, and
-	// the Redis / Garage toggles. Only the per-env DBExternal (host-port exposure)
-	// stays on Env. These supersede the legacy per-env Env.Database/DBVersion/
-	// RedisEnabled/GarageEnabled, which are still read as a fallback (see Eff*).
+	// the Redis toggle. Only the per-env DBExternal (host-port exposure) stays on
+	// Env. These supersede the legacy per-env Env.Database/DBVersion/RedisEnabled,
+	// which are still read as a fallback (see Eff*).
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
-	Garage    bool   `json:"garage_enabled,omitempty"`
 	// WebSQL adds an Adminer web-SQL client to the project (the unified flag, like
-	// Redis/Garage). composegen synthesizes the service from it for any stack with a
+	// Redis). composegen synthesizes the service from it for any stack with a
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
 	// treats both as present. See [[adminer]] in composegen.buildAdminer.
 	WebSQL bool `json:"web_sql,omitempty"`
-	// GarageWebUI adds the optional Garage web admin UI sidecar (when Garage is on).
+	// ObjectStorage selects the project's file/object-storage backend (project-level):
+	// ""/"none" (no storage), "local" (FILESYSTEM_DISK=local + persistent volume at
+	// StoragePath), or "minio" (managed MinIO S3 + mc bucket-init, wired via AWS_*).
+	// Replaces the retired Garage. See EffObjectStorage / MinIOOn / LocalStorageOn.
+	ObjectStorage string `json:"object_storage,omitempty"`
+	// StorageBucket overrides the auto-derived MinIO bucket base ({prefix}); the env
+	// name is always appended ({base}-{env}). Blank → derived. minio only.
+	StorageBucket string `json:"storage_bucket,omitempty"`
+	// StoragePath is the container path the local persistent volume mounts at
+	// (default /var/www/html/storage). local only.
+	StoragePath string `json:"storage_path,omitempty"`
+	// StorageUI adds the opens3/console admin sidecar when ObjectStorage=minio.
+	StorageUI bool `json:"storage_ui,omitempty"`
+	// Deprecated: legacy Garage toggles — kept only so old config.json unmarshals.
+	// Garage generation is retired; these are ignored (read as no-op). See EffObjectStorage.
+	Garage      bool `json:"garage_enabled,omitempty"`
 	GarageWebUI bool `json:"garage_web_ui,omitempty"`
 	// DBSeed, when set, points at a bundled SQL dump (stored at _source/seed.sql,
 	// found by the detector in an uploaded marketplace app) to import into the managed
@@ -192,8 +206,25 @@ func (c *Config) EffDBVersion(e Env) string {
 // EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
 func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
 
-// EffGarage reports whether Garage is enabled (project-level OR legacy per-env).
-func (c *Config) EffGarage(e Env) bool { return c.Project.Garage || e.GarageEnabled }
+// EffObjectStorage returns the project's object-storage mode (none|local|minio).
+// Legacy Garage configs are intentionally NOT mapped (garage is retired) — they read
+// as "none" so generation drops garage cleanly without crashing. The Env arg is
+// accepted for symmetry with the other Eff* helpers (storage is project-level).
+func (c *Config) EffObjectStorage(_ Env) string {
+	if c.Project.ObjectStorage != "" {
+		return c.Project.ObjectStorage
+	}
+	return "none"
+}
+
+// MinIOOn / LocalStorageOn report the active object-storage backend for an env.
+func (c *Config) MinIOOn(e Env) bool        { return c.EffObjectStorage(e) == "minio" }
+func (c *Config) LocalStorageOn(e Env) bool { return c.EffObjectStorage(e) == "local" }
+
+// EffGarage is retired: garage generation is removed and legacy flags are ignored.
+// Kept as a no-op (always false) so any not-yet-migrated caller compiles. Remove once
+// all call sites move to EffObjectStorage / MinIOOn / LocalStorageOn.
+func (c *Config) EffGarage(_ Env) bool { return false }
 
 // HasAdminer reports whether the project exposes the Adminer web-SQL client: the
 // project-level web_sql flag (unified), or a legacy literal "adminer" service in

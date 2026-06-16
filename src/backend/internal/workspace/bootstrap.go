@@ -19,7 +19,7 @@ import (
 //
 //	.env / .env.example  — via envgen (existing secrets preserved unless regenEnv)
 //	docker-compose.yml   — via composegen
-//	backend/Dockerfile + .dockerignore, frontend/… , nginx.conf, garage.toml
+//	backend/Dockerfile + .dockerignore, frontend/… , nginx.conf
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
@@ -118,15 +118,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		fmt.Fprintf(out, "  nginx.conf rendered (%s)\n", svc.ConfigTemplate)
 	}
 
-	// 5. garage.toml (if the managed Garage dependency is enabled)
-	if cfg.EffGarage(e) {
-		if err := os.WriteFile(filepath.Join(outDir, "garage.toml"), []byte(garageTOML(e.Domain)), 0o644); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "  garage.toml generated\n")
-	}
-
-	// 6. adminer-login.php (if an Adminer web-SQL service is present). It is
+	// 5. adminer-login.php (if an Adminer web-SQL service is present). It is
 	// bind-mounted into Adminer's plugins-enabled/ dir: the URL on its own shows the
 	// stock login page; it auto-logs-in only when the Manage Database UI POSTs a
 	// Rigger-signed payload (the plugin fills + submits Adminer's own login form, so
@@ -232,35 +224,6 @@ func renderNginx(templatesDir, outDir, backend, domain, prefix, project, env str
 		"{{ENV}}", env,
 	)
 	return os.WriteFile(filepath.Join(outDir, "nginx.conf"), []byte(r.Replace(string(src))), 0o644)
-}
-
-// garageTOML renders the garage.toml content (bootstrap.sh heredoc).
-func garageTOML(domain string) string {
-	return fmt.Sprintf(`metadata_dir = "/meta"
-data_dir     = "/data"
-db_engine    = "lmdb"
-replication_factor = 1
-
-# rpc_bind_addr is a plain socket-address string, NOT a [table] — garage rejects
-# the table form with "invalid type: map, expected socket address". The required
-# rpc_secret is injected via the GARAGE_RPC_SECRET env var (see envgen + the
-# garage service block) so it stays in .env, not this regenerated file.
-rpc_bind_addr = "0.0.0.0:3901"
-
-[s3_api]
-s3_region     = "garage"
-api_bind_addr = "0.0.0.0:3900"
-root_domain   = ".s3.%s"
-
-[s3_web]
-bind_addr     = "0.0.0.0:3902"
-root_domain   = ".web.%s"
-index         = "index.html"
-error_document = "404.html"
-
-[admin]
-api_bind_addr = "0.0.0.0:3903"
-`, domain, domain)
 }
 
 // adminerLoginPHP renders an Adminer plugin (dropped into plugins-enabled/) that
