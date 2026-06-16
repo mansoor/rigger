@@ -32,6 +32,19 @@ func (h *Handler) GetGeneralSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// GET /api/settings/detect-host-ip — query the Docker host for its primary
+// LAN/public IP (runs the rigger binary host-networked). Used by the App host
+// "Detect" button. Always 200; { ip } on success, { error } when detection fails
+// (offline, no docker, not on a Linux host) so the UI can fall back to manual.
+func (h *Handler) DetectHostIP(w http.ResponseWriter, r *http.Request) {
+	ip, err := h.bridge.DetectHostIP()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ip": "", "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ip": ip})
+}
+
 // PUT /api/settings/general
 func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 	var body map[string]string

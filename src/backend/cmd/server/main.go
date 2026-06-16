@@ -2,8 +2,10 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,10 +30,40 @@ import (
 //go:embed all:dist
 var frontendFS embed.FS
 
+// outboundIP returns the local IP of the interface used to reach the internet.
+// The UDP "connect" performs a route lookup and binds a local address but sends
+// nothing — so this works offline and never generates traffic. When run in the
+// host network namespace (via `--network host`) this is the host's real LAN/
+// public IP; in the control-plane container's own namespace it would be the
+// bridge IP, which is why detection runs host-networked.
+func outboundIP() string {
+	conn, err := net.Dial("udp", "1.1.1.1:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		return a.IP.String()
+	}
+	return ""
+}
+
 func main() {
 	// Subcommands run a one-shot task and exit instead of starting the server.
 	if len(os.Args) > 1 && os.Args[1] == "init-workspace" {
 		os.Exit(runInitWorkspace(os.Args[2:]))
+	}
+	// detect-host-ip prints the host's primary outbound IP and exits. The control
+	// plane runs this in a throwaway `--network host` container so the lookup
+	// happens in the HOST network namespace (the server's own namespace only sees
+	// the 172.x bridge). A UDP "connect" selects the outbound route without sending
+	// any packet — its local address is the IP the host reaches the internet on.
+	if len(os.Args) > 1 && os.Args[1] == "detect-host-ip" {
+		if ip := outboundIP(); ip != "" {
+			fmt.Println(ip)
+			os.Exit(0)
+		}
+		os.Exit(1)
 	}
 
 	cfg := config.Load()
@@ -66,6 +98,25 @@ func main() {
 	hostPool := remotehost.NewPool()
 	cryptoKey, _ := crypto.DeriveKey([]byte(cfg.JWTSecret))
 	bridge := shell.NewBridge(cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.ToolkitRoot, database, hostPool, cryptoKey)
+
+	// If app_host is still unset after the env seed (e.g. an older install with no
+	// RIGGER_APP_HOST), detect it from the Docker host in the background — runs a
+	// short host-networked container, so don't block startup on it. Best-effort and
+	// idempotent (only seeds when still empty); the admin can always override.
+	go func() {
+		if settings.AppSetting(database, "app_host") != "" {
+			return
+		}
+		ip, derr := bridge.DetectHostIP()
+		if derr != nil || ip == "" {
+			return
+		}
+		if settings.AppSetting(database, "app_host") == "" {
+			if err := settings.SetAppSetting(database, "app_host", ip); err == nil {
+				log.Printf("settings: detected app_host=%s from the Docker host", ip)
+			}
+		}
+	}()
 
 	// Phase 6.5 finish: commands run natively in Go, so workspaces no longer
 	// need a generated run.sh. Sweep away any leftover from older versions.
@@ -611,6 +662,8 @@ func main() {
 			handler.GetGeneralSettings(w, r)
 		case r.Method == "PUT" && path == "/api/settings/general":
 			handler.PutGeneralSettings(w, r)
+		case r.Method == "GET" && path == "/api/settings/detect-host-ip":
+			handler.DetectHostIP(w, r)
 		// System (transactional) email — invite/verification links (Phase 5.1b)
 		case r.Method == "GET" && path == "/api/settings/system-email":
 			handler.GetSystemEmail(w, r)

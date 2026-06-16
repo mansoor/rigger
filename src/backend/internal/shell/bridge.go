@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -760,6 +761,71 @@ func discoverHostMount(dest string) string {
 		}
 	}
 	return host
+}
+
+// DetectHostIP returns the Docker host's primary LAN/public IP. The control-plane
+// container can't read this from its own network namespace (it only sees the
+// 172.x bridge), so detection runs the rigger binary host-networked in a
+// throwaway container: `docker run --rm --network host <self-image> detect-host-ip`.
+// In the host namespace the binary's outbound-route lookup resolves to the real
+// host interface. The rigger image is reused (guaranteed present — no pull, no
+// external image). When Rigger isn't containerised the in-process lookup is
+// already the host's, so it's returned directly. Best-effort; surfaces errors so
+// the UI can fall back to a manual entry.
+func (b *Bridge) DetectHostIP() (string, error) {
+	img := selfImage()
+	if img == "" {
+		// Not containerised (or image undiscoverable): our own outbound IP is the
+		// host's. discoverHostMount uses the same self-inspect, so an empty image
+		// here means the same thing it does there.
+		if ip := outboundIP(); ip != "" {
+			return ip, nil
+		}
+		return "", fmt.Errorf("could not determine the host IP")
+	}
+	out, err := executor.Local{}.DockerOutput(executor.Spec{
+		Args: []string{"run", "--rm", "--network", "host", img, "detect-host-ip"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("detect host ip: %w", err)
+	}
+	ip := strings.TrimSpace(string(out))
+	if ip == "" {
+		return "", fmt.Errorf("detection returned no address")
+	}
+	return ip, nil
+}
+
+// selfImage returns the image reference of this (Rigger) container, via the same
+// hostname-is-container-id self-inspect discoverHostMount uses. "" when Rigger is
+// not containerised or docker is unreachable.
+func selfImage() string {
+	id, err := os.Hostname()
+	if err != nil || id == "" {
+		return ""
+	}
+	out, err := executor.Local{}.DockerOutput(executor.Spec{
+		Args: []string{"inspect", id, "--format", "{{.Config.Image}}"},
+	})
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// outboundIP returns the local IP of the route to the internet (UDP connect does
+// a route lookup, sends nothing). Mirrors the cmd/server helper of the same name;
+// used as the non-containerised fallback for DetectHostIP.
+func outboundIP() string {
+	conn, err := net.Dial("udp", "1.1.1.1:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	if a, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+		return a.IP.String()
+	}
+	return ""
 }
 
 // splitPrefix splits a resource prefix "{workspace}_{project}" back into its
