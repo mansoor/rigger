@@ -1190,7 +1190,7 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', localTLS = false, projectDatabase = '', projectRedis = false, projectGarage = false, projectWebSql = false, projectGarageWebUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -1370,6 +1370,24 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             The managed {projectDatabase} (and any Redis / Garage) is provisioned project-wide — configure it in the{' '}
             <strong>Services</strong> tab → <em>Project dependencies</em>.
           </p>
+        </div>
+      )}
+
+      {/* Security — per-env protection for the admin sidecars (Adminer / Garage UI).
+          Only meaningful when this env routes through Traefik (basic-auth is a Traefik
+          edge middleware) and the project actually has an admin UI. */}
+      {(projectWebSql || projectGarageWebUi) && (
+        <div className="space-y-2 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Security</p>
+          <Toggle
+            label="Protect admin UIs (Adminer / Garage UI)"
+            hint={cfg.traefik_enabled
+              ? "Require HTTP basic-auth at the Traefik edge before reaching Adminer / the Garage UI. Recommended for prod. Credentials are generated on deploy — view them in this env's Env Vars (ADMIN_UI_USER / ADMIN_UI_PASSWORD)."
+              : "Needs domain routing — enable Traefik above to protect the admin UIs (basic-auth is a Traefik middleware; host-port mode can't enforce it)."}
+            checked={!!cfg.protect_admin_uis}
+            disabled={!cfg.traefik_enabled}
+            onChange={v => upd('protect_admin_uis', v)}
+          />
         </div>
       )}
 
@@ -2195,6 +2213,8 @@ export default function EditProjectPage() {
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}
                 projectGarage={!!project?.garage_enabled}
+                projectWebSql={!!project?.web_sql}
+                projectGarageWebUi={!!project?.garage_web_ui}
                 gitRepo={project?.git_repo || ''}
                 gitBranch={project?.git_branch || ''}
                 dirty={dirty}
