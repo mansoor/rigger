@@ -1320,6 +1320,19 @@ func (b *Bridge) Run(opts RunOptions) error {
 		return err
 	}
 
+	// "refresh" means "regenerate this env's config from config.json + the current
+	// Rigger version". dockerops only re-runs composegen (docker-compose.yml); the
+	// bootstrap-generated sidecar files (garage.toml, nginx.conf) and the .env are
+	// untouched — so a fix to those, or a newly-required managed key (e.g.
+	// GARAGE_RPC_SECRET), would never apply via Refresh. Re-bootstrap first
+	// (regenEnv=true; envgen preserves secrets + app-owned keys), then let dockerops
+	// recompose + redeploy (and sync the regenerated files to a remote host).
+	if opts.Command == "refresh" {
+		if err := b.bootstrap(opts.Workspace, opts.Project, opts.Env, true, opts.Stdout); err != nil {
+			return fmt.Errorf("regenerate env config: %w", err)
+		}
+	}
+
 	if dockerops.Handles(opts.Command) {
 		dopts := dockerops.Options{
 			WorkspacesDir: b.workspacesDir,
