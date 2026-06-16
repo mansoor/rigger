@@ -29,6 +29,8 @@ type CreateRequest struct {
 	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
 	SourceKind   string            `json:"source_kind"`   // "upload" → build source came from an uploaded archive (see SourceToken)
 	SourceToken  string            `json:"source_token"`  // staging token from POST /api/upload-source; archive moved into the project on create
+	DBSeedFile   string            `json:"db_seed_file"`  // chosen bundled SQL dump (path relative to source); copied to _source/seed.sql on create
+	DBSeedAuto   bool              `json:"db_seed_auto"`  // auto-import the dump on first deploy of an empty DB
 	Services     []map[string]any  `json:"services"`      // unified services[] (repo-scan path); else seeded from legacy fields
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
@@ -361,6 +363,11 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	// the project's _source/ by the create handler (using SourceToken) before bootstrap.
 	if req.SourceKind == "upload" {
 		project["source_kind"] = "upload"
+	}
+	// A chosen bundled SQL dump (the create handler copies it to _source/seed.sql).
+	// Stored as the fixed relative name; Auto drives auto-import on first deploy.
+	if req.DBSeedFile != "" {
+		project["db_seed"] = map[string]any{"file": "seed.sql", "auto": req.DBSeedAuto}
 	}
 	// Host-side folder path, resolved once by the API layer at creation.
 	if req.ProjectRootDir != "" {

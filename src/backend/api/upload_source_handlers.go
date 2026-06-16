@@ -92,15 +92,18 @@ func (h *Handler) UploadSource(w http.ResponseWriter, r *http.Request) {
 // adoptUploadedSource moves a staged uploaded archive (by token) into the project's
 // _source/ so build can extract it. Called by the create handler after config.json is
 // written, when source_kind == "upload". Copies (not renames) so it works across mount
-// boundaries (staging is under dataDir, the project under workspacesDir).
-func (h *Handler) adoptUploadedSource(workspace, projectKey, token string) error {
+// boundaries (staging is under dataDir, the project under workspacesDir). When
+// seedRel is set (a bundled SQL dump the user chose to import), it's also copied out
+// of the staged source tree to _source/seed.sql before staging is removed.
+func (h *Handler) adoptUploadedSource(workspace, projectKey, token, seedRel string) error {
 	if token == "" {
 		return fmt.Errorf("missing source token")
 	}
 	if token != filepath.Base(token) || strings.ContainsAny(token, `/\.`) {
 		return fmt.Errorf("invalid source token")
 	}
-	staged := filepath.Join(h.sourceUploadsDir(), token, "archive")
+	stageRoot := filepath.Join(h.sourceUploadsDir(), token)
+	staged := filepath.Join(stageRoot, "archive")
 	if _, err := os.Stat(staged); err != nil {
 		return fmt.Errorf("uploaded source not found or expired — re-upload and try again")
 	}
@@ -111,8 +114,33 @@ func (h *Handler) adoptUploadedSource(workspace, projectKey, token string) error
 	if err := copyFile(staged, dest, 0o644); err != nil {
 		return err
 	}
-	os.RemoveAll(filepath.Join(h.sourceUploadsDir(), token))
+	if seedRel != "" {
+		if err := h.adoptUploadedSeed(stageRoot, workspace, projectKey, seedRel); err != nil {
+			return err
+		}
+	}
+	os.RemoveAll(stageRoot)
 	return nil
+}
+
+// adoptUploadedSeed copies the chosen SQL dump out of the staged source tree
+// (stageRoot/src/<seedRel>) into the project's _source/seed.sql. The relative path
+// comes from the detector's SeedCandidate list, but is re-validated to stay inside
+// the staged src dir (defence in depth against a crafted create payload).
+func (h *Handler) adoptUploadedSeed(stageRoot, workspace, projectKey, seedRel string) error {
+	srcRoot := filepath.Join(stageRoot, "src")
+	clean := filepath.Clean(filepath.Join(srcRoot, filepath.FromSlash(seedRel)))
+	if clean != srcRoot && !strings.HasPrefix(clean, srcRoot+string(os.PathSeparator)) {
+		return fmt.Errorf("invalid seed path")
+	}
+	if fi, err := os.Stat(clean); err != nil || fi.IsDir() {
+		return fmt.Errorf("chosen database seed not found in the uploaded source")
+	}
+	dest := wspath.SeedFile(h.workspacesDir, workspace, projectKey)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return copyFile(clean, dest, 0o644)
 }
 
 // ReplaceSource overwrites an upload-source project's stored archive with a freshly

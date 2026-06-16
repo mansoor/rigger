@@ -456,11 +456,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Upload-source projects: adopt the staged archive (from POST /api/upload-source)
 	// into the project's _source/ before bootstrap, so build extracts it into _src.
 	if msg.Workspace.SourceKind == "upload" {
-		if err := h.adoptUploadedSource(wsName, projKey, msg.Workspace.SourceToken); err != nil {
+		if err := h.adoptUploadedSource(wsName, projKey, msg.Workspace.SourceToken, msg.Workspace.DBSeedFile); err != nil {
 			send("\033[31m✗ Error: " + err.Error() + "\033[0m\n")
 			return
 		}
 		send("\033[32m✓\033[0m uploaded source stored\n")
+		if msg.Workspace.DBSeedFile != "" {
+			send("\033[32m✓\033[0m database seed stored (" + msg.Workspace.DBSeedFile + ")\n")
+		}
 	}
 
 	// Run bootstrap.sh per environment — reads env_vars from config.json

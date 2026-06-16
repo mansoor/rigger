@@ -48,6 +48,13 @@ func SourceArchive(root, workspace, project string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "_source", "archive")
 }
 
+// SeedFile is the canonical path of a project's bundled SQL dump chosen for import
+// into the managed database (the v3 DB-seed hook). Project-level, beside the source
+// archive, so it survives env copies and isn't re-extracted on every build.
+func SeedFile(root, workspace, project string) string {
+	return filepath.Join(ProjectDir(root, workspace, project), "_source", "seed.sql")
+}
+
 // EnvDir is the directory of one environment within a project.
 func EnvDir(root, workspace, project, env string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "envs", env)

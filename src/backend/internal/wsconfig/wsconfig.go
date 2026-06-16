@@ -103,6 +103,17 @@ type Project struct {
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
 	// treats both as present. See [[adminer]] in composegen.buildAdminer.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// DBSeed, when set, points at a bundled SQL dump (stored at _source/seed.sql,
+	// found by the detector in an uploaded marketplace app) to import into the managed
+	// database. Auto=true imports it automatically on first deploy of an empty DB;
+	// either way it can be imported manually. See the v3 DB-seed hook.
+	DBSeed *DBSeed `json:"db_seed,omitempty"`
+}
+
+// DBSeed describes a project's database-seed dump.
+type DBSeed struct {
+	File string `json:"file"` // stored relative name under _source (always "seed.sql")
+	Auto bool   `json:"auto"` // import automatically on first deploy when the DB is empty
 }
 
 // SourceRepo returns the project's source repository URL ("" if none).
@@ -116,6 +127,9 @@ func (c *Config) SourceKind() string {
 	}
 	return "git"
 }
+
+// SeedSpec returns the project's configured DB-seed spec, or nil when none.
+func (c *Config) SeedSpec() *DBSeed { return c.Project.DBSeed }
 
 // Branch returns the git branch to build env from: the env override, else the
 // project default, else "main".
