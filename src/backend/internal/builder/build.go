@@ -219,7 +219,7 @@ func (o Options) serviceBuildArgs(svc wsconfig.Service, ver string) []string {
 		if !routeResolved {
 			routeResolved = true
 			if data, err := os.ReadFile(o.configPath()); err == nil {
-				if url, ok := composegen.EnvRouteURL(data, o.Env, o.BaseDomain); ok {
+				if url, ok := composegen.EnvRouteURL(data, o.Env, o.BaseDomain, o.AutoURLMode, o.AutoURLHost); ok {
 					routeURL = url
 				}
 			}

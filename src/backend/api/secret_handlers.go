@@ -51,7 +51,7 @@ func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.WorkspaceBaseDomain(h.db, wsName))
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.EffectiveBaseDomain(h.db, wsName), settings.AutoURLMode(h.db), settings.AutoURLHost(h.db))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return

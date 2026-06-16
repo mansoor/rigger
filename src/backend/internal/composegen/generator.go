@@ -49,7 +49,7 @@ func GenerateRouted(configJSON []byte, env string, ro RouteOpts) ([]byte, error)
 // through Traefik, and whether it routes at all (false ⇒ host-port binding, no
 // single URL). baseDomain is the workspace's apps base domain. Mirrors
 // resolveRoute so the UI shows exactly what gets deployed.
-func EnvRouteURL(configJSON []byte, env, baseDomain string) (string, bool) {
+func EnvRouteURL(configJSON []byte, env, baseDomain, autoMode, autoHost string) (string, bool) {
 	cfg, err := parseConfig(configJSON)
 	if err != nil {
 		return "", false
@@ -58,7 +58,7 @@ func EnvRouteURL(configJSON []byte, env, baseDomain string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	ro := RouteOpts{BaseDomain: baseDomain}
+	ro := RouteOpts{BaseDomain: baseDomain, AutoURLMode: autoMode, AutoURLHost: autoHost}
 	if cfg.Project.LocalTLS {
 		ro.LocalTLS = true
 	}

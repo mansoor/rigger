@@ -309,7 +309,7 @@ func ListProjects(workspacesDir, workspaceName string) ([]Workspace, error) {
 		if !e.IsDir() {
 			continue
 		}
-		ws, err := load(workspacesDir, workspaceName, e.Name(), "")
+		ws, err := load(workspacesDir, workspaceName, e.Name(), "", "", "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "workspace: skipping %s/%s: %v\n", workspaceName, e.Name(), err)
 			continue
@@ -340,11 +340,11 @@ func List(workspacesDir string) ([]Workspace, error) {
 // Get loads a project's workspace detail. baseDomain (the workspace apps base
 // domain) is used to resolve each env's Traefik route URL for display; pass ""
 // when routing URLs aren't needed.
-func Get(workspacesDir, workspaceName, project, baseDomain string) (Workspace, error) {
-	return load(workspacesDir, workspaceName, project, baseDomain)
+func Get(workspacesDir, workspaceName, project, baseDomain, autoMode, autoHost string) (Workspace, error) {
+	return load(workspacesDir, workspaceName, project, baseDomain, autoMode, autoHost)
 }
 
-func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, error) {
+func load(workspacesDir, workspaceName, name, baseDomain, autoMode, autoHost string) (Workspace, error) {
 	wsPath := filepath.Join(workspacesDir, workspaceName, "projects", name)
 	cfgPath := filepath.Join(wsPath, "config.json")
 
@@ -422,7 +422,7 @@ func load(workspacesDir, workspaceName, name, baseDomain string) (Workspace, err
 			}
 			// Full Traefik route URL — incl. the auto-derived {prefix}-{env}.
 			// {base|localhost} when Traefik is on and no explicit domain is set.
-			if url, routed := composegen.EnvRouteURL(data, envName, baseDomain); routed {
+			if url, routed := composegen.EnvRouteURL(data, envName, baseDomain, autoMode, autoHost); routed {
 				info.URL = url
 			}
 		}

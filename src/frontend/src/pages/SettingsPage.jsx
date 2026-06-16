@@ -690,6 +690,9 @@ function GeneralTab() {
   const [acmeEmail, setAcmeEmail] = useState('')
   const [riggerDomain, setRiggerDomain] = useState('')
   const [appHost, setAppHost] = useState('')
+  const [appsBaseDomain, setAppsBaseDomain] = useState('')
+  const [autoUrlMode, setAutoUrlMode] = useState('localhost')
+  const [autoUrlHost, setAutoUrlHost] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
@@ -699,6 +702,9 @@ function GeneralTab() {
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
       app_host: appHost,
+      apps_base_domain: appsBaseDomain.trim(),
+      auto_url_mode: autoUrlMode,
+      auto_url_host: autoUrlHost.trim(),
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
@@ -712,6 +718,9 @@ function GeneralTab() {
     setAcmeEmail(cfg.acme_email || '')
     setRiggerDomain(cfg.rigger_domain || '')
     setAppHost(cfg.app_host || '')
+    setAppsBaseDomain(cfg.apps_base_domain || '')
+    setAutoUrlMode(cfg.auto_url_mode || 'localhost')
+    setAutoUrlHost(cfg.auto_url_host || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
@@ -800,6 +809,51 @@ function GeneralTab() {
           <p className="text-xs text-content-subtle mt-1">
             Leave blank to use the browser's current hostname (works when you reach Rigger directly by IP).
           </p>
+        </div>
+      </div>
+
+      {/* Application domains — the Render-style auto-URL base */}
+      <div>
+        <h2 className="text-base font-semibold text-content-strong mb-1">Application domains</h2>
+        <p className="text-sm text-content-subtle mb-4">
+          The base domain every deployed app gets a URL under —
+          <code className="font-mono text-xs"> {'{workspace}-{app}-{env}'}.{appsBaseDomain || 'onrigger.com'}</code>.
+          Workspaces can override this in <strong>Manage Workspace → General</strong>; an env can set
+          its own custom domain. When no base domain is set, apps fall back to the auto-URL below so
+          they're still reachable across machines.
+        </p>
+        <div className="space-y-4 p-4 bg-surface border border-border rounded-xl">
+          <div>
+            <Label>Apps base domain</Label>
+            <Input value={appsBaseDomain} onChange={setAppsBaseDomain} placeholder="onrigger.com" />
+            <p className="text-xs text-content-subtle mt-1">
+              Point a wildcard DNS record <code className="font-mono text-xs">*.{appsBaseDomain || 'onrigger.com'}</code> at
+              this server. Routes get HTTPS via Let's Encrypt (wildcard cert needs DNS-01 — coming next).
+              Leave blank to use the auto-URL fallback instead.
+            </p>
+          </div>
+          <div>
+            <Label>Auto-URL fallback (when no base domain)</Label>
+            <select value={autoUrlMode} onChange={e => setAutoUrlMode(e.target.value)}
+              className="w-full px-3 py-2 bg-surface-raised border border-border rounded-lg text-sm text-content">
+              <option value="localhost">localhost (host-only — not reachable from other machines)</option>
+              <option value="sslip">sslip.io (recommended — {'{label}'}.&lt;ip&gt;.sslip.io)</option>
+              <option value="nip">nip.io</option>
+              <option value="traefikme">traefik.me</option>
+              <option value="off">off</option>
+            </select>
+            {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && (
+              <div className="mt-2">
+                <Label>Auto-URL host IP</Label>
+                <Input value={autoUrlHost} onChange={setAutoUrlHost} placeholder="10.10.10.111" />
+                <p className="text-xs text-content-subtle mt-1">
+                  The IP other machines reach this host on (LAN, public, or Tailscale). Embedded into the
+                  magic-DNS name so a deploy is reachable cross-device without owning a domain — e.g.{' '}
+                  <code className="font-mono text-xs">myws-myapp-dev.{autoUrlHost || '10.10.10.111'}.sslip.io</code>.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

@@ -625,19 +625,19 @@ func TestEnvRouteURL(t *testing.T) {
 		}`)
 	}
 	// Traefik off → not routed.
-	if u, routed := EnvRouteURL(mk(false, "", "false"), "dev", ""); routed {
+	if u, routed := EnvRouteURL(mk(false, "", "false"), "dev", "", "", ""); routed {
 		t.Errorf("traefik off should not route, got %q", u)
 	}
 	// Auto localhost.
-	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", ""); !routed || u != "http://ws-app-dev.localhost" {
+	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", "", "", ""); !routed || u != "http://ws-app-dev.localhost" {
 		t.Errorf("auto localhost = %q,%v; want http://ws-app-dev.localhost,true", u, routed)
 	}
 	// Auto base domain → HTTPS.
-	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", "apps.example.com"); !routed || u != "https://ws-app-dev.apps.example.com" {
+	if u, routed := EnvRouteURL(mk(true, "", "false"), "dev", "apps.example.com", "", ""); !routed || u != "https://ws-app-dev.apps.example.com" {
 		t.Errorf("auto base = %q,%v; want https://ws-app-dev.apps.example.com,true", u, routed)
 	}
 	// Explicit domain wins.
-	if u, routed := EnvRouteURL(mk(true, "my.host", "true"), "dev", "apps.example.com"); !routed || u != "https://my.host" {
+	if u, routed := EnvRouteURL(mk(true, "my.host", "true"), "dev", "apps.example.com", "", ""); !routed || u != "https://my.host" {
 		t.Errorf("explicit = %q,%v; want https://my.host,true", u, routed)
 	}
 }

@@ -119,9 +119,9 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
         </div>
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Apps base domain</label>
-          <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="apps.example.com"
+          <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="inherits the global default (Settings → General)"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Domain-routed environments (Traefik on, no explicit domain) get a URL of <code className="font-mono">{'{project}-{env}'}.{domain.trim() || 'apps.example.com'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to route locally on <code className="font-mono">*.localhost</code>. Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || 'apps.example.com'}</code> → this host).</p>
+          <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</p>
         </div>
         <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
         <div className="pt-2 border-t border-border">

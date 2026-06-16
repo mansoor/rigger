@@ -32,6 +32,10 @@ type Options struct {
 	// BaseDomain is the workspace's apps base domain (DB-sourced). Used to resolve
 	// the ${ROUTE_URL} build-arg token to the env's public route at build time.
 	BaseDomain string
+	// AutoURLMode / AutoURLHost are the magic-DNS fallback (when no base domain) used
+	// to resolve ${ROUTE_URL} for an auto-routed env. See composegen.RouteOpts.
+	AutoURLMode string
+	AutoURLHost string
 	// TemplatesDir is the toolkit's templates/ dir, used to scaffold a blueprint
 	// Dockerfile into a source build context that ships source but no Dockerfile.
 	TemplatesDir string
