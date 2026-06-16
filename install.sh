@@ -288,7 +288,13 @@ ENV_FILE="${RIGGER_DIR}/src/.env"
 # see its 172.x bridge IP, so it can't detect this itself — we capture it here on
 # the host and hand it to the server via RIGGER_APP_HOST (seeded into the app_host
 # setting on first boot; editable later in Settings → General).
-HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || HOST_IP=""
+#
+# Prefer the source IP of the route to the internet — that's the interface other
+# machines reach this host on, and it skips docker0/bridge IPs that `hostname -I`
+# can list first. Fall back to the first `hostname -I` address.
+HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -n1)
+[[ -z "$HOST_IP" ]] && HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+HOST_IP="${HOST_IP:-}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   step "Generating configuration"

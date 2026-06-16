@@ -681,6 +681,15 @@ function ScanHostModal({ host, onClose, onImported }) {
 
 // ── General Settings Tab ──────────────────────────────────────────────────────
 
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/
+// looksDockerInternal flags addresses that are almost certainly a Docker network,
+// not the real host LAN IP: the Docker Desktop VM subnet (192.168.65.0/24) and the
+// default docker0 bridge (172.17.0.0/16). Detection from inside a container hits
+// these on Docker Desktop / non-Linux hosts, so we warn rather than trust them.
+function looksDockerInternal(ip) {
+  return /^192\.168\.65\./.test(ip) || /^172\.1[78]\./.test(ip)
+}
+
 function GeneralTab() {
   const qc = useQueryClient()
   const { data: cfg = {}, isLoading } = useQuery({
@@ -717,8 +726,17 @@ function GeneralTab() {
   const detectMut = useMutation({
     mutationFn: detectHostIP,
     onSuccess: (d) => {
-      if (d?.ip) { setAppHost(d.ip); setDetectErr('') }
-      else { setDetectErr(d?.error || 'Could not detect the host IP') }
+      if (d?.ip) {
+        setAppHost(d.ip)
+        // On Docker Desktop / non-Linux the host-networked lookup returns the
+        // Docker VM/bridge IP, not the machine's LAN IP — flag it so the admin
+        // corrects it rather than trusting a wrong value.
+        setDetectErr(looksDockerInternal(d.ip)
+          ? `Detected ${d.ip}, but that looks like a Docker-internal address (common on Docker Desktop / non-Linux hosts). Enter your host's real LAN/public IP manually.`
+          : '')
+      } else {
+        setDetectErr(d?.error || 'Could not detect the host IP')
+      }
     },
     onError: (e) => setDetectErr(e?.response?.data?.error || 'Detection failed'),
   })
@@ -841,13 +859,14 @@ function GeneralTab() {
               </button>
             )}
           </div>
-          {detectErr && <p className="text-xs text-danger-fg mt-1">{detectErr}</p>}
+          {detectErr && <p className="text-xs text-warning-fg mt-1">{detectErr}</p>}
           <p className="text-xs text-content-subtle mt-1">
-            <strong>Detect</strong> asks the Docker host for its real outbound IP (most reliable —
-            needed for sslip/nip auto-URLs, which require an IP). <strong>Use {'{hostname}'}</strong>{' '}
-            takes the address your browser reached Rigger at (good for port links / a proxy domain).
-            Leave blank to use the browser hostname for port links and fall back to
-            <code className="font-mono text-xs"> *.localhost</code> for auto-URLs.
+            Usually set automatically from the host IP at install time. To change it:{' '}
+            <strong>Detect</strong> asks the Docker host for its outbound IP (works on a native Linux
+            host; on <strong>Docker Desktop</strong> it returns the internal VM IP, not your machine's
+            LAN IP — enter it by hand there). <strong>Use {'{hostname}'}</strong> takes the address
+            your browser reached Rigger at — correct when you browse to Rigger by IP. Needs an IP for
+            sslip/nip auto-URLs. Blank ⇒ browser hostname for port links, <code className="font-mono text-xs">*.localhost</code> for auto-URLs.
           </p>
         </div>
       </div>

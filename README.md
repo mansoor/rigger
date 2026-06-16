@@ -658,6 +658,26 @@ docker network create traefik_net
 
 **SSL requirements:** Port 80 open, DNS A record pointing to this server, `ACME_EMAIL` set in `src/.env`.
 
+### App host / IP (Settings → General)
+
+The **App host** is the address users reach this host's apps at — it builds the
+direct `host:port` "Open app" links and the magic-DNS auto-URLs (`{ws}-{app}-{env}.<ip>.sslip.io`)
+for **locally-deployed** environments. (Envs bound to a remote host always use that
+host's own address.)
+
+- **Seeded at install.** The installer detects the host's outbound IP (`ip route get`,
+  falling back to `hostname -I`) and writes it to `src/.env` as `RIGGER_APP_HOST`;
+  the server seeds the `app_host` setting from it on first boot. In most cases this is
+  correct and never needs touching — update it only if the host's IP changes.
+- **Why it isn't auto-detected at runtime.** The server runs inside a container and can
+  only see its own bridge IP (e.g. `172.x`), not the host's LAN IP. The **Detect** button
+  works around this on a **native Linux host** (it runs host-networked), but on **Docker
+  Desktop** `--network host` joins the internal VM, so detection returns the VM IP, not
+  your machine's LAN IP — **enter it manually there**.
+- **Must be an IP for sslip/nip.** Those services only echo back an embedded IP address;
+  a hostname won't resolve. The **Use {hostname}** button is handy when you reach Rigger
+  by IP (it fills that IP); for a base domain (`onrigger.com`) the App host is irrelevant.
+
 ---
 
 ## 21. Rigger UI — Web Interface

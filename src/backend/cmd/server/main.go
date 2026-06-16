@@ -99,25 +99,6 @@ func main() {
 	cryptoKey, _ := crypto.DeriveKey([]byte(cfg.JWTSecret))
 	bridge := shell.NewBridge(cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.ToolkitRoot, database, hostPool, cryptoKey)
 
-	// If app_host is still unset after the env seed (e.g. an older install with no
-	// RIGGER_APP_HOST), detect it from the Docker host in the background — runs a
-	// short host-networked container, so don't block startup on it. Best-effort and
-	// idempotent (only seeds when still empty); the admin can always override.
-	go func() {
-		if settings.AppSetting(database, "app_host") != "" {
-			return
-		}
-		ip, derr := bridge.DetectHostIP()
-		if derr != nil || ip == "" {
-			return
-		}
-		if settings.AppSetting(database, "app_host") == "" {
-			if err := settings.SetAppSetting(database, "app_host", ip); err == nil {
-				log.Printf("settings: detected app_host=%s from the Docker host", ip)
-			}
-		}
-	}()
-
 	// Phase 6.5 finish: commands run natively in Go, so workspaces no longer
 	// need a generated run.sh. Sweep away any leftover from older versions.
 	removeRunSh(cfg.WorkspacesDir)
