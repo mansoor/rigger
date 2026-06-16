@@ -306,7 +306,6 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// names/users/buckets so it can repeat across workspaces.
 	imgBase := cfg.Project.Prefix()
 	prefix := imgBase + "_" + env
-	prefixUpper := strings.ToUpper(prefix)
 	registry := cfg.Project.Registry
 	tag := cfg.VersionString() + "-" + env
 
@@ -318,13 +317,29 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		}
 		return def
 	}
-	dbPassword := get(prefixUpper+"_DB_PASSWORD", "changeme_"+hexN(r, 8))
-	dbRootPassword := get(prefixUpper+"_DB_ROOT_PASSWORD", "changeme_"+hexN(r, 8))
-	appKey := get(prefixUpper+"_APP_KEY", "base64:"+base64N(r, 32))
-	garageAdminToken := get(prefixUpper+"_GARAGE_ADMIN_TOKEN", hexN(r, 16))
-	garageRPCSecret := get(prefixUpper+"_GARAGE_RPC_SECRET", hexN(r, 32)) // garage requires a 32-byte hex rpc_secret
-	garageKeyID := get(prefixUpper+"_GARAGE_KEY_ID", hexN(r, 8))
-	garageSecretKey := get(prefixUpper+"_GARAGE_SECRET_KEY", hexN(r, 32))
+	// getOut preserves a managed secret across regen by reading the OUTPUT key(s)
+	// actually written to .env (first match wins). The earlier `{prefix}_X` lookups
+	// were NEVER written, so a regen rerolled every secret — which silently broke an
+	// already-initialized managed-DB volume (its root/user password is fixed at first
+	// init; a new .env password then gets "Access denied"). At create time existing is
+	// nil, so the generated default is used (unchanged behavior).
+	getOut := func(def string, keys ...string) string {
+		if existing != nil {
+			for _, k := range keys {
+				if v, ok := existing[k]; ok && v != "" {
+					return v
+				}
+			}
+		}
+		return def
+	}
+	dbPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD")
+	dbRootPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_ROOT_PASSWORD")
+	appKey := getOut("base64:"+base64N(r, 32), "APP_KEY")
+	garageAdminToken := getOut(hexN(r, 16), "GARAGE_ADMIN_TOKEN")
+	garageRPCSecret := getOut(hexN(r, 32), "GARAGE_RPC_SECRET") // garage requires a 32-byte hex rpc_secret
+	garageKeyID := getOut(hexN(r, 8), "GARAGE_KEY_ID")
+	garageSecretKey := getOut(hexN(r, 32), "GARAGE_SECRET_KEY")
 
 	var b strings.Builder
 	p := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
