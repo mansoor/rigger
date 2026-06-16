@@ -301,6 +301,9 @@ export const updateSystemEmail = (body) => api.put('/settings/system-email', bod
 
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
+// Ask the backend to detect the Docker host's IP (runs host-networked). Returns
+// { ip } on success or { ip:'', error } so the caller can fall back to manual.
+export const detectHostIP = () => api.get('/settings/detect-host-ip').then(r => r.data)
 
 // Appearance prefs (W7): per-user, resolved server-side as
 // user-override ?? workspace-default ?? global-default. localStorage is the

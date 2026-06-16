@@ -13,7 +13,7 @@ import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
-  fetchGeneralSettings, updateGeneralSettings,
+  fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
@@ -712,6 +712,17 @@ function GeneralTab() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
 
+  // Ask the backend to detect the Docker host's IP (host-networked lookup).
+  const [detectErr, setDetectErr] = useState('')
+  const detectMut = useMutation({
+    mutationFn: detectHostIP,
+    onSuccess: (d) => {
+      if (d?.ip) { setAppHost(d.ip); setDetectErr('') }
+      else { setDetectErr(d?.error || 'Could not detect the host IP') }
+    },
+    onError: (e) => setDetectErr(e?.response?.data?.error || 'Detection failed'),
+  })
+
   // Sync from loaded data when it arrives
   const [synced, setSynced] = useState(false)
   if (!isLoading && !synced && cfg.acme_email !== undefined) {
@@ -806,14 +817,23 @@ function GeneralTab() {
           <div className="flex gap-2">
             <Input
               value={appHost}
-              onChange={setAppHost}
+              onChange={v => { setAppHost(v); setDetectErr('') }}
               placeholder="192.168.1.50 or host.example.com"
             />
+            <button
+              type="button"
+              onClick={() => detectMut.mutate()}
+              disabled={detectMut.isPending}
+              className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover disabled:opacity-50"
+              title="Query the Docker host for its real outbound IP"
+            >
+              {detectMut.isPending ? 'Detecting…' : 'Detect'}
+            </button>
             {typeof window !== 'undefined' && window.location?.hostname &&
              window.location.hostname !== appHost.trim() && (
               <button
                 type="button"
-                onClick={() => setAppHost(window.location.hostname)}
+                onClick={() => { setAppHost(window.location.hostname); setDetectErr('') }}
                 className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover"
                 title="Use the address your browser reached Rigger at"
               >
@@ -821,10 +841,13 @@ function GeneralTab() {
               </button>
             )}
           </div>
+          {detectErr && <p className="text-xs text-danger-fg mt-1">{detectErr}</p>}
           <p className="text-xs text-content-subtle mt-1">
-            Leave blank to use the browser's current hostname for port links (and fall back to
-            <code className="font-mono text-xs"> *.localhost</code> for auto-URLs). The suggestion
-            above is the address your browser used to reach Rigger — usually exactly right.
+            <strong>Detect</strong> asks the Docker host for its real outbound IP (most reliable —
+            needed for sslip/nip auto-URLs, which require an IP). <strong>Use {'{hostname}'}</strong>{' '}
+            takes the address your browser reached Rigger at (good for port links / a proxy domain).
+            Leave blank to use the browser hostname for port links and fall back to
+            <code className="font-mono text-xs"> *.localhost</code> for auto-URLs.
           </p>
         </div>
       </div>
@@ -881,6 +904,14 @@ function GeneralTab() {
                 (for local envs) or each env's own remote host — e.g.{' '}
                 <code className="font-mono text-xs">myws-myapp-dev.{(appHost.trim() || '10.10.10.111')}.{autoUrlMode === 'nip' ? 'nip.io' : autoUrlMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>.
                 {!appHost.trim() && <span className="text-warning-fg"> Set App host above for this to work across machines.</span>}
+              </p>
+            )}
+            {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && appHost.trim() &&
+             !/^\d{1,3}(\.\d{1,3}){3}$/.test(appHost.trim()) && (
+              <p className="text-xs text-warning-fg mt-1">
+                <code className="font-mono text-xs">{appHost.trim()}</code> isn't an IP address — sslip/nip/traefik.me
+                only echo back an <em>embedded IP</em>, so a hostname won't resolve. Click <strong>Detect</strong> above
+                to fetch the host's IP, or switch to a base domain.
               </p>
             )}
           </div>
