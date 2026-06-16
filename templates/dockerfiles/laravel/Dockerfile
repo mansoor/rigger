@@ -48,8 +48,11 @@ RUN if [ -f package.json ]; then \
       && (npm run build || echo "no usable npm build script — skipping asset build"); \
     fi
 
-# Writable dirs (best-effort; not every app ships them).
-RUN chmod -R 775 storage bootstrap/cache 2>/dev/null || true
+# Laravel needs these dirs present + writable at runtime — recreate them (the
+# .dockerignore strips their contents, and the app may not ship empty dirs).
+RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views \
+             storage/logs bootstrap/cache \
+    && chmod -R 777 storage bootstrap/cache
 
 EXPOSE 80
 LABEL org.opencontainers.image.version="${VERSION}" \
