@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, uploadSource, fetchBlueprints } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
 import ManagedServices from '../components/ManagedServices'
@@ -1874,6 +1874,10 @@ export default function NewProjectPage() {
   // falling back to the selected workspace for the bare /new shortcut.
   const workspace = params.workspace || storeWs
   const qc = useQueryClient()
+  // Resolve the workspace's display name (the route/store carry the KEY); fall
+  // back to the key until the list loads or if it's not found.
+  const { data: wsList = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
+  const workspaceName = wsList.find(w => w.key === workspace)?.name || workspace
   const [step, setStep]           = useState(1)
   const [data, setData]           = useState(DEFAULT_DATA)
   const [errors, setErrors]       = useState({})
@@ -2036,9 +2040,9 @@ export default function NewProjectPage() {
             {workspace && (
               <span
                 className="text-sm text-content px-2.5 py-1 rounded-lg bg-surface-raised border border-border-strong"
-                title="Workspace (fixed for this wizard)"
+                title={`Workspace "${workspaceName}" (${workspace}) — fixed for this wizard`}
               >
-                {workspace}
+                {workspaceName}
               </span>
             )}
           </div>
