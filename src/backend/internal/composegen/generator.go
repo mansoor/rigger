@@ -92,9 +92,29 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 		ro.LocalTLS = true
 	}
 	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
+	applyWebEntryFallback(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
 	return []byte(g.b.String()), nil
+}
+
+// applyWebEntryFallback promotes the sole service to the apex web entry when
+// Traefik routing resolved a domain but nothing is marked web_routed — otherwise
+// an image stack (e.g. a single `nginx` service added without a web entry) would
+// generate no router and Traefik would 404. Only fires for exactly one service
+// (multi-service stacks must pick a web entry explicitly) and defaults the
+// container port to 80 when unset. No-op when a web entry already exists.
+func applyWebEntryFallback(cfg *Config, e Env) {
+	if !e.TraefikEnabled || e.Domain == "" || len(cfg.Services) != 1 {
+		return
+	}
+	if cfg.Services[0].WebRouted {
+		return
+	}
+	cfg.Services[0].WebRouted = true
+	if string(cfg.Services[0].Port) == "" {
+		cfg.Services[0].Port = flexStr("80")
+	}
 }
 
 // resolveRoute derives an env's domain + TLS mode when the user enabled Traefik

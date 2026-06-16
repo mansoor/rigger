@@ -1275,13 +1275,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {open && (<div className="px-5 pb-5 space-y-4 border-t border-border-strong/50 pt-4">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>Domain <span className="font-normal normal-case text-content-faint">(optional override)</span></Label>
-          <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder={cfg.traefik_enabled ? 'auto — leave blank' : 'example.com'} />
-          {cfg.traefik_enabled && !cfg.domain && (
-            <p className="text-xs text-content-subtle mt-1">Blank → auto-derived from {baseDomain ? <>the workspace base domain</> : <>localhost</>}.</p>
-          )}
-        </div>
-        <div>
           <Label>Deployment</Label>
           <Select value={cfg.deployment} onChange={v => upd('deployment', v)} options={DEPLOYMENT_OPTIONS} />
         </div>
@@ -1330,8 +1323,16 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         {cfg.traefik_enabled && (
           <>
             <div>
-              <Label>Traefik network</Label>
-              <Input value={cfg.traefik_network} onChange={v => upd('traefik_network', v)} placeholder="traefik_net" />
+              <Label>Domain <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+              <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" />
+              {!cfg.domain && (
+                <p className="text-xs text-content-subtle mt-1">
+                  Blank → an automatic URL: {baseDomain
+                    ? <>the base domain (<code className="font-mono text-xs">{resourcePrefix?.replace(/_/g, '-')}-{envName}.{baseDomain}</code>)</>
+                    : <>the admin auto-URL (sslip/nip via the App host, else <code className="font-mono text-xs">*.localhost</code>)</>}.
+                  Set a value only to use your own custom domain (point a CNAME at this server).
+                </p>
+              )}
             </div>
 
             {/* SSL toggle — enabled only when domain is set */}
@@ -1347,10 +1348,24 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               />
               {cfg.ssl_enabled && cfg.domain && (
                 <p className="text-xs text-success-fg/70 mt-1">
-                  🔒 Run <code className="font-mono text-xs">./run.sh refresh {'{env}'}</code> after saving to regenerate the compose file with TLS labels.
+                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels.
                 </p>
               )}
             </div>
+
+            {/* Traefik network — advanced; changing it breaks routing unless the
+                proxy actually listens on the new network. Hidden by default. */}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-content-faint hover:text-content-subtle select-none">Advanced</summary>
+              <div className="mt-2 pl-3 border-l-2 border-border-strong">
+                <Label>Traefik network</Label>
+                <Input value={cfg.traefik_network} onChange={v => upd('traefik_network', v)} placeholder="traefik_net" />
+                <p className="text-xs text-content-subtle mt-1">
+                  The shared proxy network. Leave as <code className="font-mono text-xs">traefik_net</code> unless you run a
+                  differently-named Traefik — a mismatch means the proxy can't reach this env and routing 404s.
+                </p>
+              </div>
+            </details>
           </>
         )}
       </div>
