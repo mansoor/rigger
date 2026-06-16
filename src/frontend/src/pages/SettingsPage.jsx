@@ -692,7 +692,6 @@ function GeneralTab() {
   const [appHost, setAppHost] = useState('')
   const [appsBaseDomain, setAppsBaseDomain] = useState('')
   const [autoUrlMode, setAutoUrlMode] = useState('localhost')
-  const [autoUrlHost, setAutoUrlHost] = useState('')
   const [dnsProvider, setDnsProvider] = useState('')
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
@@ -702,10 +701,9 @@ function GeneralTab() {
     mutationFn: () => updateGeneralSettings({
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
-      app_host: appHost,
+      app_host: appHost.trim(),
       apps_base_domain: appsBaseDomain.trim(),
       auto_url_mode: autoUrlMode,
-      auto_url_host: autoUrlHost.trim(),
       apps_dns_provider: dnsProvider,
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
@@ -722,7 +720,6 @@ function GeneralTab() {
     setAppHost(cfg.app_host || '')
     setAppsBaseDomain(cfg.apps_base_domain || '')
     setAutoUrlMode(cfg.auto_url_mode || 'localhost')
-    setAutoUrlHost(cfg.auto_url_host || '')
     setDnsProvider(cfg.apps_dns_provider || '')
     // Default ON — only an explicit "false" disables confirmations.
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
@@ -793,24 +790,41 @@ function GeneralTab() {
         </div>
       </div>
 
-      {/* App host / IP for service links */}
+      {/* App host / IP — the local Docker host's address */}
       <div>
-        <h2 className="text-base font-semibold text-content-strong mb-1">App host / IP for service links</h2>
+        <h2 className="text-base font-semibold text-content-strong mb-1">App host / IP</h2>
         <p className="text-sm text-content-subtle mb-4">
-          The address users reach published service ports at (the Docker host's IP or hostname).
-          Used to build the <strong>Open app</strong> links on env cards for locally-hosted
-          environments. Set this when you access Rigger through a proxy domain, so links point at
-          the host instead of the proxy. Remote-host envs always use their own host address.
+          The address users reach this host's apps at (the Docker host's IP or hostname). Drives
+          both the <strong>Open app</strong> port links AND the auto-URL (sslip/nip) hostnames for
+          <strong> locally-deployed</strong> environments. Seeded from the host IP at install; the
+          server runs in a container so it can't re-detect this itself.{' '}
+          <strong>Remote-host envs always use their own host's address</strong> — this only applies
+          to the local host.
         </p>
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Host address</Label>
-          <Input
-            value={appHost}
-            onChange={setAppHost}
-            placeholder="192.168.1.50 or host.example.com"
-          />
+          <div className="flex gap-2">
+            <Input
+              value={appHost}
+              onChange={setAppHost}
+              placeholder="192.168.1.50 or host.example.com"
+            />
+            {typeof window !== 'undefined' && window.location?.hostname &&
+             window.location.hostname !== appHost.trim() && (
+              <button
+                type="button"
+                onClick={() => setAppHost(window.location.hostname)}
+                className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover"
+                title="Use the address your browser reached Rigger at"
+              >
+                Use {window.location.hostname}
+              </button>
+            )}
+          </div>
           <p className="text-xs text-content-subtle mt-1">
-            Leave blank to use the browser's current hostname (works when you reach Rigger directly by IP).
+            Leave blank to use the browser's current hostname for port links (and fall back to
+            <code className="font-mono text-xs"> *.localhost</code> for auto-URLs). The suggestion
+            above is the address your browser used to reach Rigger — usually exactly right.
           </p>
         </div>
       </div>
@@ -862,15 +876,12 @@ function GeneralTab() {
               <option value="off">off</option>
             </select>
             {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && (
-              <div className="mt-2">
-                <Label>Auto-URL host IP</Label>
-                <Input value={autoUrlHost} onChange={setAutoUrlHost} placeholder="10.10.10.111" />
-                <p className="text-xs text-content-subtle mt-1">
-                  The IP other machines reach this host on (LAN, public, or Tailscale). Embedded into the
-                  magic-DNS name so a deploy is reachable cross-device without owning a domain — e.g.{' '}
-                  <code className="font-mono text-xs">myws-myapp-dev.{autoUrlHost || '10.10.10.111'}.sslip.io</code>.
-                </p>
-              </div>
+              <p className="text-xs text-content-subtle mt-2">
+                The host embedded in the magic-DNS name comes from <strong>App host / IP</strong> above
+                (for local envs) or each env's own remote host — e.g.{' '}
+                <code className="font-mono text-xs">myws-myapp-dev.{(appHost.trim() || '10.10.10.111')}.{autoUrlMode === 'nip' ? 'nip.io' : autoUrlMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>.
+                {!appHost.trim() && <span className="text-warning-fg"> Set App host above for this to work across machines.</span>}
+              </p>
             )}
           </div>
         </div>
