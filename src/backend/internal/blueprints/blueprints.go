@@ -27,6 +27,18 @@ type RedisFacts struct {
 	Port string
 }
 
+// GarageFacts are the resolved connection facts for the active env's managed Garage
+// (S3-compatible object storage). Frameworks that speak S3 (e.g. Laravel's flysystem
+// s3 driver) map these onto their AWS_*-style keys. Region is a placeholder Garage
+// ignores but most SDKs require.
+type GarageFacts struct {
+	KeyID     string
+	SecretKey string
+	Bucket    string
+	Endpoint  string
+	Region    string
+}
+
 // urlScheme returns the URL scheme most ORMs/drivers accept for the engine.
 func (f DBFacts) urlScheme() string {
 	if f.Engine == "postgres" {
@@ -94,13 +106,13 @@ type Blueprint struct {
 	Template string
 
 	// EnvVars declares how this framework reads managed-dependency connection
-	// info. Given the active env's db/redis facts (either may be nil when the dep
-	// is disabled), it returns the framework-specific env keys+values to write
-	// into the generated .env — e.g. Laravel → DB_HOST/DB_DATABASE/…, Rails →
-	// DATABASE_URL, Spring → SPRING_DATASOURCE_URL. nil ⇒ the stack has no
+	// info. Given the active env's db/redis/garage facts (any may be nil when the
+	// dep is disabled), it returns the framework-specific env keys+values to write
+	// into the generated .env — e.g. Laravel → DB_HOST/DB_DATABASE/… + AWS_*,
+	// Rails → DATABASE_URL, Spring → SPRING_DATASOURCE_URL. nil ⇒ the stack has no
 	// standard convention (the user maps it via per-service env vars). This is
 	// where the per-framework env contract lives, keeping envgen language-agnostic.
-	EnvVars func(db *DBFacts, redis *RedisFacts) map[string]string
+	EnvVars func(db *DBFacts, redis *RedisFacts, garage *GarageFacts) map[string]string
 
 	// ServiceEnv is static, per-service environment the framework needs to run
 	// correctly in a container — seeded onto the service itself (its compose
@@ -114,8 +126,9 @@ type Blueprint struct {
 // ── Per-framework env contracts ──────────────────────────────────────────────
 // Each returns the env keys its framework reads, filled from the active deps.
 
-// envLaravel: discrete DB_* (driver "mysql"/"pgsql") + REDIS_HOST/PORT.
-func envLaravel(db *DBFacts, redis *RedisFacts) map[string]string {
+// envLaravel: discrete DB_* (driver "mysql"/"pgsql") + REDIS_HOST/PORT, plus the
+// AWS_* / FILESYSTEM_DISK contract so an app wires to managed Garage object storage.
+func envLaravel(db *DBFacts, redis *RedisFacts, garage *GarageFacts) map[string]string {
 	m := map[string]string{}
 	if db != nil {
 		driver := "mysql"
@@ -133,12 +146,23 @@ func envLaravel(db *DBFacts, redis *RedisFacts) map[string]string {
 		m["REDIS_HOST"] = redis.Host
 		m["REDIS_PORT"] = redis.Port
 	}
+	if garage != nil {
+		// Laravel's flysystem "s3" disk reads AWS_*; path-style + a custom endpoint
+		// point it at Garage instead of real AWS. FILESYSTEM_DISK=s3 makes it default.
+		m["AWS_ACCESS_KEY_ID"] = garage.KeyID
+		m["AWS_SECRET_ACCESS_KEY"] = garage.SecretKey
+		m["AWS_DEFAULT_REGION"] = garage.Region
+		m["AWS_BUCKET"] = garage.Bucket
+		m["AWS_ENDPOINT"] = garage.Endpoint
+		m["AWS_USE_PATH_STYLE_ENDPOINT"] = "true"
+		m["FILESYSTEM_DISK"] = "s3"
+	}
 	return m
 }
 
 // envURL: DATABASE_URL + REDIS_URL — the common convention for Node ORMs
 // (Prisma/Sequelize), Django (dj-database-url), and FastAPI.
-func envURL(db *DBFacts, redis *RedisFacts) map[string]string {
+func envURL(db *DBFacts, redis *RedisFacts, _ *GarageFacts) map[string]string {
 	m := map[string]string{}
 	if db != nil {
 		m["DATABASE_URL"] = db.url("")
@@ -150,7 +174,7 @@ func envURL(db *DBFacts, redis *RedisFacts) map[string]string {
 }
 
 // envRails: DATABASE_URL with Ruby's "mysql2" driver scheme + REDIS_URL.
-func envRails(db *DBFacts, redis *RedisFacts) map[string]string {
+func envRails(db *DBFacts, redis *RedisFacts, _ *GarageFacts) map[string]string {
 	m := map[string]string{}
 	if db != nil {
 		scheme := "mysql2"
@@ -166,7 +190,7 @@ func envRails(db *DBFacts, redis *RedisFacts) map[string]string {
 }
 
 // envSpring: Spring Boot's SPRING_DATASOURCE_* (JDBC URL) + SPRING_DATA_REDIS_*.
-func envSpring(db *DBFacts, redis *RedisFacts) map[string]string {
+func envSpring(db *DBFacts, redis *RedisFacts, _ *GarageFacts) map[string]string {
 	m := map[string]string{}
 	if db != nil {
 		m["SPRING_DATASOURCE_URL"] = db.jdbc()
@@ -181,7 +205,7 @@ func envSpring(db *DBFacts, redis *RedisFacts) map[string]string {
 }
 
 // envDotnet: ASP.NET ConnectionStrings__* (double-underscore config binding).
-func envDotnet(db *DBFacts, redis *RedisFacts) map[string]string {
+func envDotnet(db *DBFacts, redis *RedisFacts, _ *GarageFacts) map[string]string {
 	m := map[string]string{}
 	if db != nil {
 		m["ConnectionStrings__DefaultConnection"] = fmt.Sprintf(

@@ -144,6 +144,10 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 		for _, k := range []string{
 			"GARAGE_ENABLED", "GARAGE_HOST", "GARAGE_API_PORT", "GARAGE_S3_PORT", "GARAGE_WEB_PORT",
 			"GARAGE_ADMIN_TOKEN", "GARAGE_KEY_ID", "GARAGE_SECRET_KEY", "GARAGE_BUCKET", "GARAGE_ENDPOINT",
+			// The framework S3 contract (e.g. Laravel) maps Garage onto AWS_* keys — reserve
+			// them so a repo's .env.example AWS_* defaults can't shadow the managed values.
+			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_BUCKET",
+			"AWS_ENDPOINT", "AWS_USE_PATH_STYLE_ENDPOINT", "FILESYSTEM_DISK",
 		} {
 			out[k] = true
 		}
@@ -160,7 +164,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 // build.template (set by the detector or the blueprint picker); services without
 // a recognised blueprint contribute nothing. On a key clash between two
 // frameworks the first service's value wins.
-func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword string) map[string]string {
+func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbPassword, garageKeyID, garageSecretKey string) map[string]string {
 	// User must match the account the managed-db container provisions, which
 	// envgen writes as MYSQL_USER/POSTGRES_USER = "<dbBase>_user".
 	dbUser := dbBase + "_user"
@@ -178,6 +182,19 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 	if cfg.EffRedis(e) {
 		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
 	}
+	// Garage facts mirror the GARAGE_* block emitted in generate(): same bucket
+	// (dns-safe, hyphenated), same in-network S3 endpoint. Region is a placeholder
+	// SDKs require but Garage ignores.
+	var garage *blueprints.GarageFacts
+	if cfg.EffGarage(e) {
+		garage = &blueprints.GarageFacts{
+			KeyID:     garageKeyID,
+			SecretKey: garageSecretKey,
+			Bucket:    strings.ReplaceAll(dbBase, "_", "-") + "-" + env,
+			Endpoint:  "http://" + prefix + "_garage:3901",
+			Region:    "us-east-1",
+		}
+	}
 
 	out := map[string]string{}
 	seen := map[string]bool{}
@@ -190,7 +207,7 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 		if !ok || bp.EnvVars == nil {
 			continue
 		}
-		for k, v := range bp.EnvVars(db, redis) {
+		for k, v := range bp.EnvVars(db, redis, garage) {
 			if _, exists := out[k]; !exists {
 				out[k] = v
 			}
@@ -438,7 +455,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// arbitrary scanned repo wires up to the db/redis without the user hand-
 	// mapping Rigger's MYSQL_*/POSTGRES_* onto the framework's keys. The keys
 	// stay language-specific in the blueprint; envgen stays generic.
-	fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword)
+	fe := frameworkEnv(cfg, e, prefix, dbBase, env, dbPassword, garageKeyID, garageSecretKey)
 	if len(fe) > 0 {
 		p("# ── Framework env contract (blueprint-declared) ────────────\n")
 		keys := make([]string, 0, len(fe))

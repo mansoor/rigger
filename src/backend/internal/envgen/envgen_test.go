@@ -424,3 +424,39 @@ func TestExtraVarsDoNotOverrideManagedDB(t *testing.T) {
 		t.Errorf("non-infra extras should pass through: MAIL_HOST=%q WEATHER_LAT=%q", m["MAIL_HOST"], m["WEATHER_LAT"])
 	}
 }
+
+// TestGarageWiresLaravelS3 verifies the Garage→Laravel S3 contract: when Garage is
+// enabled, the Laravel framework env contract emits AWS_*/FILESYSTEM_DISK pointing at
+// the managed Garage bucket, and a repo's .env.example AWS_* can't shadow them.
+func TestGarageWiresLaravelS3(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "myapp", "garage_enabled": true,
+        "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "dev": {
+        "deployment": "compose",
+        "env_vars": { "AWS_BUCKET": "leaked", "FILESYSTEM_DISK": "local" }
+      } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	if m["FILESYSTEM_DISK"] != "s3" {
+		t.Errorf("FILESYSTEM_DISK=%q, want s3 (managed contract must win over the repo's 'local')", m["FILESYSTEM_DISK"])
+	}
+	if m["AWS_BUCKET"] == "leaked" || m["AWS_BUCKET"] == "" {
+		t.Errorf("AWS_BUCKET=%q, want the managed Garage bucket (repo value must not leak)", m["AWS_BUCKET"])
+	}
+	if m["AWS_ENDPOINT"] == "" || m["AWS_USE_PATH_STYLE_ENDPOINT"] != "true" {
+		t.Errorf("expected Garage S3 endpoint + path-style; got endpoint=%q pathstyle=%q", m["AWS_ENDPOINT"], m["AWS_USE_PATH_STYLE_ENDPOINT"])
+	}
+	if m["AWS_ACCESS_KEY_ID"] == "" || m["AWS_SECRET_ACCESS_KEY"] == "" {
+		t.Errorf("expected AWS credentials from Garage facts, got id=%q", m["AWS_ACCESS_KEY_ID"])
+	}
+	// No duplicate FILESYSTEM_DISK (the repo extra must be skipped, not appended).
+	if n := strings.Count(env, "\nFILESYSTEM_DISK="); n != 1 {
+		t.Errorf("FILESYSTEM_DISK emitted %d times, want 1", n)
+	}
+}
