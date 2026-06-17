@@ -10,11 +10,22 @@ import (
 // containerInfo is the subset of `docker compose ps` we need for the
 // container_down and restart_count conditions.
 type containerInfo struct {
-	ID      string `json:"ID"`
-	Name    string `json:"Name"`
-	Service string `json:"Service"`
-	State   string `json:"State"`
-	Health  string `json:"Health"`
+	ID       string `json:"ID"`
+	Name     string `json:"Name"`
+	Service  string `json:"Service"`
+	State    string `json:"State"`
+	Health   string `json:"Health"`
+	ExitCode int    `json:"ExitCode"`
+}
+
+// isCompletedInit reports a one-shot init job (service name ends in "_init", e.g.
+// minio_init creating the S3 bucket) that ran and exited 0. That's success, not a
+// down/partial container — exclude it from every alert condition so a finished init
+// doesn't fire container_down / stack_partial. A still-running or non-zero-exit init
+// is NOT a completed init, so a stuck/failed init still surfaces.
+func isCompletedInit(c containerInfo) bool {
+	return strings.HasSuffix(c.Service, "_init") &&
+		strings.EqualFold(c.State, "exited") && c.ExitCode == 0
 }
 
 // projectContainers runs `docker compose ps --all` for one env and returns its
@@ -35,7 +46,7 @@ func projectContainers(project, composePath string) []containerInfo {
 			continue
 		}
 		var c containerInfo
-		if json.Unmarshal([]byte(line), &c) == nil {
+		if json.Unmarshal([]byte(line), &c) == nil && !isCompletedInit(c) {
 			containers = append(containers, c)
 		}
 	}

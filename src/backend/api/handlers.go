@@ -1511,9 +1511,11 @@ func parseComposePsJSON(out []byte, runErr error) string {
 	}
 
 	type psRow struct {
-		State  string `json:"State"`
-		Status string `json:"Status"`
-		Health string `json:"Health"`
+		Service  string `json:"Service"`
+		State    string `json:"State"`
+		Status   string `json:"Status"`
+		Health   string `json:"Health"`
+		ExitCode int    `json:"ExitCode"`
 	}
 
 	total, running := 0, 0
@@ -1526,9 +1528,17 @@ func parseComposePsJSON(out []byte, runErr error) string {
 		if err := json.Unmarshal(line, &row); err != nil {
 			continue
 		}
-		total++
 		state  := strings.ToLower(row.State + " " + row.Status)
 		health := strings.ToLower(row.Health)
+		// One-shot init jobs (service name ends in "_init", e.g. minio_init creating the
+		// S3 bucket) run once and exit 0 — that's success, not a stopped service. Skip
+		// them from the tally so a completed init doesn't drag the env to "partial" and
+		// disable the URL. A still-running or non-zero-exit init is NOT skipped, so a
+		// stuck/failed init correctly surfaces as partial.
+		if strings.HasSuffix(row.Service, "_init") && strings.Contains(state, "exit") && row.ExitCode == 0 {
+			continue
+		}
+		total++
 		// A container counts as "running" only when it is up AND not actively unhealthy.
 		// "starting" is still acceptable — the healthcheck hasn't had a chance to pass yet.
 		isUp := strings.Contains(state, "running") || strings.Contains(state, "up")
