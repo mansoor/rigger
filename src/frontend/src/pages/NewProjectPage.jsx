@@ -4,7 +4,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, scanRepo, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
+import { resolveEnvRoute } from '../lib/envRoute'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
 import ManagedServices from '../components/ManagedServices'
@@ -924,7 +925,7 @@ export function looksLocalOrIP(domain) {
   return false
 }
 
-function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0, acmeDefault = '' }) {
+function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0, acmeDefault = '', resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '' }) {
   const upd = (k, v) => onChange(idx, { ...env, [k]: v })
   const [tosAccepted, setTosAccepted] = useState(!!env.ssl_enabled) // LE ToS ack gates SSL
   const sslBlocked = looksLocalOrIP(env.domain)
@@ -970,8 +971,8 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
 
       <div className="space-y-3 pt-2 border-t border-border-strong/60">
         <Toggle
-          label="Traefik reverse proxy"
-          hint="Route traffic via Traefik instead of direct port binding"
+          label="Expose via domain (Traefik)"
+          hint="Route through the shared Traefik proxy by hostname instead of binding a host port (avoids port conflicts; gives the env a URL)."
           checked={env.traefik}
           onChange={v => {
             // Single update — two sequential upd() calls would each spread the
@@ -981,80 +982,66 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           }}
         />
 
-        {/* Domain — only relevant under Traefik; blank yields an automatic URL. */}
+        {/* Route preview — the URL this env will be reachable at (matches deploy). */}
+        {env.traefik && env.name && (() => {
+          const route = resolveEnvRoute({ ...env, traefik_enabled: true }, resourcePrefix, env.name, baseDomain, false, autoUrlMode, appHost)
+          return route ? (
+            <p className="text-xs text-content-subtle">
+              Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+              {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
+            </p>
+          ) : null
+        })()}
+
+        {/* Domain + "Request SSL" on one row. SSL is enabled only once a real public
+            domain is entered (localhost/IP can't get a Let's Encrypt cert). */}
         {env.traefik && (
           <div>
             <Label>Domain <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-            <Input value={env.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" />
+            <div className="flex items-center gap-3">
+              <div className="flex-1"><Input value={env.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" /></div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs ${canSSL ? 'text-content' : 'text-content-faint'}`}>Request SSL</span>
+                <button
+                  type="button"
+                  disabled={!canSSL}
+                  title={!env.domain ? 'Enter a domain to enable SSL' : sslBlocked ? 'Not available for localhost or IP addresses' : 'Request a Let\'s Encrypt certificate'}
+                  onClick={() => upd('ssl_enabled', !env.ssl_enabled)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${env.ssl_enabled && canSSL ? 'bg-green-600' : 'bg-surface-overlay'} disabled:opacity-40`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${env.ssl_enabled && canSSL ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
+            </div>
             {!env.domain && (
               <p className="text-xs text-content-subtle mt-1">
                 Blank → an automatic URL (base domain if the admin set one, else the sslip/nip auto-URL, else <code className="font-mono text-xs">*.localhost</code>). Set a value only for your own custom domain.
               </p>
             )}
+            {sslBlocked && (
+              <p className="text-xs text-content-faint mt-1">SSL isn&apos;t available for localhost or IP addresses — use a public domain.</p>
+            )}
           </div>
         )}
 
-        {/* SSL — only under Traefik. Disabled for localhost/IP domains (LE can't issue
-            for those) and gated on accepting the Let's Encrypt Terms of Service. */}
-        {env.traefik && (
-          <div className={`pl-4 border-l-2 ${env.ssl_enabled && canSSL ? 'border-success-border' : 'border-border-strong'}`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm text-content">Request SSL certificate</p>
-                <p className="text-xs text-content-subtle mt-0.5">
-                  {!env.domain
-                    ? 'Enter a domain above to enable SSL'
-                    : sslBlocked
-                      ? 'Not available for localhost or IP addresses — use a public domain'
-                      : 'Traefik will issue a Let\'s Encrypt cert for this domain'}
-                </p>
+        {/* When SSL is on: the LE email (inherited, overridable) + the ToS acknowledgment
+            on one row. Unchecking the ToS turns SSL back off. */}
+        {env.traefik && env.ssl_enabled && canSSL && (
+          <div className="pl-4 border-l-2 border-success-border space-y-1.5">
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <label className="block text-xs text-content-subtle mb-1">Let&apos;s Encrypt email</label>
+                <Input type="email" value={env.acme_email || ''} onChange={v => upd('acme_email', v)}
+                  placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'inherit workspace / instance email'} />
               </div>
-              <button
-                type="button"
-                disabled={!canSSL || !tosAccepted}
-                onClick={() => upd('ssl_enabled', !env.ssl_enabled)}
-                className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${
-                  env.ssl_enabled && canSSL ? 'bg-green-600' : 'bg-surface-overlay'
-                } disabled:opacity-40`}
-              >
-                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                  env.ssl_enabled && canSSL ? 'translate-x-5' : ''
-                }`} />
-              </button>
-            </div>
-
-            {/* Let's Encrypt ToS acknowledgment — required before SSL can be enabled. */}
-            {canSSL && (
-              <label className="mt-2 flex items-start gap-2 text-xs text-content-muted cursor-pointer">
+              <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0 pb-2 max-w-[48%]">
                 <input type="checkbox" checked={tosAccepted}
                   onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
-                  className="w-3.5 h-3.5 mt-0.5 accent-brand-500" />
-                <span>I agree to the Let's Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a>.</span>
+                  className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a></span>
               </label>
-            )}
-
-            {/* ACME account email — inherits workspace → global; override per env. */}
-            {canSSL && (
-              <div className="mt-2">
-                <label className="block text-xs text-content-subtle mb-1">Let's Encrypt email</label>
-                <Input type="email" value={env.acme_email || ''} onChange={v => upd('acme_email', v)}
-                  placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'leave blank to inherit the workspace / instance email'} />
-                <p className="text-[11px] text-content-faint mt-1">Account/recovery contact for the cert. Blank inherits the {acmeDefault ? 'workspace' : 'instance'} default.</p>
-              </div>
-            )}
-
-            {env.ssl_enabled && canSSL && (
-              <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-success-subtle/40 border border-success-border/50 rounded-lg">
-                <span className="text-success-fg shrink-0 mt-0.5">🔒</span>
-                <div className="text-xs text-success-fg space-y-0.5">
-                  <p>SSL will be active for <strong>{env.domain}</strong></p>
-                  <p className="text-success-fg/70">
-                    Port 80 must be publicly reachable for the Let's Encrypt HTTP-01 challenge.
-                    The cert is registered to the instance's configured ACME email.
-                  </p>
-                </div>
-              </div>
-            )}
+            </div>
+            <p className="text-[11px] text-content-faint">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Port 80 must be reachable for the HTTP-01 challenge.</p>
           </div>
         )}
         {/* Git sync only applies to source-code projects (built from a repo) — not
@@ -1119,6 +1106,13 @@ function Step3({ data, onChange, workspace }) {
   // ⇒ the instance-global ACME email, shown generically since the wizard doesn't fetch it).
   const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
   const acmeDefault = (wsSettings?.acme_email || '').trim()
+  // Global routing context so the env's "Reachable at …" preview matches what deploy
+  // emits (base domain → auto-URL/sslip/nip → *.localhost). Best-effort (admin-gated).
+  const { data: gs = {} } = useQuery({ queryKey: ['general-settings'], queryFn: fetchGeneralSettings, retry: false })
+  const baseDomain = (wsSettings?.domain || gs.apps_base_domain || '').trim()
+  const autoUrlMode = gs.auto_url_mode || ''
+  const appHost = (gs.app_host || gs.auto_url_host || '').trim()
+  const resourcePrefix = workspace && data.key ? `${workspace}_${data.key}` : ''
   function updateEnv(idx, updated) {
     const envs = [...data.environments]
     envs[idx] = updated
@@ -1147,6 +1141,10 @@ function Step3({ data, onChange, workspace }) {
           hosts={hosts}
           defaultHostId={data.default_host_id || 0}
           acmeDefault={acmeDefault}
+          resourcePrefix={resourcePrefix}
+          baseDomain={baseDomain}
+          autoUrlMode={autoUrlMode}
+          appHost={appHost}
         />
       ))}
       <button

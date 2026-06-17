@@ -1375,9 +1375,25 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         })()}
         {cfg.traefik_enabled && (
           <>
+            {/* Domain + "Request SSL" on one row. SSL enables only once a real public
+                domain is entered (localhost/IP can't get a Let's Encrypt cert). */}
             <div>
               <Label>Domain <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-              <Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" />
+              <div className="flex items-center gap-3">
+                <div className="flex-1"><Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" /></div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs ${sslEligible ? 'text-content' : 'text-content-faint'}`}>Request SSL</span>
+                  <button
+                    type="button"
+                    disabled={!sslEligible}
+                    title={!cfg.domain ? 'Enter a domain to enable SSL' : sslBlocked ? 'Not available for localhost or IP addresses' : 'Request a Let\'s Encrypt certificate'}
+                    onClick={() => upd('ssl_enabled', !cfg.ssl_enabled)}
+                    className={`relative w-10 h-5 rounded-full transition-colors ${cfg.ssl_enabled && sslEligible ? 'bg-green-600' : 'bg-surface-overlay'} disabled:opacity-40`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${cfg.ssl_enabled && sslEligible ? 'translate-x-5' : ''}`} />
+                  </button>
+                </div>
+              </div>
               {!cfg.domain && (
                 <p className="text-xs text-content-subtle mt-1">
                   Blank → an automatic URL: {baseDomain
@@ -1386,45 +1402,31 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                   Set a value only to use your own custom domain (point a CNAME at this server).
                 </p>
               )}
+              {sslBlocked && (
+                <p className="text-xs text-content-faint mt-1">SSL isn&apos;t available for localhost or IP addresses — use a public domain.</p>
+              )}
             </div>
 
-            {/* SSL — disabled for localhost/IP domains (LE can't issue for those) and
-                gated on accepting the Let's Encrypt Terms of Service. */}
-            <div className={`pl-3 border-l-2 ${cfg.ssl_enabled && sslEligible ? 'border-success-border' : 'border-border-strong'}`}>
-              <Toggle
-                label="SSL certificate (Let's Encrypt)"
-                hint={!cfg.domain
-                  ? 'Set a domain above to enable SSL'
-                  : sslBlocked
-                    ? 'Not available for localhost or IP addresses — use a public domain'
-                    : `Traefik will request a cert for ${cfg.domain}`}
-                checked={!!cfg.ssl_enabled && sslEligible}
-                onChange={v => upd('ssl_enabled', v)}
-                disabled={!sslEligible || !tosAccepted}
-              />
-              {sslEligible && (
-                <label className="mt-2 flex items-start gap-2 text-xs text-content-muted cursor-pointer">
-                  <input type="checkbox" checked={tosAccepted}
-                    onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
-                    className="w-3.5 h-3.5 mt-0.5 accent-brand-500" />
-                  <span>I agree to the Let's Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a>.</span>
-                </label>
-              )}
-              {/* ACME account email — inherits workspace → global; override per env. */}
-              {sslEligible && (
-                <div className="mt-2">
-                  <Label>Let&apos;s Encrypt email</Label>
-                  <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
-                    placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'leave blank to inherit the workspace / instance email'} />
-                  <p className="text-xs text-content-faint mt-1">Account/recovery contact for the cert. Blank inherits the {acmeDefault ? 'workspace' : 'instance'} default.</p>
+            {/* When SSL is on: the LE email (inherited, overridable) + the ToS
+                acknowledgment on one row. Unchecking the ToS turns SSL back off. */}
+            {cfg.ssl_enabled && sslEligible && (
+              <div className="pl-3 border-l-2 border-success-border space-y-1.5">
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <Label>Let&apos;s Encrypt email</Label>
+                    <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
+                      placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'inherit workspace / instance email'} />
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0 pb-2 max-w-[48%]">
+                    <input type="checkbox" checked={tosAccepted}
+                      onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
+                      className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                    <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a></span>
+                  </label>
                 </div>
-              )}
-              {cfg.ssl_enabled && sslEligible && (
-                <p className="text-xs text-success-fg/70 mt-1">
-                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels.
-                </p>
-              )}
-            </div>
+                <p className="text-xs text-content-faint">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. After saving, click <strong>Refresh</strong> on the env card (or redeploy) to apply TLS.</p>
+              </div>
+            )}
 
             {/* Traefik network — advanced; changing it breaks routing unless the
                 proxy actually listens on the new network. Hidden by default. */}
