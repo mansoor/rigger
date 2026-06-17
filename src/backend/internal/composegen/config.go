@@ -142,6 +142,11 @@ type Env struct {
 	// wildcardBase, when set, makes the apex web router request a wildcard cert
 	// (tls.domains main={base} sans=*.{base}) so all base-domain apps share one cert.
 	wildcardBase string
+	// useFileCert routes an SSL env's TLS to Traefik's FILE-PROVIDER cert (issued
+	// out-of-band under a per-env/per-workspace ACME email) instead of a Traefik ACME
+	// resolver: the router emits tls=true with NO certresolver, so Traefik serves the
+	// matching file cert by SNI. Set from RouteOpts.OverrideCert.
+	useFileCert bool
 }
 
 // Service is one entry in config.json services[] — the unified app-service model

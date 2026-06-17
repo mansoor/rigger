@@ -26,6 +26,11 @@ type RouteOpts struct {
 	// Traefik DNS-01 certresolver and requests a single wildcard cert *.{base}
 	// instead of per-host HTTP-01. "" ⇒ per-host Let's Encrypt (unchanged).
 	DNSProvider string
+	// OverrideCert, when true, makes SSL routers use Traefik's file-provider cert
+	// (issued out-of-band under a per-env/workspace ACME email) instead of an ACME
+	// resolver: tls=true with NO certresolver. The bridge sets it only for an SSL env
+	// with an explicit public domain whose effective ACME email differs from the global.
+	OverrideCert bool
 	// EnvFile is the env's generated .env content. When a service sets
 	// env_file_mount, the generator embeds this verbatim as a compose `config`
 	// (content:) and mounts it at the target path. Delivered as inline content —
@@ -92,6 +97,12 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 		ro.LocalTLS = true
 	}
 	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
+	// Per-email override: serve the out-of-band file-provider cert (no ACME resolver).
+	// Only meaningful for an SSL env with an explicit public domain — the bridge has
+	// already verified the effective email differs from the global before setting this.
+	if ro.OverrideCert && e.SSLEnabled && !e.SSLSelfSigned {
+		e.useFileCert = true
+	}
 	applyWebEntryFallback(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
@@ -391,7 +402,9 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=websecure\"")
 		g.line("      - \"traefik.http.routers." + router + ".tls=true\"")
-		if !g.e.SSLSelfSigned {
+		// useFileCert ⇒ Traefik serves the out-of-band file-provider cert (matched by
+		// SNI); emit NO certresolver so it doesn't also try its own ACME account.
+		if !g.e.SSLSelfSigned && !g.e.useFileCert {
 			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=" + certResolver + "\"")
 			// Request a single wildcard cert for the apex base-domain router (DNS-01).
 			if wildcard != "" {

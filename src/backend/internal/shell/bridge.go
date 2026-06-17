@@ -131,6 +131,33 @@ func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
 	return settings.AppHost(b.db)
 }
 
+// usesOverrideCert reports whether an env's TLS should be served by Traefik's
+// file-provider cert (issued out-of-band under a per-env/per-workspace ACME email)
+// rather than a Traefik ACME resolver. True only for an SSL env with an explicit
+// public domain whose EFFECTIVE email (env → workspace → global) differs from the
+// global. composegen then emits tls=true with no certresolver. (The cert itself is
+// issued by the API layer's maybeIssueOverrideCert / the renewal scheduler.)
+func (b *Bridge) usesOverrideCert(workspaceName, project, env string) bool {
+	if b.db == nil {
+		return false
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return false
+	}
+	ec, ok := cfg.Environments[env]
+	if !ok || !ec.SSLEnabled {
+		return false
+	}
+	domain := strings.ToLower(strings.TrimSpace(ec.Domain))
+	if domain == "" || domain == "localhost" || strings.HasSuffix(domain, ".localhost") || net.ParseIP(domain) != nil {
+		return false // base-domain/wildcard or local — Traefik's own resolver handles it
+	}
+	global := strings.TrimSpace(settings.AppSetting(b.db, "acme_email"))
+	eff := settings.EffectiveAcmeEmail(b.db, workspaceName, ec.AcmeEmail)
+	return eff != "" && !strings.EqualFold(eff, global)
+}
+
 func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarget, error) {
 	if b.db == nil || b.pool == nil {
 		return nil, nil
@@ -1348,6 +1375,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			AutoURLMode:   settings.AutoURLMode(b.db),
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
+			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {

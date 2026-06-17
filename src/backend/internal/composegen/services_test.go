@@ -640,6 +640,35 @@ func TestServicesTraefikModes(t *testing.T) {
 	mustContain(t, app, "redirectscheme.scheme=https") // still redirects http→https
 }
 
+// OverrideCert: an SSL env using a per-email file-provider cert emits tls=true but NO
+// certresolver (Traefik serves the out-of-band cert by SNI), while still redirecting
+// http→https. Default (OverrideCert=false) keeps the letsencrypt resolver.
+func TestServicesOverrideCert(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"api","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"8080","env_file":true}],
+		"environments": {"prod": {"deployment":"compose","domain":"api.example.com",
+			"traefik_enabled":true,"traefik_network":"traefik_net","ssl_enabled":true,"acme_email":"team@example.com"}}
+	}`)
+
+	// Without OverrideCert → Traefik's own resolver.
+	def, err := GenerateRouted(cfg, "prod", RouteOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, svcBlock(t, string(def), "app"), "tls.certresolver=letsencrypt")
+
+	// With OverrideCert → tls=true, no certresolver, redirect intact.
+	ov, err := GenerateRouted(cfg, "prod", RouteOpts{OverrideCert: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(ov), "app")
+	mustContain(t, app, "traefik.http.routers.api_prod_app.tls=true")
+	mustNotContain(t, app, "certresolver")
+	mustContain(t, app, "redirectscheme.scheme=https")
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"
