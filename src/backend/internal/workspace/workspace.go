@@ -49,6 +49,9 @@ type Project struct {
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// Mailpit is the project-level default for the Mailpit test-SMTP sidecar (per-env
+	// overridable). The UI renders the toggle; composegen synthesizes the service per env.
+	Mailpit bool `json:"mailpit,omitempty"`
 	// Object/file storage is project-level; the two backends are INDEPENDENT (local,
 	// MinIO, both, or neither). StorageLocal → FILESYSTEM_DISK=local + persistent volume
 	// at StoragePath; StorageMinIO → managed MinIO S3 + mc bucket-init. Legacy

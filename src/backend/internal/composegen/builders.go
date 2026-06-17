@@ -34,6 +34,32 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	g.buildManagedDeps(prefix, isSwarm)
 	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
 	g.buildStorageConsole(prefix, rp, registry, tag, isSwarm)
+	g.buildMailpit(prefix, rp, registry, tag, isSwarm)
+}
+
+// buildMailpit synthesizes the Mailpit test-SMTP sidecar (axllent/mailpit — the
+// maintained MailHog successor) as a Traefik-routed service on the "mail" subdomain,
+// reusing buildService. Mailpit catches ALL outbound mail (catch-all) and shows it in
+// its web UI (:8025); the app sends to it over SMTP at mailpit:1025 (reachable in-network
+// without publishing — see envgen MAIL_*). Per-env (Tier-2): gated on the effective
+// mailpit toggle so it runs in dev/stage but not prod. AuthProtect → eligible for the
+// per-env basic-auth middleware. Host-port 8025 only when Traefik is off.
+func (g *gen) buildMailpit(prefix, rp, registry, tag string, isSwarm bool) {
+	if !g.mailpitOn() {
+		return
+	}
+	ver := g.cfg.version("mailpit", "latest")
+	svc := Service{
+		Name:        "mailpit",
+		Image:       "axllent/mailpit",
+		Tag:         ver,
+		Port:        "8025", // the web UI (Traefik / host-port target); SMTP 1025 is in-network only
+		WebRouted:   true,
+		Subdomain:   "mail",
+		HostPort:    "8025",
+		AuthProtect: true,
+	}
+	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
 }
 
 // buildAdminer synthesizes the Adminer web-SQL service from the project-level
@@ -505,6 +531,12 @@ func (g *gen) storageUIOn() bool {
 		return *g.e.StorageUI
 	}
 	return g.cfg.Project.StorageUI
+}
+func (g *gen) mailpitOn() bool {
+	if g.e.Mailpit != nil {
+		return *g.e.Mailpit
+	}
+	return g.cfg.Project.Mailpit
 }
 
 // minioOn / localStorageOn report the active object-storage backends (project-level,

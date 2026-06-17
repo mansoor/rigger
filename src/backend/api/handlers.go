@@ -1033,7 +1033,7 @@ func buildArgKeyOK(s string) bool {
 // source per service; image_from/depends_on must reference a real service (or, for
 // depends_on, an enabled managed dependency).
 func validateConfigServices(content []byte) string {
-	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "minio": true, "minio_init": true, "storage_console": true}
+	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "minio": true, "minio_init": true, "storage_console": true, "mailpit": true}
 	var doc struct {
 		Services []struct {
 			Name  string `json:"name"`

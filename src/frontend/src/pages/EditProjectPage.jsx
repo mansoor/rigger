@@ -1229,7 +1229,7 @@ function TriOverride({ label, hint, projectDefault, value, onChange }) {
   )
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, projectMailpit = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -1430,18 +1430,17 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       {/* Tooling — per-env override of the project's dev/admin sidecars (Adminer / MinIO
           console). Backends (DB/Redis/storage) stay project-level; only these sidecars can
           differ per env, e.g. on in dev/stage, off in prod. */}
-      {((projectDatabase && projectDatabase !== 'none') || projectObjectStorage === 'minio') && (
-        <div className="space-y-2 pt-3 border-t border-border-strong/50">
-          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Tooling (this environment)</p>
-          {projectDatabase && projectDatabase !== 'none' && (
-            <TriOverride label="Adminer (web SQL)" projectDefault={projectWebSql} value={cfg.web_sql} onChange={v => upd('web_sql', v)} />
-          )}
-          {projectObjectStorage === 'minio' && (
-            <TriOverride label="MinIO console" projectDefault={projectStorageUi} value={cfg.storage_ui} onChange={v => upd('storage_ui', v)} />
-          )}
-          <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a sidecar in this environment only.</p>
-        </div>
-      )}
+      <div className="space-y-2 pt-3 border-t border-border-strong/50">
+        <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Tooling (this environment)</p>
+        {projectDatabase && projectDatabase !== 'none' && (
+          <TriOverride label="Adminer (web SQL)" projectDefault={projectWebSql} value={cfg.web_sql} onChange={v => upd('web_sql', v)} />
+        )}
+        {projectObjectStorage === 'minio' && (
+          <TriOverride label="MinIO console" projectDefault={projectStorageUi} value={cfg.storage_ui} onChange={v => upd('storage_ui', v)} />
+        )}
+        <TriOverride label="Mailpit (test SMTP)" projectDefault={projectMailpit} value={cfg.mailpit} onChange={v => upd('mailpit', v)} />
+        <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a dev/admin sidecar in this environment only (e.g. Mailpit on in dev/stage, off in prod).</p>
+      </div>
 
       {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
           Only meaningful when this env routes through Traefik (basic-auth is a Traefik
@@ -2202,8 +2201,8 @@ export default function EditProjectPage() {
             {project?.type !== 'image' && (
               <div className="mb-5">
                 <ManagedServices
-                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, storageLocal: !!project?.storage_local || project?.object_storage === 'local', storageMinio: !!project?.storage_minio || project?.object_storage === 'minio', storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql }}
-                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, storage_local: !!v.storageLocal, storage_minio: !!v.storageMinio, object_storage: '', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (!!v.storageMinio && !!v.storageUi), web_sql: !!v.webSql }))}
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, storageLocal: !!project?.storage_local || project?.object_storage === 'local', storageMinio: !!project?.storage_minio || project?.object_storage === 'minio', storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql, mailpit: project?.mailpit }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, storage_local: !!v.storageLocal, storage_minio: !!v.storageMinio, object_storage: '', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (!!v.storageMinio && !!v.storageUi), web_sql: !!v.webSql, mailpit: !!v.mailpit }))}
                   showWebSql={project?.type === 'database'}
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
@@ -2288,6 +2287,7 @@ export default function EditProjectPage() {
                 projectObjectStorage={(!!project?.storage_minio || project?.object_storage === 'minio') ? 'minio' : ''}
                 projectWebSql={!!project?.web_sql}
                 projectStorageUi={!!project?.storage_ui}
+                projectMailpit={!!project?.mailpit}
                 gitRepo={project?.git_repo || ''}
                 gitBranch={project?.git_branch || ''}
                 dirty={dirty}

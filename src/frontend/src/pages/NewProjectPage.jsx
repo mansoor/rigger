@@ -1466,10 +1466,10 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
           stacks bring their own data services as images so it's hidden for them. */}
       {managedApplies && (
         <ManagedServices
-          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, storageLocal: data.storageLocal, storageMinio: data.storageMinio, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql }}
+          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, storageLocal: data.storageLocal, storageMinio: data.storageMinio, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql, mailpit: data.mailpit }}
           onChange={v => {
             onChange('database', v.database); onChange('dbVersion', v.dbVersion)
-            onChange('redis', !!v.redis); onChange('webSql', !!v.webSql)
+            onChange('redis', !!v.redis); onChange('webSql', !!v.webSql); onChange('mailpit', !!v.mailpit)
             onChange('storageLocal', !!v.storageLocal); onChange('storageMinio', !!v.storageMinio); onChange('storageBucket', v.storageBucket || ''); onChange('storagePath', v.storagePath || ''); onChange('storageUi', !!v.storageUi)
           }}
           showWebSql={data.stackType === 'database'}
@@ -1684,6 +1684,7 @@ function Step6({ data }) {
           <ReviewRow key={i} label={`  ${e.name} domain`} value={e.domain} />
         ))}
         {data.redis  && <ReviewRow label="Redis" value="Enabled" />}
+        {data.mailpit && <ReviewRow label="Mailpit (test SMTP)" value="Enabled (per-env overridable)" />}
         {(data.storageMinio || data.storageLocal) && <ReviewRow label="Object storage" value={[data.storageLocal && 'Local volume', data.storageMinio && `MinIO (S3)${data.storageUi ? ' + console' : ''}`].filter(Boolean).join(' + ')} />}
         {data.environments.filter(e => Object.keys(e.vars || {}).length > 0).map((e, i) => (
           <ReviewRow key={i} label={`  ${e.name} vars`} value={`${Object.keys(e.vars).length} variable(s)`} />
@@ -1862,7 +1863,7 @@ function Stepper({ current, maxVisited, onStepClick }) {
 const DEFAULT_DATA = {
   name: '', key: '', registry: '',
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
-  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', webSql: false, redis: false, storageLocal: false, storageMinio: false, storageBucket: '', storagePath: '', storageUi: false,
+  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', webSql: false, mailpit: false, redis: false, storageLocal: false, storageMinio: false, storageBucket: '', storagePath: '', storageUi: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
   environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
@@ -2015,6 +2016,7 @@ export default function NewProjectPage() {
       database: isImage ? 'none' : data.database,
       db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
       web_sql: (!isImage && data.database && data.database !== 'none') ? !!data.webSql : false,
+      mailpit: isImage ? false : !!data.mailpit,
       redis: (isImage || isDatabase) ? false : data.redis,
       storage_local: (isImage || isDatabase) ? false : !!data.storageLocal,
       storage_minio: (isImage || isDatabase) ? false : !!data.storageMinio,

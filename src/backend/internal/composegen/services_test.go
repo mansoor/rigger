@@ -335,6 +335,34 @@ func TestAdminerSynthSubdomain(t *testing.T) {
 	}
 }
 
+// Mailpit synthesizes as a Traefik-routed sidecar on the "mail" subdomain, gated on the
+// per-env mailpit toggle (project default, env-overridable). Off in an env → no service.
+func TestMailpitSidecar(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"mailpit":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {
+			"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com"},
+			"prod": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","mailpit":false}
+		}
+	}`
+	dev, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := svcBlock(t, string(dev), "mailpit")
+	for _, want := range []string{"image: axllent/mailpit", "routers.app1_dev_mailpit.rule=Host(`mail.app1.example.com`)"} {
+		if !strings.Contains(m, want) {
+			t.Errorf("mailpit block missing %q\n---\n%s", want, m)
+		}
+	}
+	// prod overrides mailpit=false → no mailpit service.
+	prod, _ := GenerateAt([]byte(cfg), "prod", time.Unix(0, 0).UTC())
+	if strings.Contains(string(prod), "  mailpit:") {
+		t.Errorf("prod override mailpit=false must drop the sidecar\n%s", prod)
+	}
+}
+
 // Per-env tri-state override of the project sidecar defaults: project web_sql=true, but
 // the env forces web_sql=false → no Adminer in that env (and vice-versa for storage_ui).
 func TestPerEnvSidecarOverride(t *testing.T) {

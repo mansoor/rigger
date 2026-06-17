@@ -42,6 +42,7 @@ type CreateRequest struct {
 	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
 	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
+	Mailpit      bool              `json:"mailpit"`      // add the Mailpit test-SMTP sidecar (project default)
 	Redis         bool             `json:"redis"`
 	StorageLocal  bool             `json:"storage_local"`  // local volume backend
 	StorageMinIO  bool             `json:"storage_minio"`  // MinIO S3 backend (independent of local)
@@ -339,6 +340,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			if req.WebSQL || req.Cloudbeaver {
 				project["web_sql"] = true
 			}
+		}
+		if req.Mailpit {
+			project["mailpit"] = true
 		}
 		if req.Redis {
 			project["redis_enabled"] = true

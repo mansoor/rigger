@@ -52,6 +52,9 @@ type Project struct {
 	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// Mailpit is the project-level DEFAULT for the Mailpit test-SMTP sidecar (a Tier-2
+	// dev/admin tool, per-env overridable like WebSQL/StorageUI). See gen.mailpitOn.
+	Mailpit bool `json:"mailpit,omitempty"`
 	// Object/file storage is project-level and the two backends are INDEPENDENT — a
 	// project can have local, MinIO, both, or neither:
 	//   StorageLocal → FILESYSTEM_DISK=local + a persistent named volume at StoragePath
@@ -106,6 +109,7 @@ type Env struct {
 	// prod. See gen.webSQLOn / storageUIOn.
 	WebSQL          *bool `json:"web_sql,omitempty"`
 	StorageUI       *bool `json:"storage_ui,omitempty"`
+	Mailpit         *bool `json:"mailpit,omitempty"` // per-env tri-state override of Project.Mailpit
 	RedisEnabled    bool  `json:"redis_enabled"`
 	GarageEnabled   bool   `json:"garage_enabled"`
 	TraefikEnabled  bool   `json:"traefik_enabled"`

@@ -200,6 +200,15 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         </div>
       )}
 
+      <div className="pt-1 border-t border-border">
+        <MiniToggle
+          label="Mailpit (test SMTP)"
+          hint="Catch-all SMTP + web inbox (axllent/mailpit) for testing outbound mail — routed at the mail subdomain. Default for new envs; each environment can override it (typically on in dev/stage, off in prod). Protect the route in production."
+          checked={!!v.mailpit}
+          onChange={x => set({ mailpit: x })}
+        />
+      </div>
+
       {rows.length > 0 && (
         <div className="space-y-2 pt-1">
           {rows.map(r => <ServiceRow key={r.name} row={r} resourcePrefix={resourcePrefix} />)}

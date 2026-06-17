@@ -116,6 +116,9 @@ type Project struct {
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
 	// treats both as present. See [[adminer]] in composegen.buildAdminer.
 	WebSQL bool `json:"web_sql,omitempty"`
+	// Mailpit is the project-level DEFAULT for the Mailpit test-SMTP sidecar (Tier-2
+	// dev/admin tool, per-env overridable). See EffMailpit.
+	Mailpit bool `json:"mailpit,omitempty"`
 	// Object/file storage is project-level; the two backends are INDEPENDENT (local,
 	// MinIO, both, or neither). StorageLocal → FILESYSTEM_DISK=local + a persistent
 	// volume at StoragePath; StorageMinIO → managed MinIO S3 (+ mc bucket-init) via AWS_*.
@@ -265,6 +268,12 @@ func (c *Config) EffStorageUI(e Env) bool {
 	}
 	return c.Project.StorageUI
 }
+func (c *Config) EffMailpit(e Env) bool {
+	if e.Mailpit != nil {
+		return *e.Mailpit
+	}
+	return c.Project.Mailpit
+}
 
 // HasAdminerEnv reports whether THIS env exposes Adminer (effective web_sql, or a legacy
 // literal "adminer" service). Per-env variant of HasAdminer — gates the ADMINER_LOGIN_SECRET
@@ -305,10 +314,11 @@ type Env struct {
 	// ProtectAdminUIs gates the admin sidecars (Adminer / MinIO console) behind Traefik
 	// basic-auth for this env; envgen generates the credential into .env.
 	ProtectAdminUIs bool           `json:"protect_admin_uis,omitempty"`
-	// WebSQL / StorageUI are per-env TRI-STATE overrides of the project-level sidecar
-	// defaults (nil = inherit project, &true/&false = force). See EffWebSQL / EffStorageUI.
+	// WebSQL / StorageUI / Mailpit are per-env TRI-STATE overrides of the project-level
+	// sidecar defaults (nil = inherit project, &true/&false = force). See Eff* helpers.
 	WebSQL          *bool          `json:"web_sql,omitempty"`
 	StorageUI       *bool          `json:"storage_ui,omitempty"`
+	Mailpit         *bool          `json:"mailpit,omitempty"`
 	RedisEnabled    bool           `json:"redis_enabled"`
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`

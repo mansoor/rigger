@@ -160,6 +160,13 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			out[k] = true
 		}
 	}
+	// When Mailpit is on for this env, Rigger owns the SMTP wiring so a repo's
+	// .env.example MAIL_HOST/PORT can't redirect mail away from the catch-all.
+	if cfg.EffMailpit(e) {
+		for _, k := range []string{"MAIL_MAILER", "MAIL_DRIVER", "MAIL_HOST", "MAIL_PORT", "MAIL_ENCRYPTION"} {
+			out[k] = true
+		}
+	}
 	if cfg.HasAdminerEnv(e) {
 		out["ADMINER_LOGIN_SECRET"] = true
 	}
@@ -548,10 +555,23 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("\n")
 	}
 
-	p("# ── Mail (fill in per-environment) ─────────────────────────\n")
-	p("MAIL_DRIVER=smtp\n")
-	p("MAIL_HOST=mailhog\n")
-	p("MAIL_PORT=1025\n")
+	// Mail. When the Mailpit test-SMTP sidecar is on for THIS env, point the app at it
+	// (bare host "mailpit" — SMTP rejects underscore hostnames; reachable in-network on
+	// :1025). Mailpit is a catch-all, so no auth/encryption. When off, leave MAIL_HOST
+	// blank for the user to fill a real SMTP (and MAIL_* are NOT reserved, so the app's
+	// own .env.example values win). Replaces the old hardcoded MAIL_HOST=mailhog.
+	mailpitOn := cfg.EffMailpit(e)
+	p("# ── Mail ───────────────────────────────────────────────────\n")
+	p("MAIL_MAILER=smtp\n")
+	p("MAIL_DRIVER=smtp\n") // legacy alias (Laravel <7)
+	if mailpitOn {
+		p("MAIL_HOST=mailpit\n")
+		p("MAIL_PORT=1025\n")
+		p("MAIL_ENCRYPTION=null\n")
+	} else {
+		p("MAIL_HOST=\n")
+		p("MAIL_PORT=587\n")
+	}
 	p("MAIL_USERNAME=\n")
 	p("MAIL_PASSWORD=\n")
 	mailDomain := e.Domain
@@ -559,7 +579,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		mailDomain = "localhost"
 	}
 	p("MAIL_FROM_ADDRESS=noreply@%s\n", mailDomain)
-	p("MAIL_FROM_NAME=\"%s\"\n\n", project)
+	p("MAIL_FROM_NAME=%s\n\n", envQuote(project))
 
 	p("# ── Node.js specific ───────────────────────────────────────\n")
 	if env == "prod" {
