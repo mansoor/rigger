@@ -1451,10 +1451,17 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
     })
     return rows.length ? rows : []
   })
+  const [envRows, setEnvRows] = useState(() => Object.entries(img.env_vars || {}).map(([k, v]) => ({ key: k, val: String(v) })))
 
   function syncPorts(rows) {
     setPortRows(rows)
     onChange(idx, { ...img, portMappings: rows })
+  }
+  function syncEnv(rows) {
+    setEnvRows(rows)
+    const obj = {}
+    for (const r of rows) { const k = r.key.trim(); if (k) obj[k] = r.val }
+    onChange(idx, { ...img, env_vars: obj })
   }
   function syncVols(rows) {
     setVolRows(rows)
@@ -1570,6 +1577,31 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
           <input type="text" value={img.command || ''} placeholder="php artisan queue:work"
             onChange={e => upd('command', e.target.value)} className={`w-full mt-2 ${monoInput}`} />
         )}
+      </div>
+
+      {/* Environment variables (per service) */}
+      <div>
+        <Label>Environment variables</Label>
+        <p className="text-xs text-content-subtle mb-2">KEY : VALUE — passed to this service. <code className="font-mono">${'{VAR}'}</code> values resolve from the env&apos;s .env at deploy.</p>
+        <div className="space-y-1.5">
+          {envRows.map((row, ri) => (
+            <div key={ri} className="flex items-center gap-2">
+              <input type="text" value={row.key} placeholder="KEY"
+                onChange={e => syncEnv(envRows.map((x, j) => j === ri ? { ...x, key: e.target.value } : x))}
+                className={`flex-1 ${monoInput}`} />
+              <span className="text-content-subtle font-bold shrink-0">=</span>
+              <input type="text" value={row.val} placeholder="value"
+                onChange={e => syncEnv(envRows.map((x, j) => j === ri ? { ...x, val: e.target.value } : x))}
+                className={`flex-1 ${monoInput}`} />
+              <button type="button" onClick={() => syncEnv(envRows.filter((_, j) => j !== ri))}
+                className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setEnvRows(r => [...r, { key: '', val: '' }])}
+            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            <span className="text-base leading-none">＋</span> Add variable
+          </button>
+        </div>
       </div>
 
       {/* Healthcheck */}
