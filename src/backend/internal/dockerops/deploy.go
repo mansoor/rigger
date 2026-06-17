@@ -80,6 +80,7 @@ type config struct {
 		Name           string `json:"name"`
 		Type           string `json:"type"`
 		ResourcePrefix string `json:"resource_prefix"`
+		Registry       string `json:"registry"`
 	} `json:"project"`
 	Environments map[string]struct {
 		Deployment string `json:"deployment"`
@@ -159,6 +160,7 @@ func Run(opts Options) (bool, error) {
 		opts:        opts,
 		cfgBytes:    cfgBytes,
 		projectType: cfg.Project.Type,
+		registry:    cfg.Project.Registry,
 		// Compose project name MUST use the immutable resource prefix
 		// ({workspace}_{project}) so projects with the same display name in
 		// different workspaces don't share a compose project (which would make
@@ -195,6 +197,7 @@ type runner struct {
 	opts        Options
 	cfgBytes    []byte
 	projectType string
+	registry    string // empty ⇒ local-only (built images have no registry prefix)
 	stack       string
 	envDir      string
 	composePath string
@@ -340,9 +343,17 @@ func (r *runner) update() error {
 	if out, err := r.composeOutput(append([]string{"ps", "--status", "running", "--quiet"}, target...)...); err == nil {
 		runningBefore = len(bytes.TrimSpace(out)) > 0
 	}
-	r.info("Pulling latest images...")
-	if err := r.compose(append([]string{"pull"}, target...)...); err != nil {
-		return err
+	// Local-only registry: built images have NO registry prefix, so `compose pull`
+	// would resolve them against Docker Hub and fail. Skip the pull and recreate with
+	// the locally-built images (the env's {SVC}_IMAGE pointers already track the latest
+	// build). With a registry set, pull as before to fetch the pushed image.
+	if r.registry == "" {
+		r.info("Local-only registry — skipping pull; using locally-built images")
+	} else {
+		r.info("Pulling latest images...")
+		if err := r.compose(append([]string{"pull"}, target...)...); err != nil {
+			return err
+		}
 	}
 	if runningBefore {
 		r.info("Recreating containers with new images...")
@@ -355,6 +366,8 @@ func (r *runner) update() error {
 			return err
 		}
 		r.success("Updated %s and restarted", label)
+	} else if r.registry == "" {
+		r.success("Updated %s (local images; nothing running to recreate)", label)
 	} else {
 		r.success("Updated %s (images pulled, stays stopped)", label)
 	}

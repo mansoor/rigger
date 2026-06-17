@@ -76,7 +76,9 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        {/* Fixed body height so the modal stays the same size across tabs (content
+            scrolls within) instead of resizing to each tab's content. */}
+        <div className="h-[58vh] overflow-y-auto px-5 py-4">
           {activeTab?.kind === 'database' ? (
             <DatabasePanel workspace={workspace} name={name} env={env} reveal={reveal} setReveal={setReveal}
               canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setDbMeta} />

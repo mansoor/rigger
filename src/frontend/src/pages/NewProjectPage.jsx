@@ -150,10 +150,10 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
 const STACK_TYPES = [
   { id: 'prebuilt',  label: 'Pre-built template',  desc: 'Pick from curated stacks — NPM, WordPress, Vaultwarden, Uptime Kuma…' },
   { id: 'image',     label: 'Image stack',          desc: 'Deploy any Docker images — specify your own image names, tags, and ports.' },
-  { id: 'custom',    label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
+  { id: 'database',  label: 'Database hosting', desc: 'Run a managed database (PostgreSQL, MySQL, MariaDB) on its own — no app code.' },
   { id: 'scan',      label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
   { id: 'blueprint', label: 'Start from a stack template', desc: 'No repo yet — pick a stack (Laravel, Spring, Django, Go, .NET…); Rigger scaffolds a starter Dockerfile + services.' },
-  { id: 'database',  label: 'Database hosting', desc: 'Run a managed database (PostgreSQL, MySQL, MariaDB) on its own — no app code.' },
+  { id: 'custom',    label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
 ]
 
 // BlueprintStack: pick a stack template (no repo). The selected blueprint's
@@ -912,8 +912,23 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
 const DEFAULT_ENV = { name: '', domain: '', http_port: 8080, traefik: false, traefik_network: 'traefik_net', ssl_enabled: false, deployment: 'compose', backend_replicas: 1, frontend_replicas: 1, git_enabled: false, git_repo: '', git_branch: '', vars: {}, secret_keys: [], backup_schedules: [] }
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
+// looksLocalOrIP reports whether a domain can't get a public Let's Encrypt cert:
+// localhost / *.localhost, a bare IPv4, or an IPv6 literal. (Magic-DNS hosts like
+// sslip.io / nip.io are real public names and ARE eligible, so they're allowed.)
+export function looksLocalOrIP(domain) {
+  const h = (domain || '').trim().toLowerCase().replace(/:\d+$/, '')
+  if (!h) return false
+  if (h === 'localhost' || h.endsWith('.localhost')) return true
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true // IPv4
+  if (h.includes(':')) return true                   // IPv6 literal
+  return false
+}
+
 function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0 }) {
   const upd = (k, v) => onChange(idx, { ...env, [k]: v })
+  const [tosAccepted, setTosAccepted] = useState(!!env.ssl_enabled) // LE ToS ack gates SSL
+  const sslBlocked = looksLocalOrIP(env.domain)
+  const canSSL = !!env.domain && !sslBlocked
   const hostOptions = [{ value: '0', label: 'Local control plane' },
     ...hosts.map(h => ({ value: String(h.id), label: h.name }))]
   return (
@@ -979,41 +994,53 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           </div>
         )}
 
-        {/* SSL checkbox — only shown when Traefik is on AND a domain is entered */}
+        {/* SSL — only under Traefik. Disabled for localhost/IP domains (LE can't issue
+            for those) and gated on accepting the Let's Encrypt Terms of Service. */}
         {env.traefik && (
-          <div className={`pl-4 border-l-2 ${env.ssl_enabled ? 'border-success-border' : 'border-border-strong'}`}>
+          <div className={`pl-4 border-l-2 ${env.ssl_enabled && canSSL ? 'border-success-border' : 'border-border-strong'}`}>
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-sm text-content">Request SSL certificate</p>
                 <p className="text-xs text-content-subtle mt-0.5">
                   {!env.domain
                     ? 'Enter a domain above to enable SSL'
-                    : 'Traefik will issue a Let\'s Encrypt cert for this domain'}
+                    : sslBlocked
+                      ? 'Not available for localhost or IP addresses — use a public domain'
+                      : 'Traefik will issue a Let\'s Encrypt cert for this domain'}
                 </p>
               </div>
               <button
                 type="button"
-                disabled={!env.domain}
+                disabled={!canSSL || !tosAccepted}
                 onClick={() => upd('ssl_enabled', !env.ssl_enabled)}
                 className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ml-4 ${
-                  env.ssl_enabled && env.domain ? 'bg-green-600' : 'bg-surface-overlay'
+                  env.ssl_enabled && canSSL ? 'bg-green-600' : 'bg-surface-overlay'
                 } disabled:opacity-40`}
               >
                 <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                  env.ssl_enabled && env.domain ? 'translate-x-5' : ''
+                  env.ssl_enabled && canSSL ? 'translate-x-5' : ''
                 }`} />
               </button>
             </div>
 
-            {env.ssl_enabled && env.domain && (
+            {/* Let's Encrypt ToS acknowledgment — required before SSL can be enabled. */}
+            {canSSL && (
+              <label className="mt-2 flex items-start gap-2 text-xs text-content-muted cursor-pointer">
+                <input type="checkbox" checked={tosAccepted}
+                  onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
+                  className="w-3.5 h-3.5 mt-0.5 accent-brand-500" />
+                <span>I agree to the Let's Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a>.</span>
+              </label>
+            )}
+
+            {env.ssl_enabled && canSSL && (
               <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-success-subtle/40 border border-success-border/50 rounded-lg">
                 <span className="text-success-fg shrink-0 mt-0.5">🔒</span>
                 <div className="text-xs text-success-fg space-y-0.5">
                   <p>SSL will be active for <strong>{env.domain}</strong></p>
                   <p className="text-success-fg/70">
                     Port 80 must be publicly reachable for the Let's Encrypt HTTP-01 challenge.
-                    Set <code className="font-mono text-xs">ACME_EMAIL</code> in{' '}
-                    <code className="font-mono text-xs">src/.env</code> before deploying.
+                    The cert is registered to the instance's configured ACME email.
                   </p>
                 </div>
               </div>
@@ -2025,7 +2052,7 @@ export default function NewProjectPage() {
       storage_ui: (isImage || isDatabase) ? false : (!!data.storageMinio && !!data.storageUi),
       environments: data.environments.filter(e => e.name).map(e => ({
         ...e,
-        ssl_enabled: e.traefik && !!e.domain && !!e.ssl_enabled,
+        ssl_enabled: e.traefik && !!e.domain && !looksLocalOrIP(e.domain) && !!e.ssl_enabled,
         vars: e.vars || {},
         host_id: e.host_id ?? (data.default_host_id || 0),
       })),

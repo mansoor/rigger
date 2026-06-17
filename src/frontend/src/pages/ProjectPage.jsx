@@ -199,6 +199,8 @@ const EI = {
   // rollback = clock + counter-clockwise arrow (distinct from `restart`'s plain circular arrow)
   rollback:<><path d="M3 3v5h5" /><path d="M3.5 12a8.5 8.5 0 1 1 2.2 6" /><path d="M12 8v4l3 2" /></>,
   database:<><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5" /><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></>,
+  // services = a grid of tiles (managed-services console: DB/Redis/S3/Mailpit)
+  services:<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
 }
 function EnvIcon({ name, fill, className = 'w-4 h-4' }) {
   return (
@@ -613,7 +615,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           )}
           <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
           {hasAnyService && (
-            <ToolBtn icon="database" title="Managed services console" onClick={() => setDbInfoOpen(true)}
+            <ToolBtn icon="services" title="Managed services console" onClick={() => setDbInfoOpen(true)}
               className="text-content-subtle hover:text-sky-400" />
           )}
           {canOp && (

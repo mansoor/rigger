@@ -1229,11 +1229,25 @@ function TriOverride({ label, hint, projectDefault, value, onChange }) {
   )
 }
 
+// looksLocalOrIP — a domain that can't get a public Let's Encrypt cert (localhost /
+// *.localhost / bare IP). Mirrors the same check in NewProjectPage.
+function looksLocalOrIP(domain) {
+  const h = (domain || '').trim().toLowerCase().replace(/:\d+$/, '')
+  if (!h) return false
+  if (h === 'localhost' || h.endsWith('.localhost')) return true
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true // IPv4
+  if (h.includes(':')) return true                   // IPv6 literal
+  return false
+}
+
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, projectMailpit = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const [copyOpen, setCopyOpen] = useState(false)
+  const [tosAccepted, setTosAccepted] = useState(!!cfg.ssl_enabled) // LE ToS ack gates SSL
+  const sslBlocked = looksLocalOrIP(cfg.domain)
+  const sslEligible = !!cfg.domain && !sslBlocked
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
   const updGit = (k, v) => onChange({ ...cfg, git: { ...(cfg.git || {}), [k]: v } })
   const updReplicas = (k, v) => onChange({ ...cfg, replicas: { ...(cfg.replicas || {}), [k]: parseInt(v) || 1 } })
@@ -1374,20 +1388,31 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               )}
             </div>
 
-            {/* SSL toggle — enabled only when domain is set */}
-            <div className={`pl-3 border-l-2 ${cfg.ssl_enabled ? 'border-success-border' : 'border-border-strong'}`}>
+            {/* SSL — disabled for localhost/IP domains (LE can't issue for those) and
+                gated on accepting the Let's Encrypt Terms of Service. */}
+            <div className={`pl-3 border-l-2 ${cfg.ssl_enabled && sslEligible ? 'border-success-border' : 'border-border-strong'}`}>
               <Toggle
                 label="SSL certificate (Let's Encrypt)"
-                hint={cfg.domain
-                  ? `Traefik will request a cert for ${cfg.domain}`
-                  : 'Set a domain above to enable SSL'}
-                checked={!!cfg.ssl_enabled && !!cfg.domain}
+                hint={!cfg.domain
+                  ? 'Set a domain above to enable SSL'
+                  : sslBlocked
+                    ? 'Not available for localhost or IP addresses — use a public domain'
+                    : `Traefik will request a cert for ${cfg.domain}`}
+                checked={!!cfg.ssl_enabled && sslEligible}
                 onChange={v => upd('ssl_enabled', v)}
-                disabled={!cfg.domain}
+                disabled={!sslEligible || !tosAccepted}
               />
-              {cfg.ssl_enabled && cfg.domain && (
+              {sslEligible && (
+                <label className="mt-2 flex items-start gap-2 text-xs text-content-muted cursor-pointer">
+                  <input type="checkbox" checked={tosAccepted}
+                    onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
+                    className="w-3.5 h-3.5 mt-0.5 accent-brand-500" />
+                  <span>I agree to the Let's Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a>.</span>
+                </label>
+              )}
+              {cfg.ssl_enabled && sslEligible && (
                 <p className="text-xs text-success-fg/70 mt-1">
-                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels.
+                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels. The cert is registered to the instance's configured ACME email.
                 </p>
               )}
             </div>
