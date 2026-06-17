@@ -2,8 +2,9 @@ package detect
 
 import "testing"
 
-// Pasting a multi-image compose should map cleanly to image services, fold a recognised
-// data service into a managed dependency, pick a web entry, and parse ports/env.
+// Pasting a multi-image compose for the IMAGE stack keeps EVERY service as a plain
+// image entry — including data services like postgres (the image stack has no managed-
+// dependency concept, so folding would silently drop them). Ports/env/tags still parse.
 func TestDetectComposeBytes(t *testing.T) {
 	yaml := `
 services:
@@ -27,8 +28,8 @@ services:
 	for _, s := range d.Services {
 		byName[s.Name] = s
 	}
-	if len(d.Services) != 2 {
-		t.Fatalf("want 2 app services (web, api), got %d: %+v", len(d.Services), d.Services)
+	if len(d.Services) != 3 {
+		t.Fatalf("want 3 image services (web, api, db), got %d: %+v", len(d.Services), d.Services)
 	}
 	web, ok := byName["web"]
 	if !ok || web.Image != "nginx" || web.Tag != "1.27-alpine" {
@@ -46,12 +47,15 @@ services:
 	if api := byName["api"]; api.Image != "ghcr.io/acme/api" || api.Tag != "v2" {
 		t.Errorf("api registry image split wrong: %+v", api)
 	}
-	// postgres folds into a managed dependency, not an app service.
-	if d.Database != "postgres" {
-		t.Errorf("expected postgres managed dep, got %q", d.Database)
+	// postgres is kept as a plain image service — NOT folded into a managed dependency.
+	if db, ok := byName["db"]; !ok || db.Image != "postgres" || db.Tag != "16" {
+		t.Errorf("db should be a plain image service postgres:16, got %+v", db)
 	}
-	if _, isApp := byName["db"]; isApp {
-		t.Errorf("db should be a managed dep, not an app service")
+	if d.Database != "none" {
+		t.Errorf("expected no managed dep folding for the image stack, got database=%q", d.Database)
+	}
+	if len(d.ManagedCandidates) != 0 {
+		t.Errorf("expected no managed candidates, got %d", len(d.ManagedCandidates))
 	}
 }
 

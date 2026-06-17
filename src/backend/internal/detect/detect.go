@@ -94,14 +94,14 @@ type Build struct {
 
 // Draft is the detection result the wizard pre-fills from.
 type Draft struct {
-	Services  []Service         `json:"services"`
-	Database  string            `json:"database"`             // none | postgres | mysql
-	DBVersion string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
-	Redis         bool          `json:"redis"`
-	ObjectStorage string        `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
-	Detected  string            `json:"detected"`            // primary stack label, for display
-	Notes     []string          `json:"notes"`               // human-readable detection notes
-	EnvVars   map[string]string `json:"env_vars,omitempty"`  // seeded from .env.example for the env's .env
+	Services      []Service         `json:"services"`
+	Database      string            `json:"database"`             // none | postgres | mysql
+	DBVersion     string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
+	Redis         bool              `json:"redis"`
+	ObjectStorage string            `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
+	Detected      string            `json:"detected"`                 // primary stack label, for display
+	Notes         []string          `json:"notes"`                    // human-readable detection notes
+	EnvVars       map[string]string `json:"env_vars,omitempty"`       // seeded from .env.example for the env's .env
 	// ManagedCandidates lists detected containers Rigger CAN manage (postgres/mysql/
 	// redis). The default draft above already chose "managed" (dropped the container,
 	// set the flag, rebased host refs); each candidate carries the verbatim raw
@@ -312,10 +312,11 @@ type composeSvc struct {
 	Profiles    []string  `yaml:"profiles"`
 }
 
-// DetectComposeBytes parses pasted docker-compose.yml content (no repo on disk) into
-// a Draft — the same mapping the repo scanner uses, so the "paste compose" importer
-// and a git scan produce identical service graphs. Build-context framework ID is
-// skipped (no files to read); managed-dep detection + web-entry pick still apply.
+// DetectComposeBytes parses pasted docker-compose.yml content (no repo on disk) into a
+// Draft for the IMAGE-stack importer. foldManaged is FALSE here: the image stack has no
+// managed-dependency concept, so EVERY service (postgres/redis included) is kept as a
+// plain image entry rather than folded into a managed dep (which would silently drop it).
+// Build-context framework ID is skipped (no files to read).
 func DetectComposeBytes(data []byte) (Draft, error) {
 	d := Draft{Database: "none", ObjectStorage: "none", Detected: "compose (pasted)"}
 	var cf composeFile
@@ -325,7 +326,7 @@ func DetectComposeBytes(data []byte) (Draft, error) {
 	if len(cf.Services) == 0 {
 		return d, fmt.Errorf("no services found — expected a top-level `services:` map")
 	}
-	composeIntoDraft(&d, "", cf)
+	composeIntoDraft(&d, "", cf, false)
 	return d, nil
 }
 
@@ -338,14 +339,15 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	if yaml.Unmarshal(raw, &cf) != nil || len(cf.Services) == 0 {
 		return false
 	}
-	composeIntoDraft(d, repoDir, cf)
+	composeIntoDraft(d, repoDir, cf, true)
 	return len(d.Services) > 0
 }
 
 // composeIntoDraft maps a parsed compose file into the draft: managed-dep candidates,
 // profile-gated services, app services, host-rebasing, and web-entry selection. Shared
-// by fromCompose (repo scan) and DetectComposeBytes (pasted content).
-func composeIntoDraft(d *Draft, repoDir string, cf composeFile) {
+// by fromCompose (repo scan, foldManaged=true) and DetectComposeBytes (pasted content
+// for the image stack, foldManaged=false → every service stays a plain image entry).
+func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool) {
 	var skippedProfiles []string
 	// renames maps a dropped DB/cache service's compose name (e.g. "db") to the
 	// managed service's name in Rigger's generated compose (e.g. "postgres"), so we
@@ -356,8 +358,9 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile) {
 		cs := cf.Services[name]
 		// Profile-gated services aren't started by a default `docker compose up`
 		// (e.g. an optional geocoder). Keep them OUT of the graph by default, but
-		// surface the full parsed service so the user can opt to include it.
-		if len(cs.Profiles) > 0 {
+		// surface the full parsed service so the user can opt to include it. (Image-stack
+		// paste keeps everything — the user pasted it, so include it as a plain image.)
+		if foldManaged && len(cs.Profiles) > 0 {
 			skippedProfiles = append(skippedProfiles, name)
 			d.ProfileOmitted = append(d.ProfileOmitted, OmittedService{
 				Name: dnsName(name), Profiles: cs.Profiles, Service: composeToService(repoDir, name, cs, cf.Services),
@@ -367,8 +370,9 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile) {
 		// Recognised data services CAN become a managed dependency. Default to that
 		// (drop the container, set the flag, capture the version, rebase host refs
 		// below), but record the candidate + verbatim service so the wizard can offer
-		// "keep your own container" and reverse the choice.
-		if role := dbRole(cs.Image); role != "" {
+		// "keep your own container" and reverse the choice. Skipped for the image stack
+		// (foldManaged=false), which has no managed deps — keep the data service as-is.
+		if role := dbRole(cs.Image); foldManaged && role != "" {
 			applyManagedDep(role, d)
 			img, tag := splitImage(cs.Image)
 			if tag == "latest" {
