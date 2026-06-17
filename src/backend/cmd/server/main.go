@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/api"
+	"github.com/mansoor/rigger/ui/internal/acme"
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/config"
@@ -132,6 +133,11 @@ func main() {
 	// 90 days. The same interval is reported to the UI via /api/metrics/config.
 	metricsInterval := time.Duration(metrics.IntervalSeconds()) * time.Second
 	metrics.NewCollector(database, cfg.WorkspacesDir, metricsInterval, bridge).Run()
+
+	// Renew out-of-band override certs (per-env/workspace ACME email, Phase 2): every
+	// 12h, re-issue any tracked cert within 30 days of expiry via lego (DNS-01). Idle
+	// when no Cloudflare token is set. Traefik auto-renews its own resolver certs.
+	acme.NewRenewer(database, acme.New(nil)).Run()
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
 
