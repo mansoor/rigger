@@ -35,7 +35,9 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 		// Managed deps are project-level now; per-env fields kept for back-compat.
 		Project struct {
 			Database      string `json:"database"`
-			ObjectStorage string `json:"object_storage"` // ""/none | local | minio
+			StorageLocal  bool   `json:"storage_local"`
+			StorageMinIO  bool   `json:"storage_minio"`
+			ObjectStorage string `json:"object_storage"` // legacy enum (back-compat)
 		} `json:"project"`
 		Services []struct {
 			Name  string          `json:"name"`
@@ -86,10 +88,10 @@ func (h *Handler) GetBackupServices(w http.ResponseWriter, r *http.Request) {
 	if hasBuild {
 		out = append(out, backupServiceInfo{ID: "uploads", Label: "App uploads", Kind: "volume", Hint: "Uploads volume"})
 	}
-	switch cfg.Project.ObjectStorage {
-	case "minio":
+	if cfg.Project.StorageMinIO || cfg.Project.ObjectStorage == "minio" {
 		out = append(out, backupServiceInfo{ID: "minio", Label: "MinIO S3 data", Kind: "volume", Hint: "MinIO object-store volume"})
-	case "local":
+	}
+	if cfg.Project.StorageLocal || cfg.Project.ObjectStorage == "local" {
 		out = append(out, backupServiceInfo{ID: "storage", Label: "Local storage", Kind: "volume", Hint: "App storage volume"})
 	}
 	if out == nil {

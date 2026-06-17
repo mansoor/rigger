@@ -28,27 +28,27 @@ const SERVICE_META = {
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, objectStorage, storageUi, webSql, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, storageLocal, storageMinio, storageUi, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
-  if (objectStorage === 'minio') {
+  // Object storage backends are independent — both may be on.
+  if (storageMinio) {
     out.push({ name: 'minio', kind: 'minio' })
     if (storageUi) out.push({ name: 'storage_console', kind: 'storage_console' })
-  } else if (objectStorage === 'local') {
-    out.push({ name: 'storage', kind: 'storage' })
   }
+  if (storageLocal) out.push({ name: 'storage', kind: 'storage' })
   if (webSql || cloudbeaver) out.push({ name: 'adminer', kind: 'adminer' })
   return out
 }
 
 // enabledDependsOnTargets returns the managed-service names a real service may
 // depend_on (excludes UI-only sidecars / the local-volume pseudo-service).
-export function enabledDependsOnTargets({ database, redis, objectStorage } = {}) {
+export function enabledDependsOnTargets({ database, redis, storageMinio } = {}) {
   const out = []
   if (database && database !== 'none') out.push(database)
   if (redis) out.push('redis')
-  if (objectStorage === 'minio') out.push('minio')
+  if (storageMinio) out.push('minio')
   return out
 }
 
@@ -109,7 +109,8 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
   const v = value || {}
   const rows = managedServiceList(v)
   const set = (patch) => onChange({ ...v, ...patch })
-  const storage = v.objectStorage || 'none'
+  const localOn = !!v.storageLocal
+  const minioOn = !!v.storageMinio
   return (
     <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-4">
       <div>
@@ -137,19 +138,18 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         <MiniToggle label="Redis" hint="redis:7-alpine" checked={!!v.redis} onChange={x => set({ redis: x })} />
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Object storage</label>
-          <select
-            value={storage}
-            onChange={e => set({ objectStorage: e.target.value })}
-            className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500"
-          >
-            <option value="none">None</option>
-            <option value="local">Local volume</option>
-            <option value="minio">MinIO (S3)</option>
-          </select>
+          <div className="space-y-1.5">
+            <MiniToggle label="Local volume" hint="persistent disk" checked={localOn} onChange={x => set({ storageLocal: x })} />
+            <MiniToggle label="MinIO (S3)" hint="S3-compatible" checked={minioOn} onChange={x => set({ storageMinio: x })} />
+          </div>
         </div>
       </div>
 
-      {storage === 'local' && (
+      {localOn && minioOn && (
+        <p className="text-xs text-content-subtle -mt-1">Both backends are on — the local volume is mounted <em>and</em> MinIO runs; <code className="font-mono">FILESYSTEM_DISK</code> defaults to <code className="font-mono">s3</code> (override in the app’s env if you want local primary).</p>
+      )}
+
+      {localOn && (
         <div className="pt-1 border-t border-border">
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Storage path (in container)</label>
           <input
@@ -163,7 +163,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         </div>
       )}
 
-      {storage === 'minio' && (
+      {minioOn && (
         <div className="pt-1 border-t border-border space-y-3">
           <div>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Bucket name</label>

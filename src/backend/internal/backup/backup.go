@@ -249,27 +249,24 @@ func (c *ctx) backupFiles(dateDir, backupDir string) {
 		}
 	}
 
-	// Object storage: minio → the S3 data volume; local → the persistent storage volume.
-	switch c.cfg.effObjectStorage(c.env) {
-	case "minio":
-		if c.wants("minio") {
-			c.info("Archiving MinIO S3 data...")
-			minioFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_minio_%s.tar.gz", c.project, c.env, dateDir))
-			if c.archiveNamedVolumes(minioFile, "/data", map[string]string{c.prefix + "_minio_data": "/data"}, ".") {
-				c.success("MinIO archive: %s", filepath.Base(minioFile))
-			} else {
-				c.warn("Could not archive MinIO volume")
-			}
+	// Object storage (independent — both may be on): minio → the S3 data volume;
+	// local → the persistent storage volume.
+	if c.cfg.minioOn() && c.wants("minio") {
+		c.info("Archiving MinIO S3 data...")
+		minioFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_minio_%s.tar.gz", c.project, c.env, dateDir))
+		if c.archiveNamedVolumes(minioFile, "/data", map[string]string{c.prefix + "_minio_data": "/data"}, ".") {
+			c.success("MinIO archive: %s", filepath.Base(minioFile))
+		} else {
+			c.warn("Could not archive MinIO volume")
 		}
-	case "local":
-		if c.wants("storage") {
-			c.info("Archiving local storage volume...")
-			storeFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_storage_%s.tar.gz", c.project, c.env, dateDir))
-			if c.archiveNamedVolumes(storeFile, "/data", map[string]string{c.prefix + "_storage": "/data"}, ".") {
-				c.success("Storage archive: %s", filepath.Base(storeFile))
-			} else {
-				c.warn("Could not archive storage volume")
-			}
+	}
+	if c.cfg.localOn() && c.wants("storage") {
+		c.info("Archiving local storage volume...")
+		storeFile := filepath.Join(backupDir, fmt.Sprintf("%s_%s_storage_%s.tar.gz", c.project, c.env, dateDir))
+		if c.archiveNamedVolumes(storeFile, "/data", map[string]string{c.prefix + "_storage": "/data"}, ".") {
+			c.success("Storage archive: %s", filepath.Base(storeFile))
+		} else {
+			c.warn("Could not archive storage volume")
 		}
 	}
 }

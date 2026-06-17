@@ -92,7 +92,9 @@ type wsConfig struct {
 		ResourcePrefix string `json:"resource_prefix"`
 		// Managed deps are project-level now; per-env fields kept for back-compat.
 		Database      string `json:"database"`
-		ObjectStorage string `json:"object_storage"` // ""/none | local | minio (replaces Garage)
+		StorageLocal  bool   `json:"storage_local"`  // independent backends — both may be on
+		StorageMinIO  bool   `json:"storage_minio"`
+		ObjectStorage string `json:"object_storage"` // legacy enum (back-compat); Garage retired
 		Garage        bool   `json:"garage_enabled"` // deprecated: ignored, kept for unmarshal
 	} `json:"project"`
 	Images []struct {
@@ -117,14 +119,13 @@ func (c *wsConfig) effDatabase(env string) string {
 	return c.Environments[env].Database
 }
 
-// effObjectStorage returns the project's object-storage mode (none|local|minio).
-// Legacy garage flags are ignored (garage retired). The env arg is unused (storage
-// is project-level) but kept for call-site symmetry.
-func (c *wsConfig) effObjectStorage(_ string) string {
-	if c.Project.ObjectStorage != "" {
-		return c.Project.ObjectStorage
-	}
-	return "none"
+// minioOn / localOn report the project's object-storage backends (independent — both
+// may be on). New flags OR the legacy ObjectStorage enum; garage is retired.
+func (c *wsConfig) minioOn() bool {
+	return c.Project.StorageMinIO || c.Project.ObjectStorage == "minio"
+}
+func (c *wsConfig) localOn() bool {
+	return c.Project.StorageLocal || c.Project.ObjectStorage == "local"
 }
 
 func loadConfig(workspacesDir, workspace, project string) (*wsConfig, error) {

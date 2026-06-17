@@ -42,8 +42,9 @@ type CreateRequest struct {
 	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
 	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
-	Redis        bool              `json:"redis"`
-	ObjectStorage string           `json:"object_storage"` // ""/none | local | minio
+	Redis         bool             `json:"redis"`
+	StorageLocal  bool             `json:"storage_local"`  // local volume backend
+	StorageMinIO  bool             `json:"storage_minio"`  // MinIO S3 backend (independent of local)
 	StorageBucket string           `json:"storage_bucket"` // minio: bucket-name override (env auto-suffixed)
 	StoragePath   string           `json:"storage_path"`   // local: container mount path (default /var/www/html/storage)
 	StorageUI     bool             `json:"storage_ui"`     // minio: opens3/console admin sidecar
@@ -342,17 +343,18 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		if req.Redis {
 			project["redis_enabled"] = true
 		}
-		switch req.ObjectStorage {
-		case "minio":
-			project["object_storage"] = "minio"
+		// Object storage backends are independent — both may be selected.
+		if req.StorageMinIO {
+			project["storage_minio"] = true
 			if req.StorageBucket != "" {
 				project["storage_bucket"] = req.StorageBucket
 			}
 			if req.StorageUI {
 				project["storage_ui"] = true
 			}
-		case "local":
-			project["object_storage"] = "local"
+		}
+		if req.StorageLocal {
+			project["storage_local"] = true
 			if req.StoragePath != "" {
 				project["storage_path"] = req.StoragePath
 			}

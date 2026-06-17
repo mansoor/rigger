@@ -49,11 +49,14 @@ type Project struct {
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
 	WebSQL bool `json:"web_sql,omitempty"`
-	// ObjectStorage selects the project's file/object storage: ""/"none", "local"
-	// (FILESYSTEM_DISK=local + persistent volume at StoragePath), or "minio" (managed
-	// MinIO S3 + mc bucket-init). Replaces the retired Garage. The UI renders the picker
-	// + derived service rows from these.
-	ObjectStorage string `json:"object_storage,omitempty"`
+	// Object/file storage is project-level; the two backends are INDEPENDENT (local,
+	// MinIO, both, or neither). StorageLocal → FILESYSTEM_DISK=local + persistent volume
+	// at StoragePath; StorageMinIO → managed MinIO S3 + mc bucket-init. Legacy
+	// ObjectStorage enum is still read as a fallback. The UI renders checkboxes + derived
+	// service rows from these.
+	StorageLocal  bool   `json:"storage_local,omitempty"`
+	StorageMinIO  bool   `json:"storage_minio,omitempty"`
+	ObjectStorage string `json:"object_storage,omitempty"` // legacy enum: ""/none|local|minio
 	StorageBucket string `json:"storage_bucket,omitempty"` // minio: bucket-name override (env auto-suffixed)
 	StoragePath   string `json:"storage_path,omitempty"`   // local: container mount path (default /var/www/html/storage)
 	StorageUI     bool   `json:"storage_ui,omitempty"`     // minio: opens3/console admin sidecar
@@ -162,13 +165,14 @@ func managedDepServices(c *Config) []ConfigService {
 	if redis {
 		add("redis", "redis")
 	}
-	switch c.Project.ObjectStorage {
-	case "minio":
+	// Object storage backends are independent — both may be on.
+	if c.Project.StorageMinIO || c.Project.ObjectStorage == "minio" {
 		add("minio", "minio")
 		if c.Project.StorageUI {
 			add("storage_console", "minio")
 		}
-	case "local":
+	}
+	if c.Project.StorageLocal || c.Project.ObjectStorage == "local" {
 		add("storage", "local") // a persistent local volume (no container)
 	}
 	return out

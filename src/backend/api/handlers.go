@@ -1052,7 +1052,8 @@ func validateConfigServices(content []byte) string {
 		Project struct {
 			Database      string `json:"database"`
 			Redis         bool   `json:"redis_enabled"`
-			ObjectStorage string `json:"object_storage"`
+			StorageMinIO  bool   `json:"storage_minio"`
+			ObjectStorage string `json:"object_storage"` // legacy enum (back-compat)
 		} `json:"project"`
 		Environments map[string]struct {
 			Database     string `json:"database"`
@@ -1112,7 +1113,7 @@ func validateConfigServices(content []byte) string {
 				return true
 			}
 		case "minio", "storage_console":
-			if doc.Project.ObjectStorage == "minio" {
+			if doc.Project.StorageMinIO || doc.Project.ObjectStorage == "minio" {
 				return true
 			}
 		}

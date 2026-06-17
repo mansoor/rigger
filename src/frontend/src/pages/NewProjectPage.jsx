@@ -256,7 +256,8 @@ function applyDraft(onChange, d) {
   onChange('database', d.database || 'none')
   onChange('dbVersion', d.db_version || '')
   onChange('redis', !!d.redis)
-  onChange('objectStorage', d.object_storage || 'none')
+  onChange('storageMinio', d.object_storage === 'minio')
+  onChange('storageLocal', d.object_storage === 'local')
 }
 
 // ScanReview renders the detected-services review for data.scanDraft — the web-entry
@@ -1465,11 +1466,11 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
           stacks bring their own data services as images so it's hidden for them. */}
       {managedApplies && (
         <ManagedServices
-          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, objectStorage: data.objectStorage, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql }}
+          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, storageLocal: data.storageLocal, storageMinio: data.storageMinio, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql }}
           onChange={v => {
             onChange('database', v.database); onChange('dbVersion', v.dbVersion)
             onChange('redis', !!v.redis); onChange('webSql', !!v.webSql)
-            onChange('objectStorage', v.objectStorage || 'none'); onChange('storageBucket', v.storageBucket || ''); onChange('storagePath', v.storagePath || ''); onChange('storageUi', !!v.storageUi)
+            onChange('storageLocal', !!v.storageLocal); onChange('storageMinio', !!v.storageMinio); onChange('storageBucket', v.storageBucket || ''); onChange('storagePath', v.storagePath || ''); onChange('storageUi', !!v.storageUi)
           }}
           showWebSql={data.stackType === 'database'}
           requireDatabase={data.stackType === 'database'}
@@ -1583,8 +1584,8 @@ function wizardServices(data) {
     out.push({ id: 'database', label: 'Database', kind: 'database', hint: data.database + ' — SQL dump' })
   }
   out.push({ id: 'uploads', label: 'App uploads', kind: 'volume', hint: 'Uploads volume' })
-  if (data.objectStorage === 'minio') out.push({ id: 'minio', label: 'MinIO S3 data', kind: 'volume', hint: 'MinIO object-store volume' })
-  else if (data.objectStorage === 'local') out.push({ id: 'storage', label: 'Local storage', kind: 'volume', hint: 'App storage volume' })
+  if (data.storageMinio) out.push({ id: 'minio', label: 'MinIO S3 data', kind: 'volume', hint: 'MinIO object-store volume' })
+  if (data.storageLocal) out.push({ id: 'storage', label: 'Local storage', kind: 'volume', hint: 'App storage volume' })
   return out
 }
 
@@ -1683,8 +1684,7 @@ function Step6({ data }) {
           <ReviewRow key={i} label={`  ${e.name} domain`} value={e.domain} />
         ))}
         {data.redis  && <ReviewRow label="Redis" value="Enabled" />}
-        {data.objectStorage === 'minio' && <ReviewRow label="Object storage" value={`MinIO (S3)${data.storageUi ? ' + console' : ''}`} />}
-        {data.objectStorage === 'local' && <ReviewRow label="Object storage" value="Local volume" />}
+        {(data.storageMinio || data.storageLocal) && <ReviewRow label="Object storage" value={[data.storageLocal && 'Local volume', data.storageMinio && `MinIO (S3)${data.storageUi ? ' + console' : ''}`].filter(Boolean).join(' + ')} />}
         {data.environments.filter(e => Object.keys(e.vars || {}).length > 0).map((e, i) => (
           <ReviewRow key={i} label={`  ${e.name} vars`} value={`${Object.keys(e.vars).length} variable(s)`} />
         ))}
@@ -1862,7 +1862,7 @@ function Stepper({ current, maxVisited, onStepClick }) {
 const DEFAULT_DATA = {
   name: '', key: '', registry: '',
   stackType: 'prebuilt', template: '', images: [{ ...DEFAULT_IMAGE }], customEnvVars: {},
-  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', webSql: false, redis: false, objectStorage: 'none', storageBucket: '', storagePath: '', storageUi: false,
+  backend: 'laravel', frontend: 'none', database: 'none', dbVersion: '', webSql: false, redis: false, storageLocal: false, storageMinio: false, storageBucket: '', storagePath: '', storageUi: false,
   default_host_id: 0, // Phase 7: default host for environments (0 = local)
   environments: [{ ...DEFAULT_ENV, name: 'dev' }],
   volumes: [],
@@ -2016,10 +2016,11 @@ export default function NewProjectPage() {
       db_version: (isImage || data.database === 'none') ? '' : data.dbVersion,
       web_sql: (!isImage && data.database && data.database !== 'none') ? !!data.webSql : false,
       redis: (isImage || isDatabase) ? false : data.redis,
-      object_storage: (isImage || isDatabase) ? 'none' : (data.objectStorage || 'none'),
-      storage_bucket: (isImage || isDatabase) ? '' : (data.objectStorage === 'minio' ? (data.storageBucket || '') : ''),
-      storage_path: (isImage || isDatabase) ? '' : (data.objectStorage === 'local' ? (data.storagePath || '') : ''),
-      storage_ui: (isImage || isDatabase) ? false : (data.objectStorage === 'minio' && !!data.storageUi),
+      storage_local: (isImage || isDatabase) ? false : !!data.storageLocal,
+      storage_minio: (isImage || isDatabase) ? false : !!data.storageMinio,
+      storage_bucket: (isImage || isDatabase) ? '' : (data.storageMinio ? (data.storageBucket || '') : ''),
+      storage_path: (isImage || isDatabase) ? '' : (data.storageLocal ? (data.storagePath || '') : ''),
+      storage_ui: (isImage || isDatabase) ? false : (!!data.storageMinio && !!data.storageUi),
       environments: data.environments.filter(e => e.name).map(e => ({
         ...e,
         ssl_enabled: e.traefik && !!e.domain && !!e.ssl_enabled,

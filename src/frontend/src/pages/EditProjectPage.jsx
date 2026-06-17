@@ -2161,8 +2161,8 @@ export default function EditProjectPage() {
             {project?.type !== 'image' && (
               <div className="mb-5">
                 <ManagedServices
-                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, objectStorage: project?.object_storage, storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql }}
-                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, object_storage: v.objectStorage || 'none', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (v.objectStorage === 'minio' && !!v.storageUi), web_sql: !!v.webSql }))}
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, storageLocal: !!project?.storage_local || project?.object_storage === 'local', storageMinio: !!project?.storage_minio || project?.object_storage === 'minio', storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, storage_local: !!v.storageLocal, storage_minio: !!v.storageMinio, object_storage: '', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (!!v.storageMinio && !!v.storageUi), web_sql: !!v.webSql }))}
                   showWebSql={project?.type === 'database'}
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
@@ -2182,7 +2182,7 @@ export default function EditProjectPage() {
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages}
               gitRepo={project?.git_repo} gitBranch={project?.git_branch}
-              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, objectStorage: project?.object_storage })} />
+              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, storageMinio: !!project?.storage_minio || project?.object_storage === 'minio' })} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
           </section>
@@ -2244,7 +2244,7 @@ export default function EditProjectPage() {
                 localTLS={!!project?.local_tls}
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}
-                projectObjectStorage={project?.object_storage || ''}
+                projectObjectStorage={(!!project?.storage_minio || project?.object_storage === 'minio') ? 'minio' : ''}
                 projectWebSql={!!project?.web_sql}
                 projectStorageUi={!!project?.storage_ui}
                 gitRepo={project?.git_repo || ''}

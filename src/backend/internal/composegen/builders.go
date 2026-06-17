@@ -491,10 +491,15 @@ func (g *gen) dbEngine() string {
 // redisOn reports whether Redis is enabled (project OR legacy env).
 func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
 
-// minioOn / localStorageOn report the active object-storage backend (project-level).
-// Legacy Garage flags are ignored (garage retired) — object_storage is the source of truth.
-func (g *gen) minioOn() bool        { return g.cfg.Project.ObjectStorage == "minio" }
-func (g *gen) localStorageOn() bool { return g.cfg.Project.ObjectStorage == "local" }
+// minioOn / localStorageOn report the active object-storage backends (project-level,
+// INDEPENDENT — both may be on). New storage_local/storage_minio flags OR the legacy
+// object_storage enum (back-compat). Legacy Garage flags are ignored (garage retired).
+func (g *gen) minioOn() bool {
+	return g.cfg.Project.StorageMinIO || g.cfg.Project.ObjectStorage == "minio"
+}
+func (g *gen) localStorageOn() bool {
+	return g.cfg.Project.StorageLocal || g.cfg.Project.ObjectStorage == "local"
+}
 
 // storageMountPath is the container path the local persistent volume mounts at,
 // defaulting to Laravel's storage dir (the common CodeCanyon case) when unset.

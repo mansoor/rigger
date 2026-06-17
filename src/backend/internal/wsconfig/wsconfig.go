@@ -116,11 +116,14 @@ type Project struct {
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
 	// treats both as present. See [[adminer]] in composegen.buildAdminer.
 	WebSQL bool `json:"web_sql,omitempty"`
-	// ObjectStorage selects the project's file/object-storage backend (project-level):
-	// ""/"none" (no storage), "local" (FILESYSTEM_DISK=local + persistent volume at
-	// StoragePath), or "minio" (managed MinIO S3 + mc bucket-init, wired via AWS_*).
-	// Replaces the retired Garage. See EffObjectStorage / MinIOOn / LocalStorageOn.
-	ObjectStorage string `json:"object_storage,omitempty"`
+	// Object/file storage is project-level; the two backends are INDEPENDENT (local,
+	// MinIO, both, or neither). StorageLocal → FILESYSTEM_DISK=local + a persistent
+	// volume at StoragePath; StorageMinIO → managed MinIO S3 (+ mc bucket-init) via AWS_*.
+	// When both are on, FILESYSTEM_DISK defaults to s3. Legacy ObjectStorage enum is
+	// still read as a fallback. See MinIOOn / LocalStorageOn / StorageDefaultDisk.
+	StorageLocal  bool   `json:"storage_local,omitempty"`
+	StorageMinIO  bool   `json:"storage_minio,omitempty"`
+	ObjectStorage string `json:"object_storage,omitempty"` // legacy enum: ""/none|local|minio (back-compat)
 	// StorageBucket overrides the auto-derived MinIO bucket base ({prefix}); the env
 	// name is always appended ({base}-{env}). Blank → derived. minio only.
 	StorageBucket string `json:"storage_bucket,omitempty"`
@@ -206,20 +209,27 @@ func (c *Config) EffDBVersion(e Env) string {
 // EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
 func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
 
-// EffObjectStorage returns the project's object-storage mode (none|local|minio).
-// Legacy Garage configs are intentionally NOT mapped (garage is retired) — they read
-// as "none" so generation drops garage cleanly without crashing. The Env arg is
-// accepted for symmetry with the other Eff* helpers (storage is project-level).
-func (c *Config) EffObjectStorage(_ Env) string {
-	if c.Project.ObjectStorage != "" {
-		return c.Project.ObjectStorage
-	}
-	return "none"
+// MinIOOn / LocalStorageOn report the active object-storage backends (project-level,
+// independent — both may be on). New flags OR the legacy ObjectStorage enum. The Env
+// arg is accepted for symmetry with the other Eff* helpers (storage is project-level).
+func (c *Config) MinIOOn(_ Env) bool {
+	return c.Project.StorageMinIO || c.Project.ObjectStorage == "minio"
+}
+func (c *Config) LocalStorageOn(_ Env) bool {
+	return c.Project.StorageLocal || c.Project.ObjectStorage == "local"
 }
 
-// MinIOOn / LocalStorageOn report the active object-storage backend for an env.
-func (c *Config) MinIOOn(e Env) bool        { return c.EffObjectStorage(e) == "minio" }
-func (c *Config) LocalStorageOn(e Env) bool { return c.EffObjectStorage(e) == "local" }
+// StorageDefaultDisk is the framework's default filesystem disk: "s3" when MinIO is on
+// (S3 wins as primary when both are enabled), else "local" when only local, else "".
+func (c *Config) StorageDefaultDisk(e Env) string {
+	if c.MinIOOn(e) {
+		return "s3"
+	}
+	if c.LocalStorageOn(e) {
+		return "local"
+	}
+	return ""
+}
 
 // EffGarage is retired: garage generation is removed and legacy flags are ignored.
 // Kept as a no-op (always false) so any not-yet-migrated caller compiles. Remove once

@@ -142,22 +142,23 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			out[k] = true
 		}
 	}
-	switch cfg.EffObjectStorage(e) {
-	case "minio":
+	// Object storage (local and/or minio — independent). FILESYSTEM_DISK + OBJECT_STORAGE
+	// are owned whenever either backend is on; MinIO additionally owns the MINIO_*/AWS_* keys.
+	if cfg.MinIOOn(e) || cfg.LocalStorageOn(e) {
+		out["OBJECT_STORAGE"] = true
+		out["FILESYSTEM_DISK"] = true
+	}
+	if cfg.MinIOOn(e) {
 		for _, k := range []string{
-			"OBJECT_STORAGE", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BUCKET",
+			"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BUCKET",
 			"MINIO_ENDPOINT", "MINIO_REGION", "MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
 			// The framework S3 contract (e.g. Laravel) maps MinIO onto AWS_* keys — reserve
 			// them so a repo's .env.example AWS_* defaults can't shadow the managed values.
 			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_BUCKET",
-			"AWS_ENDPOINT", "AWS_USE_PATH_STYLE_ENDPOINT", "FILESYSTEM_DISK",
+			"AWS_ENDPOINT", "AWS_USE_PATH_STYLE_ENDPOINT",
 		} {
 			out[k] = true
 		}
-	case "local":
-		// local persists files to a volume; the framework contract sets FILESYSTEM_DISK=local.
-		out["OBJECT_STORAGE"] = true
-		out["FILESYSTEM_DISK"] = true
 	}
 	if cfg.HasAdminer() {
 		out["ADMINER_LOGIN_SECRET"] = true
@@ -194,24 +195,22 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 	if cfg.EffRedis(e) {
 		redis = &blueprints.RedisFacts{Host: prefix + "_redis", Port: "6379"}
 	}
-	// Storage facts drive the framework's file/object-storage wiring: local → just
-	// FILESYSTEM_DISK=local; minio → the S3 (AWS_*) contract. The S3 access key/secret
-	// ARE the MinIO root creds; endpoint is the in-network MinIO S3 API. Region is a
-	// placeholder SDKs require but MinIO ignores.
+	// Storage facts drive the framework's file/object-storage wiring (local and/or minio,
+	// independent): S3 → the AWS_* contract (access key/secret ARE the MinIO root creds;
+	// endpoint is the in-network MinIO S3 API; region is a placeholder SDKs require but
+	// MinIO ignores); DefaultDisk → FILESYSTEM_DISK (s3 when minio is on, else local).
 	var storage *blueprints.StorageFacts
-	switch cfg.EffObjectStorage(e) {
-	case "minio":
+	if cfg.MinIOOn(e) || cfg.LocalStorageOn(e) {
 		storage = &blueprints.StorageFacts{
-			Mode:      "s3",
-			KeyID:     minioUser,
-			SecretKey: minioPassword,
-			Bucket:    minioBucket,
-			// Bare "minio" host — the AWS SDK rejects underscore hostnames; unique per project net.
-			Endpoint:  "http://minio:9000",
-			Region:    "us-east-1",
+			Local:       cfg.LocalStorageOn(e),
+			S3:          cfg.MinIOOn(e),
+			DefaultDisk: cfg.StorageDefaultDisk(e),
+			KeyID:       minioUser,
+			SecretKey:   minioPassword,
+			Bucket:      minioBucket,
+			Endpoint:    "http://minio:9000", // bare host — AWS SDK rejects underscores
+			Region:      "us-east-1",
 		}
-	case "local":
-		storage = &blueprints.StorageFacts{Mode: "local"}
 	}
 
 	out := map[string]string{}
@@ -488,20 +487,30 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	p("\n")
 
-	// ── Object / file storage ──────────────────────────────────────────────────
-	// none → nothing; local → FILESYSTEM_DISK=local (emitted via the framework
-	// contract) + a persistent volume; minio → managed MinIO S3. The S3 access
-	// key/secret ARE the MinIO root creds (simplest single-node setup). Bucket name
-	// is lowercase+hyphens only — derive from the safe prefix (or the override), env-suffixed.
-	storageMode := cfg.EffObjectStorage(e)
+	// ── Object / file storage (local and/or minio — independent) ────────────────
+	// local → FILESYSTEM_DISK=local (via the framework contract) + a persistent volume;
+	// minio → managed MinIO S3 (the S3 access key/secret ARE the MinIO root creds). Both
+	// may be on. Bucket name is lowercase+hyphens only — derive from the safe prefix (or
+	// the override), env-suffixed. OBJECT_STORAGE is a human-readable summary of what's on.
+	minioOn := cfg.MinIOOn(e)
+	localOn := cfg.LocalStorageOn(e)
 	bucketBase := strings.ReplaceAll(dbBase, "_", "-")
 	if b := cfg.Project.StorageBucket; b != "" {
 		bucketBase = strings.ReplaceAll(strings.ToLower(b), "_", "-")
 	}
 	minioBucket := bucketBase + "-" + env
+	summary := "none"
+	switch {
+	case minioOn && localOn:
+		summary = "local+minio"
+	case minioOn:
+		summary = "minio"
+	case localOn:
+		summary = "local"
+	}
 	p("# ── Object storage ─────────────────────────────────────────\n")
-	p("OBJECT_STORAGE=%s\n", storageMode)
-	if storageMode == "minio" {
+	p("OBJECT_STORAGE=%s\n", summary)
+	if minioOn {
 		p("MINIO_ROOT_USER=%s\n", minioUser)
 		p("MINIO_ROOT_PASSWORD=%s\n", minioPassword)
 		p("MINIO_BUCKET=%s\n", minioBucket)

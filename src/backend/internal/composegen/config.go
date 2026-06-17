@@ -52,13 +52,16 @@ type Project struct {
 	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
 	WebSQL bool `json:"web_sql,omitempty"`
-	// ObjectStorage selects the project's file/object-storage backend (project-level):
-	//   ""/"none" → no managed storage
-	//   "local"   → FILESYSTEM_DISK=local + a persistent named volume at StoragePath
-	//   "minio"   → managed MinIO S3 (server + one-shot mc bucket-init) wired via AWS_*
-	// Replaces the retired Garage. Legacy Garage/GarageWebUI below are kept only so old
-	// config.json unmarshals; they are NOT mapped to a mode (garage generation removed).
-	ObjectStorage string `json:"object_storage,omitempty"`
+	// Object/file storage is project-level and the two backends are INDEPENDENT — a
+	// project can have local, MinIO, both, or neither:
+	//   StorageLocal → FILESYSTEM_DISK=local + a persistent named volume at StoragePath
+	//   StorageMinIO → managed MinIO S3 (server + one-shot mc bucket-init) wired via AWS_*
+	// When both are on, the local volume is mounted AND MinIO runs; FILESYSTEM_DISK
+	// defaults to s3. Legacy ObjectStorage ("local"/"minio") is still read as a fallback
+	// (see gen.localStorageOn/minioOn). Garage is retired (fields below kept for unmarshal).
+	StorageLocal  bool   `json:"storage_local,omitempty"`
+	StorageMinIO  bool   `json:"storage_minio,omitempty"`
+	ObjectStorage string `json:"object_storage,omitempty"` // legacy enum: ""/none|local|minio (back-compat)
 	// StorageBucket overrides the auto-derived MinIO bucket base ({prefix}); the env
 	// name is always appended ({base}-{env}). Blank → derived. minio only.
 	StorageBucket string `json:"storage_bucket,omitempty"`

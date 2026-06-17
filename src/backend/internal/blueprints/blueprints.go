@@ -27,20 +27,23 @@ type RedisFacts struct {
 	Port string
 }
 
-// StorageFacts are the resolved facts for the active env's object/file storage.
-// Mode selects how a framework wires it:
-//   - "local" → just persist files to a local volume (FILESYSTEM_DISK=local); the
-//     S3 fields are unused.
-//   - "s3"    → managed MinIO; frameworks that speak S3 (e.g. Laravel's flysystem
-//     s3 driver) map the S3 fields onto their AWS_*-style keys. Region is a
-//     placeholder most SDKs require but MinIO ignores.
+// StorageFacts are the resolved facts for the active env's object/file storage. The two
+// backends are INDEPENDENT (both may be on):
+//   - Local: persist files to a local volume (no S3 fields).
+//   - S3:    managed MinIO; frameworks that speak S3 (e.g. Laravel's flysystem s3 driver)
+//     map the S3 fields onto their AWS_*-style keys. Region is a placeholder most SDKs
+//     require but MinIO ignores.
+// DefaultDisk is the framework's default filesystem disk ("s3" when MinIO is on — S3 wins
+// when both are enabled — else "local").
 type StorageFacts struct {
-	Mode      string // "local" | "s3"
-	KeyID     string
-	SecretKey string
-	Bucket    string
-	Endpoint  string
-	Region    string
+	Local       bool
+	S3          bool
+	DefaultDisk string // "s3" | "local"
+	KeyID       string
+	SecretKey   string
+	Bucket      string
+	Endpoint    string
+	Region      string
 }
 
 // urlScheme returns the URL scheme most ORMs/drivers accept for the engine.
@@ -152,20 +155,20 @@ func envLaravel(db *DBFacts, redis *RedisFacts, storage *StorageFacts) map[strin
 		m["REDIS_PORT"] = redis.Port
 	}
 	if storage != nil {
-		switch storage.Mode {
-		case "local":
-			// Persist uploads to the local disk (mounted on a named volume by composegen).
-			m["FILESYSTEM_DISK"] = "local"
-		case "s3":
-			// Laravel's flysystem "s3" disk reads AWS_*; path-style + a custom endpoint
-			// point it at MinIO instead of real AWS. FILESYSTEM_DISK=s3 makes it default.
+		// S3 (MinIO): Laravel's flysystem "s3" disk reads AWS_*; path-style + a custom
+		// endpoint point it at MinIO instead of real AWS. Emitted whenever MinIO is on,
+		// even if local is also on (the app can use both disks).
+		if storage.S3 {
 			m["AWS_ACCESS_KEY_ID"] = storage.KeyID
 			m["AWS_SECRET_ACCESS_KEY"] = storage.SecretKey
 			m["AWS_DEFAULT_REGION"] = storage.Region
 			m["AWS_BUCKET"] = storage.Bucket
 			m["AWS_ENDPOINT"] = storage.Endpoint
 			m["AWS_USE_PATH_STYLE_ENDPOINT"] = "true"
-			m["FILESYSTEM_DISK"] = "s3"
+		}
+		// Default filesystem disk: s3 when MinIO is on (wins when both), else local.
+		if storage.DefaultDisk != "" {
+			m["FILESYSTEM_DISK"] = storage.DefaultDisk
 		}
 	}
 	return m

@@ -388,6 +388,27 @@ func TestObjectStorageMinIOAndLocal(t *testing.T) {
 	}
 }
 
+// Both storage backends on at once (storage_local + storage_minio): the MinIO server
+// runs AND the app service gets the local storage volume.
+func TestObjectStorageBoth(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"storage_local":true,"storage_minio":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "  minio:") {
+		t.Errorf("storage_minio should emit the minio container\n%s", s)
+	}
+	if !strings.Contains(svcBlock(t, s, "web"), "- app1_dev_storage:/var/www/html/storage") {
+		t.Errorf("storage_local should mount the persistent volume on the app service\n%s", s)
+	}
+}
+
 // The MinIO admin console (opens3/console) synthesizes as a Traefik-routed service on
 // the "storage" subdomain (correct image, no host port under Traefik) — gated on the
 // storage_ui flag + object_storage=minio.
