@@ -51,6 +51,10 @@ services:
       # URLs). The containerized server can't detect the host IP itself. Empty ⇒
       # links fall back to the browser hostname; edit in Settings → General.
       - RIGGER_APP_HOST=${RIGGER_APP_HOST:-}
+      # Cloudflare DNS-01 token — lets rigger issue per-env/per-workspace override
+      # certs out-of-band via one-shot lego (DNS-01). Same token as Traefik's `dns`
+      # resolver; from src/.env. Empty ⇒ per-email overrides can't be issued.
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
     networks:
       - traefik_net
     # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.
