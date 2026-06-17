@@ -175,16 +175,30 @@ function VolModeToggle({ mode, onChange }) {
 
 // Volume string format: "source:path" | "source:path:ro" | "source:path:rw"
 // We parse the last segment as mode when it is exactly "ro" or "rw".
+// splitColonOutsideBraces splits on ':' but ignores colons inside ${...} — a compose
+// volume source like ${RIGGER_BIND_ROOT:-.}/data has an inner colon that must NOT be
+// treated as the source:container break.
+function splitColonOutsideBraces(s) {
+  const parts = []
+  let depth = 0, start = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '{') depth++
+    else if (ch === '}') { if (depth > 0) depth-- }
+    else if (ch === ':' && depth === 0) { parts.push(s.slice(start, i)); start = i + 1 }
+  }
+  parts.push(s.slice(start))
+  return parts
+}
+
 function parseVolumeString(v) {
-  const parts = v.split(':')
+  const parts = splitColonOutsideBraces(v)
   const last = parts[parts.length - 1]
   if ((last === 'ro' || last === 'rw') && parts.length >= 3) {
     return { source: parts[0], path: parts.slice(1, -1).join(':'), mode: last }
   }
-  const c = v.indexOf(':')
-  return c === -1
-    ? { source: v, path: '', mode: 'rw' }
-    : { source: v.slice(0, c), path: v.slice(c + 1), mode: 'rw' }
+  if (parts.length === 1) return { source: parts[0], path: '', mode: 'rw' }
+  return { source: parts[0], path: parts.slice(1).join(':'), mode: 'rw' }
 }
 
 function serializeVolumeRow(r) {

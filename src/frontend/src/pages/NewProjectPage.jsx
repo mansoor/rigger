@@ -529,6 +529,35 @@ const DEFAULT_IMAGE = {
   healthcheck_config: { interval: '30', timeout: '10', retries: '3', start_period: '30' },
 }
 
+// splitColonOutsideBraces splits on ':' but ignores colons inside ${...} — compose
+// volume/port specs use env-var defaults like ${RIGGER_BIND_ROOT:-.}/data:/x or
+// ${APP_PORT:-80}:80 whose inner colon must NOT be treated as a host:container break.
+// Mirrors the backend detector's splitter.
+export function splitColonOutsideBraces(s) {
+  const parts = []
+  let depth = 0, start = 0
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '{') depth++
+    else if (ch === '}') { if (depth > 0) depth-- }
+    else if (ch === ':' && depth === 0) { parts.push(s.slice(start, i)); start = i + 1 }
+  }
+  parts.push(s.slice(start))
+  return parts
+}
+
+// parseVolumeSpec splits a compose volume string into {source, path, mode}, ignoring
+// colons inside ${...}. Shared shape with EditProjectPage's parseVolumeString.
+export function parseVolumeSpec(v) {
+  const parts = splitColonOutsideBraces(v)
+  const last = parts[parts.length - 1]
+  if ((last === 'ro' || last === 'rw') && parts.length >= 3) {
+    return { source: parts[0], path: parts.slice(1, -1).join(':'), mode: last }
+  }
+  if (parts.length === 1) return { source: parts[0], path: '', mode: 'rw' }
+  return { source: parts[0], path: parts.slice(1).join(':'), mode: 'rw' }
+}
+
 // imagesToCompose renders the current image-stack entries as a docker-compose.yml
 // string (the editor's starting point), so edits made in the UI are reflected when the
 // user re-opens the compose editor. environment + ports use list form to dodge YAML
@@ -572,7 +601,7 @@ function draftToImages(services) {
     const ports = []
     if (s.port) ports.push({ host: s.host_port || '', container: String(s.port) })
     for (const ep of (s.extra_ports || [])) {
-      const parts = String(ep).split(':')
+      const parts = splitColonOutsideBraces(String(ep))
       ports.push(parts.length > 1 ? { host: parts[0], container: parts[parts.length - 1] } : { host: '', container: parts[0] })
     }
     imgs.push({
@@ -1014,10 +1043,8 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
                 const templateVols = []
                 for (const img of detail.images) {
                   for (const v of (img.volumes || [])) {
-                    const c = v.indexOf(':')
-                    if (c < 0) continue
-                    const source = v.slice(0, c)
-                    const mountPath = v.slice(c + 1).split(':')[0]
+                    const { source, path: mountPath } = parseVolumeSpec(v)
+                    if (!mountPath) continue
                     if (!seen.has(source)) { seen.add(source); templateVols.push({ source, mountPath }) }
                   }
                 }
@@ -1420,13 +1447,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
   const [volRows, setVolRows] = useState(() => {
     const rows = (img.volumes || []).map(v => {
       if (typeof v !== 'string') return { source: v.source||'', path: v.path||'', mode: 'rw' }
-      const parts = v.split(':')
-      const last = parts[parts.length - 1]
-      if ((last === 'ro' || last === 'rw') && parts.length >= 3) {
-        return { source: parts[0], path: parts.slice(1, -1).join(':'), mode: last }
-      }
-      const c = v.indexOf(':')
-      return c >= 0 ? { source: v.slice(0, c), path: v.slice(c + 1), mode: 'rw' } : { source: v, path: '', mode: 'rw' }
+      return parseVolumeSpec(v)
     })
     return rows.length ? rows : []
   })
