@@ -108,6 +108,9 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 			// Auto-import the bundled DB seed on a fresh deploy (empty DB + opt-in).
 			// Best-effort, streamed to the same output; never affects deploy status.
 			h.maybeAutoSeed(wsName, name, env, out)
+			// Issue/refresh a per-email override cert (out-of-band, file provider) when
+			// the env's effective ACME email differs from the global. Best-effort.
+			h.maybeIssueOverrideCert(wsName, name, env, out)
 		}
 		if body.Command == "update" && env != "" {
 			h.imgCache.Invalidate(wsName, name, env)

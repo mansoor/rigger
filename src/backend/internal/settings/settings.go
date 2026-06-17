@@ -452,6 +452,25 @@ func AppSetting(d *db.DB, key string) string {
 	return strings.TrimSpace(v)
 }
 
+// EffectiveAcmeEmail resolves the Let's Encrypt account email for an environment,
+// layering the hierarchy: the per-env override (envOverride) wins, else the workspace
+// `acme_email`, else the global `acme_email` (admin default), else "". The per-env and
+// per-workspace overrides take effect via OUT-OF-BAND issuance (internal/acme); the
+// global is what Traefik's own resolver uses.
+func EffectiveAcmeEmail(d *db.DB, wsKey, envOverride string) string {
+	if e := strings.TrimSpace(envOverride); e != "" {
+		return e
+	}
+	if d != nil {
+		if vals, err := GetWorkspaceSettings(d, wsKey); err == nil {
+			if e := strings.TrimSpace(vals["acme_email"]); e != "" {
+				return e
+			}
+		}
+	}
+	return AppSetting(d, "acme_email")
+}
+
 // EffectiveBaseDomain resolves the apps base domain for a workspace: the workspace's
 // own `domain` override wins, else the global `apps_base_domain` (admin default), else
 // "" (callers then derive a magic-DNS / *.localhost auto-URL — see AutoURLMode).

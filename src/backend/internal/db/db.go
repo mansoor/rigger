@@ -425,6 +425,21 @@ func (d *DB) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_deploy_history_env ON deploy_history(workspace, project, env, id);
 
+		-- Out-of-band override certs (ACME email hierarchy, Phase 2): one row per domain
+		-- whose env uses a per-env/per-workspace ACME email that differs from the global,
+		-- so the renewal scheduler knows the (domain → email) pairs to renew (the email is
+		-- the ACME account contact and isn't stored in the cert). not_after drives renewal.
+		CREATE TABLE IF NOT EXISTS acme_certs (
+			domain     TEXT PRIMARY KEY,
+			email      TEXT NOT NULL,
+			workspace  TEXT NOT NULL DEFAULT '',
+			project    TEXT NOT NULL DEFAULT '',
+			env        TEXT NOT NULL DEFAULT '',
+			not_after  INTEGER NOT NULL DEFAULT 0,
+			issued_at  INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT ''
+		);
+
 		-- DB Hosting: users Rigger created on a managed database (one per schema it
 		-- provisions), so the Manage Database UI can show the user/password and build
 		-- a per-user Adminer auto-login link on reload. The password is AES-256-GCM

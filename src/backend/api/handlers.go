@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mansoor/rigger/ui/internal/acme"
 	"github.com/mansoor/rigger/ui/internal/actionruns"
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
@@ -93,6 +94,8 @@ type Handler struct {
 	alertBroker   *alerts.Broker
 	notifier      *notify.Dispatcher
 	cryptoKey     []byte // derived from JWT secret; encrypts host SSH keys (Phase 7)
+	acmeIssuer    *acme.Issuer // out-of-band per-email override cert issuer (DNS-01/lego)
+	acmeCerts     *acme.Store  // tracked override certs (domain → email) for renewal
 
 	// Live pipeline runs: runID → cancel func, so a Cancel request can kill an
 	// in-flight run's docker process. Populated for the lifetime of each run's
@@ -116,6 +119,8 @@ func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remot
 		notifier:      notifier,
 		cryptoKey:     key,
 		runCancels:    map[int64]context.CancelFunc{},
+		acmeIssuer:    acme.New(nil), // local docker daemon (lego runs on the rigger host)
+		acmeCerts:     acme.NewStore(d),
 	}
 }
 

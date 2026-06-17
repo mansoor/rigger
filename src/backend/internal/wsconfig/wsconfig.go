@@ -325,6 +325,7 @@ type Env struct {
 	RedisEnabled    bool           `json:"redis_enabled"`
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`
+	SSLEnabled      bool           `json:"ssl_enabled"`
 	Deployment      string         `json:"deployment"`
 	Git             EnvGit         `json:"git"`
 	EnvVars         map[string]Str `json:"env_vars"`
