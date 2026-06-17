@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, parseCompose, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
 import { resolveEnvRoute } from '../lib/envRoute'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
@@ -522,14 +522,140 @@ function TemplateCard({ tmpl, selected, onClick }) {
 }
 
 const DEFAULT_IMAGE = {
-  name: '', image: '', tag: 'latest',
+  name: '', image: '', tag: 'latest', command: '', env_vars: {},
   portMappings: [{ host: '', container: '' }],
   volumes: [],
   healthcheck: '',
   healthcheck_config: { interval: '30', timeout: '10', retries: '3', start_period: '30' },
 }
 
+// imagesToCompose renders the current image-stack entries as a docker-compose.yml
+// string (the editor's starting point), so edits made in the UI are reflected when the
+// user re-opens the compose editor. environment + ports use list form to dodge YAML
+// quoting. Inverse of draftToImages (which parses compose back into entries).
+function imagesToCompose(images) {
+  const out = ['services:']
+  const list = (images || []).filter(im => (im.name || '').trim() || im.image)
+  if (list.length === 0) return 'services:\n  # add a service, or paste a compose file here\n'
+  for (const im of list) {
+    const name = (im.name || '').trim() || 'service'
+    out.push(`  ${name}:`)
+    if (im.image) out.push(`    image: ${im.tag && im.tag !== '' ? `${im.image}:${im.tag}` : im.image}`)
+    if (im.command) out.push(`    command: ${im.command}`)
+    const ports = (im.portMappings || []).filter(p => p.container)
+    if (ports.length) {
+      out.push('    ports:')
+      ports.forEach(p => out.push(`      - "${p.host ? `${p.host}:` : ''}${p.container}"`))
+    }
+    const env = im.env_vars || {}
+    const keys = Object.keys(env)
+    if (keys.length) {
+      out.push('    environment:')
+      keys.forEach(k => out.push(`      - ${k}=${env[k]}`))
+    }
+    const vols = (im.volumes || []).filter(v => typeof v === 'string' && v.includes(':'))
+    if (vols.length) {
+      out.push('    volumes:')
+      vols.forEach(v => out.push(`      - ${v}`))
+    }
+  }
+  return out.join('\n') + '\n'
+}
+
+// draftToImages maps a parsed compose draft's services into image-stack entries. Build
+// services can't be represented as a pre-built image, so they're skipped (reported).
+function draftToImages(services) {
+  const imgs = []
+  const skipped = []
+  for (const s of (services || [])) {
+    if (s.build) { skipped.push(s.name); continue }
+    const ports = []
+    if (s.port) ports.push({ host: s.host_port || '', container: String(s.port) })
+    for (const ep of (s.extra_ports || [])) {
+      const parts = String(ep).split(':')
+      ports.push(parts.length > 1 ? { host: parts[0], container: parts[parts.length - 1] } : { host: '', container: parts[0] })
+    }
+    imgs.push({
+      ...DEFAULT_IMAGE,
+      name: s.name || '', image: s.image || '', tag: s.tag || 'latest',
+      command: s.command || '', web_routed: !!s.web_routed,
+      portMappings: ports.length ? ports : [{ host: '', container: '' }],
+      volumes: Array.isArray(s.volumes) ? s.volumes : [],
+      env_vars: s.env_vars || {},
+      healthcheck: s.healthcheck || '',
+      healthcheck_config: (s.healthcheck_config && Object.keys(s.healthcheck_config).length) ? s.healthcheck_config : DEFAULT_IMAGE.healthcheck_config,
+    })
+  }
+  return { imgs, skipped }
+}
+
+// ComposeImportModal — a two-way compose editor for the image stack. Opens pre-filled
+// with YAML from the current entries; "Parse" sends it to the backend (same parser the
+// repo scanner uses) and previews what will be imported; "Apply" replaces the entries.
+function ComposeImportModal({ images, onApply, onClose }) {
+  const [text, setText] = useState(() => imagesToCompose(images))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [preview, setPreview] = useState(null) // { mapped:{imgs,skipped}, draft }
+
+  async function parse() {
+    setBusy(true); setErr(''); setPreview(null)
+    try {
+      const draft = await parseCompose(text)
+      const mapped = draftToImages(draft.services || [])
+      if (mapped.imgs.length === 0) {
+        setErr('No pre-built image services found. The image stack runs ready-made images — build services aren\'t supported here (use "From a Git repository" instead).')
+      } else {
+        setPreview({ mapped, draft })
+      }
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Could not parse the compose file.')
+    } finally {
+      setBusy(false)
+    }
+  }
+  function apply() {
+    if (!preview) return
+    onApply(preview.mapped.imgs)
+    onClose()
+  }
+
+  const draft = preview?.draft
+  const mdeps = draft ? [draft.database !== 'none' && draft.database, draft.redis && 'redis', draft.object_storage && draft.object_storage !== 'none' && draft.object_storage].filter(Boolean) : []
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-surface-raised border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-border">
+          <h3 className="text-base font-semibold text-content-strong">Paste / edit docker-compose</h3>
+          <p className="text-xs text-content-subtle mt-0.5">Paste a compose file to fill the services, or edit the YAML below. Parsing replaces the service list.</p>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto space-y-3">
+          <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} spellCheck={false}
+            className="w-full h-64 px-3 py-2 bg-surface border border-border-strong rounded-lg text-content-strong font-mono text-xs focus:outline-none focus:border-brand-500 resize-y" />
+          {err && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+          {preview && (
+            <div className="text-xs text-content-subtle space-y-1 bg-surface border border-border rounded-lg px-3 py-2">
+              <p className="text-success-fg">Ready to import {preview.mapped.imgs.length} service{preview.mapped.imgs.length !== 1 ? 's' : ''}: <span className="font-mono text-content">{preview.mapped.imgs.map(i => i.name).join(', ')}</span></p>
+              {preview.mapped.skipped.length > 0 && <p>Skipped build service{preview.mapped.skipped.length !== 1 ? 's' : ''} (not pre-built images): <span className="font-mono">{preview.mapped.skipped.join(', ')}</span></p>}
+              {mdeps.length > 0 && <p>Detected managed deps: <span className="font-mono">{mdeps.join(', ')}</span> — set these in the Services step.</p>}
+              {(draft.notes || []).map((n, i) => <p key={i}>• {n}</p>)}
+            </div>
+          )}
+        </div>
+        <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content">Cancel</button>
+          {preview
+            ? <button type="button" onClick={apply} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white">Apply {preview.mapped.imgs.length} service{preview.mapped.imgs.length !== 1 ? 's' : ''}</button>
+            : <button type="button" onClick={parse} disabled={busy || !text.trim()} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">{busy ? 'Parsing…' : 'Parse'}</button>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ImageEditor({ images, onChange }) {
+  const [composeOpen, setComposeOpen] = useState(false)
   function update(idx, field, val) {
     const next = images.map((img, i) => i === idx ? { ...img, [field]: val } : img)
     onChange(next)
@@ -539,6 +665,13 @@ function ImageEditor({ images, onChange }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex justify-end">
+        <button type="button" onClick={() => setComposeOpen(true)}
+          className="text-xs px-2.5 py-1 rounded-lg border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">
+          ⇕ Paste / edit compose
+        </button>
+      </div>
+      {composeOpen && <ComposeImportModal images={images} onApply={onChange} onClose={() => setComposeOpen(false)} />}
       {images.map((img, i) => (
         <div key={i} className="bg-surface-raised/50 border border-border-strong rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -2065,6 +2198,7 @@ export default function NewProjectPage() {
               link_ports: ports.filter(p => p.link && p.host).map(p => p.host),
               volumes: (img.volumes || []).filter(v => typeof v === 'string' ? v.includes(':') : false),
               depends_on: [],
+              env_vars: img.env_vars || {},
               healthcheck: img.healthcheck || '',
               healthcheck_config: img.healthcheck_config || {},
             }

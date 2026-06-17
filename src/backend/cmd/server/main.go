@@ -885,6 +885,7 @@ func main() {
 
 	// Phase 2b: repo scanner — clone + static-detect a stack into a draft service graph.
 	mux.Handle("POST /api/scan-repo", authSvc.Middleware(http.HandlerFunc(handler.ScanRepo)))
+	mux.Handle("POST /api/parse-compose", authSvc.Middleware(http.HandlerFunc(handler.ParseCompose)))
 	// Upload-source: extract an uploaded archive + detect into a draft (Custom application).
 	mux.Handle("POST /api/upload-source", authSvc.Middleware(http.HandlerFunc(handler.UploadSource)))
 	// Stack blueprints for the no-repo "start from a template" picker.

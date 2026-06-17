@@ -201,6 +201,9 @@ export const saveToolTemplate  = (name, content, force = false) =>
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
 export const scanRepo          = (repo, branch) =>
   api.post('/scan-repo', { repo, branch }).then(r => r.data)
+// Parse pasted docker-compose.yml content into a draft service graph (no clone).
+export const parseCompose      = (content) =>
+  api.post('/parse-compose', { content }).then(r => r.data)
 // Upload-source (Custom application): upload an archive → server extracts + detects;
 // returns { draft, upload_token }. The token is sent on create to adopt the archive.
 export const uploadSource      = (formData) =>

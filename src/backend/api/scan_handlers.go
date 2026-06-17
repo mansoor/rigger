@@ -44,3 +44,24 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, detect.Detect(src))
 }
+
+// ParseCompose parses pasted docker-compose.yml content into the same draft service
+// graph a repo scan produces, so the New Project image stack can import a compose file
+// (and round-trip back to YAML in the UI). Pure parse — no clone, no code execution.
+//
+// POST /api/parse-compose  { "content": "<yaml>" }
+func (h *Handler) ParseCompose(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Content) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "compose content is required"})
+		return
+	}
+	draft, err := detect.DetectComposeBytes([]byte(body.Content))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, draft)
+}

@@ -312,6 +312,23 @@ type composeSvc struct {
 	Profiles    []string  `yaml:"profiles"`
 }
 
+// DetectComposeBytes parses pasted docker-compose.yml content (no repo on disk) into
+// a Draft — the same mapping the repo scanner uses, so the "paste compose" importer
+// and a git scan produce identical service graphs. Build-context framework ID is
+// skipped (no files to read); managed-dep detection + web-entry pick still apply.
+func DetectComposeBytes(data []byte) (Draft, error) {
+	d := Draft{Database: "none", ObjectStorage: "none", Detected: "compose (pasted)"}
+	var cf composeFile
+	if err := yaml.Unmarshal(data, &cf); err != nil {
+		return d, fmt.Errorf("invalid YAML: %w", err)
+	}
+	if len(cf.Services) == 0 {
+		return d, fmt.Errorf("no services found — expected a top-level `services:` map")
+	}
+	composeIntoDraft(&d, "", cf)
+	return d, nil
+}
+
 func fromCompose(repoDir, path string, d *Draft) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -321,6 +338,14 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 	if yaml.Unmarshal(raw, &cf) != nil || len(cf.Services) == 0 {
 		return false
 	}
+	composeIntoDraft(d, repoDir, cf)
+	return len(d.Services) > 0
+}
+
+// composeIntoDraft maps a parsed compose file into the draft: managed-dep candidates,
+// profile-gated services, app services, host-rebasing, and web-entry selection. Shared
+// by fromCompose (repo scan) and DetectComposeBytes (pasted content).
+func composeIntoDraft(d *Draft, repoDir string, cf composeFile) {
 	var skippedProfiles []string
 	// renames maps a dropped DB/cache service's compose name (e.g. "db") to the
 	// managed service's name in Rigger's generated compose (e.g. "postgres"), so we
@@ -380,7 +405,6 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 		d.Notes = append(d.Notes, fmt.Sprintf("Repointed %d host reference(s) onto managed service name(s): %s.", n, strings.Join(pairs, ", ")))
 	}
 	pickWebEntry(d)
-	return len(d.Services) > 0
 }
 
 // composeToService maps one compose service to the unified Service model. Shared by
