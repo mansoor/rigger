@@ -206,7 +206,8 @@ func frameworkEnv(cfg *wsconfig.Config, e wsconfig.Env, prefix, dbBase, env, dbP
 			KeyID:     minioUser,
 			SecretKey: minioPassword,
 			Bucket:    minioBucket,
-			Endpoint:  "http://" + prefix + "_minio:9000",
+			// Bare "minio" host — the AWS SDK rejects underscore hostnames; unique per project net.
+			Endpoint:  "http://minio:9000",
 			Region:    "us-east-1",
 		}
 	case "local":
@@ -504,7 +505,9 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("MINIO_ROOT_USER=%s\n", minioUser)
 		p("MINIO_ROOT_PASSWORD=%s\n", minioPassword)
 		p("MINIO_BUCKET=%s\n", minioBucket)
-		p("MINIO_ENDPOINT=http://%s_minio:9000\n", prefix)
+		// Bare service name "minio" — mc/S3 SDKs reject underscore hostnames like
+		// {prefix}_minio ("Invalid Request (invalid hostname)"). Unique per project net.
+		p("MINIO_ENDPOINT=http://minio:9000\n")
 		p("MINIO_REGION=us-east-1\n")
 		if cfg.Project.StorageUI {
 			p("MINIO_CONSOLE_PASSPHRASE=%s\n", minioConsolePass)

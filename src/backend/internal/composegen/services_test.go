@@ -359,10 +359,14 @@ func TestObjectStorageMinIOAndLocal(t *testing.T) {
 		t.Errorf("minio must NOT carry a healthcheck (distroless → Traefik would drop it)\n%s", m)
 	}
 	init := svcBlock(t, s, "minio_init")
-	for _, want := range []string{"image: minio/mc:", "mc mb --ignore-existing", "$$MINIO_BUCKET", "restart: \"no\""} {
+	for _, want := range []string{"image: minio/mc:", "mc mb --ignore-existing", "$$MINIO_BUCKET", "restart: \"no\"", "http://minio:9000"} {
 		if !strings.Contains(init, want) {
 			t.Errorf("minio_init block missing %q\n---\n%s", want, init)
 		}
+	}
+	// mc/S3 reject underscore hostnames — must use the bare "minio" name, never {prefix}_minio.
+	if strings.Contains(init, "app1_dev_minio:9000") {
+		t.Errorf("minio_init must use bare host http://minio:9000, not the underscore host\n%s", init)
 	}
 
 	// local: no minio container, but the app service gets the storage volume at the default path.
@@ -401,7 +405,7 @@ func TestStorageConsoleSubdomain(t *testing.T) {
 	for _, want := range []string{
 		"image: opens3/console",
 		"routers.app1_dev_storage_console.rule=Host(`storage.app1.example.com`)",
-		"- CONSOLE_MINIO_SERVER=http://app1_dev_minio:9000",
+		"- CONSOLE_MINIO_SERVER=http://minio:9000", // bare host — S3/console reject underscores
 	} {
 		if !strings.Contains(g, want) {
 			t.Errorf("storage_console block missing %q\n---\n%s", want, g)

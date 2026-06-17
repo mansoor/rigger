@@ -96,7 +96,8 @@ func (g *gen) buildStorageConsole(prefix, rp, registry, tag string, isSwarm bool
 		// opens3/console contract: point it at the in-network MinIO S3 API; the PBKDF
 		// passphrase/salt (session crypto) come from .env via compose interpolation.
 		EnvVars: map[string]flexStr{
-			"CONSOLE_MINIO_SERVER":     flexStr("http://" + prefix + "_minio:9000"),
+			// Bare "minio" host — opens3/console / S3 reject underscore hostnames.
+			"CONSOLE_MINIO_SERVER":     flexStr("http://minio:9000"),
 			"CONSOLE_PBKDF_PASSPHRASE": flexStr("${MINIO_CONSOLE_PASSPHRASE}"),
 			"CONSOLE_PBKDF_SALT":       flexStr("${MINIO_CONSOLE_SALT}"),
 		},
@@ -632,7 +633,10 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.emitDependsOn(prefix, []string{"minio"}, isSwarm)
 		g.managedNet(prefix, "minio_init")
 		g.line("    env_file: .env")
-		g.line("    entrypoint: [\"/bin/sh\", \"-c\", \"until mc alias set rigger http://" + prefix + "_minio:9000 \\\"$$MINIO_ROOT_USER\\\" \\\"$$MINIO_ROOT_PASSWORD\\\"; do echo 'waiting for minio...'; sleep 2; done; mc mb --ignore-existing rigger/\\\"$$MINIO_BUCKET\\\"; echo 'bucket ready'; exit 0\"]")
+		// Use the BARE service name "minio" (a valid hostname) — NOT {prefix}_minio:
+		// mc/S3 validate the hostname and reject underscores ("Invalid Request (invalid
+		// hostname)"). The bare name is unique within the project's own network.
+		g.line("    entrypoint: [\"/bin/sh\", \"-c\", \"until mc alias set rigger http://minio:9000 \\\"$$MINIO_ROOT_USER\\\" \\\"$$MINIO_ROOT_PASSWORD\\\"; do echo 'waiting for minio...'; sleep 2; done; mc mb --ignore-existing rigger/\\\"$$MINIO_BUCKET\\\"; echo 'bucket ready'; exit 0\"]")
 		g.line("    restart: \"no\"")
 		g.line("")
 	}
