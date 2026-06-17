@@ -32,6 +32,8 @@ services:
       # Traefik's ACME cert store (read-only): lets the env card show the live
       # Let's Encrypt cert issuer + expiry for SSL envs (reads acme.json/acme-dns.json).
       - traefik-certs:/certs:ro
+      # Out-of-band override certs + dynamic TLS config (rigger writes; Traefik file-provider reads).
+      - rigger-dynamic:/dynamic
     environment:
       - LISTEN_ADDR=:8080
       - TOOLKIT_ROOT=/toolkit
@@ -126,6 +128,13 @@ services:
       # HTTP→HTTPS redirect is now per-router (emitted by composegen for SSL
       # envs only), so HTTP-only local envs (*.localhost) aren't forced onto a
       # cert-less HTTPS. Do NOT re-add a global web→websecure redirection here.
+      # ── File provider (per-email override certs) ──
+      # Rigger issues per-workspace/per-env Let's Encrypt certs OUT-OF-BAND (one-shot
+      # lego, DNS-01) under their own ACME email, then drops the cert + a dynamic TLS
+      # config into this watched dir — Traefik hot-reloads them with NO restart. An
+      # empty/absent dir is a no-op, so this is harmless until an override is used.
+      - --providers.file.directory=/dynamic
+      - --providers.file.watch=true
       # ── Logging ──
       - --log.level=INFO
       - --accesslog=false
@@ -139,6 +148,8 @@ services:
     volumes:
       # Certificate storage — mount a named volume so certs survive restarts
       - traefik-certs:/certs
+      # Out-of-band override certs + their dynamic TLS config (rigger writes; read-only here)
+      - rigger-dynamic:/dynamic:ro
     networks:
       - traefik_net
     depends_on:
@@ -177,3 +188,5 @@ volumes:
   rigger-data:
   # Let's Encrypt certificate store — back this volume up regularly
   traefik-certs:
+  # Out-of-band override certs + their dynamic TLS config (rigger ⇄ Traefik file provider)
+  rigger-dynamic:
