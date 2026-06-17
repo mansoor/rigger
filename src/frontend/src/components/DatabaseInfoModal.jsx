@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
-function humanBytes(n) {
+export function humanBytes(n) {
   if (!n || n < 1024) return `${n || 0} B`
   const u = ['KB', 'MB', 'GB', 'TB']
   let v = n / 1024, i = 0
@@ -11,13 +11,14 @@ function humanBytes(n) {
   return `${v >= 10 ? Math.round(v) : v.toFixed(1)} ${u[i]}`
 }
 
-// DatabaseInfoModal — connection details for an environment's managed database:
-// engine + version, internal address, external address (when published), masked
-// credentials (reveal for operator+), ready-to-paste connection URIs, and the raw
-// connection env keys. Read-only; mirrors the ContainerInfoModal layout. The
-// password is fetched (and shown) only when reveal is on AND the user can reveal.
+// DatabasePanel — connection details + safe management for an environment's managed
+// database: engine + version, internal address, external address (when published),
+// masked credentials (reveal for operator+), ready-to-paste connection URIs, and the
+// raw connection env keys, plus a Manage subtab (schemas/databases + users). Rendered
+// as one tab inside the Managed Service Console (and standalone via DatabaseInfoModal).
+// reveal/setReveal are lifted so the whole console shares one secret-reveal state.
 
-function CopyBtn({ value }) {
+export function CopyBtn({ value }) {
   const [done, setDone] = useState(false)
   if (!value) return null
   return (
@@ -29,7 +30,7 @@ function CopyBtn({ value }) {
   )
 }
 
-function Row({ label, value, mono = true }) {
+export function Row({ label, value, mono = true }) {
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="w-32 shrink-0 text-content-subtle">{label}</span>
@@ -57,14 +58,16 @@ function ConnectBtn({ openAdminer, webSqlEnabled, adminerUrl, as = 'admin', labe
   )
 }
 
-export default function DatabaseInfoModal({ workspace, name, env, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onClose }) {
-  const [reveal, setReveal] = useState(false)
+// DatabasePanel renders the database tab body. info is fetched here (keyed on reveal);
+// onMeta lets a parent (the console header) show the engine/version badge.
+export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onMeta }) {
   const [tab, setTab] = useState('connection')
   const { data: info, isLoading } = useQuery({
     queryKey: ['db-info', workspace, name, env, reveal],
     queryFn: () => fetchDatabaseInfo(workspace, name, env, reveal),
   })
   const has = info && info.engine && info.engine !== 'none'
+  if (onMeta && has) onMeta({ label: info.label, version: info.version })
   const tabCls = (t) => `px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-brand-500 text-content-strong' : 'border-transparent text-content-subtle hover:text-content'}`
 
   // Open Adminer auto-logged-in as `as` ('admin' or a username). The window is opened
@@ -80,108 +83,120 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
   }
 
   return (
+    <>
+      {has && (
+        <div className="-mt-2 mb-4 -mx-5 px-3 border-b border-border flex items-center gap-1">
+          <button className={tabCls('connection')} onClick={() => setTab('connection')}>Connection</button>
+          <button className={tabCls('manage')} onClick={() => setTab('manage')}>Manage</button>
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-xs text-content-subtle">Loading…</p>
+      ) : !has ? (
+        <p className="text-xs text-content-subtle">No managed database configured for this environment.</p>
+      ) : tab === 'manage' ? (
+        <ManageTab workspace={workspace} name={name} env={env} info={info} canManage={canManage}
+          openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} />
+      ) : (
+        <div className="space-y-5">
+          {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
+          {canManage && (
+            <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
+              <div className="text-xs text-content-subtle">Open a browser SQL console connected to this database.</div>
+              <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" />
+            </section>
+          )}
+
+          {/* In-network connection */}
+          <section className="space-y-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">In-network (from other services)</h3>
+            <Row label="Host" value={info.internal_host} />
+            <Row label="Port" value={String(info.port)} />
+            <Row label="Database" value={info.database} />
+            <Row label="Username" value={info.username} />
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-32 shrink-0 text-content-subtle">Password</span>
+              <code className="flex-1 break-all font-mono text-content-strong select-all">
+                {info.revealed ? (info.password || <span className="text-content-faint">(none)</span>) : '••••••••'}
+              </code>
+              {canReveal && info.has_password && (
+                <button type="button" onClick={() => setReveal(v => !v)}
+                  className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+                  {info.revealed ? 'Hide' : 'Reveal'}
+                </button>
+              )}
+              {info.revealed && <CopyBtn value={info.password} />}
+            </div>
+          </section>
+
+          {/* External access */}
+          <section className="space-y-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">External access</h3>
+            {info.external ? (
+              <>
+                <Row label="Host" value={info.external_host} />
+                <Row label="Port" value={String(info.external_port)} />
+              </>
+            ) : (
+              <p className="text-xs text-content-subtle">Not published. Enable “external access” on this database in Edit Project to expose a host port for outside clients.</p>
+            )}
+          </section>
+
+          {/* Connection URIs */}
+          <section className="space-y-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">Connection URIs</h3>
+            {(info.connections || []).map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="w-32 shrink-0 text-content-subtle">{c.label}</span>
+                <code className="flex-1 break-all font-mono text-content-strong select-all">{c.value}</code>
+                <CopyBtn value={c.value} />
+              </div>
+            ))}
+            {!info.revealed && (
+              <p className="text-[11px] text-content-faint">Password masked — reveal it above to copy a ready-to-use URI.</p>
+            )}
+          </section>
+
+          {/* Raw env keys */}
+          <section className="space-y-1.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">Connection env vars</h3>
+            <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1">
+              {Object.entries(info.env_keys || {}).map(([k, v]) => (
+                <div key={k} className="flex items-center gap-2 text-[11px] font-mono">
+                  <span className="text-content-subtle">{k}</span>
+                  <span className="text-content-faint">=</span>
+                  <span className="flex-1 break-all text-content select-all">{v}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  )
+}
+
+// DatabaseInfoModal — standalone modal wrapper around DatabasePanel (kept for any
+// direct callers; the env card now opens the tabbed ServiceConsoleModal instead).
+export default function DatabaseInfoModal({ workspace, name, env, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onClose }) {
+  const [reveal, setReveal] = useState(false)
+  const [meta, setMeta] = useState(null)
+  return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-full max-w-2xl max-h-[85vh] flex flex-col bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-3 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-base">🗄</span>
             <span className="font-semibold text-content-strong">Database</span>
-            {has && <span className="px-1.5 py-0.5 rounded border border-border-strong bg-surface-raised text-xs text-content">{info.label} {info.version}</span>}
+            {meta && <span className="px-1.5 py-0.5 rounded border border-border-strong bg-surface-raised text-xs text-content">{meta.label} {meta.version}</span>}
             <span className="text-xs text-content-subtle">· {env}</span>
           </div>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
         </div>
-
-        {has && (
-          <div className="px-3 border-b border-border flex items-center gap-1">
-            <button className={tabCls('connection')} onClick={() => setTab('connection')}>Connection</button>
-            <button className={tabCls('manage')} onClick={() => setTab('manage')}>Manage</button>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {isLoading ? (
-            <p className="text-xs text-content-subtle">Loading…</p>
-          ) : !has ? (
-            <p className="text-xs text-content-subtle">No managed database configured for this environment.</p>
-          ) : tab === 'manage' ? (
-            <ManageTab workspace={workspace} name={name} env={env} info={info} canManage={canManage}
-              openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} />
-          ) : (
-            <>
-              {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
-              {canManage && (
-                <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
-                  <div className="text-xs text-content-subtle">Open a browser SQL console connected to this database.</div>
-                  <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" />
-                </section>
-              )}
-
-              {/* In-network connection */}
-              <section className="space-y-1.5">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">In-network (from other services)</h3>
-                <Row label="Host" value={info.internal_host} />
-                <Row label="Port" value={String(info.port)} />
-                <Row label="Database" value={info.database} />
-                <Row label="Username" value={info.username} />
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="w-32 shrink-0 text-content-subtle">Password</span>
-                  <code className="flex-1 break-all font-mono text-content-strong select-all">
-                    {info.revealed ? (info.password || <span className="text-content-faint">(none)</span>) : '••••••••'}
-                  </code>
-                  {canReveal && info.has_password && (
-                    <button type="button" onClick={() => setReveal(v => !v)}
-                      className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
-                      {info.revealed ? 'Hide' : 'Reveal'}
-                    </button>
-                  )}
-                  {info.revealed && <CopyBtn value={info.password} />}
-                </div>
-              </section>
-
-              {/* External access */}
-              <section className="space-y-1.5">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">External access</h3>
-                {info.external ? (
-                  <>
-                    <Row label="Host" value={info.external_host} />
-                    <Row label="Port" value={String(info.external_port)} />
-                  </>
-                ) : (
-                  <p className="text-xs text-content-subtle">Not published. Enable “external access” on this database in Edit Project to expose a host port for outside clients.</p>
-                )}
-              </section>
-
-              {/* Connection URIs */}
-              <section className="space-y-1.5">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">Connection URIs</h3>
-                {(info.connections || []).map((c, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="w-32 shrink-0 text-content-subtle">{c.label}</span>
-                    <code className="flex-1 break-all font-mono text-content-strong select-all">{c.value}</code>
-                    <CopyBtn value={c.value} />
-                  </div>
-                ))}
-                {!info.revealed && (
-                  <p className="text-[11px] text-content-faint">Password masked — reveal it above to copy a ready-to-use URI.</p>
-                )}
-              </section>
-
-              {/* Raw env keys */}
-              <section className="space-y-1.5">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-content-muted">Connection env vars</h3>
-                <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1">
-                  {Object.entries(info.env_keys || {}).map(([k, v]) => (
-                    <div key={k} className="flex items-center gap-2 text-[11px] font-mono">
-                      <span className="text-content-subtle">{k}</span>
-                      <span className="text-content-faint">=</span>
-                      <span className="flex-1 break-all text-content select-all">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </>
-          )}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          <DatabasePanel workspace={workspace} name={name} env={env} reveal={reveal} setReveal={setReveal}
+            canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setMeta} />
         </div>
       </div>
     </div>

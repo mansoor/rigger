@@ -83,6 +83,11 @@ export const createDatabaseUser = (ws, name, env, body) => api.post(`${projBase(
 // adminerLoginHTML returns the auto-submitting login page (fetched authenticated, then
 // written into a window) so the JWT stays in the header and creds never hit the URL.
 export const adminerLoginHTML = (ws, name, env, as, url) => api.get(`${projBase(ws, name)}/envs/${env}/database/adminer-login`, { params: { as, url }, responseType: 'text' }).then(r => r.data)
+// Managed Service Console (P4) — non-DB sidecars (redis/object-storage/mailpit) connection info.
+// reveal=true (operator+) unmasks secrets. Plus MinIO bucket list/create.
+export const fetchServiceConsole = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/services${reveal ? '?reveal=true' : ''}`).then(r => r.data)
+export const fetchStorageBuckets = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/storage/buckets`).then(r => r.data)
+export const createStorageBucket = (ws, name, env, bucketName) => api.post(`${projBase(ws, name)}/envs/${env}/storage/buckets`, { name: bucketName }).then(r => r.data)
 export const fetchEnvStatus    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/status`).then(r => r.data)
 export const fetchImageUpdates  = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/image-updates`).then(r => r.data)
 export const fetchContainers    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/containers`).then(r => r.data)

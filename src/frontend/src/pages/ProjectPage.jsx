@@ -11,7 +11,7 @@ import TerminalModal from '../components/TerminalModal'
 import ContainerInfoModal from '../components/ContainerInfoModal'
 import FileBrowserModal from '../components/FileBrowserModal'
 import RollbackModal from '../components/RollbackModal'
-import DatabaseInfoModal from '../components/DatabaseInfoModal'
+import ServiceConsoleModal from '../components/ServiceConsoleModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -470,11 +470,18 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
   const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
-  const [dbInfoOpen, setDbInfoOpen] = useState(false) // managed-database connection info (Phase 5)
+  const [dbInfoOpen, setDbInfoOpen] = useState(false) // Managed Service Console (P4)
   // Managed DB engine is project-level now (falls back to the legacy per-env value).
-  const dbEngine = ws?.config?.project?.database || cfg?.database || ''
+  const proj = ws?.config?.project || {}
+  const dbEngine = proj.database || cfg?.database || ''
   const hasManagedDB = !!dbEngine && dbEngine !== 'none'
-  const canManageDB = ['admin', 'operator'].includes(ws?.my_role) // reveal secret + create schema
+  // Any managed service for this env gates the console button: DB, Redis, object
+  // storage (project-level), or the per-env Mailpit (env override else project default).
+  const hasRedis    = !!proj.redis || !!cfg?.redis_enabled
+  const hasStorage  = !!proj.storage_minio || !!proj.storage_local || (!!proj.object_storage && proj.object_storage !== 'none')
+  const effMailpit  = cfg?.mailpit != null ? !!cfg.mailpit : !!proj.mailpit
+  const hasAnyService = hasManagedDB || hasRedis || hasStorage || effMailpit
+  const canManageDB = ['admin', 'operator'].includes(ws?.my_role) // reveal secret + create schema/bucket
 
   const [infoFor, setInfoFor]             = useState(null) // {service, short} for the Info inspector
   const [filesFor, setFilesFor]           = useState(null) // {service, short} for the file browser
@@ -605,8 +612,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             </>
           )}
           <ToolBtn icon="compose" title="View Compose" onClick={onCompose} className="text-content-subtle hover:text-teal-400" />
-          {hasManagedDB && (
-            <ToolBtn icon="database" title="Database connection info" onClick={() => setDbInfoOpen(true)}
+          {hasAnyService && (
+            <ToolBtn icon="database" title="Managed services console" onClick={() => setDbInfoOpen(true)}
               className="text-content-subtle hover:text-sky-400" />
           )}
           {canOp && (
@@ -792,11 +799,13 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           onClose={() => setFilesFor(null)} />
       )}
 
-      {/* Managed-database connection info + management (Phase 5/6). Reveal-secret and
-          create-schema are operator+; viewers see structure only. */}
+      {/* Managed Service Console (P4) — tabbed per-env console over DB / Redis / object
+          storage / Mailpit. Reveal-secret, create-schema and create-bucket are
+          operator+; viewers see structure + connection info only. */}
       {dbInfoOpen && (
-        <DatabaseInfoModal workspace={workspace} name={name} env={envName}
-          canReveal={canManageDB} canManage={canManageDB}
+        <ServiceConsoleModal workspace={workspace} name={name} env={envName}
+          hasManagedDB={hasManagedDB} canReveal={canManageDB} canManage={canManageDB}
+          apexUrl={accessUrls[0]?.href || ''}
           webSqlEnabled={(ws?.config?.services || []).some(s => s.name === 'adminer' || s.name === 'cloudbeaver') || !!ws?.config?.project?.web_sql}
           adminerUrl={(() => {
             // Apex when Adminer owns the web entry (pure DB-hosting); else it routes

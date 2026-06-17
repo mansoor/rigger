@@ -868,6 +868,10 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseUsers)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseUser)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/adminer-login", authSvc.Middleware(http.HandlerFunc(handler.AdminerLogin)))
+	// Managed Service Console (P4) — non-DB sidecars (redis/object-storage/mailpit) + MinIO buckets.
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/services", authSvc.Middleware(http.HandlerFunc(handler.GetServiceConsole)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/storage/buckets", authSvc.Middleware(http.HandlerFunc(handler.ListStorageBuckets)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/storage/buckets", authSvc.Middleware(http.HandlerFunc(handler.CreateStorageBucket)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/image-status", authSvc.Middleware(http.HandlerFunc(handler.GetImageStatus)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/track-latest", authSvc.Middleware(http.HandlerFunc(handler.TrackLatest)))
 
