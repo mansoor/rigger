@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
 
@@ -67,7 +67,11 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
     queryFn: () => fetchDatabaseInfo(workspace, name, env, reveal),
   })
   const has = info && info.engine && info.engine !== 'none'
-  if (onMeta && has) onMeta({ label: info.label, version: info.version })
+  // Report engine/version to the parent header AFTER render (never call a parent's
+  // setState during render — that triggers an infinite update loop and crashes the tree).
+  useEffect(() => {
+    if (onMeta && has) onMeta({ label: info.label, version: info.version })
+  }, [onMeta, has, info?.label, info?.version])
   const tabCls = (t) => `px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${tab === t ? 'border-brand-500 text-content-strong' : 'border-transparent text-content-subtle hover:text-content'}`
 
   // Open Adminer auto-logged-in as `as` ('admin' or a username). The window is opened
