@@ -89,6 +89,8 @@ export const fetchServiceConsole = (ws, name, env, reveal = false) => api.get(`$
 export const fetchStorageBuckets = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/storage/buckets`).then(r => r.data)
 export const createStorageBucket = (ws, name, env, bucketName) => api.post(`${projBase(ws, name)}/envs/${env}/storage/buckets`, { name: bucketName }).then(r => r.data)
 export const fetchEnvStatus    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/status`).then(r => r.data)
+// TLS cert status (issuer + expiry) for an SSL env — reads Traefik's ACME store server-side.
+export const fetchCertInfo     = (ws, name, env, domain) => api.get(`${projBase(ws, name)}/envs/${env}/cert`, { params: { domain } }).then(r => r.data)
 export const fetchImageUpdates  = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/image-updates`).then(r => r.data)
 export const fetchContainers    = (ws, name, env) => api.get(`${projBase(ws, name)}/envs/${env}/containers`).then(r => r.data)
 export const fetchContainerInspect = (ws, name, env, svc) => api.get(`${projBase(ws, name)}/envs/${env}/containers/${svc}/inspect`).then(r => r.data)

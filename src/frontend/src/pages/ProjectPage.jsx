@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo } from '../lib/api'
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
@@ -319,6 +319,24 @@ function BackupStatsLine({ name, envName }) {
   )
 }
 
+// CertBadge — live TLS cert status for an SSL env (issuer + days to expiry), read
+// from Traefik's ACME store. Amber under 14 days, red when expired.
+function CertBadge({ info }) {
+  const d = info.days_remaining
+  const tone = info.expired
+    ? 'bg-danger-subtle text-danger-fg border-danger-border/60'
+    : d <= 14
+      ? 'bg-warning-subtle text-warning-fg border-warning-border/60'
+      : 'bg-surface-raised text-content-subtle border-border-strong'
+  const when = info.not_after ? new Date(info.not_after).toLocaleDateString() : ''
+  return (
+    <span title={`${info.issuer || 'TLS certificate'} — ${info.expired ? 'expired' : `expires ${when} (${d} day${d === 1 ? '' : 's'})`}`}
+      className={`text-[10px] px-1.5 py-0.5 rounded border ${tone}`}>
+      🔒 {info.lets_encrypt ? 'LE' : 'TLS'} · {info.expired ? 'expired' : `${d}d`}
+    </span>
+  )
+}
+
 function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerminal, onLogs, onActionDone }) {
   const qc         = useQueryClient()
   const { workspace } = useParams() // parent-tier workspace (from the route)
@@ -341,6 +359,17 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     retry: false,
   })
   const containerStatus = statusData?.status || 'unknown'
+
+  // TLS cert status (issuer + expiry) for SSL envs — read from Traefik's ACME store.
+  // Certs change slowly, so refresh every 6h. Gated on SSL being active for this env.
+  const sslActive = !!(cfg?.ssl_enabled || _ea?.ssl)
+  const { data: certInfo } = useQuery({
+    queryKey: ['cert', workspace, name, envName, domain],
+    queryFn: () => fetchCertInfo(workspace, name, envName, domain),
+    enabled: sslActive && !!domain && domain !== '—',
+    refetchInterval: 6 * 60 * 60 * 1000,
+    retry: false,
+  })
 
   // Per-container health details — shared query key with LogViewer (React Query deduplicates)
   const { data: containers = [] } = useQuery({
@@ -560,6 +589,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
               className="text-[10px] px-1.5 py-0.5 rounded bg-info-subtle text-info-fg border border-info-border/60">⬆ {imgStatus.version} ready</span>
           )}
           <AccessUrls urls={accessUrls} reachable={reachable} />
+          {certInfo?.found && <CertBadge info={certInfo} />}
         </div>
       </div>
 

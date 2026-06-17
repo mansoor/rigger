@@ -29,6 +29,9 @@ services:
       - /:/host:ro
       # Persistent data: SQLite DB
       - rigger-data:/data
+      # Traefik's ACME cert store (read-only): lets the env card show the live
+      # Let's Encrypt cert issuer + expiry for SSL envs (reads acme.json/acme-dns.json).
+      - traefik-certs:/certs:ro
     environment:
       - LISTEN_ADDR=:8080
       - TOOLKIT_ROOT=/toolkit
