@@ -471,6 +471,39 @@ func TestProtectAdminUIsCreds(t *testing.T) {
 	}
 }
 
+// A free-form extra env var with whitespace (e.g. APP_NAME=Document Management seeded
+// from an app's .env.example) must be QUOTED in .env so a strict parser (phpdotenv via
+// env_file_mount) doesn't choke on "unexpected whitespace" — and it must round-trip
+// without double-quoting on regen (ParseEnv unquotes; envgen re-quotes once).
+func TestExtraEnvVarWhitespaceQuotedAndStable(t *testing.T) {
+	cfgJSON := `{
+      "project": { "name": "app", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "environments": { "dev": { "deployment": "compose", "database": "none",
+        "env_vars": { "APP_NAME": "Document Management" } } }
+    }`
+	c := cfg(t, cfgJSON)
+	env1, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(env1, `APP_NAME="Document Management"`) {
+		t.Errorf("APP_NAME with a space must be quoted in .env:\n%s", env1)
+	}
+	// ParseEnv strips the quotes back to the logical value.
+	if got := ParseEnv([]byte(env1))["APP_NAME"]; got != "Document Management" {
+		t.Errorf("ParseEnv APP_NAME = %q, want unquoted 'Document Management'", got)
+	}
+	// Regenerate with the previous .env as existing — value stays quoted ONCE (no
+	// "\"Document Management\"" double-quoting).
+	env2, _, err := Generate(c, "dev", ParseEnv([]byte(env1)), fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(env2, `APP_NAME="Document Management"`) || strings.Contains(env2, `\"Document Management\"`) {
+		t.Errorf("APP_NAME must round-trip quoted-once across regen:\n%s", env2)
+	}
+}
+
 // TestMinIOWiresLaravelS3 verifies the MinIO→Laravel S3 contract: when MinIO is
 // enabled, the Laravel framework env contract emits AWS_*/FILESYSTEM_DISK pointing at
 // the managed MinIO bucket (creds = MinIO root), and a repo's .env.example AWS_* can't

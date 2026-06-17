@@ -532,7 +532,9 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			p("%s=%s\n", k, fe[k])
+			// envQuote so a value with whitespace/# (e.g. a connection string) stays valid
+			// when the .env is parsed strictly (phpdotenv via env_file_mount).
+			p("%s=%s\n", k, envQuote(fe[k]))
 		}
 		p("\n")
 	}
@@ -592,13 +594,17 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		// Rigger's values, so they stay authoritative even in this mode.
 		writableEnv := cfg.HasWritableEnvFile()
 		for _, k := range keys {
+			// envQuote so a free-form value with whitespace/# (e.g. APP_NAME=Document
+			// Management seeded from the app's .env.example) stays valid when the .env is
+			// parsed strictly (phpdotenv via env_file_mount). docker compose & phpdotenv
+			// both strip the surrounding quotes; plain values pass through unquoted.
 			if writableEnv && existing != nil {
 				if ev, ok := existing[k]; ok {
-					p("%s=%s\n", k, ev)
+					p("%s=%s\n", k, envQuote(ev))
 					continue
 				}
 			}
-			p("%s=%s\n", k, ResolveImageValue(k, e.EnvVars[k].String(), existing, r))
+			p("%s=%s\n", k, envQuote(ResolveImageValue(k, e.EnvVars[k].String(), existing, r)))
 		}
 	}
 
@@ -673,9 +679,28 @@ func ParseEnv(content []byte) map[string]string {
 		if !ok {
 			continue
 		}
-		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		out[strings.TrimSpace(k)] = unquoteEnvValue(strings.TrimSpace(v))
 	}
 	return out
+}
+
+// unquoteEnvValue reverses envQuote: it strips ONE layer of surrounding double or
+// single quotes, and for double quotes unescapes \" and \\ (in the reverse order
+// envQuote applied them). This keeps preserved values stable across regen — without
+// it, a value envgen wrote quoted (e.g. APP_NAME="Document Management") would be read
+// back WITH its quotes and then re-quoted on the next regen ("\"Document Management\"").
+// Plain unquoted values (the common case — secrets, hosts, ports) pass through unchanged.
+func unquoteEnvValue(v string) string {
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' {
+		inner := v[1 : len(v)-1]
+		inner = strings.ReplaceAll(inner, `\"`, `"`)
+		inner = strings.ReplaceAll(inner, `\\`, `\`)
+		return inner
+	}
+	if len(v) >= 2 && v[0] == '\'' && v[len(v)-1] == '\'' {
+		return v[1 : len(v)-1]
+	}
+	return v
 }
 
 // RebaseImageRegistry rewrites a .env's REGISTRY line and the "{registry}/" prefix
