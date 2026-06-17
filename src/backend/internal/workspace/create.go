@@ -102,6 +102,7 @@ type EnvRequest struct {
 	Traefik    bool              `json:"traefik"`
 	TraefikNet string            `json:"traefik_network"`
 	SSLEnabled bool              `json:"ssl_enabled"`
+	SSLSelfSigned bool           `json:"ssl_self_signed,omitempty"` // per-env local HTTPS (self-signed) for non-LE URLs
 	AcmeEmail  string            `json:"acme_email,omitempty"` // per-env LE email override (blank = inherit ws/global)
 	Deployment string            `json:"deployment"`
 	BEReplicas int               `json:"backend_replicas"`
@@ -267,6 +268,7 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			"traefik_enabled": e.Traefik,
 			"traefik_network": traefik,
 			"ssl_enabled":     e.SSLEnabled,
+			"ssl_self_signed": e.SSLSelfSigned,
 			"acme_email":      e.AcmeEmail,
 			"git": map[string]any{
 				"enabled": e.GitEnabled,

@@ -24,14 +24,16 @@ export function resolveEnvRoute(cfg, prefix, envName, baseDomain, localTLS, auto
     const host = `${label}.${base}`
     return { url: `https://${host}`, domain: host, ssl: true, auto: true }
   }
-  // Magic-DNS fallback: {label}.{appHost}.{suffix}, HTTP (matches the backend).
+  // Local HTTPS (self-signed) opt-in: per-env ssl_self_signed, or the legacy project
+  // local_tls default — upgrades a non-LE auto URL (magic-DNS / localhost) to HTTPS.
+  const selfSigned = !!cfg.ssl_self_signed || !!localTLS
+  // Magic-DNS fallback: {label}.{appHost}.{suffix}, HTTP (or self-signed HTTPS).
   const suffix = { sslip: 'sslip.io', nip: 'nip.io', traefikme: 'traefik.me' }[autoMode]
   const ah = (appHost || '').trim()
   if (suffix && ah) {
     const host = `${label}.${ah}.${suffix}`
-    return { url: `http://${host}`, domain: host, ssl: false, auto: true }
+    return { url: `${selfSigned ? 'https' : 'http'}://${host}`, domain: host, ssl: selfSigned, auto: true }
   }
   const host = `${label}.localhost`
-  const ssl = !!localTLS
-  return { url: `${ssl ? 'https' : 'http'}://${host}`, domain: host, ssl, auto: true }
+  return { url: `${selfSigned ? 'https' : 'http'}://${host}`, domain: host, ssl: selfSigned, auto: true }
 }

@@ -170,6 +170,11 @@ func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
 		}
 		return ""
 	}()
+	// Local HTTPS (Traefik's self-signed default cert) for an auto URL that can't get
+	// a real Let's Encrypt cert (localhost / magic-DNS). Per-env opt-in (e.SSLSelfSigned
+	// from config), OR the legacy project-level default (ro.LocalTLS). Captured before
+	// the switch overwrites the SSL fields.
+	localHTTPS := ro.LocalTLS || e.SSLSelfSigned
 	switch {
 	case ro.BaseDomain != "":
 		// Real domain (admin global default or workspace override) → HTTPS via Let's Encrypt.
@@ -184,16 +189,17 @@ func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
 			e.wildcardBase = ro.BaseDomain
 		}
 	case magicSuffix != "":
-		// Cross-machine magic-DNS auto-URL. HTTP in Phase 1 (real certs for these come
-		// later: per-host LE if publicly reachable, or traefik.me's shared cert).
+		// Cross-machine magic-DNS auto-URL — HTTP by default; self-signed HTTPS when the
+		// env opts into local HTTPS (real LE certs for these come later: per-host HTTP-01
+		// if publicly reachable, or traefik.me's shared cert).
 		e.Domain = label + "." + magicSuffix
-		e.SSLEnabled = false
-		e.SSLSelfSigned = false
+		e.SSLEnabled = localHTTPS
+		e.SSLSelfSigned = localHTTPS
 	default:
 		// Host-local default (also when a magic-DNS mode is selected but no host set).
 		e.Domain = label + ".localhost"
-		e.SSLEnabled = ro.LocalTLS
-		e.SSLSelfSigned = ro.LocalTLS
+		e.SSLEnabled = localHTTPS
+		e.SSLSelfSigned = localHTTPS
 	}
 }
 

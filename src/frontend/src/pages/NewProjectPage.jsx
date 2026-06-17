@@ -925,6 +925,16 @@ export function looksLocalOrIP(domain) {
   return false
 }
 
+// leCapable reports whether a host can get a real Let's Encrypt cert (a public DNS
+// name). localhost/IP can't; magic-DNS hosts (sslip/nip/traefik.me) are HTTP-only in
+// Phase 1 → treated as not-LE so "local HTTPS" (self-signed) is offered instead.
+export function leCapable(domain) {
+  const h = (domain || '').trim().toLowerCase()
+  if (!h || looksLocalOrIP(h)) return false
+  if (/\.(sslip\.io|nip\.io|traefik\.me)$/.test(h)) return false
+  return true
+}
+
 function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0, acmeDefault = '', resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '' }) {
   const upd = (k, v) => onChange(idx, { ...env, [k]: v })
   const [tosAccepted, setTosAccepted] = useState(!!env.ssl_enabled) // LE ToS ack gates SSL
@@ -982,15 +992,29 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           }}
         />
 
-        {/* Route preview — the URL this env will be reachable at (matches deploy). */}
+        {/* Route preview — the URL this env will be reachable at (matches deploy). For a
+            URL that can't get a Let's Encrypt cert (localhost / IP / magic-DNS), an
+            inline "Enable local HTTPS" upgrades it to Traefik's self-signed cert. */}
         {env.traefik && env.name && (() => {
           const route = resolveEnvRoute({ ...env, traefik_enabled: true }, resourcePrefix, env.name, baseDomain, false, autoUrlMode, appHost)
-          return route ? (
-            <p className="text-xs text-content-subtle">
-              Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
-              {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
-            </p>
-          ) : null
+          if (!route) return null
+          const showLocalHTTPS = !leCapable(route.domain)
+          return (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-content-subtle min-w-0 truncate">
+                Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+                {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
+              </p>
+              {showLocalHTTPS && (
+                <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0" title="Serve this URL over HTTPS with Traefik's self-signed cert (browsers warn; useful for apps that require HTTPS). No public cert is possible for localhost / IP / magic-DNS.">
+                  <input type="checkbox" checked={!!env.ssl_self_signed}
+                    onChange={e => onChange(idx, { ...env, ssl_self_signed: e.target.checked, ssl_enabled: e.target.checked })}
+                    className="w-3.5 h-3.5 accent-brand-500" />
+                  Enable local HTTPS
+                </label>
+              )}
+            </div>
+          )
         })()}
 
         {/* Domain + "Request SSL" on one row. SSL is enabled only once a real public
@@ -2065,7 +2089,10 @@ export default function NewProjectPage() {
       storage_ui: (isImage || isDatabase) ? false : (!!data.storageMinio && !!data.storageUi),
       environments: data.environments.filter(e => e.name).map(e => ({
         ...e,
-        ssl_enabled: e.traefik && !!e.domain && !looksLocalOrIP(e.domain) && !!e.ssl_enabled,
+        // SSL: Let's Encrypt needs a real public domain; self-signed (local HTTPS) is
+        // allowed on any Traefik env (localhost/IP/magic-DNS included).
+        ssl_self_signed: e.traefik && !!e.ssl_self_signed,
+        ssl_enabled: e.traefik && !!e.ssl_enabled && (!!e.ssl_self_signed || (!!e.domain && !looksLocalOrIP(e.domain))),
         vars: e.vars || {},
         host_id: e.host_id ?? (data.default_host_id || 0),
       })),

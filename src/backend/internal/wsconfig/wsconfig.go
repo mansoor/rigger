@@ -326,6 +326,10 @@ type Env struct {
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`
 	SSLEnabled      bool           `json:"ssl_enabled"`
+	// SSLSelfSigned serves this env over HTTPS with Traefik's self-signed cert — the
+	// per-env "local HTTPS" opt-in for URLs that can't get a Let's Encrypt cert
+	// (localhost / IP / magic-DNS). Supersedes the project-level local_tls default.
+	SSLSelfSigned   bool           `json:"ssl_self_signed,omitempty"`
 	Deployment      string         `json:"deployment"`
 	Git             EnvGit         `json:"git"`
 	EnvVars         map[string]Str `json:"env_vars"`

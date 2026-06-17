@@ -1240,6 +1240,15 @@ function looksLocalOrIP(domain) {
   return false
 }
 
+// leCapable — host can get a real Let's Encrypt cert (public DNS name). localhost/IP
+// can't; magic-DNS (sslip/nip/traefik.me) is HTTP-only here → offer local HTTPS instead.
+function leCapable(domain) {
+  const h = (domain || '').trim().toLowerCase()
+  if (!h || looksLocalOrIP(h)) return false
+  if (/\.(sslip\.io|nip\.io|traefik\.me)$/.test(h)) return false
+  return true
+}
+
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', acmeDefault = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, projectMailpit = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
@@ -1366,12 +1375,28 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         />
         {(() => {
           const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS, autoUrlMode, appHost)
-          return route ? (
-            <p className="text-xs text-content-subtle">
-              Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
-              {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
-            </p>
-          ) : null
+          if (!route) return null
+          // For a URL that can't get a Let's Encrypt cert (localhost / IP / magic-DNS),
+          // an inline "Enable local HTTPS" upgrades it to Traefik's self-signed cert.
+          // Per-env opt-in (legacy project local_tls is the initial default).
+          const showLocalHTTPS = !leCapable(route.domain)
+          const localOn = cfg.ssl_self_signed != null ? !!cfg.ssl_self_signed : !!localTLS
+          return (
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-content-subtle min-w-0 truncate">
+                Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+                {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
+              </p>
+              {showLocalHTTPS && (
+                <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0" title="Serve this URL over HTTPS with Traefik's self-signed cert (browsers warn; useful for apps that require HTTPS). No public cert is possible for localhost / IP / magic-DNS.">
+                  <input type="checkbox" checked={localOn}
+                    onChange={e => onChange({ ...cfg, ssl_self_signed: e.target.checked, ssl_enabled: e.target.checked })}
+                    className="w-3.5 h-3.5 accent-brand-500" />
+                  Enable local HTTPS
+                </label>
+              )}
+            </div>
+          )
         })()}
         {cfg.traefik_enabled && (
           <>
@@ -2189,15 +2214,8 @@ export default function EditProjectPage() {
               </div>
             </div>
 
-            {/* Local HTTPS for domain-routed envs without a workspace base domain. */}
-            <Toggle
-              label="Local HTTPS (self-signed)"
-              hint={baseDomain
-                ? `Not used — this workspace has a base domain (${baseDomain}); domain-routed envs use Let's Encrypt.`
-                : "Serve domain-routed *.localhost envs over HTTPS with Traefik's self-signed cert (for apps that require HTTPS, e.g. Vaultwarden). Default is plain HTTP."}
-              checked={!!project?.local_tls}
-              onChange={v => setProject(p => ({ ...p, local_tls: v }))}
-            />
+            {/* Local HTTPS moved to a per-env control (the "Enable local HTTPS" toggle on
+                each environment's route-preview row, in the Environments tab). */}
 
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
             <div>
