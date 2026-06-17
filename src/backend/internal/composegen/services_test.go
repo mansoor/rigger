@@ -335,6 +335,31 @@ func TestAdminerSynthSubdomain(t *testing.T) {
 	}
 }
 
+// Per-env tri-state override of the project sidecar defaults: project web_sql=true, but
+// the env forces web_sql=false → no Adminer in that env (and vice-versa for storage_ui).
+func TestPerEnvSidecarOverride(t *testing.T) {
+	// Project default Adminer ON; prod env overrides it OFF → no adminer service in prod.
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"postgres","web_sql":true},
+		"services": [{"name":"web","build":{},"port":"3000","web_routed":true}],
+		"environments": {"prod": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","web_sql":false}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "  adminer:") {
+		t.Errorf("env override web_sql=false must drop Adminer in this env\n%s", out)
+	}
+	// A dev env with no override inherits the project default (Adminer ON).
+	devCfg := strings.Replace(cfg, `"prod": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","web_sql":false}`,
+		`"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com"}`, 1)
+	out2, _ := GenerateAt([]byte(devCfg), "dev", time.Unix(0, 0).UTC())
+	if !strings.Contains(string(out2), "  adminer:") {
+		t.Errorf("env with no override must inherit the project default (Adminer ON)\n%s", out2)
+	}
+}
+
 // object_storage=minio emits the MinIO server + a one-shot mc bucket-init; neither
 // carries a Docker healthcheck (so Traefik won't drop them). object_storage=local emits
 // no storage container but mounts a persistent volume over the app's storage dir.

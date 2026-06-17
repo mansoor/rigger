@@ -101,6 +101,9 @@ type EnvConfig struct {
 	// pre-move configs still resolve the derived service rows (fallback).
 	RedisEnabled    bool                        `json:"redis_enabled,omitempty"`
 	GarageEnabled   bool                        `json:"garage_enabled,omitempty"`
+	// Per-env sidecar overrides (web_sql / storage_ui, tri-state) live in config.json and
+	// are round-tripped raw by the editor + read by composegen/envgen; they don't need a
+	// typed field in this read view.
 	ServiceOverrides map[string]ServiceOverride `json:"service_overrides,omitempty"`
 	// SecretKeys are env-var names flagged as secrets (Phase 8). For swarm
 	// deployments their values live in Docker Swarm secrets (encrypted at rest),
@@ -165,12 +168,10 @@ func managedDepServices(c *Config) []ConfigService {
 	if redis {
 		add("redis", "redis")
 	}
-	// Object storage backends are independent — both may be on.
+	// Object storage backends are independent — both may be on. (The MinIO console is
+	// per-env tooling now, surfaced in the env's Managed Service Console — not here.)
 	if c.Project.StorageMinIO || c.Project.ObjectStorage == "minio" {
 		add("minio", "minio")
-		if c.Project.StorageUI {
-			add("storage_console", "minio")
-		}
 	}
 	if c.Project.StorageLocal || c.Project.ObjectStorage == "local" {
 		add("storage", "local") // a persistent local volume (no container)

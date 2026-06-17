@@ -119,6 +119,8 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
           Databases, caches and object storage Rigger runs for you — consistent across every
           environment. They appear as services below and are wired into your app via env vars +
           <code className="font-mono"> depends_on</code>. Remove one by setting it back to <em>None</em> / off.
+          Adminer &amp; the MinIO console are <strong>defaults</strong> — each environment can override
+          them (e.g. on in dev/stage, off in prod) in Edit Project → Environments → Tooling.
         </p>
       </div>
 

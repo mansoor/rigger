@@ -160,7 +160,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			out[k] = true
 		}
 	}
-	if cfg.HasAdminer() {
+	if cfg.HasAdminerEnv(e) {
 		out["ADMINER_LOGIN_SECRET"] = true
 	}
 	if e.ProtectAdminUIs {
@@ -431,7 +431,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// (which reads it via env_file) and Rigger's adminer-login endpoint (which signs
 	// links). Emitted when Adminer is present via the project web_sql flag or a legacy
 	// literal "adminer" service.
-	if cfg.HasAdminer() {
+	if cfg.HasAdminerEnv(e) {
 		p("ADMINER_LOGIN_SECRET=%s\n", get("ADMINER_LOGIN_SECRET", hexN(r, 32)))
 	}
 	// Admin-UI basic-auth credential (per env, when protection is enabled and the
@@ -440,7 +440,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// doesn't try to expand the bcrypt hash's '$' segments. The plaintext password is
 	// preserved across regen (read from the existing .env) so a regen doesn't lock the
 	// user out — only the hash re-derives.
-	if e.ProtectAdminUIs && (cfg.HasAdminer() || cfg.Project.StorageUI) {
+	if e.ProtectAdminUIs && (cfg.HasAdminerEnv(e) || cfg.EffStorageUI(e)) {
 		adminPass := ""
 		if existing != nil {
 			adminPass = existing["ADMIN_UI_PASSWORD"]
@@ -518,7 +518,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		// {prefix}_minio ("Invalid Request (invalid hostname)"). Unique per project net.
 		p("MINIO_ENDPOINT=http://minio:9000\n")
 		p("MINIO_REGION=us-east-1\n")
-		if cfg.Project.StorageUI {
+		if cfg.EffStorageUI(e) {
 			p("MINIO_CONSOLE_PASSPHRASE=%s\n", minioConsolePass)
 			p("MINIO_CONSOLE_SALT=%s\n", minioConsoleSalt)
 		}

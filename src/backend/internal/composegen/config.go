@@ -96,11 +96,17 @@ type Env struct {
 	Database   string  `json:"database"` // none | postgres | mysql | mariadb
 	DBVersion  string  `json:"db_version,omitempty"`
 	DBExternal bool    `json:"db_external,omitempty"`
-	// ProtectAdminUIs gates the synthesized admin sidecars (Adminer / Garage UI) behind
-	// Traefik HTTP basic-auth for THIS environment (creds generated into .env by envgen).
-	// Only enforceable under Traefik routing; a no-Traefik host-port env can't apply it.
-	ProtectAdminUIs bool   `json:"protect_admin_uis,omitempty"`
-	RedisEnabled    bool   `json:"redis_enabled"`
+	// ProtectAdminUIs gates the synthesized admin sidecars (Adminer / MinIO console)
+	// behind Traefik HTTP basic-auth for THIS environment (creds generated into .env by
+	// envgen). Only enforceable under Traefik routing; a no-Traefik host-port env can't apply it.
+	ProtectAdminUIs bool `json:"protect_admin_uis,omitempty"`
+	// WebSQL / StorageUI are per-env TRI-STATE overrides of the project-level defaults for
+	// the dev/admin sidecars (Adminer / MinIO console): nil = inherit the project value,
+	// &true / &false = force on/off for this env. Lets tooling run in dev/stage but not
+	// prod. See gen.webSQLOn / storageUIOn.
+	WebSQL          *bool `json:"web_sql,omitempty"`
+	StorageUI       *bool `json:"storage_ui,omitempty"`
+	RedisEnabled    bool  `json:"redis_enabled"`
 	GarageEnabled   bool   `json:"garage_enabled"`
 	TraefikEnabled  bool   `json:"traefik_enabled"`
 	TraefikNetwork  string `json:"traefik_network"`

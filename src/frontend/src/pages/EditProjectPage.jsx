@@ -1204,6 +1204,31 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
   )
 }
 
+// TriOverride is a per-env tri-state control over a project-level default: Inherit
+// (use the project value), On, or Off. value is true/false (explicit override) or
+// undefined/null (inherit); onChange emits true/false/undefined accordingly.
+function TriOverride({ label, hint, projectDefault, value, onChange }) {
+  const cur = value === true ? 'on' : value === false ? 'off' : 'inherit'
+  const opts = [['inherit', `Inherit (${projectDefault ? 'on' : 'off'})`], ['on', 'On'], ['off', 'Off']]
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm text-content">{label}</p>
+        {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
+      </div>
+      <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs shrink-0">
+        {opts.map(([k, lbl]) => (
+          <button key={k} type="button"
+            onClick={() => onChange(k === 'on' ? true : k === 'off' ? false : undefined)}
+            className={`px-2.5 py-1 ${cur === k ? 'bg-brand-600 text-white' : 'bg-surface-raised text-content-muted hover:bg-surface-overlay/40'}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
@@ -1402,10 +1427,26 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         </div>
       )}
 
+      {/* Tooling — per-env override of the project's dev/admin sidecars (Adminer / MinIO
+          console). Backends (DB/Redis/storage) stay project-level; only these sidecars can
+          differ per env, e.g. on in dev/stage, off in prod. */}
+      {((projectDatabase && projectDatabase !== 'none') || projectObjectStorage === 'minio') && (
+        <div className="space-y-2 pt-3 border-t border-border-strong/50">
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Tooling (this environment)</p>
+          {projectDatabase && projectDatabase !== 'none' && (
+            <TriOverride label="Adminer (web SQL)" projectDefault={projectWebSql} value={cfg.web_sql} onChange={v => upd('web_sql', v)} />
+          )}
+          {projectObjectStorage === 'minio' && (
+            <TriOverride label="MinIO console" projectDefault={projectStorageUi} value={cfg.storage_ui} onChange={v => upd('storage_ui', v)} />
+          )}
+          <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a sidecar in this environment only.</p>
+        </div>
+      )}
+
       {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
           Only meaningful when this env routes through Traefik (basic-auth is a Traefik
-          edge middleware) and the project actually has an admin UI. */}
-      {(projectWebSql || projectStorageUi) && (
+          edge middleware) and the env actually exposes an admin UI (effective web_sql/storage_ui). */}
+      {((cfg.web_sql ?? projectWebSql) || (cfg.storage_ui ?? projectStorageUi)) && (
         <div className="space-y-2 pt-3 border-t border-border-strong/50">
           <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Security</p>
           <Toggle

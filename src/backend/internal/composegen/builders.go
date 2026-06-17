@@ -44,7 +44,7 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 // a literal "adminer" service already exists in Services (legacy projects — that
 // service already rendered), avoiding a duplicate (invalid) compose key.
 func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
-	if !g.cfg.Project.WebSQL || g.hasService("adminer") {
+	if !g.webSQLOn() || g.hasService("adminer") {
 		return
 	}
 	engine := g.dbEngine()
@@ -80,7 +80,7 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 // (dev-only). Gated on the project's StorageUI flag + MinIO being enabled. The user logs
 // into it with the MinIO root creds (shown in the managed-services info row).
 func (g *gen) buildStorageConsole(prefix, rp, registry, tag string, isSwarm bool) {
-	if !g.cfg.Project.StorageUI || !g.minioOn() {
+	if !g.storageUIOn() || !g.minioOn() {
 		return
 	}
 	ver := g.cfg.version("storage_console", "latest")
@@ -490,6 +490,22 @@ func (g *gen) dbEngine() string {
 
 // redisOn reports whether Redis is enabled (project OR legacy env).
 func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
+
+// webSQLOn / storageUIOn resolve the per-env TRI-STATE override of the project-level
+// dev/admin sidecar defaults: the env override wins when set (non-nil), else the
+// project default. Lets Adminer / the MinIO console run in dev/stage but not prod.
+func (g *gen) webSQLOn() bool {
+	if g.e.WebSQL != nil {
+		return *g.e.WebSQL
+	}
+	return g.cfg.Project.WebSQL
+}
+func (g *gen) storageUIOn() bool {
+	if g.e.StorageUI != nil {
+		return *g.e.StorageUI
+	}
+	return g.cfg.Project.StorageUI
+}
 
 // minioOn / localStorageOn report the active object-storage backends (project-level,
 // INDEPENDENT — both may be on). New storage_local/storage_minio flags OR the legacy

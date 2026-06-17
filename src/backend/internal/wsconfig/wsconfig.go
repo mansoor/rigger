@@ -238,9 +238,39 @@ func (c *Config) EffGarage(_ Env) bool { return false }
 
 // HasAdminer reports whether the project exposes the Adminer web-SQL client: the
 // project-level web_sql flag (unified), or a legacy literal "adminer" service in
-// services[]. Gates adminer-login.php generation + the ADMINER_LOGIN_SECRET in .env.
+// services[]. Gates adminer-login.php generation.
 func (c *Config) HasAdminer() bool {
 	if c.Project.WebSQL {
+		return true
+	}
+	for _, s := range c.Services {
+		if s.Name == "adminer" {
+			return true
+		}
+	}
+	return false
+}
+
+// EffWebSQL / EffStorageUI resolve the per-env TRI-STATE override of the project-level
+// dev/admin sidecar defaults: env override wins when set (non-nil), else project default.
+func (c *Config) EffWebSQL(e Env) bool {
+	if e.WebSQL != nil {
+		return *e.WebSQL
+	}
+	return c.Project.WebSQL
+}
+func (c *Config) EffStorageUI(e Env) bool {
+	if e.StorageUI != nil {
+		return *e.StorageUI
+	}
+	return c.Project.StorageUI
+}
+
+// HasAdminerEnv reports whether THIS env exposes Adminer (effective web_sql, or a legacy
+// literal "adminer" service). Per-env variant of HasAdminer — gates the ADMINER_LOGIN_SECRET
+// and the admin-UI protection credential for the env.
+func (c *Config) HasAdminerEnv(e Env) bool {
+	if c.EffWebSQL(e) {
 		return true
 	}
 	for _, s := range c.Services {
@@ -272,9 +302,13 @@ type Env struct {
 	Database   string `json:"database"` // none | postgres | mysql | mariadb
 	DBVersion  string `json:"db_version,omitempty"`
 	DBExternal bool   `json:"db_external,omitempty"`
-	// ProtectAdminUIs gates the admin sidecars (Adminer / Garage UI) behind Traefik
+	// ProtectAdminUIs gates the admin sidecars (Adminer / MinIO console) behind Traefik
 	// basic-auth for this env; envgen generates the credential into .env.
 	ProtectAdminUIs bool           `json:"protect_admin_uis,omitempty"`
+	// WebSQL / StorageUI are per-env TRI-STATE overrides of the project-level sidecar
+	// defaults (nil = inherit project, &true/&false = force). See EffWebSQL / EffStorageUI.
+	WebSQL          *bool          `json:"web_sql,omitempty"`
+	StorageUI       *bool          `json:"storage_ui,omitempty"`
 	RedisEnabled    bool           `json:"redis_enabled"`
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`
