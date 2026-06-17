@@ -1240,7 +1240,7 @@ function looksLocalOrIP(domain) {
   return false
 }
 
-function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, projectMailpit = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
+function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectType, workspaceName, isOnlyEnv, imageNames, defaultOpen, hosts = [], resourcePrefix = '', baseDomain = '', acmeDefault = '', autoUrlMode = '', appHost = '', localTLS = false, projectDatabase = '', projectRedis = false, projectObjectStorage = '', projectWebSql = false, projectStorageUi = false, projectMailpit = false, gitRepo = '', gitBranch = '', dirty = false, onCopied, existingNames = [] }) {
   const { workspace } = useParams()
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
@@ -1410,9 +1410,18 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                   <span>I agree to the Let's Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a>.</span>
                 </label>
               )}
+              {/* ACME account email — inherits workspace → global; override per env. */}
+              {sslEligible && (
+                <div className="mt-2">
+                  <Label>Let&apos;s Encrypt email</Label>
+                  <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
+                    placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'leave blank to inherit the workspace / instance email'} />
+                  <p className="text-xs text-content-faint mt-1">Account/recovery contact for the cert. Blank inherits the {acmeDefault ? 'workspace' : 'instance'} default.</p>
+                </div>
+              )}
               {cfg.ssl_enabled && sslEligible && (
                 <p className="text-xs text-success-fg/70 mt-1">
-                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels. The cert is registered to the instance's configured ACME email.
+                  🔒 After saving, click <strong>Refresh</strong> on the environment card (or redeploy) to regenerate the compose with TLS labels.
                 </p>
               )}
             </div>
@@ -1920,6 +1929,9 @@ export default function EditProjectPage() {
   // Effective base domain: workspace override → global apps base domain (mirrors
   // the backend's EffectiveBaseDomain so the route preview matches the deploy).
   const baseDomain = (wsSettings?.domain || ws?.apps_base_domain || '').trim()
+  // Effective ACME email default the per-env SSL email inherits: workspace override
+  // → global ACME email. Shown as the per-env field's placeholder.
+  const acmeDefault = (wsSettings?.acme_email || ws?.apps_acme_email || '').trim()
 
   // Local editable state
   const [envs, setEnvs]       = useState(null)
@@ -2304,6 +2316,7 @@ export default function EditProjectPage() {
                 imageNames={(images || []).map(img => img.name).filter(Boolean)}
                 resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 baseDomain={baseDomain}
+                acmeDefault={acmeDefault}
                 autoUrlMode={ws?.auto_url_mode || ''}
                 appHost={ws?.app_host || ''}
                 localTLS={!!project?.local_tls}

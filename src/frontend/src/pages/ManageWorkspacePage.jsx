@@ -115,7 +115,7 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">ACME email</label>
           <input value={acme} onChange={e => setAcme(e.target.value)} type="email" placeholder="ops@example.com"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Let's Encrypt registration email for this workspace's certificates.</p>
+          <p className="text-xs text-content-subtle mt-1">Default Let's Encrypt registration email for this workspace's certificates. Overrides the instance-wide email (Settings → General); a project environment can override it again in its SSL settings. Blank inherits the global default.</p>
         </div>
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Apps base domain</label>

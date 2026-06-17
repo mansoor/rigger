@@ -254,6 +254,9 @@ type Workspace struct {
 	// base domain (workspace `domain` overrides it, like EffectiveBaseDomain).
 	AutoURLMode    string `json:"auto_url_mode,omitempty"`
 	AppsBaseDomain string `json:"apps_base_domain,omitempty"`
+	// Global ACME (Let's Encrypt) email — the instance default the per-env SSL email
+	// inherits when neither the env nor the workspace overrides it. Set by the API layer.
+	AppsAcmeEmail string `json:"apps_acme_email,omitempty"`
 }
 
 // EnvHostRef is the host an environment runs on (omitted ⇒ local).

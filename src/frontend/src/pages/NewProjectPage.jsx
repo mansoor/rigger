@@ -924,7 +924,7 @@ export function looksLocalOrIP(domain) {
   return false
 }
 
-function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0 }) {
+function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0, acmeDefault = '' }) {
   const upd = (k, v) => onChange(idx, { ...env, [k]: v })
   const [tosAccepted, setTosAccepted] = useState(!!env.ssl_enabled) // LE ToS ack gates SSL
   const sslBlocked = looksLocalOrIP(env.domain)
@@ -1033,6 +1033,16 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
               </label>
             )}
 
+            {/* ACME account email — inherits workspace → global; override per env. */}
+            {canSSL && (
+              <div className="mt-2">
+                <label className="block text-xs text-content-subtle mb-1">Let's Encrypt email</label>
+                <Input type="email" value={env.acme_email || ''} onChange={v => upd('acme_email', v)}
+                  placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'leave blank to inherit the workspace / instance email'} />
+                <p className="text-[11px] text-content-faint mt-1">Account/recovery contact for the cert. Blank inherits the {acmeDefault ? 'workspace' : 'instance'} default.</p>
+              </div>
+            )}
+
             {env.ssl_enabled && canSSL && (
               <div className="mt-2 flex items-start gap-2 px-3 py-2 bg-success-subtle/40 border border-success-border/50 rounded-lg">
                 <span className="text-success-fg shrink-0 mt-0.5">🔒</span>
@@ -1105,6 +1115,10 @@ function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, d
 
 function Step3({ data, onChange, workspace }) {
   const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
+  // Workspace ACME email override — the default the per-env SSL email inherits (blank
+  // ⇒ the instance-global ACME email, shown generically since the wizard doesn't fetch it).
+  const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace })
+  const acmeDefault = (wsSettings?.acme_email || '').trim()
   function updateEnv(idx, updated) {
     const envs = [...data.environments]
     envs[idx] = updated
@@ -1132,6 +1146,7 @@ function Step3({ data, onChange, workspace }) {
           stackType={data.stackType}
           hosts={hosts}
           defaultHostId={data.default_host_id || 0}
+          acmeDefault={acmeDefault}
         />
       ))}
       <button

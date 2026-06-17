@@ -115,6 +115,10 @@ type Env struct {
 	TraefikEnabled  bool   `json:"traefik_enabled"`
 	TraefikNetwork  string `json:"traefik_network"`
 	SSLEnabled      bool   `json:"ssl_enabled"`
+	// AcmeEmail is the per-env Let's Encrypt account email override (blank ⇒ inherit
+	// the workspace, then global ACME email). Consumed by the Phase-2 out-of-band
+	// issuer; carried here so it round-trips through generation.
+	AcmeEmail string `json:"acme_email,omitempty"`
 	// SSLSelfSigned routes HTTPS through Traefik's default (self-signed) cert
 	// instead of Let's Encrypt — used for local *.localhost envs that need HTTPS
 	// (e.g. Vaultwarden) but can't get a public cert. Ignored unless SSLEnabled.

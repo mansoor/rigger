@@ -303,6 +303,9 @@ type Env struct {
 	Domain    string `json:"domain"`
 	HTTPPort  Str    `json:"http_port"`
 	HTTPSPort Str    `json:"https_port"`
+	// AcmeEmail is the per-env Let's Encrypt email override (blank = inherit workspace,
+	// then global). See EffAcmeEmail (Phase-2 out-of-band issuer reads it).
+	AcmeEmail string `json:"acme_email,omitempty"`
 	// Managed database (catalog-driven, one per env). Database is the engine id
 	// (none|postgres|mysql|mariadb); DBVersion is the chosen image tag ("" → the
 	// catalog default); DBExternal publishes the DB port on the host so external

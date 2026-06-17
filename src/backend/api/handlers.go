@@ -1689,6 +1689,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// Auto-URL context so Edit Project's route preview matches the deploy.
 	out.AutoURLMode = settings.AutoURLMode(h.db)
 	out.AppsBaseDomain = settings.AppSetting(h.db, "apps_base_domain")
+	out.AppsAcmeEmail = settings.AppSetting(h.db, "acme_email")
 	writeJSON(w, http.StatusOK, out)
 }
 
