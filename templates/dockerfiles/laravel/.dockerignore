@@ -25,10 +25,13 @@ storage/framework/sessions/*
 storage/framework/views/*
 bootstrap/cache/*.php
 
-# ── Frontend build output (compiled inside container) ────────────────────────
+# ── Frontend dev-server marker (never bake into an image) ────────────────────
+# `public/hot` is Vite's HMR marker; if baked, the app tries to load assets from a
+# dev server that isn't running. NOTE: pre-built assets (public/build,
+# public/mix-manifest.json) are intentionally KEPT — CodeCanyon apps ship them and
+# may not rebuild (their installer often uses Laravel Mix via mix()); an in-container
+# `npm run build` overwrites them, so keeping them is safe either way.
 public/hot
-public/build
-public/mix-manifest.json
 
 # ── Test suite ────────────────────────────────────────────────────────────────
 tests
