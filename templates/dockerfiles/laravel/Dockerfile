@@ -58,4 +58,9 @@ EXPOSE 80
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.title="laravel"
 
-CMD ["sh", "-c", "php artisan serve --host=0.0.0.0 --port=80"]
+# --no-reload (Laravel 11+) stops `php artisan serve` from auto-restarting whenever
+# .env changes — otherwise an app that writes its own .env (a CodeCanyon installer
+# saving DB creds / INSTALLED=true) restarts the server mid-request and the next
+# request hits a ~1s gap → 502 at the Traefik edge. Version-guarded so apps on older
+# Laravel (no such flag) still start. After an in-app .env write, Restart to apply it.
+CMD ["sh", "-c", "FLAGS=''; php artisan serve --help 2>/dev/null | grep -q -- '--no-reload' && FLAGS='--no-reload'; exec php artisan serve --host=0.0.0.0 --port=80 $FLAGS"]
