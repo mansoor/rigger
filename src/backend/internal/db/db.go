@@ -458,6 +458,37 @@ func (d *DB) migrate() error {
 			UNIQUE(workspace, project, env, username)
 		);
 		CREATE INDEX IF NOT EXISTS idx_managed_db_users_env ON managed_db_users(workspace, project, env);
+
+		-- API access keys (external REST API at /api/v1, separate from the JWT/cookie UI
+		-- auth). key_hash = sha256 of the raw key (raw "rgk_…" shown once on create);
+		-- key_prefix is a non-secret display snippet. scopes = JSON array of GRANULAR
+		-- operation ids (e.g. ["projects.list","env.start"]) — the UI groups them but the
+		-- key stores the resolved op set. project_access = 'all' | 'specific'; when
+		-- 'specific', api_key_projects holds the (workspace,project) pairs the key may
+		-- touch. rate_limit = max requests per minute PER PROJECT (0 = unlimited).
+		-- created_at/last_used_at/expires_at are epoch seconds (expires_at 0 = never).
+		CREATE TABLE IF NOT EXISTS api_keys (
+			id             INTEGER PRIMARY KEY AUTOINCREMENT,
+			name           TEXT    NOT NULL,
+			key_hash       TEXT    NOT NULL UNIQUE,
+			key_prefix     TEXT    NOT NULL DEFAULT '',
+			scopes         TEXT    NOT NULL DEFAULT '[]',
+			project_access TEXT    NOT NULL DEFAULT 'all',
+			rate_limit     INTEGER NOT NULL DEFAULT 0,
+			enabled        INTEGER NOT NULL DEFAULT 1,
+			created_by     TEXT    NOT NULL DEFAULT '',
+			created_at     INTEGER NOT NULL DEFAULT 0,
+			last_used_at   INTEGER NOT NULL DEFAULT 0,
+			expires_at     INTEGER NOT NULL DEFAULT 0
+		);
+		-- Specific-project grants for a key (only consulted when project_access='specific').
+		CREATE TABLE IF NOT EXISTS api_key_projects (
+			key_id    INTEGER NOT NULL,
+			workspace TEXT    NOT NULL,
+			project   TEXT    NOT NULL,
+			UNIQUE(key_id, workspace, project)
+		);
+		CREATE INDEX IF NOT EXISTS idx_api_key_projects ON api_key_projects(key_id);
 	`)
 	if err != nil {
 		return err
