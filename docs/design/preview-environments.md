@@ -1,7 +1,28 @@
 # Design: Preview / PR Environments
 
-> Status: **Design — review before building.** Branch: `develop` (incremental commits).
-> Companion: [preview-environments-plan.md](preview-environments-plan.md) (implementation plan).
+> Status: **SHIPPED on `develop` (Phases 0–6 + write-back + clone-from), pending live E2E.**
+> Branch: `develop` (incremental commits). Companion:
+> [preview-environments-plan.md](preview-environments-plan.md) (implementation plan).
+
+## 0. Implementation status (2026-06-18)
+
+| Phase | What | Status |
+|---|---|---|
+| 0 | `removeEnv` teardown refactor + `PreviewConfig` model | ✅ `b13264d` |
+| 1 | `preview_webhooks` + `preview_environments` tables + store | ✅ `0d3a75b` |
+| 2 | Lifecycle controller (create/update/teardown/dispatch) | ✅ `93b28ec` |
+| 3 | Signed PR webhook receiver + dispatch (**MVP**) | ✅ `b795793` |
+| 5 | TTL reaper + concurrency cap | ✅ `ab24a88` |
+| 6 | REST endpoints + Preview Environments UI tab | ✅ `c4f1b67`, `b3c30a2` |
+| 4 | PR commit-status + comment write-back (optional) | ✅ `d166857` |
+| 5b | `clone-from` DB strategy (via `migrate` primitive) | ✅ `7cacc75` |
+| 5b | `shared` DB strategy (cross-stack networking) | ⏸ deferred — needs live-verifiable composegen changes |
+| 7 | Full gate + **live E2E** + docs | ⏳ in progress (build-verified; live E2E pending a real repo/webhook) |
+
+All phases are unit/build-verified (`go build/vet/test`, `npm run build`). **Not yet
+live-verified end-to-end** — that needs a real provider webhook hitting a rebuilt
+Rigger (see §8 Usage). `shared` DB mode and the precise clone-from sequencing
+(DB-up → restore → app-up) are the remaining live-testing items.
 
 ## 1. Goal
 
@@ -315,3 +336,31 @@ New **Project → Preview Environments** tab:
 4. **Fork default** — `off` (recommended) for v1.
 5. **Write-back in v1 or deferred** — recommend deferring to Phase 4 (URL visible in Rigger UI
    first; write-back is additive).
+
+## 8. Usage (how to turn it on)
+
+1. **Edit Project → Preview Envs tab.** Enable previews, pick the **template
+   environment** to clone (e.g. `dev`), set provider (GitHub/Gitea), and optionally a
+   branch filter, max-concurrent cap, TTL, fork policy, and **DB strategy**
+   (`isolated-empty` | `isolated-seed` | `clone-from` + source env). Save.
+2. **Add the webhook.** Click *Add webhook* — copy the one-time URL
+   (`{rigger}/api/previews/hooks/{token}`) and add it to the repo as a
+   **`pull_request`** webhook (GitHub: Settings → Webhooks → content type
+   `application/json`, set the same secret if you configured one).
+3. *(optional)* **Write-back.** Toggle it on and paste a GitHub token
+   (`repo:status` + PR-comment scope). Rigger then posts a commit status + a single
+   PR comment with the preview URL.
+4. **Open a PR.** Rigger clones the template → `pr{n}`, overrides the branch, builds
+   + deploys, and the preview is reachable at `{ws}-{proj}-pr{n}.{base}` (existing
+   wildcard cert). Pushes redeploy it; closing the PR tears it down; the TTL reaper
+   is the safety net for a missed close.
+
+**Manual replay (smoke test without a live PR):** create a webhook, then
+`curl -X POST {rigger}/api/previews/hooks/{token} -H 'X-GitHub-Event: pull_request'
+-H 'X-Hub-Signature-256: sha256=<hmac>' -d @pr-opened.json` — a valid signature
+returns `202 accepted`; a bad one returns `401`.
+
+**Security:** the webhook is token + HMAC authed (no JWT). Fork PRs default to
+`off` (never auto-deploy untrusted code); previews regenerate secret-flagged env
+vars so prod secrets are never copied in. The write-back token is AES-256-GCM
+encrypted at rest and never returned by the API.
