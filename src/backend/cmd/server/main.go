@@ -772,7 +772,8 @@ func main() {
 	mux.Handle("GET /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/services/{service}/logs", v1(handler.GetServiceLogsV1))
 	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/{action}", v1(handler.RunActionV1))
 	mux.Handle("GET /api/v1/workspaces/{workspace}/projects/{project}/pipelines", v1(handler.ListPipelinesV1))
-	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/run", v1(handler.RunPipelineV1))
+	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs", v1(handler.RunPipelineV1))
+	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}/cancel", v1(handler.CancelPipelineRunV1))
 
 	// Migration jobs (Phase 7) — poll async workspace/env host moves
 	mux.Handle("/api/migration-jobs/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

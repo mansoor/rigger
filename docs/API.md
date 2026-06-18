@@ -42,7 +42,8 @@ Scopes are granular operation ids, grouped in the UI as **Read**, **Operate**, a
 | Operate | `env.inactivate` | Tear down (compose `down`) |
 | Operate | `env.backup` | Back up an environment |
 | Pipeline | `pipeline.list` | List a project's pipelines |
-| Pipeline | `pipeline.run` | Trigger a pipeline run |
+| Pipeline | `pipeline.run` | Create (trigger) a pipeline run |
+| Pipeline | `pipeline.cancel` | Cancel a pipeline run |
 
 ## Endpoints
 
@@ -103,13 +104,24 @@ Use this to find the pipeline `id` for the run endpoint.
   "pipelines": [{ "id": 42, "name": "release", "enabled": true, "stages": 4 }] }
 ```
 
-### Trigger a pipeline
+### Trigger a pipeline run
 ```
-POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/run
+POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs
 ```
-Starts the run in the background and returns its id (`202 Accepted`).
+Creates a run in the background and returns its id (`202 Accepted`). A run is a
+resource, so it lives under `…/pipelines/{id}/runs` (not `…/actions/run`).
 ```json
 { "status": "started", "pipeline": "release", "run_id": 42 }
+```
+
+### Cancel a pipeline run
+```
+POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}/cancel
+```
+Cancels a specific run — kills the in-flight stage's container if it's executing, else
+marks the record cancelled. `409` if the run isn't active.
+```json
+{ "status": "cancelling", "run_id": 42 }
 ```
 
 ## Errors

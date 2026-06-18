@@ -30,8 +30,9 @@ const (
 	OpEnvRefresh    = "env.refresh"    // POST .../actions/refresh
 	OpEnvInactivate = "env.inactivate" // POST .../actions/inactivate (compose down)
 	OpEnvBackup     = "env.backup"     // POST .../actions/backup
-	OpPipelineList  = "pipeline.list"  // GET  .../pipelines
-	OpPipelineRun   = "pipeline.run"   // POST .../pipelines/{id}/run
+	OpPipelineList   = "pipeline.list"   // GET  .../pipelines
+	OpPipelineRun    = "pipeline.run"    // POST .../pipelines/{id}/runs
+	OpPipelineCancel = "pipeline.cancel" // POST .../pipelines/{id}/runs/{runId}/cancel
 )
 
 // Group is a UI-facing bundle of operations. The admin form lets a user toggle a whole
@@ -68,9 +69,10 @@ var Groups = []Group{
 		{OpEnvInactivate, "Inactivate (down)", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/inactivate"},
 		{OpEnvBackup, "Backup", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/backup"},
 	}},
-	{ID: "pipeline", Label: "Pipeline", Desc: "List and trigger deployment pipelines.", Ops: []OpInfo{
+	{ID: "pipeline", Label: "Pipeline", Desc: "List, run, and cancel deployment pipelines.", Ops: []OpInfo{
 		{OpPipelineList, "List pipelines", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines"},
-		{OpPipelineRun, "Trigger a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/run"},
+		{OpPipelineRun, "Trigger a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs"},
+		{OpPipelineCancel, "Cancel a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}/cancel"},
 	}},
 }
 

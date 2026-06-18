@@ -300,7 +300,7 @@ func (h *Handler) ListPipelinesV1(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"workspace": ws, "project": proj, "pipelines": out})
 }
 
-// RunPipelineV1: POST .../pipelines/{id}/run — triggers a pipeline run in the background
+// RunPipelineV1: POST .../pipelines/{id}/runs — creates a pipeline run in the background
 // and returns its run id (mirrors the UI trigger; poll status via the UI for now).
 func (h *Handler) RunPipelineV1(w http.ResponseWriter, r *http.Request) {
 	ws, proj := r.PathValue("workspace"), r.PathValue("project")
@@ -330,6 +330,47 @@ func (h *Handler) RunPipelineV1(w http.ResponseWriter, r *http.Request) {
 		"apikey:"+key.Name, h.resourcePrefix(ws, proj), "pipeline:"+p.Name, "")
 	go h.continueRun(runID, p, nil, 0, io.Discard)
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "pipeline": p.Name, "run_id": runID})
+}
+
+// CancelPipelineRunV1: POST .../pipelines/{id}/runs/{runId}/cancel — cancels a specific
+// run (kills the in-flight stage's docker process if it's live here, else marks the
+// record cancelled). Mirrors the internal CancelPipelineRun, gated by the API key.
+func (h *Handler) CancelPipelineRunV1(w http.ResponseWriter, r *http.Request) {
+	ws, proj := r.PathValue("workspace"), r.PathValue("project")
+	key, ok := h.apiGate(w, r, apikey.OpPipelineCancel, ws, proj)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		apiErr(w, http.StatusBadRequest, "invalid pipeline id")
+		return
+	}
+	p, _ := pipelines.Get(h.db, id)
+	if p == nil || p.Workspace != ws || p.Project != proj {
+		apiErr(w, http.StatusNotFound, "pipeline not found")
+		return
+	}
+	runID, _ := strconv.ParseInt(r.PathValue("runId"), 10, 64)
+	run, rerr := pipelines.GetRun(h.db, runID)
+	if rerr != nil || run == nil || run.PipelineID != id {
+		apiErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+	if run.Status != "running" && run.Status != pipelines.OutcomeAwaiting {
+		apiErr(w, http.StatusConflict, "run is not active")
+		return
+	}
+	h.db.Exec(`INSERT INTO audit_log (username, project, command, env) VALUES (?,?,?,?)`, //nolint:errcheck
+		"apikey:"+key.Name, h.resourcePrefix(ws, proj), "pipeline-cancel:"+p.Name, "")
+	// Live run in this process: signal it; its goroutine finalizes the record.
+	if h.cancelRun(runID) {
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "cancelling", "run_id": runID})
+		return
+	}
+	// Orphaned/awaiting with no goroutine — mark cancelled directly.
+	pipelines.MarkRunCancelled(h.db, run, time.Now().UnixMilli()) //nolint:errcheck
+	writeJSON(w, http.StatusOK, map[string]any{"status": "cancelled", "run_id": runID})
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────────
