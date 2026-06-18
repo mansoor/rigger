@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo } from '../lib/api'
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
+import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
 import { useAuthStore } from '../store/auth'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
@@ -1889,48 +1890,64 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
           </label>
         </div>
 
-        {isLoading ? <p className="text-content-subtle text-sm">Loading…</p> : (
-          <div className="space-y-2 mb-4 max-h-72 overflow-y-auto pr-1">
-            {Object.entries(vars || {}).map(([k, info]) => {
-              const markedForDelete = deletes.has(k)
-              const secret = isSecret(k)
-              // Swarm secrets are write-only: their value can't be edited inline.
-              const lockedValue = secret && swarm && !!info.secret
-              return (
-                <div key={k} className={`flex items-center gap-2 rounded pl-1.5 transition-colors ${markedForDelete ? 'opacity-40' : ''} ${secret ? 'border-l-2 border-warning/70' : 'border-l-2 border-transparent'}`}>
-                  <button type="button" onClick={() => toggleFlag(k)} disabled={markedForDelete}
-                    title={secret ? 'Flagged as secret — click to unflag' : 'Flag as secret'}
-                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
-                    {secret ? '🔒' : '🔓'}
-                  </button>
-                  <span className="font-mono text-xs text-content w-36 shrink-0 truncate" title={k}>{k}</span>
-                  {lockedValue ? (
-                    <div className="flex-1 flex items-center gap-2">
-                      <span className="flex-1 px-2 py-1 text-sm text-content-subtle italic select-none">stored in Docker secret</span>
-                      <button type="button" onClick={() => { setRotateKey(k); setRotateVal('') }}
-                        className="shrink-0 px-2 py-1 text-xs rounded bg-surface-overlay hover:bg-surface-overlay text-content-strong">Rotate</button>
-                    </div>
-                  ) : (
-                    <input
-                      type={reveal && !secret ? 'text' : 'password'}
-                      placeholder={reveal ? (info.value || '') : '••••••••'}
-                      value={markedForDelete ? '' : (edits[k] ?? (reveal && !secret ? info.value : ''))}
-                      disabled={markedForDelete}
-                      onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                      className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
-                    />
-                  )}
-                  <button type="button" onClick={() => toggleDelete(k)}
-                    title={markedForDelete ? 'Undo delete' : 'Delete this variable'}
-                    className={`shrink-0 w-6 h-6 flex items-center justify-center rounded transition-colors text-xs ${
-                      markedForDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'}`}>
-                    {markedForDelete ? '↩' : '×'}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        )}
+        {isLoading ? <p className="text-content-subtle text-sm">Loading…</p> : (() => {
+          // One var row — reused for the Application and System groups so the popup
+          // groups identically to the Edit Project → Environments editor.
+          const renderRow = ([k, info]) => {
+            const markedForDelete = deletes.has(k)
+            const secret = isSecret(k)
+            // Swarm secrets are write-only: their value can't be edited inline.
+            const lockedValue = secret && swarm && !!info.secret
+            return (
+              <div key={k} className={`flex items-center gap-2 rounded pl-1.5 transition-colors ${markedForDelete ? 'opacity-40' : ''} ${secret ? 'border-l-2 border-warning/70' : 'border-l-2 border-transparent'}`}>
+                <button type="button" onClick={() => toggleFlag(k)} disabled={markedForDelete}
+                  title={secret ? 'Flagged as secret — click to unflag' : 'Flag as secret'}
+                  className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+                  {secret ? '🔒' : '🔓'}
+                </button>
+                <span className="font-mono text-xs text-content w-36 shrink-0 truncate" title={k}>{k}</span>
+                {lockedValue ? (
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="flex-1 px-2 py-1 text-sm text-content-subtle italic select-none">stored in Docker secret</span>
+                    <button type="button" onClick={() => { setRotateKey(k); setRotateVal('') }}
+                      className="shrink-0 px-2 py-1 text-xs rounded bg-surface-overlay hover:bg-surface-overlay text-content-strong">Rotate</button>
+                  </div>
+                ) : (
+                  <input
+                    type={reveal && !secret ? 'text' : 'password'}
+                    placeholder={reveal ? (info.value || '') : '••••••••'}
+                    value={markedForDelete ? '' : (edits[k] ?? (reveal && !secret ? info.value : ''))}
+                    disabled={markedForDelete}
+                    onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
+                    className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
+                )}
+                <button type="button" onClick={() => toggleDelete(k)}
+                  title={markedForDelete ? 'Undo delete' : 'Delete this variable'}
+                  className={`shrink-0 w-6 h-6 flex items-center justify-center rounded transition-colors text-xs ${
+                    markedForDelete ? 'bg-red-600 text-white hover:bg-red-700' : 'text-content-faint hover:text-danger-fg hover:bg-surface-overlay'}`}>
+                  {markedForDelete ? '↩' : '×'}
+                </button>
+              </div>
+            )
+          }
+          const entries = Object.entries(vars || {})
+          const appEntries = entries.filter(([k]) => !isSystemVar(k))
+          const sysEntries = entries.filter(([k]) => isSystemVar(k))
+          const grouped = appEntries.length > 0 && sysEntries.length > 0
+          return (
+            <div className="space-y-2 mb-4 max-h-72 overflow-y-auto pr-1">
+              {grouped ? (
+                <>
+                  <EnvVarGroupLabel>Application</EnvVarGroupLabel>
+                  {appEntries.map(renderRow)}
+                  <EnvVarGroupLabel>System · managed by Rigger</EnvVarGroupLabel>
+                  {sysEntries.map(renderRow)}
+                </>
+              ) : entries.map(renderRow)}
+            </div>
+          )
+        })()}
 
         {/* Rotate sub-form */}
         {rotateKey && (

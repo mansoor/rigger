@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
+import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import RegistryPicker from '../components/RegistryPicker'
@@ -1682,25 +1683,6 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
 // ── New env vars editor — same look as EnvVarsInline for new (unsaved) envs ───
 // Stores vars in cfg._initial_vars (written to .env after save).
 // Matches EnvVarsInline appearance: collapsible, show/hide values toggle.
-// isSystemVar classifies an env var as Rigger-managed ("system") vs application-
-// defined, so the editors can group them. System = the keys Rigger generates: a
-// managed dependency's connection vars (POSTGRES_*/MYSQL_*/MARIADB_*/REDIS_*/
-// GARAGE_*), per-service image pointers (*_IMAGE), and a few platform vars.
-// Everything else is the app's own configuration.
-const SYS_VAR_PREFIXES = ['POSTGRES_', 'MYSQL_', 'MARIADB_', 'REDIS_', 'GARAGE_']
-const SYS_VAR_EXACT = new Set(['ADMINER_LOGIN_SECRET', 'PROJECT_NAME', 'RESOURCE_PREFIX', 'REGISTRY', 'COMPOSE_PROJECT_NAME', 'MAIL_HOST'])
-function isSystemVar(k) {
-  if (SYS_VAR_EXACT.has(k)) return true
-  if (k.endsWith('_IMAGE')) return true
-  return SYS_VAR_PREFIXES.some(p => k.startsWith(p))
-}
-
-// EnvVarGroupLabel is the small subheader shown above the Application / System
-// groups when both are present.
-function EnvVarGroupLabel({ children }) {
-  return <p className="text-[10px] font-semibold uppercase tracking-wider text-content-faint pt-1 first:pt-0">{children}</p>
-}
-
 function NewEnvVarsEditor({ cfg, onChange }) {
   const vars = cfg._initial_vars || {}
   const secretKeys = cfg._secret_keys || []
