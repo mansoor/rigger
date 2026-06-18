@@ -532,6 +532,17 @@ func (d *DB) migrate() error {
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_preview_envs_pr ON preview_environments(workspace, project, pr_number);
 		CREATE INDEX IF NOT EXISTS idx_preview_envs_proj ON preview_environments(workspace, project);
 		CREATE INDEX IF NOT EXISTS idx_preview_envs_expiry ON preview_environments(expires_at);
+
+		-- Per-project write-back token (Phase 4): a provider PAT used to post the
+		-- preview URL/status back to the PR (commit status + comment). AES-256-GCM
+		-- encrypted at rest (same key as host SSH keys); never returned to the client.
+		CREATE TABLE IF NOT EXISTS preview_writeback_tokens (
+			workspace  TEXT    NOT NULL,
+			project    TEXT    NOT NULL,
+			token_enc  TEXT    NOT NULL,
+			created_at INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (workspace, project)
+		);
 	`)
 	if err != nil {
 		return err

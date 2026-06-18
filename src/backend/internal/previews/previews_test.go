@@ -107,6 +107,67 @@ func TestPreviewEnvCRUD(t *testing.T) {
 	}
 }
 
+func TestParseGitHubRepo(t *testing.T) {
+	cases := []struct {
+		url, want string
+		ok        bool
+	}{
+		{"https://github.com/acme/web.git", "acme/web", true},
+		{"https://github.com/acme/web", "acme/web", true},
+		{"git@github.com:acme/web.git", "acme/web", true},
+		{"https://github.com/acme/web/", "acme/web", true},
+		{"https://gitlab.com/acme/web.git", "", false}, // non-github
+		{"", "", false},
+		{"git@github.com:acme", "", false}, // missing repo
+	}
+	for _, c := range cases {
+		got, ok := ParseGitHubRepo(c.url)
+		if got != c.want || ok != c.ok {
+			t.Errorf("ParseGitHubRepo(%q) = (%q,%v), want (%q,%v)", c.url, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestGitHubCommitState(t *testing.T) {
+	cases := map[string]string{
+		StatusCreating: "pending", StatusUpdating: "pending",
+		StatusRunning: "success", StatusTornDown: "success", StatusFailed: "failure",
+	}
+	for status, want := range cases {
+		if got := GitHubCommitState(status); got != want {
+			t.Errorf("GitHubCommitState(%q) = %q, want %q", status, got, want)
+		}
+	}
+}
+
+func TestWritebackTokenStore(t *testing.T) {
+	d := openTestDB(t)
+	if HasWritebackToken(d, "mcl", "web") {
+		t.Fatal("no token expected initially")
+	}
+	if err := SetWritebackToken(d, "mcl", "web", "ciphertext-xyz", 100); err != nil {
+		t.Fatal(err)
+	}
+	if !HasWritebackToken(d, "mcl", "web") {
+		t.Error("token should be present after set")
+	}
+	enc, _ := GetWritebackTokenEnc(d, "mcl", "web")
+	if enc != "ciphertext-xyz" {
+		t.Errorf("enc = %q, want ciphertext-xyz", enc)
+	}
+	// Upsert replaces.
+	SetWritebackToken(d, "mcl", "web", "newer", 200) //nolint:errcheck
+	if enc, _ := GetWritebackTokenEnc(d, "mcl", "web"); enc != "newer" {
+		t.Errorf("after upsert enc = %q, want newer", enc)
+	}
+	if err := DeleteWritebackToken(d, "mcl", "web"); err != nil {
+		t.Fatal(err)
+	}
+	if HasWritebackToken(d, "mcl", "web") {
+		t.Error("token should be gone after delete")
+	}
+}
+
 func TestListExpired(t *testing.T) {
 	d := openTestDB(t)
 

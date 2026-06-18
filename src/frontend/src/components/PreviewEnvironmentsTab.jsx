@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchPreviewSettings, setPreviewConfig,
   createPreviewWebhook, deletePreviewWebhook,
-  redeployPreview, teardownPreview,
+  redeployPreview, teardownPreview, setPreviewWritebackToken,
 } from '../lib/api'
 
 // Preview / PR environments tab (inside Edit Project). Opt-in per project: a
@@ -84,6 +84,12 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
   async function copyUrl() {
     try { await navigator.clipboard.writeText(newUrl); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* clipboard unavailable */ }
   }
+
+  const [tokenInput, setTokenInput] = useState('')
+  const saveToken = useMutation({
+    mutationFn: (tok) => setPreviewWritebackToken(workspace, name, tok),
+    onSuccess: () => { setTokenInput(''); qc.invalidateQueries({ queryKey }) },
+  })
 
   const redeploy = useMutation({
     mutationFn: (pr) => redeployPreview(workspace, name, pr),
@@ -168,6 +174,11 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
           <span>Protect preview URLs with basic auth</span>
         </label>
 
+        <label className="flex items-center gap-2 text-sm text-content">
+          <input type="checkbox" checked={draft.write_back} onChange={e => upd('write_back', e.target.checked)} />
+          <span>Post the preview URL &amp; status back to the PR <span className="text-content-faint">(GitHub commit status + comment)</span></span>
+        </label>
+
         <div className="flex items-center gap-3">
           <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
             className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold disabled:opacity-40">
@@ -214,6 +225,31 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
           </div>
         ))}
       </div>
+
+      {/* ── Write-back token ── */}
+      {draft.write_back && (
+        <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-content">Write-back token</h3>
+            <p className="text-xs text-content-subtle">
+              A GitHub token with <code className="font-mono">repo:status</code> + PR-comment scope. Stored
+              encrypted; never shown again. {data?.has_writeback_token
+                ? <span className="text-success-fg">A token is configured.</span>
+                : <span className="text-warning-fg">No token set — write-back is inactive until you add one.</span>}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="password" autoComplete="off" className={inputCls} placeholder={data?.has_writeback_token ? '•••••••• (leave blank to keep, type to replace)' : 'ghp_…'}
+              value={tokenInput} onChange={e => setTokenInput(e.target.value)} />
+            <button onClick={() => saveToken.mutate(tokenInput)} disabled={saveToken.isPending || !tokenInput}
+              className="shrink-0 px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold disabled:opacity-40">Save token</button>
+            {data?.has_writeback_token && (
+              <button onClick={() => saveToken.mutate('')} disabled={saveToken.isPending}
+                className="shrink-0 px-3 py-2 rounded-lg text-danger-fg hover:bg-danger-subtle/40 text-sm">Clear</button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Active previews ── */}
       <div className="bg-surface border border-border rounded-xl p-5 space-y-3">

@@ -173,6 +173,7 @@ export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projB
 // Settings + webhooks + active previews for a project's Preview Environments tab.
 export const fetchPreviewSettings  = (ws, name)         => api.get(`${projBase(ws, name)}/preview`).then(r => r.data)
 export const setPreviewConfig      = (ws, name, config) => api.put(`${projBase(ws, name)}/preview`, config).then(r => r.data)
+export const setPreviewWritebackToken = (ws, name, token) => api.put(`${projBase(ws, name)}/preview/writeback-token`, { token }).then(r => r.data)
 export const createPreviewWebhook  = (ws, name, body = {}) => api.post(`${projBase(ws, name)}/preview/webhooks`, body).then(r => r.data)
 export const deletePreviewWebhook  = (ws, name, id)     => api.delete(`${projBase(ws, name)}/preview/webhooks/${id}`).then(r => r.data)
 export const redeployPreview       = (ws, name, pr)     => api.post(`${projBase(ws, name)}/preview/envs/${pr}/redeploy`).then(r => r.data)

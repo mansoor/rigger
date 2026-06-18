@@ -155,6 +155,40 @@ func Delete(d *db.DB, id int64) error {
 	return err
 }
 
+// SetWritebackToken upserts a project's encrypted write-back token. The caller
+// encrypts (crypto.Encrypt) before storing — this layer only persists ciphertext.
+func SetWritebackToken(d *db.DB, workspace, project, tokenEnc string, now int64) error {
+	_, err := d.Exec(
+		`INSERT INTO preview_writeback_tokens (workspace, project, token_enc, created_at)
+		 VALUES (?,?,?,?)
+		 ON CONFLICT(workspace, project) DO UPDATE SET token_enc=excluded.token_enc, created_at=excluded.created_at`,
+		workspace, project, tokenEnc, now)
+	return err
+}
+
+// GetWritebackTokenEnc returns the stored ciphertext ("" when none configured).
+func GetWritebackTokenEnc(d *db.DB, workspace, project string) (string, error) {
+	var enc string
+	err := d.QueryRow(`SELECT token_enc FROM preview_writeback_tokens WHERE workspace=? AND project=?`,
+		workspace, project).Scan(&enc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return enc, err
+}
+
+// HasWritebackToken reports whether a write-back token is configured.
+func HasWritebackToken(d *db.DB, workspace, project string) bool {
+	enc, _ := GetWritebackTokenEnc(d, workspace, project)
+	return enc != ""
+}
+
+// DeleteWritebackToken removes a project's write-back token.
+func DeleteWritebackToken(d *db.DB, workspace, project string) error {
+	_, err := d.Exec(`DELETE FROM preview_writeback_tokens WHERE workspace=? AND project=?`, workspace, project)
+	return err
+}
+
 func scanPreview(s scanner) (*PreviewEnv, error) {
 	var p PreviewEnv
 	if err := s.Scan(&p.ID, &p.Workspace, &p.Project, &p.PRNumber, &p.Provider, &p.Branch,

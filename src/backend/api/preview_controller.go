@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
+	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/previews"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
@@ -148,6 +149,7 @@ func (h *Handler) createPreview(ws, proj string, cfg *wsconfig.PreviewConfig, pr
 	if derr := h.deployPreview(ws, proj, env); derr != nil {
 		row.Status = previews.StatusFailed
 		previews.Update(h.db, *row) //nolint:errcheck
+		h.writeBackPreview(ws, proj, row, previews.StatusFailed)
 		return row, fmt.Errorf("deploy %s: %w", env, derr)
 	}
 	now = time.Now().Unix()
@@ -156,6 +158,7 @@ func (h *Handler) createPreview(ws, proj string, cfg *wsconfig.PreviewConfig, pr
 	row.ExpiresAt = previewExpiry(cfg.TTLHours, now)
 	row.URL = h.previewURL(ws, proj, env)
 	previews.Update(h.db, *row) //nolint:errcheck
+	h.writeBackPreview(ws, proj, row, previews.StatusRunning)
 	return row, nil
 }
 
@@ -178,6 +181,7 @@ func (h *Handler) updatePreview(ws, proj string, cfg *wsconfig.PreviewConfig, ro
 	if derr := h.deployPreview(ws, proj, row.EnvKey); derr != nil {
 		row.Status = previews.StatusFailed
 		previews.Update(h.db, *row) //nolint:errcheck
+		h.writeBackPreview(ws, proj, row, previews.StatusFailed)
 		return row, fmt.Errorf("redeploy %s: %w", row.EnvKey, derr)
 	}
 	now := time.Now().Unix()
@@ -186,6 +190,7 @@ func (h *Handler) updatePreview(ws, proj string, cfg *wsconfig.PreviewConfig, ro
 	row.ExpiresAt = previewExpiry(cfg.TTLHours, now)
 	row.URL = h.previewURL(ws, proj, row.EnvKey)
 	previews.Update(h.db, *row) //nolint:errcheck
+	h.writeBackPreview(ws, proj, row, previews.StatusRunning)
 	return row, nil
 }
 
@@ -200,7 +205,59 @@ func (h *Handler) teardownPreview(ws, proj string, row *previews.PreviewEnv) err
 	if err := h.removeEnvFromConfig(ws, proj, row.EnvKey); err != nil {
 		fmt.Fprintf(os.Stderr, "teardownPreview: drop env from config %s/%s/%s: %v\n", ws, proj, row.EnvKey, err)
 	}
+	h.writeBackPreview(ws, proj, row, previews.StatusTornDown)
 	return previews.Delete(h.db, row.ID)
+}
+
+// writeBackPreview posts the preview's URL/status back to the PR (GitHub commit
+// status + a single upserted comment) when the project has write-back enabled and
+// a token configured. Best-effort and fully async — never affects the lifecycle.
+// A copy of row is captured so the caller may keep mutating the original.
+func (h *Handler) writeBackPreview(ws, proj string, row *previews.PreviewEnv, status string) {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, ws, proj))
+	if err != nil || cfg.Project.Preview == nil || !cfg.Project.Preview.WriteBack {
+		return
+	}
+	repo, ok := previews.ParseGitHubRepo(cfg.Project.GitRepo)
+	if !ok {
+		return // non-GitHub remote — write-back unsupported in v1
+	}
+	enc, _ := previews.GetWritebackTokenEnc(h.db, ws, proj)
+	if enc == "" {
+		return
+	}
+	tokBytes, derr := crypto.Decrypt(h.cryptoKey, enc)
+	if derr != nil {
+		fmt.Fprintf(os.Stderr, "writeBackPreview: decrypt token %s/%s: %v\n", ws, proj, derr)
+		return
+	}
+	wb := previews.NewGitHubWriteBack(string(tokBytes), repo)
+	r := *row // snapshot
+	go func() {
+		desc := "Rigger preview"
+		if status == previews.StatusFailed {
+			desc = "Preview deploy failed"
+		}
+		if serr := wb.PostCommitStatus(r.HeadSHA, previews.GitHubCommitState(status), r.URL, desc); serr != nil {
+			fmt.Fprintf(os.Stderr, "writeBackPreview: status %s/%s PR#%d: %v\n", ws, proj, r.PRNumber, serr)
+		}
+		var comment string
+		switch status {
+		case previews.StatusRunning:
+			if r.URL != "" {
+				comment = fmt.Sprintf("🔎 **Preview environment** is live: %s", r.URL)
+			}
+		case previews.StatusFailed:
+			comment = "⚠️ Preview environment deploy failed — see Rigger for logs."
+		case previews.StatusTornDown:
+			comment = "🧹 Preview environment torn down."
+		}
+		if comment != "" {
+			if cerr := wb.UpsertPRComment(r.PRNumber, comment); cerr != nil {
+				fmt.Fprintf(os.Stderr, "writeBackPreview: comment %s/%s PR#%d: %v\n", ws, proj, r.PRNumber, cerr)
+			}
+		}
+	}()
 }
 
 // deployPreview runs the standard build+up for a preview env: build (custom/

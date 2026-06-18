@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/previews"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -39,11 +41,49 @@ func (h *Handler) GetPreviewSettings(w http.ResponseWriter, r *http.Request) {
 	hooks, _ := previews.ListWebhooks(h.db, ws, name)
 	envs, _ := previews.ListForProject(h.db, ws, name)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"config":           cfg.Project.Preview, // nil when never configured
-		"webhooks":         hooks,
-		"previews":         envs,
-		"hook_path_prefix": previewHookPathPrefix,
+		"config":              cfg.Project.Preview, // nil when never configured
+		"webhooks":            hooks,
+		"previews":            envs,
+		"hook_path_prefix":    previewHookPathPrefix,
+		"has_writeback_token": previews.HasWritebackToken(h.db, ws, name),
 	})
+}
+
+// SetPreviewWritebackToken stores (or clears) the per-project write-back token,
+// encrypted at rest. An empty token clears it. The token is never returned.
+//
+// PUT /api/workspaces/{workspace}/projects/{name}/preview/writeback-token
+func (h *Handler) SetPreviewWritebackToken(w http.ResponseWriter, r *http.Request) {
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "operator role required"})
+		return
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if body.Token == "" {
+		if err := previews.DeleteWritebackToken(h.db, ws, name); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "cleared", "has_writeback_token": false})
+		return
+	}
+	enc, err := crypto.Encrypt(h.cryptoKey, []byte(body.Token))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "encrypt: " + err.Error()})
+		return
+	}
+	if err := previews.SetWritebackToken(h.db, ws, name, enc, time.Now().Unix()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "has_writeback_token": true})
 }
 
 // SetPreviewConfig writes a project's preview config into config.json

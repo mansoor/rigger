@@ -922,6 +922,7 @@ func main() {
 	// receiver is registered separately above (token-authed, no JWT).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/preview", authSvc.Middleware(http.HandlerFunc(handler.GetPreviewSettings)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/preview", authSvc.Middleware(http.HandlerFunc(handler.SetPreviewConfig)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/preview/writeback-token", authSvc.Middleware(http.HandlerFunc(handler.SetPreviewWritebackToken)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/preview/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePreviewWebhook)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/preview/webhooks/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePreviewWebhook)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/preview/envs/{pr}/redeploy", authSvc.Middleware(http.HandlerFunc(handler.RedeployPreview)))
