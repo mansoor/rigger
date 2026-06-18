@@ -144,6 +144,27 @@ type Project struct {
 	// database. Auto=true imports it automatically on first deploy of an empty DB;
 	// either way it can be imported manually. See the v3 DB-seed hook.
 	DBSeed *DBSeed `json:"db_seed,omitempty"`
+	// Preview configures PR/preview environments for this project (opt-in). nil ⇒
+	// the feature is off. See internal/previews and docs/design/preview-environments.md.
+	Preview *PreviewConfig `json:"preview,omitempty"`
+}
+
+// PreviewConfig holds a project's PR/preview-environment settings. A preview is a
+// short-lived env keyed pr{n}, cloned from TemplateEnv with the git branch
+// overridden to the PR head, torn down on PR close. Opt-in (Enabled) and driven by
+// a signed per-project webhook. See docs/design/preview-environments.md.
+type PreviewConfig struct {
+	Enabled         bool   `json:"enabled,omitempty"`
+	TemplateEnv     string `json:"template_env,omitempty"`      // env to clone (e.g. "dev")
+	Provider        string `json:"provider,omitempty"`          // "github"|"gitlab"|"gitea"
+	BranchFilter    string `json:"branch_filter,omitempty"`     // optional glob, e.g. "feature/*"; "" = all
+	MaxConcurrent   int    `json:"max_concurrent,omitempty"`    // cap active previews (0 = unlimited)
+	TTLHours        int    `json:"ttl_hours,omitempty"`         // auto-reap after inactivity (0 = until PR closes)
+	ProtectAuth     bool   `json:"protect_auth,omitempty"`      // basic-auth the preview URLs
+	AutoDeployForks string `json:"auto_deploy_forks,omitempty"` // "off"|"approved"|"on" (security gate)
+	WriteBack       bool   `json:"write_back,omitempty"`        // post URL/status back to the PR
+	DBStrategy      string `json:"db_strategy,omitempty"`       // "isolated-empty"|"isolated-seed"|"clone-from"|"shared"
+	DBSource        string `json:"db_source,omitempty"`         // env to clone-from / share (for those two modes)
 }
 
 // DBSeed describes a project's database-seed dump.

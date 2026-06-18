@@ -69,6 +69,25 @@ type Project struct {
 	// SourceKind is "upload" when build source came from an uploaded archive (else
 	// "git"/empty). The UI reads it to show the source origin + "Replace source".
 	SourceKind string `json:"source_kind,omitempty"`
+	// Preview configures PR/preview environments (opt-in). nil ⇒ off. The UI reads
+	// it to render the Preview Environments tab. See docs/design/preview-environments.md.
+	Preview *PreviewConfig `json:"preview,omitempty"`
+}
+
+// PreviewConfig holds a project's PR/preview-environment settings (read view). See
+// wsconfig.PreviewConfig for the authoritative shape and docs/design/preview-environments.md.
+type PreviewConfig struct {
+	Enabled         bool   `json:"enabled,omitempty"`
+	TemplateEnv     string `json:"template_env,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	BranchFilter    string `json:"branch_filter,omitempty"`
+	MaxConcurrent   int    `json:"max_concurrent,omitempty"`
+	TTLHours        int    `json:"ttl_hours,omitempty"`
+	ProtectAuth     bool   `json:"protect_auth,omitempty"`
+	AutoDeployForks string `json:"auto_deploy_forks,omitempty"`
+	WriteBack       bool   `json:"write_back,omitempty"`
+	DBStrategy      string `json:"db_strategy,omitempty"`
+	DBSource        string `json:"db_source,omitempty"`
 }
 
 // Prefix returns the immutable Docker resource prefix, falling back to the

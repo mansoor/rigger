@@ -46,6 +46,11 @@ type Options struct {
 	Env           string
 	Extra         []string
 	EnvVars       []string // child-process environment (built by the shell bridge)
+	// PurgeVolumes makes a "down" command run `compose down --volumes`, destroying
+	// the env's named data volumes too. Default false: plain `compose down` keeps
+	// volumes (so user-driven env delete doesn't lose data). Previews set true so
+	// per-PR volumes don't accumulate. Compose-only; ignored on swarm.
+	PurgeVolumes bool
 	Stdout        io.Writer
 	Stderr        io.Writer
 
@@ -181,7 +186,7 @@ func Run(opts Options) (bool, error) {
 	case "stop":
 		return true, r.stop()
 	case "down":
-		return true, r.down()
+		return true, r.down(opts.PurgeVolumes)
 	case "restart":
 		return true, r.restart()
 	case "update":
@@ -289,7 +294,15 @@ func (r *runner) stop() error {
 	return nil
 }
 
-func (r *runner) down() error {
+func (r *runner) down(purgeVolumes bool) error {
+	if purgeVolumes {
+		r.info("Bringing down stack '%s' (containers + volumes removed)", r.stack)
+		if err := r.compose("down", "--volumes"); err != nil {
+			return err
+		}
+		r.success("Stack '%s' is down (volumes purged)", r.stack)
+		return nil
+	}
 	r.info("Bringing down stack '%s' (containers removed)", r.stack)
 	if err := r.compose("down"); err != nil {
 		return err

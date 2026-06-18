@@ -1,7 +1,9 @@
 package wsconfig
 
 import (
+	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +105,39 @@ func TestStrFromNumberAndString(t *testing.T) {
 	}
 	if prod.EnvVars["API_KEY"].String() != "CHANGE_ME" {
 		t.Errorf("env_vars API_KEY = %q, want CHANGE_ME", prod.EnvVars["API_KEY"])
+	}
+}
+
+// A project without preview config must marshal WITHOUT a "preview" key
+// (omitempty), so existing config.json round-trips byte-identical — no spurious
+// diff for the thousands of projects that never enable previews.
+func TestProjectOmitsPreviewWhenNil(t *testing.T) {
+	out, err := json.Marshal(Project{Name: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "preview") {
+		t.Errorf("marshaled Project with nil Preview should omit the key, got %s", out)
+	}
+}
+
+// PreviewConfig round-trips through config.json under project.preview.
+func TestPreviewConfigRoundTrip(t *testing.T) {
+	src := `{"project":{"name":"x","preview":{"enabled":true,"template_env":"dev",` +
+		`"provider":"github","max_concurrent":3,"ttl_hours":48,"db_strategy":"clone-from",` +
+		`"db_source":"staging","auto_deploy_forks":"off"}},"environments":{"dev":{}}}`
+	c, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.Project.Preview
+	if p == nil {
+		t.Fatal("Preview = nil, want parsed config")
+	}
+	if !p.Enabled || p.TemplateEnv != "dev" || p.Provider != "github" ||
+		p.MaxConcurrent != 3 || p.TTLHours != 48 || p.DBStrategy != "clone-from" ||
+		p.DBSource != "staging" || p.AutoDeployForks != "off" {
+		t.Errorf("PreviewConfig parsed wrong: %+v", *p)
 	}
 }
 

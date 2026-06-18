@@ -1122,6 +1122,11 @@ type RunOptions struct {
 	Stdout    io.Writer
 	Stderr    io.Writer
 
+	// PurgeVolumes (down-only): also remove the env's named data volumes
+	// (`compose down --volumes`). Default false preserves volumes so a normal
+	// env delete keeps its data; previews pass true so per-PR volumes don't pile up.
+	PurgeVolumes bool
+
 	// Context, when set, makes the command cancellable: cancelling it kills the
 	// underlying docker process(es). Pipelines pass a per-run context so a Cancel
 	// request aborts a hung build mid-flight. nil ⇒ uncancellable (existing behavior
@@ -1371,6 +1376,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Command:       opts.Command,
 			Env:           opts.Env,
 			Extra:         opts.Extra,
+			PurgeVolumes:  opts.PurgeVolumes,
 			EnvVars:       shellEnv(),
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,

@@ -1234,13 +1234,13 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	// deploy layer can still resolve it; then delete its directory.
 	newEnvs := configEnvNames([]byte(body.Content))
 	for env := range oldEnvs {
-		if newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
+		if newEnvs[env] {
 			continue
 		}
-		var out bytes.Buffer
-		if derr := h.bridge.Run(shell.RunOptions{Workspace: wsName, Project: name, Command: "down", Env: env, Stdout: &out, Stderr: &out}); derr != nil {
-			fmt.Fprintf(os.Stderr, "PutConfig: tear down removed env %s/%s: %v\n%s", name, env, derr, out.String())
-		}
+		// Removed env: tear it down + delete its directory while the old
+		// config.json still resolves it. purgeVolumes=false — a user-driven
+		// env delete must NOT destroy its data volumes (122ad60 orphan-cleanup).
+		h.removeEnv(wsName, name, env, false)
 	}
 
 	// Deployment-mode changes (compose↔swarm) must tear down the OLD deployment
@@ -1268,13 +1268,8 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove the now-orphaned env directories (config.json already updated).
-	for env := range oldEnvs {
-		if newEnvs[env] || env == "" || strings.ContainsAny(env, "/\\.") {
-			continue
-		}
-		os.RemoveAll(wspath.EnvDir(h.workspacesDir, wsName, name, env)) //nolint:errcheck
-	}
+	// (Removed-env directory cleanup already happened above via removeEnv, which
+	// runs `down` + os.RemoveAll while the old config still resolves the env.)
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
 		h.db.Exec("INSERT INTO audit_log (user_id, username, project, command, env) VALUES (?,?,?,?,?)", //nolint:errcheck
