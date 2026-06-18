@@ -332,6 +332,32 @@ func (h *Handler) RunPipelineV1(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "pipeline": p.Name, "run_id": runID})
 }
 
+// GetPipelineRunV1: GET .../pipelines/{id}/runs/{runId} — the run's current status,
+// timings, and per-stage output (the log). Use it to poll a run after triggering it.
+func (h *Handler) GetPipelineRunV1(w http.ResponseWriter, r *http.Request) {
+	ws, proj := r.PathValue("workspace"), r.PathValue("project")
+	if _, ok := h.apiGate(w, r, apikey.OpPipelineRead, ws, proj); !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		apiErr(w, http.StatusBadRequest, "invalid pipeline id")
+		return
+	}
+	p, _ := pipelines.Get(h.db, id)
+	if p == nil || p.Workspace != ws || p.Project != proj {
+		apiErr(w, http.StatusNotFound, "pipeline not found")
+		return
+	}
+	runID, _ := strconv.ParseInt(r.PathValue("runId"), 10, 64)
+	run, rerr := pipelines.GetRun(h.db, runID)
+	if rerr != nil || run == nil || run.PipelineID != id {
+		apiErr(w, http.StatusNotFound, "run not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
 // CancelPipelineRunV1: POST .../pipelines/{id}/runs/{runId}/cancel — cancels a specific
 // run (kills the in-flight stage's docker process if it's live here, else marks the
 // record cancelled). Mirrors the internal CancelPipelineRun, gated by the API key.

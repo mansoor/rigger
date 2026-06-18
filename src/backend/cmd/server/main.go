@@ -773,6 +773,7 @@ func main() {
 	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/{action}", v1(handler.RunActionV1))
 	mux.Handle("GET /api/v1/workspaces/{workspace}/projects/{project}/pipelines", v1(handler.ListPipelinesV1))
 	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs", v1(handler.RunPipelineV1))
+	mux.Handle("GET /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}", v1(handler.GetPipelineRunV1))
 	mux.Handle("POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}/cancel", v1(handler.CancelPipelineRunV1))
 
 	// Migration jobs (Phase 7) — poll async workspace/env host moves

@@ -31,6 +31,7 @@ const (
 	OpEnvInactivate = "env.inactivate" // POST .../actions/inactivate (compose down)
 	OpEnvBackup     = "env.backup"     // POST .../actions/backup
 	OpPipelineList   = "pipeline.list"   // GET  .../pipelines
+	OpPipelineRead   = "pipeline.read"   // GET  .../pipelines/{id}/runs/{runId}  (status + stage logs)
 	OpPipelineRun    = "pipeline.run"    // POST .../pipelines/{id}/runs
 	OpPipelineCancel = "pipeline.cancel" // POST .../pipelines/{id}/runs/{runId}/cancel
 )
@@ -69,8 +70,9 @@ var Groups = []Group{
 		{OpEnvInactivate, "Inactivate (down)", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/inactivate"},
 		{OpEnvBackup, "Backup", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/backup"},
 	}},
-	{ID: "pipeline", Label: "Pipeline", Desc: "List, run, and cancel deployment pipelines.", Ops: []OpInfo{
+	{ID: "pipeline", Label: "Pipeline", Desc: "List, read, run, and cancel deployment pipelines.", Ops: []OpInfo{
 		{OpPipelineList, "List pipelines", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines"},
+		{OpPipelineRead, "Read a run (status + logs)", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}"},
 		{OpPipelineRun, "Trigger a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs"},
 		{OpPipelineCancel, "Cancel a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}/cancel"},
 	}},

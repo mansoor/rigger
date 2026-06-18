@@ -42,6 +42,7 @@ Scopes are granular operation ids, grouped in the UI as **Read**, **Operate**, a
 | Operate | `env.inactivate` | Tear down (compose `down`) |
 | Operate | `env.backup` | Back up an environment |
 | Pipeline | `pipeline.list` | List a project's pipelines |
+| Pipeline | `pipeline.read` | Read a run's status + logs |
 | Pipeline | `pipeline.run` | Create (trigger) a pipeline run |
 | Pipeline | `pipeline.cancel` | Cancel a pipeline run |
 
@@ -112,6 +113,18 @@ Creates a run in the background and returns its id (`202 Accepted`). A run is a
 resource, so it lives under `…/pipelines/{id}/runs` (not `…/actions/run`).
 ```json
 { "status": "started", "pipeline": "release", "run_id": 42 }
+```
+
+### Read a pipeline run (status + logs)
+```
+GET /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/runs/{runId}
+```
+Returns the run: overall status, timings, and each stage's status + `output` (the log).
+Poll this after triggering to follow progress.
+```json
+{ "id": 99, "status": "running", "started_at": 1718700000000,
+  "stages": [{ "type": "build", "env": "prod", "status": "ok", "output": "…log…", "ms": 8421 },
+             { "type": "deploy", "env": "prod", "status": "running", "output": "…" }] }
 ```
 
 ### Cancel a pipeline run
