@@ -159,7 +159,41 @@ func (h *Handler) createPreview(ws, proj string, cfg *wsconfig.PreviewConfig, pr
 	row.URL = h.previewURL(ws, proj, env)
 	previews.Update(h.db, *row) //nolint:errcheck
 	h.writeBackPreview(ws, proj, row, previews.StatusRunning)
+
+	// DBStrategy clone-from: restore the source env's data into the fresh preview DB
+	// ONCE, on create (a redeploy must never re-clone — it would wipe a reviewer's
+	// test data). isolated-seed needs no action (the v3 db_seed hook auto-imports on
+	// first deploy). shared is not implemented yet (deferred). Best-effort: a clone
+	// failure leaves the preview up on an empty DB rather than failing the deploy.
+	if cfg.DBStrategy == "clone-from" && cfg.DBSource != "" && cfg.DBSource != env {
+		if cerr := h.clonePreviewData(ws, proj, cfg.DBSource, env); cerr != nil {
+			fmt.Fprintf(os.Stderr, "createPreview: clone-from %s→%s: %v\n", cfg.DBSource, env, cerr)
+		}
+	}
 	return row, nil
+}
+
+// clonePreviewData copies a source env's managed-DB data into a preview env by
+// reusing the existing `migrate` primitive (backup source → restore into target).
+// SkipTargetBackup: the preview DB is brand-new, so there's nothing worth backing
+// up first. Runs after deploy, so the preview's DB is already up to restore into.
+//
+// NOTE (Phase 7 follow-up): this restores after the app is already up, so an app
+// that runs install-on-empty-DB at first boot may briefly see an empty schema
+// before the real data lands. Refining to a DB-up → restore → app-up sequence is
+// left for live verification.
+func (h *Handler) clonePreviewData(ws, proj, sourceEnv, targetEnv string) error {
+	var out bytes.Buffer
+	return h.bridge.Run(shell.RunOptions{
+		Workspace:        ws,
+		Project:          proj,
+		Command:          "migrate",
+		Env:              targetEnv, // restore INTO the preview
+		SourceEnv:        sourceEnv, // back up FROM the source env
+		SkipTargetBackup: true,
+		Stdout:           &out,
+		Stderr:           &out,
+	})
 }
 
 // updatePreview redeploys an existing preview for a new commit (synchronize): it
