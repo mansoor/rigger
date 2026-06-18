@@ -489,6 +489,49 @@ func (d *DB) migrate() error {
 			UNIQUE(key_id, workspace, project)
 		);
 		CREATE INDEX IF NOT EXISTS idx_api_key_projects ON api_key_projects(key_id);
+
+		-- Preview/PR environments (design 6ece941). A preview webhook is per-PROJECT
+		-- (not per-pipeline like pipeline_webhooks): a signed inbound URL that drives
+		-- the preview lifecycle. token_hash = sha256 of the URL token (raw shown once);
+		-- secret verifies the provider HMAC; provider = github|gitlab|gitea.
+		CREATE TABLE IF NOT EXISTS preview_webhooks (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace         TEXT    NOT NULL,
+			project           TEXT    NOT NULL,
+			token_hash        TEXT    NOT NULL,
+			secret            TEXT    NOT NULL DEFAULT '',
+			provider          TEXT    NOT NULL DEFAULT 'github',
+			enabled           INTEGER NOT NULL DEFAULT 1,
+			created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_triggered_at DATETIME
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_preview_webhooks_token ON preview_webhooks(token_hash);
+		CREATE INDEX IF NOT EXISTS idx_preview_webhooks_proj ON preview_webhooks(workspace, project);
+
+		-- One live (or torn-down) preview environment: the pr{n} env cloned for a PR.
+		-- status = creating|running|updating|failed|torn_down. created_at /
+		-- last_deployed_at / expires_at are epoch seconds (expires_at 0 = no TTL, lives
+		-- until PR close); the reaper sweeps rows where expires_at>0 AND expires_at<=now.
+		-- last_run_id links the pipeline run that last deployed it (0 = none).
+		CREATE TABLE IF NOT EXISTS preview_environments (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			workspace        TEXT    NOT NULL,
+			project          TEXT    NOT NULL,
+			pr_number        INTEGER NOT NULL,
+			provider         TEXT    NOT NULL DEFAULT 'github',
+			branch           TEXT    NOT NULL DEFAULT '',
+			head_sha         TEXT    NOT NULL DEFAULT '',
+			env_key          TEXT    NOT NULL,
+			url              TEXT    NOT NULL DEFAULT '',
+			status           TEXT    NOT NULL DEFAULT 'creating',
+			last_run_id      INTEGER NOT NULL DEFAULT 0,
+			created_at       INTEGER NOT NULL DEFAULT 0,
+			last_deployed_at INTEGER NOT NULL DEFAULT 0,
+			expires_at       INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_preview_envs_pr ON preview_environments(workspace, project, pr_number);
+		CREATE INDEX IF NOT EXISTS idx_preview_envs_proj ON preview_environments(workspace, project);
+		CREATE INDEX IF NOT EXISTS idx_preview_envs_expiry ON preview_environments(expires_at);
 	`)
 	if err != nil {
 		return err
