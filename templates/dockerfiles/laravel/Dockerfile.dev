@@ -28,20 +28,28 @@ COPY --from=composer:2.7 /usr/bin/composer /usr/local/bin/composer
 
 WORKDIR /var/www/html
 
-# Application source (vendor/, node_modules/, .git, .env excluded via .dockerignore).
+# Application source (node_modules/, .git, .env excluded via .dockerignore; a shipped
+# vendor/ is KEPT so CodeCanyon apps build offline).
 COPY . .
 
-# PHP dependencies (incl. dev) — from the lock if present, else resolved.
-RUN if [ -f composer.json ]; then \
+# PHP dependencies — if the app already ships a vendor/ (CodeCanyon / marketplace
+# apps bundle one), skip composer ENTIRELY so the build needs no network (this is
+# what made `composer update` time out on api.github.com). Otherwise resolve from
+# the lock if present, else composer.json. --no-scripts skips artisan hooks.
+RUN if [ -f vendor/autoload.php ]; then \
+      echo "vendor/ present — skipping composer (app ships its PHP dependencies)"; \
+    elif [ -f composer.json ]; then \
       composer install --no-interaction --prefer-dist --no-scripts \
       || composer update --no-interaction --prefer-dist --no-scripts; \
     fi
 
-# Front-end assets — only when the app defines a build.
+# Front-end assets — only when the app defines a build. Best-effort: a registry
+# timeout or a missing build script must not fail the image (CodeCanyon apps ship
+# pre-built assets under public/, which .dockerignore keeps).
 RUN if [ -f package.json ]; then \
       apk add --no-cache nodejs npm \
-      && npm install --no-audit --no-fund \
-      && (npm run build || echo "no usable npm build script — skipping asset build"); \
+      && ( npm install --no-audit --no-fund && ( npm run build || echo "no usable npm build script — skipping asset build" ) \
+           || echo "npm install/build unavailable (offline or no deps) — keeping any shipped assets" ); \
     fi
 
 # Laravel needs these dirs present + writable at runtime — recreate them (the

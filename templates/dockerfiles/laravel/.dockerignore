@@ -14,8 +14,12 @@
 .env.*
 !.env.example
 
-# ── Dependency directories (reinstalled inside container) ─────────────────────
-vendor
+# ── Dependency directories ────────────────────────────────────────────────────
+# vendor/ is intentionally NOT ignored: a CodeCanyon / marketplace app ships a
+# complete vendor/, and baking it lets the build skip composer (see Dockerfile),
+# so it needs no network (avoids the api.github.com timeout on `composer update`).
+# A git-source app that ships no vendor/ has nothing to copy, so composer still
+# resolves it. node_modules stays ignored (huge; apps ship built assets, not it).
 node_modules
 
 # ── Laravel runtime cache (generated at startup) ──────────────────────────────

@@ -13,7 +13,11 @@
 !.env.example
 
 # ── Reinstalled in container ──────────────────────────────────────────────────
-vendor
+# NOTE: vendor/ is intentionally NOT ignored. CodeCanyon / marketplace apps ship a
+# complete vendor/ (and a matching composer.lock); baking it lets the build skip
+# composer entirely (see Dockerfile.dev), so it never needs network — which is what
+# made `composer update` time out on api.github.com. A git-source app that ships no
+# vendor/ has nothing to copy, so composer still resolves it normally.
 node_modules
 
 # ── Laravel runtime cache (recreated at build/startup) ────────────────────────
