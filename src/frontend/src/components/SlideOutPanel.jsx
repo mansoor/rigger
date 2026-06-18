@@ -534,7 +534,9 @@ function VersionContent({ workspaceFilter, typeFilter, wsTypes }) {
   return (
     <div className="divide-y divide-border">
       {filtered.map(ws => {
-        const events = activityByWs[ws.name] || []
+        // Activity is keyed by audit_log.project = the resource prefix ({ws}_{proj}),
+        // not the bare project key — group/look up by resource_prefix or events never match.
+        const events = activityByWs[ws.resource_prefix] || activityByWs[ws.name] || []
         const isImage = ws.type === 'image'
         return (
           <div key={ws.name} className="px-5 py-3">
