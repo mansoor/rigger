@@ -168,6 +168,16 @@ export const cancelPipelineRun  = (ws, name, id, runId) => api.post(`${projBase(
 export const fetchPipelineWebhooks = (ws, name, id) => api.get(`${projBase(ws, name)}/pipelines/${id}/webhooks`).then(r => r.data)
 export const createPipelineWebhook = (ws, name, id, body = {}) => api.post(`${projBase(ws, name)}/pipelines/${id}/webhooks`, body).then(r => r.data)
 export const deletePipelineWebhook = (ws, name, id, whId) => api.delete(`${projBase(ws, name)}/pipelines/${id}/webhooks/${whId}`).then(r => r.data)
+
+// ── Preview / PR environments ──────────────────────────────────────────────────
+// Settings + webhooks + active previews for a project's Preview Environments tab.
+export const fetchPreviewSettings  = (ws, name)         => api.get(`${projBase(ws, name)}/preview`).then(r => r.data)
+export const setPreviewConfig      = (ws, name, config) => api.put(`${projBase(ws, name)}/preview`, config).then(r => r.data)
+export const createPreviewWebhook  = (ws, name, body = {}) => api.post(`${projBase(ws, name)}/preview/webhooks`, body).then(r => r.data)
+export const deletePreviewWebhook  = (ws, name, id)     => api.delete(`${projBase(ws, name)}/preview/webhooks/${id}`).then(r => r.data)
+export const redeployPreview       = (ws, name, pr)     => api.post(`${projBase(ws, name)}/preview/envs/${pr}/redeploy`).then(r => r.data)
+export const teardownPreview       = (ws, name, pr)     => api.delete(`${projBase(ws, name)}/preview/envs/${pr}`).then(r => r.data)
+
 // Host-aware port-conflict check: host_ports = [{host_id, port, service}].
 export const checkPorts        = (hostPorts, excludeWorkspace = '') =>
   api.post('/port-check', { host_ports: hostPorts, exclude_workspace: excludeWorkspace }).then(r => r.data)
