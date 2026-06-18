@@ -168,7 +168,7 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-content-strong">New API key{ws ? ` · ${ws}` : ''}</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
@@ -204,10 +204,12 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
                     {isOpen && (
                       <div className="border-t border-border-strong px-3 py-2 space-y-1.5">
                         {g.ops.map(o => (
-                          <label key={o.id} className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" className="accent-brand-500 w-3.5 h-3.5" checked={scopes.has(o.id)} onChange={() => toggleOp(o.id)} />
-                            <span className="text-sm text-content">{o.label}</span>
-                            <span className="font-mono text-[10px] text-content-faint ml-auto">{o.method} {o.path.replace('/api/v1', '')}</span>
+                          <label key={o.id} className="flex items-start gap-2 cursor-pointer">
+                            <input type="checkbox" className="accent-brand-500 w-3.5 h-3.5 mt-0.5 shrink-0" checked={scopes.has(o.id)} onChange={() => toggleOp(o.id)} />
+                            <span className="min-w-0">
+                              <span className="text-sm text-content">{o.label}</span>
+                              <span className="block font-mono text-[10px] text-content-faint break-all">{o.method} {o.path.replace('/api/v1', '')}</span>
+                            </span>
                           </label>
                         ))}
                       </div>
@@ -235,7 +237,11 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
                   )}
                   <select disabled={!projectsWs} onChange={e => { if (e.target.value) addProjectRef(projectsWs, e.target.value); e.target.value = '' }} className={inputCls}>
                     <option value="">＋ add project…</option>
-                    {pickProjects.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                    {pickProjects.map(p => (
+                      <option key={p.name} value={p.name}>
+                        {(p.config?.project?.name || p.name)} ({projectsWs}/{p.name})
+                      </option>
+                    ))}
                   </select>
                 </div>
                 {projects.length > 0 && (
