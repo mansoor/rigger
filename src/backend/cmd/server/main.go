@@ -741,6 +741,9 @@ func main() {
 	// ── External REST API (/api/v1) — authenticated by API keys, NOT the UI's JWT.
 	// Each route is wrapped in APIKeyMiddleware (resolves the key); the handlers enforce
 	// the per-operation scope + project access + rate limit. See internal/apikey.
+	// Public docs (no key needed — documentation): OpenAPI spec + rendered page.
+	mux.HandleFunc("GET /api/v1/openapi.json", handler.OpenAPISpec)
+	mux.HandleFunc("GET /api/v1/docs", handler.APIDocsPage)
 	v1 := func(fn http.HandlerFunc) http.Handler { return handler.APIKeyMiddleware(fn) }
 	mux.Handle("GET /api/v1/projects", v1(handler.ListProjectsV1))
 	mux.Handle("GET /api/v1/projects/{workspace}/{project}/envs/{env}/services", v1(handler.ListServicesV1))

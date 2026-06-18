@@ -1852,7 +1852,7 @@ function ApiKeysTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">API Keys</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Programmatic access to the <code className="font-mono text-xs">/api/v1</code> REST API — scoped, project-restricted, rate-limited.</p>
+          <p className="text-sm text-content-subtle mt-0.5">Programmatic access to the <code className="font-mono text-xs">/api/v1</code> REST API — scoped, project-restricted, rate-limited. <a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300">View API docs ↗</a></p>
         </div>
         <Btn onClick={() => setModal(true)}>＋ New API key</Btn>
       </div>
