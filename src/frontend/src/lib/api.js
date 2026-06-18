@@ -334,6 +334,14 @@ export const saveGlobalAppearance = (prefs) =>
 
 // ── Settings: Backup Targets ──────────────────────────────────────────────────
 
+// API keys (external /api/v1 credentials) — admin-managed. createApiKey returns the
+// raw token ONCE (token field); it's never readable again.
+export const fetchApiKeyScopes = ()           => api.get('/settings/api-key-scopes').then(r => r.data)
+export const fetchApiKeys      = ()           => api.get('/settings/api-keys').then(r => r.data)
+export const createApiKey      = (body)       => api.post('/settings/api-keys', body).then(r => r.data)
+export const setApiKeyEnabled  = (id, enabled) => api.put(`/settings/api-keys/${id}`, { enabled }).then(r => r.data)
+export const deleteApiKey      = (id)         => api.delete(`/settings/api-keys/${id}`).then(r => r.data)
+
 // Admin (global Settings) view — every target; global ones carry their `grants`.
 export const fetchBackupTargets   = ()          => api.get('/settings/backup-targets').then(r => r.data)
 export const createBackupTarget   = (body)      => api.post('/settings/backup-targets', body).then(r => r.data)

@@ -689,6 +689,17 @@ func main() {
 			handler.UpdateNotificationChannel(w, r)
 		case r.Method == "DELETE" && matchPrefix(path, "/api/settings/notification-channels/"):
 			handler.DeleteNotificationChannel(w, r)
+		// API keys (external /api/v1 credentials) — admin-managed.
+		case r.Method == "GET" && path == "/api/settings/api-key-scopes":
+			handler.GetApiKeyScopes(w, r)
+		case r.Method == "GET" && path == "/api/settings/api-keys":
+			handler.ListApiKeys(w, r)
+		case r.Method == "POST" && path == "/api/settings/api-keys":
+			handler.CreateApiKey(w, r)
+		case r.Method == "PUT" && matchPrefix(path, "/api/settings/api-keys/"):
+			handler.UpdateApiKey(w, r)
+		case r.Method == "DELETE" && matchPrefix(path, "/api/settings/api-keys/"):
+			handler.DeleteApiKey(w, r)
 		default:
 			http.NotFound(w, r)
 		}
