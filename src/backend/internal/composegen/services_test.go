@@ -828,6 +828,16 @@ func TestEnvRouteURL(t *testing.T) {
 	if u, routed := EnvRouteURL(mk(true, "my.host", "true"), "dev", "apps.example.com", "", ""); !routed || u != "https://my.host" {
 		t.Errorf("explicit = %q,%v; want https://my.host,true", u, routed)
 	}
+	// Preview env: the hyphen-free pr{n} suffix stays a single flat label under the
+	// wildcard cert (ws-app-pr42, not ws-app-pr-42), so one *.base cert covers it.
+	prCfg := []byte(`{
+		"project": {"name":"x","resource_prefix":"ws_app"},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"80"}],
+		"environments": {"pr42": {"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net","domain":"","ssl_enabled":false}}
+	}`)
+	if u, routed := EnvRouteURL(prCfg, "pr42", "apps.example.com", "", ""); !routed || u != "https://ws-app-pr42.apps.example.com" {
+		t.Errorf("preview env = %q,%v; want https://ws-app-pr42.apps.example.com,true", u, routed)
+	}
 }
 
 // Swarm secrets still wire through deployBlock for a build service.

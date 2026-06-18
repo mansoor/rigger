@@ -907,6 +907,12 @@ func main() {
 		handler.InboundWebhook(w, r)
 	})
 
+	// PUBLIC preview/PR webhook — no JWT; authed by the URL token (+ provider HMAC
+	// signature). Drives the ephemeral pr{n} environment lifecycle (Phase 3).
+	mux.HandleFunc("POST /api/previews/hooks/{token}", func(w http.ResponseWriter, r *http.Request) {
+		handler.InboundPreviewWebhook(w, r)
+	})
+
 	// Phase 9e: per-env deploy history + rollback (authed; per-project RBAC inside).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/rollback", authSvc.Middleware(http.HandlerFunc(handler.RollbackEnv)))
