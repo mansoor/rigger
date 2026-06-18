@@ -283,7 +283,10 @@ function RestoreConfirmModal({ snap, onConfirm, onClose }) {
 
 function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({ queryKey: ['backups'], queryFn: fetchBackups, refetchInterval: 60_000 })
+  // Fetch ALL backups (filtered client-side by workspaceFilter below). Must wrap in an
+  // arrow — a bare `queryFn: fetchBackups` passes React Query's context object as the
+  // workspace arg, producing ?workspace=[object Object] → backend matches nothing → empty.
+  const { data, isLoading } = useQuery({ queryKey: ['backups'], queryFn: () => fetchBackups(), refetchInterval: 60_000 })
   const [expanded, setExpanded]           = useState(null)
   const [confirmSnap, setConfirmSnap]     = useState(null)
   const [restoringSnap, setRestoringSnap] = useState(null)
