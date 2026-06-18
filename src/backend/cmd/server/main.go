@@ -918,6 +918,14 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/rollback", authSvc.Middleware(http.HandlerFunc(handler.RollbackEnv)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/copy", authSvc.Middleware(http.HandlerFunc(handler.CopyEnvironment)))
+	// Preview/PR environments (authed; per-project RBAC inside). The public webhook
+	// receiver is registered separately above (token-authed, no JWT).
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/preview", authSvc.Middleware(http.HandlerFunc(handler.GetPreviewSettings)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/preview", authSvc.Middleware(http.HandlerFunc(handler.SetPreviewConfig)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/preview/webhooks", authSvc.Middleware(http.HandlerFunc(handler.CreatePreviewWebhook)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/preview/webhooks/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeletePreviewWebhook)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/preview/envs/{pr}/redeploy", authSvc.Middleware(http.HandlerFunc(handler.RedeployPreview)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/preview/envs/{pr}", authSvc.Middleware(http.HandlerFunc(handler.TeardownPreviewEnv)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/migrate-data", authSvc.Middleware(http.HandlerFunc(handler.MigrateEnvData)))
 	// Replace an upload-source project's stored archive (operator+); next build re-extracts it.
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/source", authSvc.Middleware(http.HandlerFunc(handler.ReplaceSource)))
