@@ -90,6 +90,17 @@ func (o Options) dockerRun(args ...string) error {
 	})
 }
 
+// imageExists reports whether an image tag is present on the build daemon (the
+// same daemon that just built it — local, or the env's bound remote host). Quiet:
+// output is discarded; only the exit status matters. Used by advancePointers to
+// tell a real pin (image exists) from a stale/seed pointer (image gone).
+func (o Options) imageExists(tag string) bool {
+	_, err := executor.Default(o.Exec).DockerOutput(executor.Spec{
+		Args: []string{"image", "inspect", tag}, Env: o.EnvVars,
+	})
+	return err == nil
+}
+
 // dockerRunInDir runs a docker command with the working directory set to dir, so
 // relative paths (e.g. a build context) resolve there. For a remote executor the
 // dir is translated to the host's path, so the build runs against the pushed

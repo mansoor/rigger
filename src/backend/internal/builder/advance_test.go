@@ -78,6 +78,27 @@ func TestAdvancePinnedSkipped(t *testing.T) {
 	}
 }
 
+// A pointer whose tag's image no longer exists (a seed/stale pointer left behind
+// when failed builds bumped the version past it) is re-synced to the new tag —
+// NOT treated as a pin — so the next deploy doesn't chase a missing image.
+func TestAdvanceStaleMissingImageResynced(t *testing.T) {
+	wsDir := setup(t)
+	stale := "reg/app-backend:1.2.3-build.0-prod"
+	seedEnv(t, wsDir, "prod", "BACKEND_IMAGE="+stale+"\n")
+	var out strings.Builder
+	o := Options{
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
+		Extra: []string{"backend", "--bump", "build"}, Stdout: &out,
+		Exec: &recorder{missingImages: map[string]bool{stale: true}},
+	}
+	if _, err := o.Run(); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if got := envKey(t, wsDir, "prod", "BACKEND_IMAGE"); got != "reg/app-backend:1.2.3-build.5-prod" {
+		t.Errorf("stale missing-image pointer not resynced: %q", got)
+	}
+}
+
 // Build without a bump is a no-op for a tracking pointer.
 func TestAdvanceNoBumpNoop(t *testing.T) {
 	wsDir := setup(t)

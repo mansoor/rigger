@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,10 @@ func setup(t *testing.T) string {
 type recorder struct {
 	calls [][]string
 	dirs  []string
+	// missingImages: tags for which `docker image inspect` should report "no such
+	// image" (everything else is treated as present). Lets tests exercise the
+	// stale-pointer resync path in advancePointers.
+	missingImages map[string]bool
 }
 
 func (r *recorder) Docker(s executor.Spec) error {
@@ -49,6 +54,9 @@ func (r *recorder) Docker(s executor.Spec) error {
 func (r *recorder) DockerOutput(s executor.Spec) ([]byte, error) {
 	r.calls = append(r.calls, s.Args)
 	r.dirs = append(r.dirs, s.Dir)
+	if len(s.Args) == 3 && s.Args[0] == "image" && s.Args[1] == "inspect" && r.missingImages[s.Args[2]] {
+		return nil, fmt.Errorf("no such image: %s", s.Args[2])
+	}
 	return nil, nil
 }
 

@@ -47,8 +47,17 @@ func (o Options) advancePointers(cfg *wsconfig.Config, builds []wsconfig.Service
 			}
 		case cur == newTag:
 			// already current — nothing to do
+		case !o.imageExists(cur):
+			// Pointer differs from both the previous and the new tag, so it LOOKS like
+			// a deliberate pin — but its image doesn't actually exist. That happens when
+			// earlier FAILED builds bumped the version past the pointer (e.g. a seeded
+			// {SVC}_IMAGE=…build.0 left behind while the version marched to build.4):
+			// the pointer then never matches prevTag again and would be stuck forever,
+			// making `compose up` chase a missing image. A real pin always points at an
+			// image that exists, so a missing-image pointer is stale — re-sync it.
+			updates[key] = newTag
 		default:
-			pinned = append(pinned, fmt.Sprintf("%s(%s)", svc.Name, cur)) // pinned → leave
+			pinned = append(pinned, fmt.Sprintf("%s(%s)", svc.Name, cur)) // genuine pin → leave
 		}
 	}
 
