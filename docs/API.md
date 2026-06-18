@@ -32,7 +32,7 @@ Scopes are granular operation ids, grouped in the UI as **Read**, **Operate**, a
 
 | Group | Scope id | Allows |
 |---|---|---|
-| Read | `projects.list` | List projects |
+| Read | `projects.list` | List a workspace's projects |
 | Read | `services.list` | List a project's services |
 | Read | `logs.read` | Read a service's recent logs |
 | Operate | `env.start` | Start an environment |
@@ -41,17 +41,21 @@ Scopes are granular operation ids, grouped in the UI as **Read**, **Operate**, a
 | Operate | `env.refresh` | Regenerate compose + redeploy |
 | Operate | `env.inactivate` | Tear down (compose `down`) |
 | Operate | `env.backup` | Back up an environment |
+| Pipeline | `pipeline.list` | List a project's pipelines |
 | Pipeline | `pipeline.run` | Trigger a pipeline run |
 
 ## Endpoints
 
+All resources are nested under their workspace and project, mirroring how they're
+organized: `workspaces/{workspace}/projects/{project}/…`.
+
 ### List projects
 ```
-GET /api/v1/projects
+GET /api/v1/workspaces/{workspace}/projects
 ```
-Returns the projects the key may access, each with its environments.
+Returns the projects in the workspace the key may access, each with its environments.
 ```bash
-curl -H "Authorization: Bearer $RIGGER_KEY" https://rigger.example.com/api/v1/projects
+curl -H "Authorization: Bearer $RIGGER_KEY" https://rigger.example.com/api/v1/workspaces/mcl/projects
 ```
 ```json
 [{ "workspace": "mcl", "project": "ahb", "type": "custom", "envs": ["prod"] }]
@@ -59,7 +63,7 @@ curl -H "Authorization: Bearer $RIGGER_KEY" https://rigger.example.com/api/v1/pr
 
 ### List services
 ```
-GET /api/v1/projects/{workspace}/{project}/envs/{env}/services
+GET /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/services
 ```
 ```json
 { "workspace": "mcl", "project": "ahb",
@@ -68,7 +72,7 @@ GET /api/v1/projects/{workspace}/{project}/envs/{env}/services
 
 ### Read service logs
 ```
-GET /api/v1/projects/{workspace}/{project}/envs/{env}/services/{service}/logs?tail=200
+GET /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/services/{service}/logs?tail=200
 ```
 `tail` defaults to 200, capped at 2000. Returns a bounded, non-streaming snapshot.
 ```json
@@ -77,21 +81,31 @@ GET /api/v1/projects/{workspace}/{project}/envs/{env}/services/{service}/logs?ta
 
 ### Lifecycle actions
 ```
-POST /api/v1/projects/{workspace}/{project}/envs/{env}/actions/{action}
+POST /api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/{action}
 ```
 `{action}` ∈ `start`, `stop`, `restart`, `refresh`, `inactivate`, `backup`. Runs
-synchronously and returns the captured output.
+synchronously and returns the captured output. Actions target one **environment**.
 ```bash
 curl -X POST -H "Authorization: Bearer $RIGGER_KEY" \
-  https://rigger.example.com/api/v1/projects/mcl/ahb/envs/prod/actions/restart
+  https://rigger.example.com/api/v1/workspaces/mcl/projects/ahb/envs/prod/actions/restart
 ```
 ```json
 { "status": "ok", "action": "restart", "env": "prod", "output": "…" }
 ```
 
+### List pipelines
+```
+GET /api/v1/workspaces/{workspace}/projects/{project}/pipelines
+```
+Use this to find the pipeline `id` for the run endpoint.
+```json
+{ "workspace": "mcl", "project": "ahb",
+  "pipelines": [{ "id": 42, "name": "release", "enabled": true, "stages": 4 }] }
+```
+
 ### Trigger a pipeline
 ```
-POST /api/v1/projects/{workspace}/{project}/pipelines/{id}/run
+POST /api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/run
 ```
 Starts the run in the background and returns its id (`202 Accepted`).
 ```json

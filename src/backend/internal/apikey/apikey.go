@@ -30,6 +30,7 @@ const (
 	OpEnvRefresh    = "env.refresh"    // POST .../actions/refresh
 	OpEnvInactivate = "env.inactivate" // POST .../actions/inactivate (compose down)
 	OpEnvBackup     = "env.backup"     // POST .../actions/backup
+	OpPipelineList  = "pipeline.list"  // GET  .../pipelines
 	OpPipelineRun   = "pipeline.run"   // POST .../pipelines/{id}/run
 )
 
@@ -55,20 +56,21 @@ type OpInfo struct {
 // generator. Adding an endpoint = add its op here + require it in the handler.
 var Groups = []Group{
 	{ID: "read", Label: "Read", Desc: "List projects/services and read logs.", Ops: []OpInfo{
-		{OpProjectsList, "List projects", "GET", "/api/v1/projects"},
-		{OpServicesList, "List services", "GET", "/api/v1/projects/{workspace}/{project}/envs/{env}/services"},
-		{OpLogsRead, "Read service logs", "GET", "/api/v1/projects/{workspace}/{project}/envs/{env}/services/{service}/logs"},
+		{OpProjectsList, "List projects", "GET", "/api/v1/workspaces/{workspace}/projects"},
+		{OpServicesList, "List services", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/services"},
+		{OpLogsRead, "Read service logs", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/services/{service}/logs"},
 	}},
 	{ID: "operate", Label: "Operate", Desc: "Lifecycle actions on an environment.", Ops: []OpInfo{
-		{OpEnvStart, "Start", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/start"},
-		{OpEnvStop, "Stop", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/stop"},
-		{OpEnvRestart, "Restart", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/restart"},
-		{OpEnvRefresh, "Refresh", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/refresh"},
-		{OpEnvInactivate, "Inactivate (down)", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/inactivate"},
-		{OpEnvBackup, "Backup", "POST", "/api/v1/projects/{workspace}/{project}/envs/{env}/actions/backup"},
+		{OpEnvStart, "Start", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/start"},
+		{OpEnvStop, "Stop", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/stop"},
+		{OpEnvRestart, "Restart", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/restart"},
+		{OpEnvRefresh, "Refresh", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/refresh"},
+		{OpEnvInactivate, "Inactivate (down)", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/inactivate"},
+		{OpEnvBackup, "Backup", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/envs/{env}/actions/backup"},
 	}},
-	{ID: "pipeline", Label: "Pipeline", Desc: "Trigger deployment pipelines.", Ops: []OpInfo{
-		{OpPipelineRun, "Trigger a pipeline run", "POST", "/api/v1/projects/{workspace}/{project}/pipelines/{id}/run"},
+	{ID: "pipeline", Label: "Pipeline", Desc: "List and trigger deployment pipelines.", Ops: []OpInfo{
+		{OpPipelineList, "List pipelines", "GET", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines"},
+		{OpPipelineRun, "Trigger a pipeline run", "POST", "/api/v1/workspaces/{workspace}/projects/{project}/pipelines/{id}/run"},
 	}},
 }
 

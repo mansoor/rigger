@@ -99,12 +99,48 @@ func apiErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// apiGateList authorizes a LISTING request that has no single concrete project (e.g.
+// list projects/pipelines in a workspace). It checks enabled/expiry + scope + (for a
+// workspace-confined key) that ws matches, then rate-limits on the workspace bucket.
+// The handler still filters results per-project via key.CanAccess.
+func (h *Handler) apiGateList(w http.ResponseWriter, r *http.Request, op, ws string) (*apikey.Key, bool) {
+	key := apiKeyFromCtx(r)
+	if key == nil {
+		apiErr(w, http.StatusUnauthorized, "unauthenticated")
+		return nil, false
+	}
+	now := time.Now()
+	if !key.Enabled {
+		apiErr(w, http.StatusUnauthorized, apikey.ErrDisabled.Error())
+		return nil, false
+	}
+	if key.ExpiresAt > 0 && now.Unix() >= key.ExpiresAt {
+		apiErr(w, http.StatusUnauthorized, apikey.ErrExpired.Error())
+		return nil, false
+	}
+	if !key.HasScope(op) {
+		apiErr(w, http.StatusForbidden, apikey.ErrScope.Error())
+		return nil, false
+	}
+	if key.Workspace != "" && key.Workspace != ws {
+		apiErr(w, http.StatusForbidden, apikey.ErrProject.Error())
+		return nil, false
+	}
+	if !h.apiRL.Allow(key.ID, ws, key.RateLimit, now) {
+		w.Header().Set("Retry-After", "60")
+		apiErr(w, http.StatusTooManyRequests, "rate limit exceeded (max "+strconv.Itoa(key.RateLimit)+" req/min)")
+		return nil, false
+	}
+	return key, true
+}
+
 // ── Read endpoints ─────────────────────────────────────────────────────────────────
 
-// ListProjectsV1: GET /api/v1/projects — every project the key may access, with its
-// environments. "all"-access keys see all projects; "specific" keys see only granted.
+// ListProjectsV1: GET /api/v1/workspaces/{workspace}/projects — the projects in this
+// workspace the key may access (filtered by its project-access list).
 func (h *Handler) ListProjectsV1(w http.ResponseWriter, r *http.Request) {
-	key, ok := h.apiGate(w, r, apikey.OpProjectsList, "", "")
+	ws := r.PathValue("workspace")
+	key, ok := h.apiGateList(w, r, apikey.OpProjectsList, ws)
 	if !ok {
 		return
 	}
@@ -115,19 +151,16 @@ func (h *Handler) ListProjectsV1(w http.ResponseWriter, r *http.Request) {
 		Envs      []string `json:"envs"`
 	}
 	out := []projOut{}
-	wss, _ := workspace.ListWorkspaces(h.workspacesDir)
-	for _, ws := range wss {
-		projs, _ := workspace.ListProjects(h.workspacesDir, ws.Key)
-		for _, p := range projs {
-			if !key.CanAccess(ws.Key, p.Name) {
-				continue
-			}
-			cfg := h.readProjectConfig(ws.Key, p.Name)
-			out = append(out, projOut{
-				Workspace: ws.Key, Project: p.Name,
-				Type: cfg.Project.Type, Envs: cfg.envNames(),
-			})
+	projs, _ := workspace.ListProjects(h.workspacesDir, ws)
+	for _, p := range projs {
+		if !key.CanAccess(ws, p.Name) {
+			continue
 		}
+		cfg := h.readProjectConfig(ws, p.Name)
+		out = append(out, projOut{
+			Workspace: ws, Project: p.Name,
+			Type: cfg.Project.Type, Envs: cfg.envNames(),
+		})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -240,6 +273,31 @@ func (h *Handler) RunActionV1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "action": action, "env": env, "output": buf.String()})
+}
+
+// ListPipelinesV1: GET .../projects/{project}/pipelines — the project's pipelines, so a
+// client can discover the id to pass to the run endpoint.
+func (h *Handler) ListPipelinesV1(w http.ResponseWriter, r *http.Request) {
+	ws, proj := r.PathValue("workspace"), r.PathValue("project")
+	if _, ok := h.apiGate(w, r, apikey.OpPipelineList, ws, proj); !ok {
+		return
+	}
+	pls, err := pipelines.List(h.db, ws, proj)
+	if err != nil {
+		apiErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	type plOut struct {
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+		Stages  int    `json:"stages"`
+	}
+	out := []plOut{}
+	for _, p := range pls {
+		out = append(out, plOut{ID: p.ID, Name: p.Name, Enabled: p.Enabled, Stages: len(p.Stages)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspace": ws, "project": proj, "pipelines": out})
 }
 
 // RunPipelineV1: POST .../pipelines/{id}/run — triggers a pipeline run in the background
