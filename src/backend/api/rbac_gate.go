@@ -55,6 +55,10 @@ func wsMinRole(method, seg3, seg4, seg5 string) string {
 			return auth.RoleViewer // members may view the pool (e.g. to pick on deploy)
 		}
 		return auth.RoleAdmin
+	case "api-keys": // listing + minting keys is sensitive — workspace admin only
+		return auth.RoleAdmin
+	case "api-key-scopes": // static scope catalog for the create form
+		return auth.RoleViewer
 	case "projects":
 		if seg4 == "" || isGET {
 			return auth.RoleViewer

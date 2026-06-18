@@ -7,6 +7,7 @@ import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
 import AccessRequestsInbox from '../components/AccessRequestsInbox'
+import ApiKeysManager from '../components/ApiKeysManager'
 import VerticalTabs from '../components/VerticalTabs'
 import RoleHelp from '../components/RoleHelp'
 import {
@@ -32,6 +33,7 @@ const TABS = [
   { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
   { id: 'notifications',  label: 'Notifications',    icon: '📣' },
   { id: 'alerts',         label: 'Alert Rules',      icon: '🚨' },
+  { id: 'api-keys',       label: 'API Keys',         icon: '🔑' },
   { group: 'Workspace' },
   { id: 'danger',         label: 'Danger Zone',      icon: '⚠', danger: true },
 ]
@@ -80,6 +82,7 @@ export default function ManageWorkspacePage() {
           {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
           {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
           {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
+          {tab === 'api-keys'       && <ApiKeysManager workspace={workspace} />}
           {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
         </VerticalTabs>
       </div>

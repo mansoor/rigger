@@ -12,9 +12,9 @@ import (
 func Create(d *db.DB, hash string, k Key) (int64, error) {
 	scopes, _ := json.Marshal(k.Scopes)
 	res, err := d.Exec(
-		`INSERT INTO api_keys (name, key_hash, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, expires_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		k.Name, hash, k.KeyPrefix, string(scopes), k.ProjectAccess, k.RateLimit,
+		`INSERT INTO api_keys (name, workspace, key_hash, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, expires_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		k.Name, k.Workspace, hash, k.KeyPrefix, string(scopes), k.ProjectAccess, k.RateLimit,
 		boolToInt(k.Enabled), k.CreatedBy, k.CreatedAt, k.ExpiresAt,
 	)
 	if err != nil {
@@ -29,13 +29,25 @@ func Create(d *db.DB, hash string, k Key) (int64, error) {
 	return id, nil
 }
 
-// List returns all keys (newest first), each with its specific-project grants. Never
-// includes the raw token (it isn't stored).
-func List(d *db.DB) ([]Key, error) {
-	rows, err := d.Query(
-		`SELECT id, name, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, last_used_at, expires_at
-		 FROM api_keys ORDER BY id DESC`,
-	)
+// List returns ALL keys (global + every workspace's) newest first — the admin view.
+func List(d *db.DB) ([]Key, error) { return query(d, "") }
+
+// ListForWorkspace returns only the keys confined to one workspace — the workspace-admin
+// view (never the global admin keys).
+func ListForWorkspace(d *db.DB, ws string) ([]Key, error) { return query(d, ws) }
+
+// query lists keys, optionally filtered to a workspace ("" = all). Never includes the
+// raw token (it isn't stored).
+func query(d *db.DB, ws string) ([]Key, error) {
+	q := `SELECT id, name, workspace, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, last_used_at, expires_at
+		 FROM api_keys`
+	args := []any{}
+	if ws != "" {
+		q += ` WHERE workspace = ?`
+		args = append(args, ws)
+	}
+	q += ` ORDER BY id DESC`
+	rows, err := d.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +71,24 @@ func List(d *db.DB) ([]Key, error) {
 	return keys, nil
 }
 
+// Get loads one key by id (for ownership checks). Returns ErrNotFound if absent.
+func Get(d *db.DB, id int64) (*Key, error) {
+	row := d.QueryRow(
+		`SELECT id, name, workspace, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, last_used_at, expires_at
+		 FROM api_keys WHERE id = ?`, id,
+	)
+	k, err := scanKey(row)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	return k, nil
+}
+
 // GetByHash resolves a presented (hashed) key for the auth middleware. Returns
 // ErrNotFound if no row matches. Loads specific-project grants so Authorize can run.
 func GetByHash(d *db.DB, hash string) (*Key, error) {
 	row := d.QueryRow(
-		`SELECT id, name, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, last_used_at, expires_at
+		`SELECT id, name, workspace, key_prefix, scopes, project_access, rate_limit, enabled, created_by, created_at, last_used_at, expires_at
 		 FROM api_keys WHERE key_hash = ?`, hash,
 	)
 	k, err := scanKey(row)
@@ -120,7 +145,7 @@ func scanKey(s scanner) (*Key, error) {
 	var k Key
 	var scopes string
 	var enabled int
-	if err := s.Scan(&k.ID, &k.Name, &k.KeyPrefix, &scopes, &k.ProjectAccess, &k.RateLimit,
+	if err := s.Scan(&k.ID, &k.Name, &k.Workspace, &k.KeyPrefix, &scopes, &k.ProjectAccess, &k.RateLimit,
 		&enabled, &k.CreatedBy, &k.CreatedAt, &k.LastUsedAt, &k.ExpiresAt); err != nil {
 		return nil, err
 	}

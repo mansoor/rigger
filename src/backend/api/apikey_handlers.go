@@ -2,12 +2,14 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/apikey"
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // Admin-only management of API keys (the external /api/v1 credentials). Mounted under
@@ -132,6 +134,167 @@ func (h *Handler) DeleteApiKey(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(apiKeyIDFromPath(r.URL.Path), 10, 64)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if err := apikey.Delete(h.db, id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ── Workspace-scoped API keys ──────────────────────────────────────────────────
+//
+// Mounted under /api/workspaces/{workspace}/api-keys and gated to the workspace ADMIN
+// role by GateWorkspace (wsMinRole "api-keys"). These keys are CONFINED to the
+// workspace (api_keys.workspace = the key); they can never reach another workspace,
+// regardless of their project-access setting. A workspace admin manages only its own
+// keys (never the global admin keys).
+
+// ListWorkspaceApiKeys: GET /api/workspaces/{workspace}/api-keys.
+func (h *Handler) ListWorkspaceApiKeys(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	keys, err := apikey.ListForWorkspace(h.db, ws)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+// CreateWorkspaceApiKey: POST /api/workspaces/{workspace}/api-keys. Identical to the
+// admin create, but the key is forced to this workspace and any specific projects must
+// belong to it.
+func (h *Handler) CreateWorkspaceApiKey(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	if _, err := os.Stat(wspath.WorkspaceMeta(h.workspacesDir, ws)); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "workspace not found"})
+		return
+	}
+	var body struct {
+		Name          string              `json:"name"`
+		Scopes        []string            `json:"scopes"`
+		ProjectAccess string              `json:"project_access"`
+		Projects      []apikey.ProjectRef `json:"projects"`
+		RateLimit     int                 `json:"rate_limit"`
+		ExpiresInDays int                 `json:"expires_in_days"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if strings.TrimSpace(body.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if len(body.Scopes) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "select at least one scope"})
+		return
+	}
+	for _, s := range body.Scopes {
+		if !apikey.ValidOp(s) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown scope: " + s})
+			return
+		}
+	}
+	if body.ProjectAccess != "specific" {
+		body.ProjectAccess = "all"
+	}
+	// Confine to this workspace: every specific project must be in it (defence in depth —
+	// the UI only offers this workspace's projects).
+	for _, p := range body.Projects {
+		if p.Workspace != ws {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "projects must belong to this workspace"})
+			return
+		}
+	}
+	if body.ProjectAccess == "specific" && len(body.Projects) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "select at least one project for specific access"})
+		return
+	}
+	if body.RateLimit < 0 {
+		body.RateLimit = 0
+	}
+
+	raw, hash, prefix, err := apikey.Generate()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	createdBy := "admin"
+	if claims := auth.ClaimsFromContext(r.Context()); claims != nil {
+		createdBy = claims.Username
+	}
+	var expiresAt int64
+	if body.ExpiresInDays > 0 {
+		expiresAt = time.Now().Add(time.Duration(body.ExpiresInDays) * 24 * time.Hour).Unix()
+	}
+	k := apikey.Key{
+		Name: strings.TrimSpace(body.Name), Workspace: ws, KeyPrefix: prefix, Scopes: body.Scopes,
+		ProjectAccess: body.ProjectAccess, Projects: body.Projects, RateLimit: body.RateLimit,
+		Enabled: true, CreatedBy: createdBy, CreatedAt: time.Now().Unix(), ExpiresAt: expiresAt,
+	}
+	id, err := apikey.Create(h.db, hash, k)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	k.ID = id
+	k.Token = raw
+	writeJSON(w, http.StatusCreated, k)
+}
+
+// wsOwnsKey loads a key and confirms it belongs to ws (so a workspace admin can't touch
+// global keys or another workspace's). Returns nil + writes the response on failure.
+func (h *Handler) wsOwnsKey(w http.ResponseWriter, ws string) func(int64) *apikey.Key {
+	return func(id int64) *apikey.Key {
+		k, err := apikey.Get(h.db, id)
+		if err != nil || k == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "API key not found"})
+			return nil
+		}
+		if k.Workspace != ws {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this key isn't managed by this workspace"})
+			return nil
+		}
+		return k
+	}
+}
+
+// UpdateWorkspaceApiKey: PUT /api/workspaces/{workspace}/api-keys/{keyid} — enable/disable.
+func (h *Handler) UpdateWorkspaceApiKey(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := strconv.ParseInt(r.PathValue("keyid"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if h.wsOwnsKey(w, ws)(id) == nil {
+		return
+	}
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled (bool) is required"})
+		return
+	}
+	if err := apikey.SetEnabled(h.db, id, *body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"enabled": *body.Enabled})
+}
+
+// DeleteWorkspaceApiKey: DELETE /api/workspaces/{workspace}/api-keys/{keyid}.
+func (h *Handler) DeleteWorkspaceApiKey(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := strconv.ParseInt(r.PathValue("keyid"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if h.wsOwnsKey(w, ws)(id) == nil {
 		return
 	}
 	if err := apikey.Delete(h.db, id); err != nil {

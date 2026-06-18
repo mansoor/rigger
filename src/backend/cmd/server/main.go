@@ -339,6 +339,27 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "api-key-scopes":
+			// Scope catalog for the workspace API-key create form (static metadata).
+			handler.GetApiKeyScopes(w, r)
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "api-keys":
+			// Workspace-scoped API keys (workspace admin only — gated by wsMinRole).
+			// /api/workspaces/{ws}/api-keys[/{id}]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("keyid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceApiKeys(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceApiKey(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceApiKey(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceApiKey(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "backup-targets":
 			// Workspace-scoped Backup Targets (Phase 3).
 			// /api/workspaces/{ws}/backup-targets[/{id}[/test]]

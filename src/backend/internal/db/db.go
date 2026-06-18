@@ -503,6 +503,7 @@ func (d *DB) migrate() error {
 	d.addColumn("users", "email_verified INTEGER NOT NULL DEFAULT 0")             // Phase 5.1b
 	d.addColumn("users", "status TEXT NOT NULL DEFAULT 'active'")                 // Phase 5.1b: 'invited' | 'active'
 	d.addColumn("users", "appearance_prefs TEXT NOT NULL DEFAULT ''")             // per-user theme/typography override (W7)
+	d.addColumn("api_keys", "workspace TEXT NOT NULL DEFAULT ''")                 // ''=global (admin); else confined to that workspace
 	// Unique email among accounts that have one (empty allowed for legacy/pre-email rows).
 	d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email <> ''`) //nolint:errcheck
 	// Drop the legacy UNIQUE constraint on users.username. Email is now the login

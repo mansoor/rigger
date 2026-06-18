@@ -91,6 +91,7 @@ func ValidOp(op string) bool { return validOps[op] }
 type Key struct {
 	ID            int64        `json:"id"`
 	Name          string       `json:"name"`
+	Workspace     string       `json:"workspace,omitempty"`    // ""=global (admin-minted); else confined to this workspace
 	KeyPrefix     string       `json:"key_prefix"`             // non-secret display snippet, e.g. "rgk_ab12…"
 	Scopes        []string     `json:"scopes"`                 // granular op ids
 	ProjectAccess string       `json:"project_access"`         // "all" | "specific"
@@ -154,9 +155,13 @@ func (k *Key) HasScope(op string) bool {
 	return false
 }
 
-// CanAccess reports whether the key may touch (workspace, project). "all"-access keys
-// always can; "specific" keys must list the pair.
+// CanAccess reports whether the key may touch (workspace, project). A workspace-confined
+// key (Workspace != "") can only ever touch its own workspace. Within that, "all"-access
+// keys reach any project; "specific" keys must list the pair.
 func (k *Key) CanAccess(workspace, project string) bool {
+	if k.Workspace != "" && k.Workspace != workspace {
+		return false
+	}
 	if k.ProjectAccess != "specific" {
 		return true
 	}

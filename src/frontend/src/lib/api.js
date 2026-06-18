@@ -342,6 +342,13 @@ export const createApiKey      = (body)       => api.post('/settings/api-keys', 
 export const setApiKeyEnabled  = (id, enabled) => api.put(`/settings/api-keys/${id}`, { enabled }).then(r => r.data)
 export const deleteApiKey      = (id)         => api.delete(`/settings/api-keys/${id}`).then(r => r.data)
 
+// Workspace-scoped API keys (workspace admin only) — confined to that workspace.
+export const fetchWorkspaceApiKeyScopes = (ws)        => api.get(`/workspaces/${ws}/api-key-scopes`).then(r => r.data)
+export const fetchWorkspaceApiKeys      = (ws)        => api.get(`/workspaces/${ws}/api-keys`).then(r => r.data)
+export const createWorkspaceApiKey      = (ws, body)  => api.post(`/workspaces/${ws}/api-keys`, body).then(r => r.data)
+export const setWorkspaceApiKeyEnabled  = (ws, id, enabled) => api.put(`/workspaces/${ws}/api-keys/${id}`, { enabled }).then(r => r.data)
+export const deleteWorkspaceApiKey       = (ws, id)   => api.delete(`/workspaces/${ws}/api-keys/${id}`).then(r => r.data)
+
 // Admin (global Settings) view — every target; global ones carry their `grants`.
 export const fetchBackupTargets   = ()          => api.get('/settings/backup-targets').then(r => r.data)
 export const createBackupTarget   = (body)      => api.post('/settings/backup-targets', body).then(r => r.data)
