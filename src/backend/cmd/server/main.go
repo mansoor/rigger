@@ -727,6 +727,16 @@ func main() {
 		}
 	}))))
 
+	// ── External REST API (/api/v1) — authenticated by API keys, NOT the UI's JWT.
+	// Each route is wrapped in APIKeyMiddleware (resolves the key); the handlers enforce
+	// the per-operation scope + project access + rate limit. See internal/apikey.
+	v1 := func(fn http.HandlerFunc) http.Handler { return handler.APIKeyMiddleware(fn) }
+	mux.Handle("GET /api/v1/projects", v1(handler.ListProjectsV1))
+	mux.Handle("GET /api/v1/projects/{workspace}/{project}/envs/{env}/services", v1(handler.ListServicesV1))
+	mux.Handle("GET /api/v1/projects/{workspace}/{project}/envs/{env}/services/{service}/logs", v1(handler.GetServiceLogsV1))
+	mux.Handle("POST /api/v1/projects/{workspace}/{project}/envs/{env}/actions/{action}", v1(handler.RunActionV1))
+	mux.Handle("POST /api/v1/projects/{workspace}/{project}/pipelines/{id}/run", v1(handler.RunPipelineV1))
+
 	// Migration jobs (Phase 7) — poll async workspace/env host moves
 	mux.Handle("/api/migration-jobs/", authSvc.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {

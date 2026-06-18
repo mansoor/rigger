@@ -39,6 +39,7 @@ var allowedCommands = map[string]bool{
 	"update":  true,
 	"ps":      true,
 	"logs":    true,
+	"logtail": true, // bounded, non-following logs for the /api/v1 REST API
 	"refresh": true,
 	"backup":  true,
 	"restore": true,

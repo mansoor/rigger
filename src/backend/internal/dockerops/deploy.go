@@ -29,6 +29,7 @@ var deployCommands = map[string]bool{
 	"update":  true,
 	"ps":      true,
 	"logs":    true,
+	"logtail": true, // bounded, non-following logs (used by the /api/v1 REST API)
 	"refresh": true,
 	"test":    true, // Phase 9: `compose exec` inside a service container
 }
@@ -189,6 +190,8 @@ func Run(opts Options) (bool, error) {
 		return true, r.ps()
 	case "logs":
 		return true, r.logs()
+	case "logtail":
+		return true, r.logTail()
 	case "refresh":
 		return true, r.refresh()
 	case "test":
@@ -394,6 +397,25 @@ func (r *runner) logs() error {
 		return r.compose("logs", "-f")
 	}
 	return r.compose("logs", "-f", r.resolveSvc(svc))
+}
+
+// logTail returns a bounded snapshot of recent logs and exits (no -f). Extra[0] is the
+// optional service (short name; "" = all services), Extra[1] the tail line count
+// (defaults to 200). Used by the REST API, where a streaming/following read would hang
+// the request.
+func (r *runner) logTail() error {
+	svc, tail := "", "200"
+	if len(r.opts.Extra) > 0 {
+		svc = r.opts.Extra[0]
+	}
+	if len(r.opts.Extra) > 1 && r.opts.Extra[1] != "" {
+		tail = r.opts.Extra[1]
+	}
+	args := []string{"logs", "--no-color", "--no-log-prefix", "--tail", tail}
+	if svc != "" {
+		args = append(args, r.resolveSvc(svc))
+	}
+	return r.compose(args...)
 }
 
 func (r *runner) refresh() error {

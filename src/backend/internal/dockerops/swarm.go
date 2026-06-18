@@ -48,6 +48,8 @@ func (s *swarmRunner) run() (bool, error) {
 		return true, s.ps()
 	case "logs":
 		return true, s.logs()
+	case "logtail":
+		return true, s.logTail()
 	case "restart":
 		return true, s.restart()
 	case "update":
@@ -169,6 +171,23 @@ func (s *swarmRunner) ps() error {
 		printImageUpdates(s.opts.Stdout, s.opts.WorkspacesDir, s.opts.Workspace, s.opts.Project, s.opts.Env)
 	}
 	return nil
+}
+
+// logTail returns a bounded, non-following log snapshot for one swarm service and
+// exits. Extra[0] = service short name (required for swarm; no `stack logs` exists),
+// Extra[1] = tail count (default 200). Used by the REST API.
+func (s *swarmRunner) logTail() error {
+	svc, tail := "", "200"
+	if len(s.opts.Extra) > 0 {
+		svc = s.opts.Extra[0]
+	}
+	if len(s.opts.Extra) > 1 && s.opts.Extra[1] != "" {
+		tail = s.opts.Extra[1]
+	}
+	if svc == "" {
+		return fmt.Errorf("a service name is required to read logs on a Swarm environment")
+	}
+	return s.docker("service", "logs", "--no-task-ids", "--tail", tail, s.resolveSvc(svc))
 }
 
 func (s *swarmRunner) logs() error {

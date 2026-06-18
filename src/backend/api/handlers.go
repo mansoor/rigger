@@ -19,6 +19,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/acme"
 	"github.com/mansoor/rigger/ui/internal/actionruns"
 	"github.com/mansoor/rigger/ui/internal/alerts"
+	"github.com/mansoor/rigger/ui/internal/apikey"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
@@ -102,6 +103,10 @@ type Handler struct {
 	// background goroutine; guarded by runMu.
 	runMu      sync.Mutex
 	runCancels map[int64]context.CancelFunc
+
+	// apiRL enforces the per-API-key, per-project request rate limit for the /api/v1
+	// surface (in-memory, process-local — see apikey.RateLimiter).
+	apiRL *apikey.RateLimiter
 }
 
 func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remoteWorkspacesDir, templatesDir, dataDir string, imgCache *imagecheck.Cache, alertBroker *alerts.Broker, notifier *notify.Dispatcher, jwtSecret string) *Handler {
@@ -121,6 +126,7 @@ func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remot
 		runCancels:    map[int64]context.CancelFunc{},
 		acmeIssuer:    acme.New(nil), // local docker daemon (lego runs on the rigger host)
 		acmeCerts:     acme.NewStore(d),
+		apiRL:         apikey.NewRateLimiter(),
 	}
 }
 
