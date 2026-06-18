@@ -287,6 +287,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
   const [volumeRows, setVolumeRows] = useState(() => imgToVolumeRows(img))
   const [argRows,    setArgRows]    = useState(() => imgToArgRows(img))
   const [linkRows,   setLinkRows]   = useState(() => imgToLinkRows(img))
+  const [envRows,    setEnvRows]    = useState(() => Object.entries(img.env_vars || {}).map(([k, v]) => ({ key: k, val: String(v) })))
   // Explicit "override default command" toggle. Kept as local UI state so the input
   // stays revealed while the field is momentarily empty (before the user types).
   const [cmdOverride, setCmdOverride] = useState(() => !!img.command)
@@ -306,6 +307,14 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
   function syncLinks(rows) {
     setLinkRows(rows)
     onUpdate(idx, { ...img, links: linkRowsToArray(rows) })
+  }
+  // Per-service env vars → object, dropping blank keys. Inline environment: overrides
+  // the flat .env for this service only (Compose: environment wins over env_file).
+  function syncEnv(rows) {
+    setEnvRows(rows)
+    const obj = {}
+    for (const r of rows) { const k = r.key.trim(); if (k) obj[k] = r.val }
+    onUpdate(idx, { ...img, env_vars: obj })
   }
   function upd(field, val) {
     onUpdate(idx, { ...img, [field]: val })
@@ -687,6 +696,39 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           <button type="button" onClick={() => syncLinks([...linkRows, { env_var:'', service:'', port:'', path:'', scheme:'' }])}
             className="mt-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add service link</button>
         </div>)}
+      </div>
+
+      {/* Environment variables — inline per-service env, emitted into this service's
+          environment: block. Overrides the shared .env for matching keys on this
+          service only (Compose: environment wins over env_file). For values that must
+          differ per environment, use ${KEY} here + a value in the Environment Variables tab. */}
+      <div>
+        <Label>Environment variables</Label>
+        <p className="text-xs text-content-subtle mb-2">
+          Set on <strong className="text-content-muted">this service only</strong> — overrides the shared{' '}
+          <code className="font-mono text-xs">.env</code> for matching keys. Use a literal for a project-wide
+          constant, or <code className="font-mono text-xs">${'{KEY}'}</code> here plus a per-environment value
+          in the <strong className="text-content-muted">Environment Variables</strong> tab when the value must
+          differ by environment.
+        </p>
+        <div className="space-y-1.5">
+          {envRows.map((row, ri) => (
+            <div key={ri} className="flex items-center gap-2">
+              <input type="text" value={row.key}
+                onChange={e => syncEnv(envRows.map((x,j)=>j===ri?{...x,key:e.target.value}:x))}
+                placeholder="LOG_LEVEL" className={`flex-1 ${monoInput}`} />
+              <span className="text-content-subtle font-bold shrink-0">=</span>
+              <input type="text" value={row.val}
+                onChange={e => syncEnv(envRows.map((x,j)=>j===ri?{...x,val:e.target.value}:x))}
+                placeholder="debug   (or ${LOG_LEVEL})" className={`flex-[2] ${monoInput}`} />
+              <button type="button" title="Remove variable"
+                onClick={() => syncEnv(envRows.filter((_,j)=>j!==ri))}
+                className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => syncEnv([...envRows, { key:'', val:'' }])}
+            className="mt-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add variable</button>
+        </div>
       </div>
 
       {/* Advanced — extra_compose YAML */}
