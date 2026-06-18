@@ -145,6 +145,7 @@ func main() {
 	handler.StartHousekeepingScheduler(3)
 	handler.MigrateBackupConfig()  // one-time: legacy config.backup → per-env schedules
 	handler.StartBackupScheduler() // Phase 11 — per-env interval-based backup schedules
+	handler.StartPreviewReaper()   // tear down preview envs past their TTL (missed-close safety net)
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
