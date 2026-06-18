@@ -1305,6 +1305,8 @@ func (b *Bridge) Run(opts RunOptions) error {
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
 			AutoURLMode:   settings.AutoURLMode(b.db),
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
+			DNSProvider:   settings.AppsDNSProvider(b.db),
+			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}

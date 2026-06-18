@@ -36,6 +36,12 @@ type Options struct {
 	// to resolve ${ROUTE_URL} for an auto-routed env. See composegen.RouteOpts.
 	AutoURLMode string
 	AutoURLHost string
+	// DNSProvider / OverrideCert complete the routing inputs so the compose regenerated
+	// after a build carries the SAME Traefik labels as deploy/refresh (DNS-01 wildcard
+	// signal + per-env override cert). Omitting them produced label-incomplete composes
+	// that 404'd until a manual Refresh regenerated them. See composegen.RouteOpts.
+	DNSProvider  string
+	OverrideCert bool
 	// TemplatesDir is the toolkit's templates/ dir, used to scaffold a blueprint
 	// Dockerfile into a source build context that ships source but no Dockerfile.
 	TemplatesDir string

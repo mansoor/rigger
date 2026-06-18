@@ -64,7 +64,17 @@ func (o Options) advancePointers(cfg *wsconfig.Config, builds []wsconfig.Service
 		return fmt.Errorf("read config: %w", err)
 	}
 	envContent, _ := os.ReadFile(envPath)
-	content, err := composegen.GenerateRouted(cfgBytes, o.Env, composegen.RouteOpts{BaseDomain: o.BaseDomain, EnvFile: string(envContent)})
+	// Pass the FULL routing inputs (not just BaseDomain) so the regenerated compose
+	// carries the same Traefik labels deploy/refresh would — otherwise a magic-DNS or
+	// override-cert env gets a label-incomplete compose and 404s until a manual Refresh.
+	content, err := composegen.GenerateRouted(cfgBytes, o.Env, composegen.RouteOpts{
+		BaseDomain:   o.BaseDomain,
+		AutoURLMode:  o.AutoURLMode,
+		AutoURLHost:  o.AutoURLHost,
+		DNSProvider:  o.DNSProvider,
+		OverrideCert: o.OverrideCert,
+		EnvFile:      string(envContent),
+	})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}
