@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -14,6 +15,13 @@ import (
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/wspath"
+)
+
+// Sentinel errors from cloneEnv so HTTP callers can map them to status codes
+// (the preview controller treats them as ordinary errors).
+var (
+	errCloneSrcNotFound = errors.New("source environment not found")
+	errCloneDstExists   = errors.New("environment already exists")
 )
 
 // copyEnvNameRe validates a new environment name: lowercase letter first, then
@@ -66,92 +74,15 @@ func (h *Handler) CopyEnvironment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfgPath := wspath.ConfigPath(h.workspacesDir, ws, name)
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
-		return
-	}
-
-	// Edit config.json as raw JSON so every field on the OTHER envs (and the new
-	// one) is preserved verbatim — round-tripping through a typed struct would drop
-	// fields the lightweight model doesn't know about.
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config parse: " + err.Error()})
-		return
-	}
-	var envs map[string]json.RawMessage
-	if len(root["environments"]) > 0 {
-		json.Unmarshal(root["environments"], &envs) //nolint:errcheck
-	}
-	if envs == nil {
-		envs = map[string]json.RawMessage{}
-	}
-	srcRaw, ok := envs[src]
-	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("source environment %q not found", src)})
-		return
-	}
-	if _, exists := envs[newEnv]; exists {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("environment %q already exists", newEnv)})
-		return
-	}
-
-	// Clone the source block; blank the domain, and optionally reset secret-flagged
-	// app env vars so bootstrap generates fresh values for them.
-	var envMap map[string]any
-	if err := json.Unmarshal(srcRaw, &envMap); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "env parse: " + err.Error()})
-		return
-	}
-	envMap["domain"] = ""
-	if body.RegenerateSecrets {
-		if vars, ok := envMap["env_vars"].(map[string]any); ok {
-			for k, v := range vars {
-				if s, ok := v.(string); ok && copyEnvSecretKey(k) && !envgen.IsPlaceholder(s) {
-					vars[k] = "CHANGE_ME"
-				}
-			}
+	if err := h.cloneEnv(ws, name, src, newEnv, body.RegenerateSecrets, ""); err != nil {
+		switch {
+		case errors.Is(err, errCloneSrcNotFound):
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		case errors.Is(err, errCloneDstExists):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-	}
-	cloned, err := json.Marshal(envMap)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "env marshal: " + err.Error()})
-		return
-	}
-	envs[newEnv] = cloned
-
-	envsOut, err := json.Marshal(envs)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "environments marshal: " + err.Error()})
-		return
-	}
-	root["environments"] = envsOut
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "config marshal: " + err.Error()})
-		return
-	}
-	if err := os.WriteFile(cfgPath, out, 0644); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write config: " + err.Error()})
-		return
-	}
-
-	// Copy bind-mount config files from the source env dir (e.g. Caddyfile,
-	// mosquitto/) so the new env can deploy. Best-effort: bootstrap regenerates the
-	// essentials regardless.
-	srcDir := wspath.EnvDir(h.workspacesDir, ws, name, src)
-	dstDir := wspath.EnvDir(h.workspacesDir, ws, name, newEnv)
-	if cerr := copyEnvConfigFiles(srcDir, dstDir); cerr != nil {
-		fmt.Fprintf(os.Stderr, "CopyEnvironment: copy config files %s→%s: %v\n", src, newEnv, cerr)
-	}
-
-	// Bootstrap the new env: fresh .env (fresh managed-dep secrets), compose, and any
-	// generated config (nginx/garage/adminer) for the new env name.
-	var bout bytes.Buffer
-	if berr := h.bridge.Bootstrap(ws, name, newEnv, &bout, &bout); berr != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bootstrap new env: " + berr.Error() + "\n" + bout.String()})
 		return
 	}
 
@@ -162,6 +93,96 @@ func (h *Handler) CopyEnvironment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "env": newEnv})
+}
+
+// cloneEnv clones src env → dst within a project's config.json and bootstraps the
+// new env. It is additive — src is never modified. The new env's domain is blanked
+// (so a Traefik env auto-routes to a unique {prefix}-{env} host); when branch != ""
+// the per-env git override (git.branch) is set so build pulls that ref; with
+// regenSecrets, secret-flagged app env vars are reset to a placeholder so bootstrap
+// regenerates them (previews never inherit prod secrets). Source-env bind-mount
+// config files are copied best-effort. Returns errCloneSrcNotFound / errCloneDstExists
+// so HTTP callers can map status codes; the preview controller uses it directly.
+func (h *Handler) cloneEnv(ws, name, src, dst string, regenSecrets bool, branch string) error {
+	cfgPath := wspath.ConfigPath(h.workspacesDir, ws, name)
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("project not found: %w", err)
+	}
+	// Edit config.json as raw JSON so every field on the OTHER envs (and the new
+	// one) is preserved verbatim — round-tripping through a typed struct would drop
+	// fields the lightweight model doesn't know about.
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		return fmt.Errorf("config parse: %w", err)
+	}
+	var envs map[string]json.RawMessage
+	if len(root["environments"]) > 0 {
+		json.Unmarshal(root["environments"], &envs) //nolint:errcheck
+	}
+	if envs == nil {
+		envs = map[string]json.RawMessage{}
+	}
+	srcRaw, ok := envs[src]
+	if !ok {
+		return fmt.Errorf("%w: %q", errCloneSrcNotFound, src)
+	}
+	if _, exists := envs[dst]; exists {
+		return fmt.Errorf("%w: %q", errCloneDstExists, dst)
+	}
+
+	var envMap map[string]any
+	if err := json.Unmarshal(srcRaw, &envMap); err != nil {
+		return fmt.Errorf("env parse: %w", err)
+	}
+	envMap["domain"] = ""
+	if branch != "" {
+		envMap["git"] = map[string]any{"branch": branch}
+	}
+	if regenSecrets {
+		if vars, ok := envMap["env_vars"].(map[string]any); ok {
+			for k, v := range vars {
+				if s, ok := v.(string); ok && copyEnvSecretKey(k) && !envgen.IsPlaceholder(s) {
+					vars[k] = "CHANGE_ME"
+				}
+			}
+		}
+	}
+	cloned, err := json.Marshal(envMap)
+	if err != nil {
+		return fmt.Errorf("env marshal: %w", err)
+	}
+	envs[dst] = cloned
+
+	envsOut, err := json.Marshal(envs)
+	if err != nil {
+		return fmt.Errorf("environments marshal: %w", err)
+	}
+	root["environments"] = envsOut
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return fmt.Errorf("config marshal: %w", err)
+	}
+	if err := os.WriteFile(cfgPath, out, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+
+	// Copy bind-mount config files from the source env dir (e.g. Caddyfile,
+	// mosquitto/) so the new env can deploy. Best-effort: bootstrap regenerates the
+	// essentials regardless.
+	srcDir := wspath.EnvDir(h.workspacesDir, ws, name, src)
+	dstDir := wspath.EnvDir(h.workspacesDir, ws, name, dst)
+	if cerr := copyEnvConfigFiles(srcDir, dstDir); cerr != nil {
+		fmt.Fprintf(os.Stderr, "cloneEnv: copy config files %s→%s: %v\n", src, dst, cerr)
+	}
+
+	// Bootstrap the new env: fresh .env (fresh managed-dep secrets), compose, and any
+	// generated config (nginx/adminer/etc.) for the new env name.
+	var bout bytes.Buffer
+	if berr := h.bridge.Bootstrap(ws, name, dst, &bout, &bout); berr != nil {
+		return fmt.Errorf("bootstrap %s: %v\n%s", dst, berr, bout.String())
+	}
+	return nil
 }
 
 // copyEnvConfigFiles copies the source env dir into the new env dir, skipping the
