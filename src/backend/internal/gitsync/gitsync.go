@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -57,4 +58,17 @@ func Sync(envDir, repo, branch string, out io.Writer) (string, error) {
 		return "", fmt.Errorf("git clone: %w", err)
 	}
 	return src, nil
+}
+
+// HeadSHA returns the commit SHA currently checked out at src ("" + error if src
+// isn't a git checkout). Used by the build "if changed" mode to detect whether the
+// source moved since the last successful build.
+func HeadSHA(src string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", src, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }

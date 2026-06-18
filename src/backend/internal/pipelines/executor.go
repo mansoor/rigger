@@ -56,6 +56,12 @@ func StageRunOptions(workspace, project string, s Stage) shell.RunOptions {
 		if s.Push {
 			o.Extra = append(o.Extra, "--push") // also push to the registry (required before a later promote)
 		}
+		switch s.When {
+		case "if-changed":
+			o.Extra = append(o.Extra, "--if-changed") // skip the build (and bump/advance) when the source is unchanged
+		case "force":
+			o.Extra = append(o.Extra, "--no-cache") // rebuild every layer, ignoring Docker's cache
+		}
 	case "restart":
 		o.Command = "restart"
 		if s.Service != "" {

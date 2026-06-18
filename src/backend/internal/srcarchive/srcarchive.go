@@ -68,6 +68,11 @@ func ExtractToSrc(envDir, archivePath string, out io.Writer) (string, error) {
 	return src, nil
 }
 
+// Stamp returns a cheap content-identity for an archive (size + mod time) — the same
+// signal ExtractToSrc uses to detect a Replace-source. Exported for the build
+// "if changed" mode (change-detection of an uploaded source). Empty if it can't stat.
+func Stamp(archivePath string) string { return archiveStamp(archivePath) }
+
 // archiveStamp identifies an archive by size + mod time (enough to detect a
 // Replace-source). Empty if the archive can't be stat'd.
 func archiveStamp(p string) string {

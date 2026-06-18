@@ -629,6 +629,11 @@ function StageRow({ idx, count, stage, envNames, serviceNames = [], onChange, on
             )}
             {stage.type === 'build' && (
               <>
+                <select value={stage.when || ''} onChange={e => onChange({ when: e.target.value })} className={inputCls} title="When to build. Always: build every time (uses Docker's layer cache). If changed: skip the build (and version bump) when the source is unchanged since the last build — source-tracked only, so a changed build-arg/Dockerfile needs Always/Force. Force: rebuild every layer (--no-cache).">
+                  <option value="">always build</option>
+                  <option value="if-changed">if source changed</option>
+                  <option value="force">force (no cache)</option>
+                </select>
                 <select value={stage.part || ''} onChange={e => onChange({ part: e.target.value })} className={inputCls} title="Bump the version as part of this build (so the deploy rolls to the new version)">
                   <option value="">no bump</option>
                   <option value="build">bump build</option>

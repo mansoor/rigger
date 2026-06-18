@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -194,11 +195,58 @@ func (h *Handler) ReplaceSource(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Archive the current source (if any) before overwriting it, so a replaced version
+	// isn't lost (a bad upload can be recovered from _source/archives). Best-effort —
+	// a failure to archive must never block the replace itself.
+	archiveExistingSource(dest)
 	if err := copyFile(archiveTmp, dest, 0o644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced — build to apply the new source"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "replaced — build to apply the new source (previous source archived)"})
+}
+
+// sourceArchiveKeep bounds how many previous uploaded sources are retained per project.
+const sourceArchiveKeep = 10
+
+// archiveExistingSource copies the project's current source archive (if present) into a
+// timestamped file under _source/archives/ before it gets overwritten, then prunes to
+// the newest sourceArchiveKeep. Best-effort: all failures are ignored so a replace is
+// never blocked by archiving. (Eventually superseded by a git-push pipeline stage —
+// see the enhancements backlog.)
+func archiveExistingSource(dest string) {
+	if _, err := os.Stat(dest); err != nil {
+		return // nothing to archive yet
+	}
+	archiveDir := filepath.Join(filepath.Dir(dest), "archives")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		return
+	}
+	stamp := time.Now().Format("20060102-150405")
+	_ = copyFile(dest, filepath.Join(archiveDir, "archive-"+stamp), 0o644)
+	pruneSourceArchives(archiveDir, sourceArchiveKeep)
+}
+
+// pruneSourceArchives keeps the newest `keep` archived sources in dir (named
+// archive-{timestamp}, so lexical order == chronological), deleting the rest.
+func pruneSourceArchives(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "archive-") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) <= keep {
+		return
+	}
+	sort.Strings(names) // oldest first
+	for _, n := range names[:len(names)-keep] {
+		_ = os.Remove(filepath.Join(dir, n))
+	}
 }
 
 // reapSourceUploads removes staging dirs older than 2h (abandoned scans that never

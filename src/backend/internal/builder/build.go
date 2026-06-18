@@ -23,12 +23,18 @@ func (o Options) build() error {
 	push := false
 	bump := false
 	bumpPart := "build"
+	ifChanged := false // --if-changed: skip the build when the source is unchanged
+	noCache := false   // --no-cache: rebuild every layer (the "force" mode)
 	for _, arg := range o.Extra {
 		switch arg {
 		case "--push":
 			push = true
 		case "--bump":
 			bump = true
+		case "--if-changed":
+			ifChanged = true
+		case "--no-cache":
+			noCache = true
 		case "major", "minor", "patch", "build":
 			bumpPart = arg
 		default:
@@ -36,12 +42,45 @@ func (o Options) build() error {
 		}
 	}
 
-	// Capture the version BEFORE any bump so advancePointers can tell which env
-	// image pointers were tracking the old version (advance them) vs pinned to
-	// something else (leave them).
-	prevVer := ""
-	if pc, perr := o.loadConfig(); perr == nil {
-		prevVer = pc.VersionString()
+	// Load config BEFORE any bump: needed for the source info AND the pre-bump
+	// version (advancePointers must know which env pointers tracked the old version
+	// to advance them vs leave pins). Tags are re-read after the bump below.
+	cfg, err := o.loadConfig()
+	if err != nil {
+		return err
+	}
+	prevVer := cfg.VersionString()
+
+	// Materialize the project's source into this env's _src once, then each build
+	// service builds from a subdir of it. Source comes from a git clone OR an
+	// uploaded archive; both wipe + repopulate _src (idempotent). A pure greenfield
+	// project (no source) leaves srcDir empty and builds from its scaffolded context.
+	// Done before the bump so the change-detection ref reflects the real source.
+	srcDir := ""
+	envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
+	if repo := cfg.SourceRepo(); repo != "" {
+		var serr error
+		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.Stdout); serr != nil {
+			return serr
+		}
+	} else if cfg.SourceKind() == "upload" {
+		var serr error
+		if srcDir, serr = srcarchive.ExtractToSrc(envDir, wspath.SourceArchive(o.WorkspacesDir, o.Workspace, o.Project), o.Stdout); serr != nil {
+			return serr
+		}
+	}
+
+	// "If changed" mode (whole-project builds only): skip the build — and the version
+	// bump + pointer advance — when the source (+ build-service set) matches the last
+	// successful build. A specific-service target always builds. NOTE: only the SOURCE
+	// is tracked; a changed build-arg or Dockerfile is NOT detected — use Always/Force.
+	ref := ""
+	if ifChanged && target == "all" {
+		ref = o.buildRef(cfg, srcDir)
+		if ref != "" && readBuildRef(envDir) == ref {
+			o.success("Source unchanged since last build — skipping (build mode: if changed)")
+			return nil
+		}
 	}
 
 	if bump {
@@ -49,12 +88,10 @@ func (o Options) build() error {
 		if _, err := version.Bump(o.configPath(), bumpPart); err != nil {
 			return err
 		}
-	}
-
-	// Load config AFTER the bump so tags reflect the new version.
-	cfg, err := o.loadConfig()
-	if err != nil {
-		return err
+		// Reload so tags reflect the new version.
+		if cfg, err = o.loadConfig(); err != nil {
+			return err
+		}
 	}
 	if err := cfg.ValidateEnv(o.Env); err != nil {
 		return err
@@ -82,26 +119,8 @@ func (o Options) build() error {
 		return nil
 	}
 
-	// Materialize the project's source into this env's _src once, then each build
-	// service builds from a subdir of it. Source comes from a git clone OR an
-	// uploaded archive; both wipe + repopulate _src (idempotent). A pure greenfield
-	// project (no source) leaves srcDir empty and builds from its scaffolded context.
-	srcDir := ""
-	envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
-	if repo := cfg.SourceRepo(); repo != "" {
-		var serr error
-		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.Stdout); serr != nil {
-			return serr
-		}
-	} else if cfg.SourceKind() == "upload" {
-		var serr error
-		if srcDir, serr = srcarchive.ExtractToSrc(envDir, wspath.SourceArchive(o.WorkspacesDir, o.Workspace, o.Project), o.Stdout); serr != nil {
-			return serr
-		}
-	}
-
 	for _, svc := range builds {
-		if err := o.buildService(cfg, svc, srcDir, push); err != nil {
+		if err := o.buildService(cfg, svc, srcDir, push, noCache); err != nil {
 			return err
 		}
 	}
@@ -112,13 +131,58 @@ func (o Options) build() error {
 	if err := o.advancePointers(cfg, builds, prevVer); err != nil {
 		o.info("⚠ built ok, but could not advance image pointers: %v", err)
 	}
+
+	// Record the source ref so the next "if changed" run can skip an unchanged
+	// rebuild. Full builds only — a single-service target leaves the ref untouched
+	// (it doesn't reflect the whole service set).
+	if target == "all" {
+		if ref == "" {
+			ref = o.buildRef(cfg, srcDir)
+		}
+		if ref != "" {
+			writeBuildRef(envDir, ref)
+		}
+	}
 	return nil
 }
+
+// buildRef returns a stable signature of the CURRENT source plus the build-service
+// set, used by the "if changed" build mode to skip a rebuild when nothing changed
+// since the last successful build. Empty for greenfield / undetectable sources (⇒
+// the caller never skips). Only the SOURCE is tracked — a changed build-arg or
+// Dockerfile is NOT reflected, so those need Always or Force.
+func (o Options) buildRef(cfg *wsconfig.Config, srcDir string) string {
+	var sig string
+	switch {
+	case cfg.SourceRepo() != "" && srcDir != "":
+		sig, _ = gitsync.HeadSHA(srcDir)
+	case cfg.SourceKind() == "upload":
+		sig = srcarchive.Stamp(wspath.SourceArchive(o.WorkspacesDir, o.Workspace, o.Project))
+	}
+	if sig == "" {
+		return ""
+	}
+	names := make([]string, 0)
+	for _, svc := range cfg.BuildServices() {
+		names = append(names, svc.Name)
+	}
+	sort.Strings(names)
+	return sig + "|" + strings.Join(names, ",")
+}
+
+func buildRefPath(envDir string) string { return filepath.Join(envDir, ".build-ref") }
+
+func readBuildRef(envDir string) string {
+	b, _ := os.ReadFile(buildRefPath(envDir))
+	return strings.TrimSpace(string(b))
+}
+
+func writeBuildRef(envDir, ref string) { _ = os.WriteFile(buildRefPath(envDir), []byte(ref), 0o644) }
 
 // buildService builds (and optionally pushes) one build service. When srcDir is
 // set (the project has a source repo) the context is a subdir of the checkout and
 // the repo's own Dockerfile is used; otherwise the scaffolded context dir is used.
-func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir string, push bool) error {
+func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir string, push, noCache bool) error {
 	dockerfile := "Dockerfile"
 	if svc.Build != nil && svc.Build.Dockerfile != "" {
 		dockerfile = svc.Build.Dockerfile
@@ -161,11 +225,14 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	// Run with the build context as the working dir and relative paths, so the
 	// remote executor can translate the dir to the host and build against the
 	// pushed context on the remote daemon (local behaviour is identical).
-	args := []string{
-		"build",
-		"--build-arg", "BUILD_ENV=" + o.Env,
-		"--build-arg", "VERSION=" + ver,
+	args := []string{"build"}
+	if noCache {
+		args = append(args, "--no-cache") // force mode: rebuild every layer
 	}
+	args = append(args,
+		"--build-arg", "BUILD_ENV="+o.Env,
+		"--build-arg", "VERSION="+ver,
+	)
 	for _, kv := range o.serviceBuildArgs(svc, ver) {
 		args = append(args, "--build-arg", kv)
 	}

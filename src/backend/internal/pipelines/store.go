@@ -44,6 +44,7 @@ type Stage struct {
 	Network   bool   `json:"network,omitempty"` // script only — attach to the env's compose network
 	Part      string `json:"part,omitempty"`    // version only — major|minor|patch|build
 	Push      bool   `json:"push,omitempty"`    // build only — also push images to the registry
+	When      string `json:"when,omitempty"`    // build only — always(default) | if-changed | force(no-cache)
 	OnFailure string `json:"on_failure"`        // stop | continue (default stop)
 }
 
