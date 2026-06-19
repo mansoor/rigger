@@ -551,6 +551,9 @@ export function openActionSocket(workspace, name, command, env, extra = [], serv
   return ws
 }
 
+// Rigger's own build version (self-update Phase 0).
+export const fetchVersion = () => api.get('/version').then(r => r.data)
+
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'

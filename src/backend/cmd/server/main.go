@@ -169,6 +169,9 @@ func main() {
 	mux.Handle("GET /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.GetAppearance)))
 	mux.Handle("PUT /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.PutAppearance)))
 
+	// Rigger's own build version (self-update Phase 0).
+	mux.Handle("GET /api/version", authSvc.Middleware(http.HandlerFunc(handler.GetVersion)))
+
 	// Access requests (roadmap 9): any signed-in user can request access; workspace
 	// admins / super-admins review. All behind auth middleware (claims present);
 	// per-action authorization is enforced inside the handlers.

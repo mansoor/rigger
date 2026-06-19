@@ -11,6 +11,11 @@ services:
       # (single-image distribution; toolkit logic lives in the Go binary).
       context: ..
       dockerfile: src/Dockerfile
+      args:
+        # Stamp the running version (self-update Phase 0). Defaults to "dev" for
+        # a plain local build; CI/release passes the real tag + short SHA.
+        RIGGER_VERSION: ${RIGGER_VERSION:-dev}
+        RIGGER_COMMIT: ${RIGGER_COMMIT:-}
     container_name: rigger
     restart: unless-stopped
     ports:

@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, resendVerification } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, resendVerification, fetchVersion } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -20,6 +20,19 @@ const STATUS_DOT = {
 }
 
 // Polls the first environment of a project to determine its dot color
+// VersionFooter shows the running Rigger build version at the bottom of the
+// sidebar (self-update Phase 0). The check-for-update / apply UI lands later.
+function VersionFooter() {
+  const { data } = useQuery({ queryKey: ['rigger-version'], queryFn: fetchVersion, staleTime: Infinity })
+  const v = data?.version
+  if (!v) return null
+  return (
+    <div className="mt-auto px-3 py-2 border-t border-border text-[10px] text-content-faint" title={data.commit ? `commit ${data.commit}` : undefined}>
+      Rigger {v === 'dev' ? 'dev build' : v}
+    </div>
+  )
+}
+
 function ProjectStatusDot({ workspace, name, envs }) {
   const firstEnv = envs?.[0]
   const { data } = useQuery({
@@ -529,6 +542,7 @@ export default function Layout({ children }) {
               </div>
             )}
           </div>
+          <VersionFooter />
         </aside>
 
         {/* Main content */}

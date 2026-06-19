@@ -35,7 +35,14 @@ COPY --from=frontend-builder /app/backend/cmd/server/dist ./cmd/server/dist
 # go.sum is not committed — generate it here from the full source tree
 RUN go mod tidy
 
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+# Version stamping (self-update Phase 0): CI passes the release tag + short SHA;
+# a plain build leaves buildinfo's defaults ("dev").
+ARG RIGGER_VERSION=dev
+ARG RIGGER_COMMIT=
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w \
+      -X github.com/mansoor/rigger/ui/internal/buildinfo.Version=${RIGGER_VERSION} \
+      -X github.com/mansoor/rigger/ui/internal/buildinfo.Commit=${RIGGER_COMMIT}" \
     -o /rigger ./cmd/server
 
 
