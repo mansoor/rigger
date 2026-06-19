@@ -13,6 +13,7 @@ import { globalRoleOptions, wsRoleOptions } from '../lib/roles'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
+  fetchManagedRegistry, managedRegistryAction,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
@@ -248,6 +249,69 @@ function BackupTargetsTab() {
   )
 }
 
+// ── Rigger-managed registry (image-distribution Phase 2) ──────────────────────
+// One-click registry:2 sidecar Rigger runs on the host. When an apps base domain
+// is configured it's fronted by Traefik over HTTPS at registry.{base} (pullable by
+// every Swarm node); otherwise it's a local HTTP registry (single-node only).
+function ManagedRegistryCard({ onChanged }) {
+  const qc = useQueryClient()
+  const { data: st, isLoading } = useQuery({ queryKey: ['managed-registry'], queryFn: fetchManagedRegistry })
+  const [msg, setMsg] = useState(null) // { ok, text }
+
+  const act = useMutation({
+    mutationFn: (action) => managedRegistryAction(action),
+    onSuccess: (_d, action) => {
+      qc.invalidateQueries({ queryKey: ['managed-registry'] })
+      qc.invalidateQueries({ queryKey: ['registries'] }) // entry created/marked system
+      onChanged?.()
+      setMsg({ ok: true, text: action === 'gc' ? 'Garbage collection complete' : action === 'down' ? 'Registry stopped' : 'Registry running' })
+      setTimeout(() => setMsg(null), 5000)
+    },
+    onError: (e) => setMsg({ ok: false, text: e?.response?.data?.error || 'Action failed' }),
+  })
+
+  if (isLoading) return null
+  const running = st?.running
+  const noBaseDomain = !st?.base_domain
+
+  return (
+    <div className="mb-6 rounded-xl border border-border bg-surface-raised/40 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🗄️</span>
+            <h3 className="text-sm font-semibold text-content-strong">Rigger-managed registry</h3>
+            {running
+              ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">running</span>
+              : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">stopped</span>}
+          </div>
+          <p className="text-xs text-content-subtle mt-1">
+            {running
+              ? <>Serving at <code className="text-content-muted">{st.url}</code>{st.https ? ' over HTTPS' : ' (local HTTP)'}{st.system ? ' · system registry' : ''}{st.disk_usage ? ` · ${st.disk_usage}` : ''}.</>
+              : <>Run a registry:2 container on this host with one click. Build pushes here; deploys (and Swarm nodes) pull from it.</>}
+          </p>
+          {noBaseDomain ? (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">No apps base domain set — the registry will be local HTTP (<code>localhost:5000</code>), usable only for single-node compose deploys. Set a base domain (Settings → General) for an HTTPS <code>registry.&#123;base&#125;</code> a Swarm can pull from.</p>
+          ) : (
+            <p className="text-xs text-content-faint mt-1">Will be fronted by Traefik over HTTPS at <code>registry.{st.base_domain}</code>{st.https ? '' : ' once running'} — pullable by every Swarm node.</p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          {!running ? (
+            <Btn onClick={() => act.mutate('up')} disabled={act.isPending}>{act.isPending ? 'Starting…' : st?.exists ? 'Start registry' : 'Run managed registry'}</Btn>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Btn variant="ghost" size="sm" onClick={() => act.mutate('gc')} disabled={act.isPending} title="Reclaim space from deleted/overwritten tags">Garbage-collect</Btn>
+              <Btn variant="danger" size="sm" onClick={() => act.mutate('down')} disabled={act.isPending}>Stop</Btn>
+            </div>
+          )}
+        </div>
+      </div>
+      {msg && <p className={`text-xs mt-2 ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.ok ? '✓ ' : '✗ '}{msg.text}</p>}
+    </div>
+  )
+}
+
 // ── Docker Registries (Phase 3: scoping) ──────────────────────────────────────
 
 function RegistriesTab() {
@@ -300,6 +364,8 @@ function RegistriesTab() {
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add registry</Btn>
       </div>
+
+      <ManagedRegistryCard />
 
       {regs.length === 0 ? (
         <EmptyState

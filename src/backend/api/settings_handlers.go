@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/managedregistry"
 	"github.com/mansoor/rigger/ui/internal/settings"
 )
 
@@ -312,6 +315,135 @@ func (h *Handler) MarkRegistrySystem(w http.ResponseWriter, r *http.Request) {
 		updated.Grants, _ = settings.RegistryGrants(h.db, id) //nolint:errcheck
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// ── Rigger-managed registry (image-distribution Phase 2) ──────────────────────
+
+type managedRegistryStatus struct {
+	Running    bool   `json:"running"`
+	Exists     bool   `json:"exists"`
+	URL        string `json:"url"`         // the registries-entry URL (image-tag prefix)
+	HTTPS      bool   `json:"https"`       // fronted by Traefik over TLS (base-domain mode)
+	System     bool   `json:"system"`      // designated the system registry
+	BaseDomain string `json:"base_domain"` // global apps base domain ('' ⇒ local-only HTTP)
+	DiskUsage  string `json:"disk_usage"`  // data-volume size, e.g. "42M"
+}
+
+// managedConfig builds the managed-registry Config from the global settings: the
+// managed registry is instance-wide, so it uses the GLOBAL apps base domain (not a
+// workspace override) + the DNS provider for the cert resolver choice.
+func (h *Handler) managedConfig() managedregistry.Config {
+	return managedregistry.Config{
+		BaseDomain:  settings.AppSetting(h.db, "apps_base_domain"),
+		DNSProvider: settings.AppsDNSProvider(h.db),
+	}
+}
+
+// GET /api/settings/registries/managed — status of the Rigger-managed registry.
+func (h *Handler) GetManagedRegistry(w http.ResponseWriter, r *http.Request) {
+	mgr := managedregistry.New(nil)
+	cfg := h.managedConfig()
+	st := managedRegistryStatus{
+		Running:    mgr.Running(),
+		Exists:     mgr.Exists(),
+		BaseDomain: cfg.BaseDomain,
+		HTTPS:      cfg.HTTPS(),
+		URL:        cfg.URL(),
+	}
+	if entry, _ := settings.GetRegistryByName(h.db, managedregistry.EntryName); entry != nil {
+		st.URL = entry.URL // the URL actually in use (may predate a base-domain change)
+		st.System = entry.System
+	}
+	if st.Running {
+		st.DiskUsage = mgr.DiskUsage()
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// POST /api/settings/registries/managed — run/stop/garbage-collect the managed
+// registry. Body: {"action": "up"|"down"|"gc"}.
+func (h *Handler) ManagedRegistryAction(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	mgr := managedregistry.New(nil)
+	switch body.Action {
+	case "up":
+		h.managedRegistryUp(w, mgr)
+	case "down":
+		if err := mgr.Down(); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		// Stop pointing projects at a now-stopped registry: clear the system flag but
+		// keep the entry (its URL/password persist for a later "up").
+		if entry, _ := settings.GetRegistryByName(h.db, managedregistry.EntryName); entry != nil {
+			_ = settings.SetRegistrySystem(h.db, entry.ID, false) //nolint:errcheck
+		}
+		h.GetManagedRegistry(w, r)
+	case "gc":
+		out, err := mgr.GC()
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "output": out})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "output": out})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be up, down, or gc"})
+	}
+}
+
+// managedRegistryUp starts (or restarts) the managed registry, upserts its
+// registries entry, and marks it the system registry. The password is reused across
+// runs when an entry already exists, so a restart doesn't invalidate prior logins.
+func (h *Handler) managedRegistryUp(w http.ResponseWriter, mgr *managedregistry.Manager) {
+	cfg := h.managedConfig()
+	entry, _ := settings.GetRegistryByName(h.db, managedregistry.EntryName)
+	password := ""
+	if entry != nil {
+		password = entry.Password
+	}
+	if password == "" {
+		buf := make([]byte, 24)
+		if _, err := rand.Read(buf); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "generate password: " + err.Error()})
+			return
+		}
+		password = hex.EncodeToString(buf)
+	}
+	if err := mgr.Up(cfg, managedregistry.Username, password); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	// Upsert the registries entry (global) so the build host can authenticate and
+	// EffectiveRegistry can resolve it.
+	if entry == nil {
+		created, err := settings.CreateRegistry(h.db, managedregistry.EntryName, cfg.URL(), managedregistry.Username, password, "global")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save registry: " + err.Error()})
+			return
+		}
+		_ = settings.SetRegistryGrants(h.db, created.ID, []string{"*"}) //nolint:errcheck — offer to all workspaces
+		entry = created
+	} else if _, err := settings.UpdateRegistry(h.db, entry.ID, managedregistry.EntryName, cfg.URL(), managedregistry.Username, password); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update registry: " + err.Error()})
+		return
+	}
+	// Designate it the global system registry (the whole point of one-click).
+	if err := settings.SetRegistrySystem(h.db, entry.ID, true); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mark system: " + err.Error()})
+		return
+	}
+	// Authenticate the local daemon now so the first build can push.
+	_ = dockerLogin(cfg.URL(), managedregistry.Username, password) //nolint:errcheck
+	writeJSON(w, http.StatusOK, managedRegistryStatus{
+		Running: mgr.Running(), Exists: true, URL: cfg.URL(), HTTPS: cfg.HTTPS(),
+		System: true, BaseDomain: cfg.BaseDomain, DiskUsage: mgr.DiskUsage(),
+	})
 }
 
 // POST /api/settings/registries/{id}/test

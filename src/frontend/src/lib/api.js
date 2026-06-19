@@ -404,6 +404,9 @@ export const deleteRegistry       = (id)        => api.delete(`/settings/registr
 export const testRegistry         = (id)        => api.post(`/settings/registries/${id}/test`).then(r => r.data)
 // Designate (or clear) the GLOBAL system registry — used wherever a project sets none.
 export const markRegistrySystem   = (id, system) => api.post(`/settings/registries/${id}/system`, { system }).then(r => r.data)
+// Rigger-managed registry (one-click registry:2 sidecar).
+export const fetchManagedRegistry = ()           => api.get('/settings/registries/managed').then(r => r.data)
+export const managedRegistryAction = (action)    => api.post('/settings/registries/managed', { action }).then(r => r.data)
 
 // Workspace-scoped registry pool (Phase 3): own registries + granted globals.
 export const fetchWorkspaceRegistries = (ws)         => api.get(`/workspaces/${ws}/registries`).then(r => r.data)

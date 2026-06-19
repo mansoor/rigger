@@ -395,6 +395,21 @@ func GetRegistry(d *db.DB, id int64) (*DockerRegistry, error) {
 	return &r, err
 }
 
+// GetRegistryByName returns the registry with the given display name (incl. its
+// password), or nil when none. Used to find/upsert the singleton Rigger-managed
+// registry entry across runs.
+func GetRegistryByName(d *db.DB, name string) (*DockerRegistry, error) {
+	var id int64
+	err := d.QueryRow(`SELECT id FROM docker_registries WHERE name=?`, name).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return GetRegistry(d, id)
+}
+
 func CreateRegistry(d *db.DB, name, url, username, password, ownerScope string) (*DockerRegistry, error) {
 	if ownerScope == "" {
 		ownerScope = "global"

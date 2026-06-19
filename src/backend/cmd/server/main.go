@@ -696,6 +696,14 @@ func main() {
 			handler.ListRegistries(w, r)
 		case r.Method == "POST" && path == "/api/settings/registries":
 			handler.CreateRegistry(w, r)
+		// Rigger-managed registry (image-distribution Phase 2) — exact paths,
+		// matched before the generic {id} prefix cases below.
+		case r.Method == "GET" && path == "/api/settings/registries/managed":
+			handler.GetManagedRegistry(w, r)
+		case r.Method == "POST" && path == "/api/settings/registries/managed":
+			handler.ManagedRegistryAction(w, r)
+		case r.Method == "POST" && matchPrefix(path, "/api/settings/registries/") && hasSuffix(path, "/system"):
+			handler.MarkRegistrySystem(w, r)
 		case r.Method == "PUT" && matchPrefix(path, "/api/settings/registries/") && !hasSuffix(path, "/test"):
 			handler.UpdateRegistry(w, r)
 		case r.Method == "DELETE" && matchPrefix(path, "/api/settings/registries/"):
