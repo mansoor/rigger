@@ -314,6 +314,13 @@ func ListWorkspaces(workspacesDir string) ([]WorkspaceInfo, error) {
 	return out, nil
 }
 
+// WorkspaceDisplayName returns the free-form display name of the workspace with
+// the given key, falling back to the key when no name is recorded. Convenience
+// wrapper for callers that have the workspaces root + key (e.g. notifications).
+func WorkspaceDisplayName(workspacesDir, key string) string {
+	return workspaceDisplayName(filepath.Join(workspacesDir, key), key)
+}
+
 // workspaceDisplayName reads the free-form display name from a workspace's
 // workspace.json marker, falling back to the key (dir name) when absent.
 func workspaceDisplayName(dir, key string) string {

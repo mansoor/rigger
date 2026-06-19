@@ -48,6 +48,18 @@ type Stage struct {
 	OnFailure string `json:"on_failure"`        // stop | continue (default stop)
 }
 
+// NotifyEvents selects which pipeline-run events fire a notification. Stage-level
+// detail (which stage failed + a short error) rides on the Failed alert, so there
+// is no per-stage toggle — the run-level outcome covers every case.
+type NotifyEvents struct {
+	Started   bool `json:"started"`
+	Succeeded bool `json:"succeeded"`
+	Failed    bool `json:"failed"`
+}
+
+// Any reports whether at least one event is enabled (so alerting is configured).
+func (n NotifyEvents) Any() bool { return n.Started || n.Succeeded || n.Failed }
+
 // Pipeline is a named, ordered list of stages attached to a project.
 type Pipeline struct {
 	ID        int64     `json:"id"`
@@ -56,8 +68,12 @@ type Pipeline struct {
 	Name      string    `json:"name"`
 	Stages    []Stage   `json:"stages"`
 	Enabled   bool      `json:"enabled"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	// NotifyChannelIDs are the notification channels alerted on run events, and
+	// NotifyEvents selects which events fire (mirrors alert-rule fan-out).
+	NotifyChannelIDs []int64      `json:"notify_channel_ids"`
+	NotifyEvents     NotifyEvents `json:"notify_events"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
 // StageResult is the recorded outcome of one stage within a run.
@@ -140,7 +156,7 @@ func (p *Pipeline) Validate() error {
 // List returns the pipelines for one project, newest first.
 func List(d *db.DB, workspace, project string) ([]Pipeline, error) {
 	rows, err := d.Query(
-		`SELECT id, workspace, project, name, stages, enabled, created_at, updated_at
+		`SELECT id, workspace, project, name, stages, enabled, notify_channel_ids, notify_events, created_at, updated_at
 		   FROM pipelines WHERE workspace=? AND project=? ORDER BY id DESC`,
 		workspace, project,
 	)
@@ -162,7 +178,7 @@ func List(d *db.DB, workspace, project string) ([]Pipeline, error) {
 // Get returns one pipeline by id.
 func Get(d *db.DB, id int64) (*Pipeline, error) {
 	return scanPipeline(d.QueryRow(
-		`SELECT id, workspace, project, name, stages, enabled, created_at, updated_at
+		`SELECT id, workspace, project, name, stages, enabled, notify_channel_ids, notify_events, created_at, updated_at
 		   FROM pipelines WHERE id=?`, id))
 }
 
@@ -172,9 +188,11 @@ func Create(d *db.DB, p Pipeline) (*Pipeline, error) {
 		return nil, err
 	}
 	stages, _ := json.Marshal(p.Stages)
+	chans, _ := json.Marshal(nonNilIDs(p.NotifyChannelIDs))
+	events, _ := json.Marshal(p.NotifyEvents)
 	res, err := d.Exec(
-		`INSERT INTO pipelines (workspace, project, name, stages, enabled) VALUES (?,?,?,?,?)`,
-		p.Workspace, p.Project, p.Name, string(stages), boolToInt(p.Enabled),
+		`INSERT INTO pipelines (workspace, project, name, stages, enabled, notify_channel_ids, notify_events) VALUES (?,?,?,?,?,?,?)`,
+		p.Workspace, p.Project, p.Name, string(stages), boolToInt(p.Enabled), string(chans), string(events),
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -192,9 +210,11 @@ func Update(d *db.DB, id int64, p Pipeline) (*Pipeline, error) {
 		return nil, err
 	}
 	stages, _ := json.Marshal(p.Stages)
+	chans, _ := json.Marshal(nonNilIDs(p.NotifyChannelIDs))
+	events, _ := json.Marshal(p.NotifyEvents)
 	if _, err := d.Exec(
-		`UPDATE pipelines SET name=?, stages=?, enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		p.Name, string(stages), boolToInt(p.Enabled), id,
+		`UPDATE pipelines SET name=?, stages=?, enabled=?, notify_channel_ids=?, notify_events=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		p.Name, string(stages), boolToInt(p.Enabled), string(chans), string(events), id,
 	); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return nil, errors.New("a pipeline with that name already exists in this project")
@@ -363,9 +383,9 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanPipeline(s scanner) (*Pipeline, error) {
 	var p Pipeline
-	var stages string
+	var stages, chans, events string
 	var enabled int
-	if err := s.Scan(&p.ID, &p.Workspace, &p.Project, &p.Name, &stages, &enabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.Workspace, &p.Project, &p.Name, &stages, &enabled, &chans, &events, &p.CreatedAt, &p.UpdatedAt); err != nil {
 		return nil, err
 	}
 	p.Enabled = enabled != 0
@@ -375,7 +395,21 @@ func scanPipeline(s scanner) (*Pipeline, error) {
 	if p.Stages == nil {
 		p.Stages = []Stage{}
 	}
+	if chans != "" {
+		json.Unmarshal([]byte(chans), &p.NotifyChannelIDs) //nolint:errcheck
+	}
+	if events != "" {
+		json.Unmarshal([]byte(events), &p.NotifyEvents) //nolint:errcheck
+	}
 	return &p, nil
+}
+
+// nonNilIDs returns a non-nil slice so an empty channel set persists as "[]".
+func nonNilIDs(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
 }
 
 func scanRun(s scanner) (*Run, error) {

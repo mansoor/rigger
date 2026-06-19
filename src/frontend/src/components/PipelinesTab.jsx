@@ -5,7 +5,7 @@ import {
   fetchPipelineRuns, fetchPipelineRun, startPipelineRun,
   approvePipelineRun, rejectPipelineRun, cancelPipelineRun,
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
-  suggestPipeline,
+  suggestPipeline, fetchWorkspaceNotificationChannels,
 } from '../lib/api'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
@@ -74,7 +74,7 @@ export default function PipelinesTab({ workspace, name, envNames = [], serviceNa
   if (editing) {
     return (
       <PipelineEditor
-        draft={editing} envNames={envNames} serviceNames={serviceNames}
+        draft={editing} workspace={workspace} envNames={envNames} serviceNames={serviceNames}
         onChange={setEditing}
         onCancel={() => setEditing(null)}
         onSave={() => saveMut.mutate(editing)}
@@ -201,6 +201,9 @@ function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDele
           <div className="flex items-center gap-2">
             <span className="font-semibold text-content-strong truncate">{pipeline.name}</span>
             {!pipeline.enabled && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface-raised text-content-faint">disabled</span>}
+            {(pipeline.notify_channel_ids?.length > 0) && (pipeline.notify_events?.started || pipeline.notify_events?.succeeded || pipeline.notify_events?.failed) && (
+              <span title="Run-event alerts configured" className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised text-content-muted border border-border-strong">🔔 alerts</span>
+            )}
             {staleEnvs.length > 0 && (
               <span title={`References removed environment(s): ${staleEnvs.join(', ')}. Regenerate or edit to fix.`}
                 className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg border border-warning-border/60">⚠ stale</span>
@@ -521,7 +524,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
 
 // ── Editor ────────────────────────────────────────────────────────────────────
 
-function PipelineEditor({ draft, envNames, serviceNames = [], onChange, onCancel, onSave, saving, error }) {
+function PipelineEditor({ draft, workspace, envNames, serviceNames = [], onChange, onCancel, onSave, saving, error }) {
   const setStage = (i, patch) => onChange({ ...draft, stages: draft.stages.map((s, j) => j === i ? { ...s, ...patch } : s) })
   const addStage = () => onChange({ ...draft, stages: [...draft.stages, blankStage(envNames[0])] })
   const removeStage = (i) => onChange({ ...draft, stages: draft.stages.filter((_, j) => j !== i) })
@@ -571,8 +574,74 @@ function PipelineEditor({ draft, envNames, serviceNames = [], onChange, onCancel
             ))}
           </div>
         </div>
+
+        <NotifySection draft={draft} workspace={workspace} onChange={onChange} />
       </div>
     </section>
+  )
+}
+
+// NotifySection configures run-event alerting: pick which run events fire
+// (started / succeeded / failed) and which notification channels to send them to.
+// The failure alert carries the failing stage + a short error, so there's no
+// per-stage toggle. Channels come from the workspace's pool (own + granted).
+function NotifySection({ draft, workspace, onChange }) {
+  const { data: channels = [] } = useQuery({
+    queryKey: ['ws-notification-channels', workspace],
+    queryFn: () => fetchWorkspaceNotificationChannels(workspace),
+    enabled: !!workspace,
+  })
+  const events = draft.notify_events || {}
+  const ids = draft.notify_channel_ids || []
+  const setEvent = (k, v) => onChange({ ...draft, notify_events: { ...events, [k]: v } })
+  const toggleChannel = (id) => onChange({
+    ...draft,
+    notify_channel_ids: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id],
+  })
+  const anyEvent = events.started || events.succeeded || events.failed
+
+  const EVENTS = [
+    ['started', 'Pipeline started'],
+    ['succeeded', 'Pipeline succeeded'],
+    ['failed', 'Pipeline failed (incl. failing stage + error)'],
+  ]
+
+  return (
+    <div className="border-t border-border pt-4">
+      <label className="block text-[11px] font-semibold uppercase tracking-wide text-content-muted mb-1">Notifications</label>
+      <p className="text-xs text-content-subtle mb-3">
+        Alert a notification channel on run events. Every alert includes the workspace, project, environment and pipeline name.
+      </p>
+
+      <div className="flex flex-wrap gap-x-5 gap-y-2 mb-3">
+        {EVENTS.map(([key, label]) => (
+          <label key={key} className="flex items-center gap-2 text-xs text-content-muted cursor-pointer">
+            <input type="checkbox" checked={!!events[key]} onChange={e => setEvent(key, e.target.checked)} className="w-4 h-4 accent-brand-500" />
+            {label}
+          </label>
+        ))}
+      </div>
+
+      {anyEvent && (
+        channels.length === 0 ? (
+          <p className="text-xs text-warning-fg">No notification channels available in this workspace. Add one under Manage Workspace → Notifications first.</p>
+        ) : (
+          <div>
+            <p className="text-[11px] text-content-faint mb-1.5">Send to channels:</p>
+            <div className="flex flex-wrap gap-2">
+              {channels.map(c => (
+                <label key={c.id} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border cursor-pointer transition-colors ${ids.includes(c.id) ? 'border-brand-500 bg-brand-500/10 text-content-strong' : 'border-border-strong text-content-muted hover:bg-surface-raised'}`}>
+                  <input type="checkbox" checked={ids.includes(c.id)} onChange={() => toggleChannel(c.id)} className="w-3.5 h-3.5 accent-brand-500" />
+                  {c.name}
+                  <span className="text-[10px] text-content-faint">({c.type})</span>
+                </label>
+              ))}
+            </div>
+            {ids.length === 0 && <p className="text-[11px] text-warning-fg mt-1.5">Select at least one channel, or the alerts won't be delivered.</p>}
+          </div>
+        )
+      )}
+    </div>
   )
 }
 

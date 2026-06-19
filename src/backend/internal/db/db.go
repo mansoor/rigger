@@ -630,6 +630,9 @@ func (d *DB) migrate() error {
 	)`) //nolint:errcheck
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
+	// Pipeline alerting: channels to notify on run events + which events fire.
+	d.addColumn("pipelines", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
+	d.addColumn("pipelines", "notify_events TEXT NOT NULL DEFAULT '{}'")
 	d.addColumn("metrics_snapshots", "net_rx_bytes INTEGER NOT NULL DEFAULT 0")
 	d.addColumn("metrics_snapshots", "net_tx_bytes INTEGER NOT NULL DEFAULT 0")
 	d.addColumn("audit_log", "host TEXT NOT NULL DEFAULT ''")       // Phase 7: host name

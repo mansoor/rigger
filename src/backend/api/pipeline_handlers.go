@@ -5,14 +5,18 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/envorder"
+	"github.com/mansoor/rigger/ui/internal/notify"
 	"github.com/mansoor/rigger/ui/internal/pipelines"
+	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -410,6 +414,11 @@ func (h *Handler) cancelRun(id int64) bool {
 func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipelines.StageResult, startIdx int, out io.Writer) string {
 	ctx := h.registerRun(runID)
 	defer h.unregisterRun(runID)
+	// "Started" fires once, at the genuine start of a run (startIdx 0) — not when
+	// resuming after a gate approval (startIdx > 0).
+	if startIdx == 0 {
+		h.notifyPipelineRun(p, "started", nil)
+	}
 	progress := func(seg []pipelines.StageResult) {
 		all := append(append([]pipelines.StageResult{}, prior...), seg...)
 		pipelines.UpdateRunProgress(h.db, runID, all) //nolint:errcheck
@@ -418,6 +427,98 @@ func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipeli
 	all := append(append([]pipelines.StageResult{}, prior...), results...)
 	h.finalizeRun(runID, p, all, outcome)
 	return outcome
+}
+
+// notifyPipelineRun fans out a run-event notification ("started"|"succeeded"|
+// "failed") to the pipeline's configured channels, when that event is enabled.
+// The message carries the workspace/project display names, environment, pipeline
+// name, and — on failure — the stage that failed plus a short error excerpt.
+// No-op when no dispatcher, no channels, or the event is off.
+func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages []pipelines.StageResult) {
+	if h.notifier == nil || len(p.NotifyChannelIDs) == 0 {
+		return
+	}
+	ev := p.NotifyEvents
+	on := (event == "started" && ev.Started) || (event == "succeeded" && ev.Succeeded) || (event == "failed" && ev.Failed)
+	if !on {
+		return
+	}
+
+	wsName := workspace.WorkspaceDisplayName(h.workspacesDir, p.Workspace)
+	projName := p.Project
+	if cfg, err := wsconfig.Load(wspath.ConfigPath(h.workspacesDir, p.Workspace, p.Project)); err == nil && cfg.Project.Name != "" {
+		projName = cfg.Project.Name
+	}
+
+	// Common context line shared by every event.
+	ctxLine := fmt.Sprintf("Workspace: %s · Project: %s · Pipeline: %s", wsName, projName, p.Name)
+
+	var n notify.Notification
+	switch event {
+	case "started":
+		n = notify.Notification{
+			Title: fmt.Sprintf("Pipeline started: %s", p.Name),
+			Body:  "▶ Pipeline run started.\n" + ctxLine,
+			Level: notify.LevelInfo,
+		}
+	case "succeeded":
+		n = notify.Notification{
+			Title: fmt.Sprintf("Pipeline succeeded: %s", p.Name),
+			Body:  "✓ Pipeline completed successfully.\n" + ctxLine,
+			Level: notify.LevelSuccess,
+		}
+	case "failed":
+		// Identify the failing stage + a short tail of its output.
+		stageLabel, env, errMsg := "", "", ""
+		for i := range stages {
+			if stages[i].Status == pipelines.OutcomeFail {
+				stageLabel, env, errMsg = stages[i].Label, stages[i].Env, shortErr(stages[i].Output)
+				break
+			}
+		}
+		body := "❌ Pipeline failed."
+		if stageLabel != "" {
+			body += fmt.Sprintf("\nFailed stage: %s", stageLabel)
+		}
+		if env != "" {
+			body += fmt.Sprintf("\nEnvironment: %s", env)
+		}
+		body += "\n" + ctxLine
+		if errMsg != "" {
+			body += "\nError: " + errMsg
+		}
+		n = notify.Notification{
+			Title: fmt.Sprintf("Pipeline failed: %s", p.Name),
+			Body:  body,
+			Level: notify.LevelFailure,
+		}
+	default:
+		return
+	}
+	h.notifier.DispatchToChannels(p.NotifyChannelIDs, n)
+}
+
+// shortErr returns a compact single-paragraph excerpt of a failing stage's
+// output: the last non-empty lines, trimmed to a sane length for a notification.
+func shortErr(out string) string {
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return ""
+	}
+	lines := strings.Split(out, "\n")
+	// Keep the last few non-empty lines (the error is usually at the tail).
+	var tail []string
+	for i := len(lines) - 1; i >= 0 && len(tail) < 4; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			tail = append([]string{s}, tail...)
+		}
+	}
+	msg := strings.Join(tail, " ")
+	const max = 400
+	if len(msg) > max {
+		msg = msg[:max] + "…"
+	}
+	return msg
 }
 
 // finalizeRun persists a run's outcome (finish time left NULL while awaiting) and
@@ -435,6 +536,13 @@ func (h *Handler) finalizeRun(runID int64, p *pipelines.Pipeline, stages []pipel
 			h.imgCache.Invalidate(p.Workspace, p.Project, s.Env)
 			h.recordDeploy(p.Workspace, p.Project, s.Env, "pipeline")
 		}
+	}
+	// Run-event alerting (only on a terminal outcome — a gate pause is not a finish).
+	switch outcome {
+	case pipelines.OutcomeOK:
+		h.notifyPipelineRun(p, "succeeded", stages)
+	case pipelines.OutcomeFail:
+		h.notifyPipelineRun(p, "failed", stages)
 	}
 }
 
