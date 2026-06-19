@@ -98,6 +98,7 @@ type remoteTarget struct {
 	exec     remotehost.Remote
 	client   *remotehost.Client
 	hostName string
+	hostID   int64 // resolved host id (used to compare build host vs deploy host)
 }
 
 // resolveRemote returns the remote target for one environment, or (nil, nil) when
@@ -167,6 +168,26 @@ func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarge
 	if err != nil || host == nil {
 		return nil, err
 	}
+	return b.connectHost(host)
+}
+
+// resolveBuildRemote returns the project's EXPLICIT build host (project binding →
+// workspace default), or (nil, nil) when none is configured — in which case the
+// caller builds on the env's own deploy host (today's behavior). Image-distribution
+// Phase 4.
+func (b *Bridge) resolveBuildRemote(workspaceName, project string) (*remoteTarget, error) {
+	if b.db == nil || b.pool == nil {
+		return nil, nil
+	}
+	host, err := settings.BuildHostFor(b.db, workspaceName, b.resourcePrefix(workspaceName, project))
+	if err != nil || host == nil {
+		return nil, err
+	}
+	return b.connectHost(host)
+}
+
+// connectHost dials a host (decrypting its key) and wraps it as a remoteTarget.
+func (b *Bridge) connectHost(host *settings.Host) (*remoteTarget, error) {
 	keyPEM, err := crypto.Decrypt(b.cryptoKey, host.SSHKeyEnc)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt key for host %q: %w", host.Name, err)
@@ -183,6 +204,7 @@ func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarge
 		exec:     remotehost.NewRemote(client, b.workspacesDir, b.hostBase(host)),
 		client:   client,
 		hostName: host.Name,
+		hostID:   host.ID,
 	}, nil
 }
 
@@ -1368,16 +1390,52 @@ func (b *Bridge) Run(opts RunOptions) error {
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
-			Exec:          runExec, // context-bound (local or remote) — cancellable
+			Exec:          runExec, // default: env's deploy host (or local) — used by promote
 		}
-		// Ensure the project's registry is authenticated before any push/pull. The
-		// build/push and promote paths talk to the registry but rely on docker's
-		// stored credentials — previously only populated by the registry "Test"
-		// button. Log in here (on whichever daemon will run docker) using the
-		// workspace registry's stored creds, so a fresh container/session works.
+		// Phase 4: `build` runs on the project's BUILD host, which may differ from the
+		// env's deploy host. With no explicit build host the default is to build on the
+		// deploy host (rt) — today's behavior. promote always runs on the deploy host.
+		buildRT := rt
+		if opts.Command == "build" {
+			if explicit, berr := b.resolveBuildRemote(opts.Workspace, opts.Project); berr != nil {
+				return fmt.Errorf("resolve build host: %w", berr)
+			} else if explicit != nil {
+				buildRT = explicit
+			}
+			var base executor.Executor = executor.Local{}
+			if buildRT != nil {
+				base = buildRT.exec
+			}
+			bopts.Exec = executor.WithContext(base, opts.Context)
+			// If the build host differs from the env's deploy host, the built image
+			// can't be used in place — it must travel via a registry. Force --push and
+			// require one (replaces shipping source/image to the deploy host).
+			deployID, buildID := int64(0), int64(0)
+			if rt != nil {
+				deployID = rt.hostID
+			}
+			if buildRT != nil {
+				buildID = buildRT.hostID
+			}
+			if deployID != buildID {
+				if b.effectiveRegistry(opts.Workspace, opts.Project) == "" {
+					return fmt.Errorf("the build host differs from the deploy host, so the built image must be pushed to a registry — but none is configured. Designate a system registry (Settings → Docker Registries) or a project registry, then rebuild")
+				}
+				if !contains(opts.Extra, "--push") {
+					opts.Extra = append(opts.Extra, "--push")
+					bopts.Extra = opts.Extra
+				}
+			}
+		}
+		// Authenticate to the registry before any push/pull, on the host that runs
+		// docker: the BUILD host for build, the deploy host for promote.
 		if (opts.Command == "build" && contains(opts.Extra, "--push")) || opts.Command == "promote" {
 			var loginExec executor.Executor = executor.Local{}
-			if rt != nil {
+			if opts.Command == "build" {
+				if buildRT != nil {
+					loginExec = buildRT.exec
+				}
+			} else if rt != nil {
 				loginExec = rt.exec
 			}
 			if lerr := b.ensureRegistryLogin(opts.Workspace, opts.Project, loginExec, opts.Stdout); lerr != nil {
@@ -1386,23 +1444,26 @@ func (b *Bridge) Run(opts RunOptions) error {
 				fmt.Fprintf(opts.Stdout, "⚠ registry login: %v\n", lerr)
 			}
 		}
-		if rt != nil {
-			// Remote build/promote runs docker on the host's own daemon (so the
-			// image lands where the remote deploy needs it — no registry required
-			// for a plain build). For build, ship the build context (env dir incl
-			// service subdirs, .env stays host-authoritative) first. Route the
-			// post-promote deploy back through the bridge so it lands on the
-			// destination env's host.
-			// bopts.Exec is already runExec (wraps rt.exec); just add remote plumbing.
-			bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
-			bopts.SetDeploy(func(env string) error {
-				return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
-			})
-			if opts.Command == "build" {
+		switch opts.Command {
+		case "build":
+			// Ship the build context to the BUILD host (its own daemon builds it). The
+			// .env stays host-authoritative and is skipped. Local build host ⇒ nothing
+			// to push; when the build host differs from deploy, the image was --pushed.
+			if buildRT != nil {
+				bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
 				localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
-				if err := rt.client.PushDir(localDir, rt.exec.RemoteDir(localDir), ".env"); err != nil {
-					return fmt.Errorf("push build context to %s: %w", rt.hostName, err)
+				if err := buildRT.client.PushDir(localDir, buildRT.exec.RemoteDir(localDir), ".env"); err != nil {
+					return fmt.Errorf("push build context to %s: %w", buildRT.hostName, err)
 				}
+			}
+		case "promote":
+			// Retag-and-redeploy runs on the env's deploy host; route the post-promote
+			// deploy back through the bridge so it lands on the destination env's host.
+			if rt != nil {
+				bopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
+				bopts.SetDeploy(func(env string) error {
+					return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
+				})
 			}
 		}
 		_, err := builder.Run(bopts)

@@ -391,24 +391,28 @@ function WorkspaceDefaults({ workspace, qc }) {
   const [reg, setReg]       = useState('')
   const [host, setHost]     = useState('')
   const [target, setTarget] = useState('')
+  const [buildHost, setBuildHost] = useState('')
   const [seeded, setSeeded] = useState(false)
   if (!seeded && saved) {
     setReg(saved.default_registry_id || '')
     setHost(saved.default_host_id || '')
     setTarget(saved.default_backup_target_id || '')
+    setBuildHost(saved.default_build_host_id || '')
     setSeeded(true)
   }
 
   const mut = useMutation({
     mutationFn: () => updateWorkspaceSettings(workspace, {
       default_registry_id: reg, default_host_id: host, default_backup_target_id: target,
+      default_build_host_id: buildHost,
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
   const dirty = saved && (
     reg !== (saved.default_registry_id || '') ||
     host !== (saved.default_host_id || '') ||
-    target !== (saved.default_backup_target_id || '')
+    target !== (saved.default_backup_target_id || '') ||
+    buildHost !== (saved.default_build_host_id || '')
   )
   const sel = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
   const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
@@ -439,6 +443,14 @@ function WorkspaceDefaults({ workspace, qc }) {
             <option value="">No default (Local filesystem)</option>
             {targets.map(t => <option key={t.id} value={String(t.id)}>{t.name} ({String(t.type).toUpperCase()})</option>)}
           </select>
+        </div>
+        <div>
+          <label className={lbl}>Default build host</label>
+          <select value={buildHost} onChange={e => setBuildHost(e.target.value)} className={sel}>
+            <option value="">Inherit (build on each env's deploy host)</option>
+            {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
+          </select>
+          <p className="text-[11px] text-content-faint mt-1">Where image builds run for this workspace's projects (overridable per project). A dedicated builder must push to a registry the deploy targets can pull — set a system registry. Applies live, not just to new projects.</p>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}

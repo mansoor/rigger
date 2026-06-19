@@ -19,6 +19,9 @@ var workspaceSettingKeys = map[string]bool{
 	"default_registry_id":      true,
 	"default_host_id":          true,
 	"default_backup_target_id": true,
+	// Image-distribution Phase 4: workspace default BUILD host (id; "" = unset →
+	// projects build on their env's deploy host). Per-project override in Edit Project.
+	"default_build_host_id": true,
 	// W7: workspace default appearance (JSON blob; users can override per-account).
 	"appearance_prefs": true,
 	// Release pipeline: env tier names (low→high, comma/newline) driving the

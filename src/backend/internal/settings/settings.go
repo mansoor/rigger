@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -919,4 +920,66 @@ func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// ── Build hosts (image-distribution Phase 4) ──────────────────────────────────
+
+// ProjectBuildHostID returns the explicit per-project build host id (0 ⇒ no
+// project-level binding; the project then inherits the workspace default).
+// prefix is the resource prefix ({ws}_{proj}).
+func ProjectBuildHostID(d *db.DB, prefix string) (int64, error) {
+	var id int64
+	err := d.QueryRow(`SELECT host_id FROM project_build_hosts WHERE project=?`, prefix).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return id, err
+}
+
+// SetProjectBuildHost pins a project's image builds to a host (prefix = resource
+// prefix). hostID 0 clears the binding so the project reverts to the workspace
+// default (and ultimately to building on the env's own deploy host).
+func SetProjectBuildHost(d *db.DB, prefix string, hostID int64) error {
+	if hostID == 0 {
+		_, err := d.Exec(`DELETE FROM project_build_hosts WHERE project=?`, prefix)
+		return err
+	}
+	_, err := d.Exec(
+		`INSERT INTO project_build_hosts (project, host_id) VALUES (?, ?)
+		 ON CONFLICT(project) DO UPDATE SET host_id=excluded.host_id`,
+		prefix, hostID)
+	return err
+}
+
+// WorkspaceDefaultBuildHostID returns the workspace's default build host id from
+// the `default_build_host_id` workspace setting (0 ⇒ unset).
+func WorkspaceDefaultBuildHostID(d *db.DB, wsKey string) int64 {
+	if d == nil {
+		return 0
+	}
+	vals, err := GetWorkspaceSettings(d, wsKey)
+	if err != nil {
+		return 0
+	}
+	id, _ := strconv.ParseInt(strings.TrimSpace(vals["default_build_host_id"]), 10, 64)
+	return id
+}
+
+// BuildHostFor resolves the EXPLICIT build host for a project (including its
+// encrypted key, for dialing): the per-project binding wins, else the workspace
+// default. (nil, nil) means no explicit build host is configured — the caller then
+// builds on the environment's own deploy host (today's behavior; local for a local
+// env). wsKey is the workspace key; prefix is the resource prefix.
+func BuildHostFor(d *db.DB, wsKey, prefix string) (*Host, error) {
+	id, err := ProjectBuildHostID(d, prefix)
+	if err != nil {
+		return nil, err
+	}
+	if id == 0 {
+		id = WorkspaceDefaultBuildHostID(d, wsKey)
+	}
+	if id == 0 {
+		return nil, nil
+	}
+	return GetHost(d, id)
 }

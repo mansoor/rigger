@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -2407,6 +2407,7 @@ export default function EditProjectPage() {
         {/* Host — per-environment binding + whole-project migrate (Phase 7) */}
         {tab === 'host' && (<>
           <EnvHostsSection name={name} />
+          <BuildHostSection name={name} />
           <MigrateSection name={name} />
         </>)}
 
@@ -2630,6 +2631,54 @@ function EnvHostsSection({ name }) {
 
 // MigrateSection moves the whole workspace to another host (or back to local),
 // streaming progress. Only available when every environment is on the same host.
+// BuildHostSection — per-project build host (image-distribution Phase 4). Default
+// is to build on each env's own deploy host; pick a dedicated builder to offload
+// builds (e.g. a fast Linux box) — its image is pushed to the system registry and
+// the deploy targets pull it.
+function BuildHostSection({ name }) {
+  const { workspace } = useParams()
+  const qc = useQueryClient()
+  const { data: hosts = [] } = useQuery({ queryKey: ['ws-hosts', workspace], queryFn: () => fetchWorkspaceHosts(workspace), enabled: !!workspace })
+  const { data: bh } = useQuery({ queryKey: ['build-host', workspace, name], queryFn: () => fetchProjectBuildHost(workspace, name), enabled: !!workspace })
+
+  const [val, setVal] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && bh) { setVal(bh.host_id ? String(bh.host_id) : ''); setSeeded(true) }
+
+  const mut = useMutation({
+    mutationFn: () => setProjectBuildHost(workspace, name, Number(val || 0)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['build-host', workspace, name] }),
+  })
+  const dirty = bh && val !== (bh.host_id ? String(bh.host_id) : '')
+  const wsDefaultName = bh?.ws_default_id ? (hosts.find(h => h.id === bh.ws_default_id)?.name || `host #${bh.ws_default_id}`) : ''
+  const inheritLabel = wsDefaultName
+    ? `Inherit — workspace default (${wsDefaultName})`
+    : "Inherit — build on each environment's deploy host"
+
+  const sel = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-sm font-semibold text-content mb-3">Build host</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
+        <p className="text-xs text-content-subtle">Where this project's images are built. The default builds on each environment's own deploy host. Choosing a dedicated builder offloads the work (e.g. a fast Linux machine) — its image is pushed to the system registry and the deploy targets pull it, so a registry must be configured.</p>
+        <select value={val} onChange={e => setVal(e.target.value)} className={sel}>
+          <option value="">{inheritLabel}</option>
+          {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
+        </select>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            {mut.isPending ? 'Saving…' : 'Save build host'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+          {mut.isError && <span className="text-xs text-danger-fg">{mut.error?.response?.data?.error || 'Failed'}</span>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function MigrateSection({ name }) {
   const { workspace } = useParams()
   const qc = useQueryClient()

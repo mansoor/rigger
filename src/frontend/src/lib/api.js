@@ -454,6 +454,9 @@ export const updateWorkspaceHost  = (ws, id, body) => api.put(`/workspaces/${ws}
 export const deleteWorkspaceHost  = (ws, id)     => api.delete(`/workspaces/${ws}/hosts/${id}`)
 export const testWorkspaceHost    = (ws, id)     => api.post(`/workspaces/${ws}/hosts/${id}/test`).then(r => r.data)
 export const fetchWorkspaceHostStats = (ws, id)  => api.get(`/workspaces/${ws}/hosts/${id}/stats`).then(r => r.data)
+// Per-project build host (image-distribution Phase 4). host_id 0 = inherit (ws default / deploy host).
+export const fetchProjectBuildHost = (ws, name)        => api.get(`/workspaces/${ws}/projects/${name}/build-host`).then(r => r.data)
+export const setProjectBuildHost   = (ws, name, hostId) => api.put(`/workspaces/${ws}/projects/${name}/build-host`, { host_id: hostId }).then(r => r.data)
 
 // Stream a chunked plain-text response body, invoking onChunk per chunk.
 async function streamText(url, method, body, onChunk) {

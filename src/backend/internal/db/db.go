@@ -318,6 +318,16 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (project, env)
 		);
 
+		-- Per-project BUILD host (image-distribution Phase 4). A row pins a project's
+		-- image builds to a host (project = resource prefix {ws}_{proj}); no row ⇒ the
+		-- project inherits its workspace default build host, else builds on the env's
+		-- own deploy host (today's behavior). Independent of the deploy-host binding
+		-- above so a dedicated builder can push to a registry the deploy targets pull.
+		CREATE TABLE IF NOT EXISTS project_build_hosts (
+			project   TEXT    PRIMARY KEY,
+			host_id   INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE
+		);
+
 		-- Settings-scopes (Phase 3): a GLOBAL host's allowlist of workspaces it is
 		-- offered to. workspace='*' = offered to every workspace (the default given
 		-- to pre-scope hosts on migration). A workspace-owned host
@@ -654,6 +664,7 @@ func (d *DB) migrate() error {
 	// default), so deleting a host/registry can leave dangling bindings/grants.
 	// Sweep any that reference a row that no longer exists.
 	d.Exec(`DELETE FROM workspace_host_envs WHERE host_id NOT IN (SELECT id FROM hosts)`)                          //nolint:errcheck
+	d.Exec(`DELETE FROM project_build_hosts WHERE host_id NOT IN (SELECT id FROM hosts)`)                          //nolint:errcheck
 	d.Exec(`DELETE FROM global_host_grants WHERE host_id NOT IN (SELECT id FROM hosts)`)                           //nolint:errcheck
 	d.Exec(`DELETE FROM global_registry_grants WHERE registry_id NOT IN (SELECT id FROM docker_registries)`)       //nolint:errcheck
 	d.Exec(`DELETE FROM global_backup_target_grants WHERE target_id NOT IN (SELECT id FROM backup_targets)`)      //nolint:errcheck
