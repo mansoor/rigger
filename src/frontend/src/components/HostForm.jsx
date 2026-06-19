@@ -32,7 +32,7 @@ function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest 
   )
 }
 
-export default function HostForm({ initial, onSave, onCancel, saving, showGrants = false, workspaces = [] }) {
+export default function HostForm({ initial, onSave, onCancel, saving, showGrants = false, showBuildOnly = false, workspaces = [] }) {
   const isEdit = !!initial?.id
   const [name, setName]       = useState(initial?.name || '')
   const [address, setAddress] = useState(initial?.address || '')
@@ -41,6 +41,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
   const [wsDir, setWsDir]     = useState(initial?.workspaces_dir || '')
   const [key, setKey]         = useState('')
   const [managed, setManaged] = useState(false)
+  const [buildOnly, setBuildOnly] = useState(!!initial?.build_only)
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState('')
 
@@ -82,6 +83,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
       ssh_user: user.trim(), ssh_key: managed ? '' : key, use_managed_key: managed,
       workspaces_dir: wsDir.trim(),
     }
+    if (showBuildOnly) body.build_only = buildOnly
     if (showGrants) body.grants = grantMode === 'all' ? ['*'] : grantKeys
     try {
       await onSave(body)
@@ -164,6 +166,22 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
               <code className="font-mono"> rigger_host</code> here and install <code className="font-mono">rigger_host.pub</code> on the host.
             </p>
           </div>
+        </div>
+      )}
+
+      {showBuildOnly && (
+        <div className="rounded-lg border border-border-strong bg-canvas/60 p-3">
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <input type="checkbox" checked={buildOnly} onChange={e => setBuildOnly(e.target.checked)} className="accent-brand-500 mt-0.5" />
+            <span>
+              <span className="text-sm text-content">Build-only (dedicated builder)</span>
+              <span className="block text-xs text-content-subtle mt-0.5">
+                Use this host only to build &amp; push images — it's hidden from deploy-host pickers and runs no workloads,
+                so it can be torn down at any time. Leave unchecked for a normal <strong className="text-content-muted">Build + Deploy</strong> host.
+                {isEdit && ' A host that is still a deploy target for an environment can\'t be switched to build-only until those environments are moved.'}
+              </span>
+            </span>
+          </label>
         </div>
       )}
 

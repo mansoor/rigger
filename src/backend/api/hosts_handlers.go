@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/crypto"
+	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/stats"
@@ -26,6 +27,33 @@ type hostBody struct {
 	UseManagedKey bool     `json:"use_managed_key"` // use the Rigger-managed key instead of a pasted one
 	WorkspacesDir string   `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
 	Grants        []string `json:"grants"`          // admin only: global host's workspace allowlist ('*' = all)
+	BuildOnly     bool     `json:"build_only"`      // dedicated builder — excluded from deploy targets
+}
+
+// buildOnlyConflict reports whether marking the host build-only would strand a
+// project: it returns a user-facing message listing the environments still bound
+// to this host as a deploy target, or "" when none (safe to designate build-only).
+// A dedicated builder carries no workload and can be torn down at any time, so a
+// host that is still a deploy target must be repointed first.
+func buildOnlyConflict(d *db.DB, hostID int64) (string, error) {
+	uses, err := settings.HostEnvBindings(d, hostID)
+	if err != nil {
+		return "", err
+	}
+	if len(uses) == 0 {
+		return "", nil
+	}
+	parts := make([]string, 0, len(uses))
+	for _, u := range uses {
+		env := u.Env
+		if env == "" {
+			env = "(all environments)"
+		}
+		parts = append(parts, u.Project+" / "+env)
+	}
+	return "Can't mark this host build-only — it's still the deploy target for: " +
+		strings.Join(parts, ", ") +
+		". Move those environments to another host (Edit Project → Environments → Host), then try again.", nil
 }
 
 // hostKeyEnc resolves the encrypted SSH key for a create/update from the request
@@ -138,6 +166,11 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 		grants = []string{"*"} // default: offered to every workspace
 	}
 	_ = settings.SetHostGrants(h.db, host.ID, grants) //nolint:errcheck
+	if b.BuildOnly {
+		// A freshly-created host has no env bindings yet, so no conflict check needed.
+		_ = settings.SetHostBuildOnly(h.db, host.ID, true) //nolint:errcheck
+		host.BuildOnly = true
+	}
 	host.Grants, _ = settings.HostGrants(h.db, host.ID)
 	writeJSON(w, http.StatusCreated, host)
 }
@@ -159,6 +192,18 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Guard the Deploy → Build-only transition: a build-only host carries no
+	// workload and may be decommissioned, so it must not still be a deploy target.
+	cur, _ := settings.GetHost(h.db, id)
+	if b.BuildOnly && (cur == nil || !cur.BuildOnly) {
+		if msg, gerr := buildOnlyConflict(h.db, id); gerr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
+			return
+		} else if msg != "" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			return
+		}
+	}
 	host, err := settings.UpdateHost(h.db, id, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -168,6 +213,8 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
+	_ = settings.SetHostBuildOnly(h.db, id, b.BuildOnly) //nolint:errcheck
+	host.BuildOnly = b.BuildOnly
 	if host.OwnerScope == "global" && b.Grants != nil {
 		_ = settings.SetHostGrants(h.db, id, b.Grants) //nolint:errcheck
 	}
@@ -249,6 +296,15 @@ func (h *Handler) SetHostBuildOnly(w http.ResponseWriter, r *http.Request) {
 		BuildOnly bool `json:"build_only"`
 	}
 	_ = readJSON(r, &body) //nolint:errcheck — absent/invalid ⇒ unset (false)
+	if body.BuildOnly && !host.BuildOnly {
+		if msg, gerr := buildOnlyConflict(h.db, id); gerr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
+			return
+		} else if msg != "" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			return
+		}
+	}
 	if err := settings.SetHostBuildOnly(h.db, id, body.BuildOnly); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

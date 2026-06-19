@@ -96,11 +96,23 @@ func (h *Handler) UpdateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Guard the Deploy → Build-only transition (same rule as the admin path).
+	if b.BuildOnly && !host.BuildOnly {
+		if msg, gerr := buildOnlyConflict(h.db, id); gerr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
+			return
+		} else if msg != "" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			return
+		}
+	}
 	updated, err := settings.UpdateHost(h.db, id, b.Name, b.Address, b.SSHPort, b.SSHUser, keyEnc, b.WorkspacesDir)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	_ = settings.SetHostBuildOnly(h.db, id, b.BuildOnly) //nolint:errcheck
+	updated.BuildOnly = b.BuildOnly
 	h.bridge.EvictHost(id)
 	writeJSON(w, http.StatusOK, updated)
 }
@@ -168,6 +180,15 @@ func (h *Handler) SetWorkspaceHostBuildOnly(w http.ResponseWriter, r *http.Reque
 		BuildOnly bool `json:"build_only"`
 	}
 	_ = readJSON(r, &body) //nolint:errcheck
+	if body.BuildOnly && !host.BuildOnly {
+		if msg, gerr := buildOnlyConflict(h.db, id); gerr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": gerr.Error()})
+			return
+		} else if msg != "" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": msg})
+			return
+		}
+	}
 	if err := settings.SetHostBuildOnly(h.db, id, body.BuildOnly); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

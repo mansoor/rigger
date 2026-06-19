@@ -945,6 +945,34 @@ func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 	return out, rows.Err()
 }
 
+// HostEnvUsage is one (project → env) binding that targets a given host for
+// deployment. project is the resource prefix ({ws}_{proj}); env="" is the
+// project-wide default binding.
+type HostEnvUsage struct {
+	Project string `json:"project"`
+	Env     string `json:"env"`
+}
+
+// HostEnvBindings returns every environment that targets the given host for
+// deployment (reverse of EnvHosts). Used to block marking a host build-only
+// while it is still a live deploy target. Empty ⇒ safe to designate build-only.
+func HostEnvBindings(d *db.DB, hostID int64) ([]HostEnvUsage, error) {
+	rows, err := d.Query(`SELECT project, env FROM workspace_host_envs WHERE host_id=? ORDER BY project, env`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []HostEnvUsage
+	for rows.Next() {
+		var u HostEnvUsage
+		if err := rows.Scan(&u.Project, &u.Env); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
 // ── Build hosts (image-distribution Phase 4) ──────────────────────────────────
 
 // ProjectBuildHostID returns the explicit per-project build host id (0 ⇒ no
