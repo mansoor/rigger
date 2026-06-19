@@ -65,6 +65,13 @@ services:
       # certs out-of-band via one-shot lego (DNS-01). Same token as Traefik's `dns`
       # resolver; from src/.env. Empty ⇒ per-email overrides can't be issued.
       - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
+      # Self-update (Phase 3): host path to the Rigger install dir (the compose
+      # project lives at $RIGGER_HOST_DIR/src). The in-app updater spawns a
+      # detached helper that bind-mounts this to run `compose pull && up -d`.
+      # Set by install.sh; empty ⇒ one-click apply is disabled (manual update only).
+      - RIGGER_HOST_DIR=${RIGGER_HOST_DIR:-}
+      # The image tag this instance runs — the updater's apply/rollback default.
+      - RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG:-latest}
     networks:
       - traefik_net
     # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.

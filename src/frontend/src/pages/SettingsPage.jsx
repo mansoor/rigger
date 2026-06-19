@@ -16,7 +16,7 @@ import {
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
-  fetchVersion, checkUpdates,
+  fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -1912,6 +1912,11 @@ function UpdatesTab() {
   const [checking, setChecking] = useState(false)
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+
+  const current = info?.current || ver?.version || '—'
+  const isDev = info ? info.dev : (ver?.version === 'dev')
 
   async function runCheck() {
     setChecking(true); setErr('')
@@ -1924,8 +1929,42 @@ function UpdatesTab() {
     }
   }
 
-  const current = info?.current || ver?.version || '—'
-  const isDev = info ? info.dev : (ver?.version === 'dev')
+  // After apply/rollback the container restarts; poll until it's reachable again
+  // on a (usually different) version, then reload. Falls back to a reload after 2m.
+  function waitForRestart() {
+    const start = Date.now()
+    const iv = setInterval(async () => {
+      try {
+        const v = await fetchVersion()
+        if (v?.version !== current || Date.now() - start > 25000) {
+          clearInterval(iv); window.location.reload()
+        }
+      } catch { /* mid-restart — keep polling */ }
+      if (Date.now() - start > 120000) { clearInterval(iv); window.location.reload() }
+    }, 4000)
+  }
+
+  async function doApply(tag) {
+    if (!window.confirm(`Update Rigger to ${tag}? Rigger will restart and this page will reconnect automatically.`)) return
+    setBusy(true); setErr('')
+    try {
+      await applyUpdate(tag)
+      setRestarting(true); waitForRestart()
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Update failed to start'); setBusy(false)
+    }
+  }
+
+  async function doRollback() {
+    if (!window.confirm('Roll back to the previously running version? Rigger will restart.')) return
+    setBusy(true); setErr('')
+    try {
+      await rollbackUpdate()
+      setRestarting(true); waitForRestart()
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Rollback failed to start'); setBusy(false)
+    }
+  }
 
   return (
     <div className="max-w-2xl">
@@ -1935,6 +1974,12 @@ function UpdatesTab() {
       </div>
 
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        {restarting && (
+          <div className="rounded-lg bg-warning-subtle/40 border border-warning-border/60 px-3 py-2 text-sm text-warning-fg flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            Rigger is updating and will restart — this page will reconnect automatically.
+          </div>
+        )}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Current version</p>
@@ -1943,7 +1988,7 @@ function UpdatesTab() {
               {ver?.commit && <span className="ml-2 text-xs font-mono text-content-faint">{ver.commit.slice(0, 7)}</span>}
             </p>
           </div>
-          <button onClick={runCheck} disabled={checking}
+          <button onClick={runCheck} disabled={checking || restarting}
             className="shrink-0 text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
             {checking ? 'Checking…' : 'Check for updates'}
           </button>
@@ -1976,18 +2021,28 @@ function UpdatesTab() {
                     <pre className="text-xs whitespace-pre-wrap break-words bg-surface-raised border border-border-strong rounded-lg p-3 max-h-72 overflow-y-auto text-content">{info.notes}</pre>
                   </div>
                 )}
-                <div className="rounded-lg bg-surface-raised border border-border-strong px-3 py-2 text-xs text-content-muted">
-                  <p className="font-semibold text-content mb-1">To update now:</p>
-                  <code className="font-mono">cd ~/rigger/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code>
-                  <p className="mt-1 text-content-faint">One-click apply lands in a later release.</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button onClick={() => doApply(info.latest)} disabled={busy || restarting}
+                    className="text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+                    {busy ? 'Starting…' : `Update to ${info.latest}`}
+                  </button>
+                  {info.html_url && <a href={info.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
                 </div>
-                {info.html_url && <a href={info.html_url} target="_blank" rel="noreferrer" className="inline-block text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
+                <p className="text-[11px] text-content-faint">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></p>
               </>
             ) : (
               <p className="text-sm text-success-fg">✓ You’re on the latest release ({info.latest}).</p>
             )}
           </div>
         )}
+
+        <div className="border-t border-border pt-3">
+          <button onClick={doRollback} disabled={busy || restarting}
+            className="text-xs text-content-muted hover:text-content-strong disabled:opacity-50">
+            ↩ Roll back to previous version
+          </button>
+          <p className="text-[11px] text-content-faint mt-0.5">Re-runs the version that was active before the last update.</p>
+        </div>
       </div>
     </div>
   )

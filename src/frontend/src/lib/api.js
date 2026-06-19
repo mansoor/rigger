@@ -556,6 +556,9 @@ export const fetchVersion = () => api.get('/version').then(r => r.data)
 
 // Check for a newer Rigger release (self-update Phase 2; admin). force=true bypasses the cache.
 export const checkUpdates = (force = false) => api.get(`/updates/check${force ? '?force=1' : ''}`).then(r => r.data)
+// Apply an update / roll back to the previous version (self-update Phase 3; admin). Rigger restarts.
+export const applyUpdate = (tag) => api.post('/updates/apply', tag ? { tag } : {}).then(r => r.data)
+export const rollbackUpdate = () => api.post('/updates/rollback', {}).then(r => r.data)
 
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {

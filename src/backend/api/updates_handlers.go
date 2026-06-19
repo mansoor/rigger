@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -10,7 +11,16 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/buildinfo"
+	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/settings"
 )
+
+// imageRepo is the published image the updater pulls + recreates from.
+const imageRepo = "ghcr.io/mansoor/rigger"
+
+// prevTagKey stores the image tag that was running before the last apply, so a
+// rollback can pin back to it (app_settings KV).
+const prevTagKey = "self_update_prev_tag"
 
 // Self-update Phase 2 — check for a newer Rigger release.
 //
@@ -127,6 +137,107 @@ func fetchUpdateInfo() *updateInfo {
 		info.UpdateAvailable = semverNewer(rel.TagName, cur)
 	}
 	return info
+}
+
+// currentImageTag is the image tag this instance was started with (from compose
+// via RIGGER_IMAGE_TAG), defaulting to "latest".
+func currentImageTag() string {
+	if t := strings.TrimSpace(os.Getenv("RIGGER_IMAGE_TAG")); t != "" {
+		return t
+	}
+	return "latest"
+}
+
+// runningPipelineCount returns how many pipeline runs are mid-flight — the apply
+// guard refuses to restart Rigger while one is executing.
+func (h *Handler) runningPipelineCount() int {
+	var n int
+	h.db.QueryRow(`SELECT COUNT(*) FROM pipeline_runs WHERE status='running'`).Scan(&n) //nolint:errcheck
+	return n
+}
+
+// POST /api/updates/apply — admin. Pulls the requested tag (default "latest")
+// and recreates the Rigger container by spawning a DETACHED helper that runs
+// `docker compose pull rigger && docker compose up -d rigger` against the install
+// (a container can't recreate itself). Returns 202; the UI reconnects on restart.
+// Body: { "tag": "0.2.0" } (optional; leading "v" tolerated).
+func (h *Handler) ApplyUpdate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	_ = readJSON(r, &body) //nolint:errcheck — empty ⇒ latest
+
+	target := strings.TrimPrefix(strings.TrimSpace(body.Tag), "v")
+	if target == "" {
+		target = "latest"
+	}
+	// Record the tag we're moving away from so rollback can return to it. Prefer a
+	// concrete version (buildinfo) over a floating "latest".
+	prev := strings.TrimPrefix(buildinfo.Version, "v")
+	if prev == "" || prev == "dev" {
+		prev = currentImageTag()
+	}
+	h.startUpdate(w, target, prev)
+}
+
+// POST /api/updates/rollback — admin. Re-applies the tag recorded before the last
+// apply (app_settings prevTagKey).
+func (h *Handler) RollbackUpdate(w http.ResponseWriter, r *http.Request) {
+	prev := strings.TrimSpace(settings.AppSetting(h.db, prevTagKey))
+	if prev == "" || prev == "dev" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no previous version recorded to roll back to"})
+		return
+	}
+	h.startUpdate(w, prev, currentImageTag())
+}
+
+// startUpdate validates preconditions, records the rollback tag, and launches the
+// detached recreate helper. Shared by apply + rollback.
+func (h *Handler) startUpdate(w http.ResponseWriter, target, prev string) {
+	hostDir := strings.TrimSpace(os.Getenv("RIGGER_HOST_DIR"))
+	if hostDir == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "one-click update isn't enabled for this install (RIGGER_HOST_DIR not set). Re-run install.sh, or update manually: cd <install>/src && docker compose pull && docker compose up -d"})
+		return
+	}
+	if n := h.runningPipelineCount(); n > 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "a pipeline run is in progress — wait for it to finish before updating"})
+		return
+	}
+
+	_ = settings.SetAppSetting(h.db, prevTagKey, prev) //nolint:errcheck
+
+	// Helper base = the currently-running Rigger image (already local, guaranteed to
+	// have docker + the compose plugin) with sh as entrypoint. It bind-mounts the
+	// install dir, points .env at the target tag, then pulls + recreates only the
+	// rigger service. The 2s sleep lets this HTTP 202 flush before we get killed.
+	script := `sleep 2
+cd /work/src || exit 1
+if grep -q '^RIGGER_IMAGE_TAG=' .env 2>/dev/null; then
+  sed -i "s|^RIGGER_IMAGE_TAG=.*|RIGGER_IMAGE_TAG=${RIGGER_TARGET_TAG}|" .env
+else
+  echo "RIGGER_IMAGE_TAG=${RIGGER_TARGET_TAG}" >> .env
+fi
+docker compose pull rigger && docker compose up -d rigger`
+
+	args := []string{
+		"run", "-d", "--rm",
+		"-v", "/var/run/docker.sock:/var/run/docker.sock",
+		"-v", hostDir + ":/work",
+		"-e", "RIGGER_TARGET_TAG=" + target,
+		"--entrypoint", "sh",
+		imageRepo + ":" + currentImageTag(),
+		"-c", script,
+	}
+	var out bytes.Buffer
+	if err := (executor.Local{}).Docker(executor.Spec{Args: args, Stdout: &out, Stderr: &out, Timeout: 30 * time.Second}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "couldn't start the update helper: " + strings.TrimSpace(out.String())})
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{
+		"status": "updating",
+		"target": target,
+		"message": "Rigger is updating to " + target + " and will restart in a few seconds. This page will reconnect automatically.",
+	})
 }
 
 // semverNewer reports whether tag a is a strictly newer semver than b. Leading

@@ -188,6 +188,9 @@ func main() {
 
 	// Self-update Phase 2 — check for a newer Rigger release (admin only).
 	mux.Handle("GET /api/updates/check", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.CheckUpdates))))
+	// Self-update Phase 3 — apply / rollback via a detached recreate helper (admin only).
+	mux.Handle("POST /api/updates/apply", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.ApplyUpdate))))
+	mux.Handle("POST /api/updates/rollback", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.RollbackUpdate))))
 
 	// User management (Phase 5 / roadmap 10a) — admin only.
 	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

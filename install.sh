@@ -327,6 +327,10 @@ RIGGER_APP_HOST=${HOST_IP}
 # pin a specific version like v1.2.3. The in-app updater (Admin → Updates) and
 # 'docker compose pull && up -d' both honor this.
 RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}
+
+# Host path to this install — lets the in-app updater (Admin → Updates) spawn a
+# helper that recreates Rigger in place. Must be the dir containing src/.
+RIGGER_HOST_DIR=${RIGGER_DIR}
 EOF
 
   success "Configuration written to ${ENV_FILE}"
@@ -342,6 +346,10 @@ else
     sed -i.bak "s/^RIGGER_IMAGE_TAG=.*/RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}/" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
   else
     echo "RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}" >> "$ENV_FILE"
+  fi
+  # Ensure the install dir is recorded so the in-app updater can recreate in place.
+  if ! grep -q '^RIGGER_HOST_DIR=' "$ENV_FILE"; then
+    echo "RIGGER_HOST_DIR=${RIGGER_DIR}" >> "$ENV_FILE"
   fi
 fi
 
