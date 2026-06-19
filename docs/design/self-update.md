@@ -56,10 +56,14 @@ is sent — it's a read of the public releases list.
 
 - **Phase 0 — version awareness** (foundation): `buildinfo` + ldflags in Dockerfile + compose
   build arg + `GET /api/version` + show current version in the UI. Independently useful.
-- **Phase 1 — publish images:** GitHub Actions workflow builds + pushes `ghcr.io/mansoor/rigger:vX.Y.Z`
-  + `:latest` on a `v*` tag (passing `RIGGER_VERSION`/`RIGGER_COMMIT` build args). Add a
-  `docker-compose.build.yml` override so contributors can still build from source; the default
-  installed compose uses `image:`.
+- **Phase 1 — publish images** ✅ BUILT (commit pending tag): `.github/workflows/release.yml`
+  builds + pushes `ghcr.io/mansoor/rigger:{version}` + `:latest` on a `v*` tag (passing
+  `RIGGER_VERSION`/`RIGGER_COMMIT`). The compose `rigger` service now sets BOTH `image:`
+  (`ghcr.io/mansoor/rigger:${RIGGER_IMAGE_TAG:-latest}`) and `build:` — they coexist, so
+  `compose pull` fetches the published image while `compose up --build` still builds from source
+  (no separate override file needed). `install.sh` pulls the image (build fallback via
+  `RIGGER_BUILD=1` or pull failure), honors `RIGGER_IMAGE_TAG`, keeps all prereq checks.
+  ⚠️ The GHCR package must be set **public** once after the first tag push.
 - **Phase 2 — check for updates:** `GET /api/updates/check` (GitHub Releases) + Admin → Updates
   section: current version, Check button, "update available" badge + changelog.
 - **Phase 3 — apply update:** detached-helper pull+recreate, prior-tag record, Apply button +

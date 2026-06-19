@@ -11,6 +11,9 @@
 #   RIGGER_PORT=8080            — UI host port               (default: 8080)
 #   RIGGER_BRANCH=main          — git branch to install      (default: main)
 #   RIGGER_REPO=<url>           — git clone URL              (default: GitHub HTTPS)
+#   RIGGER_IMAGE_TAG=latest     — published image tag to run (default: latest;
+#                                 set e.g. v1.2.3 to pin a specific release)
+#   RIGGER_BUILD=1              — build from source instead of pulling the image
 #   ACME_EMAIL=you@email.com  — Let's Encrypt contact email
 #   SKIP_DOCKER=1             — skip Docker installation check
 #
@@ -27,6 +30,8 @@ RIGGER_REPO="${RIGGER_REPO:-https://github.com/mansoor/rigger.git}"
 RIGGER_DIR="${RIGGER_DIR:-$HOME/rigger}"
 RIGGER_PORT="${RIGGER_PORT:-8080}"
 RIGGER_BRANCH="${RIGGER_BRANCH:-main}"
+RIGGER_IMAGE_TAG="${RIGGER_IMAGE_TAG:-latest}"
+RIGGER_BUILD="${RIGGER_BUILD:-0}"
 ACME_EMAIL="${ACME_EMAIL:-}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
 
@@ -317,6 +322,11 @@ ACME_EMAIL=${ACME_EMAIL:-your@email.com}
 # and magic-DNS (sslip/nip) URLs for locally-deployed envs. Detected at install;
 # edit in Settings → General if wrong (e.g. a public IP or a different interface).
 RIGGER_APP_HOST=${HOST_IP}
+
+# Published image tag to run (self-update). 'latest' tracks the newest release;
+# pin a specific version like v1.2.3. The in-app updater (Admin → Updates) and
+# 'docker compose pull && up -d' both honor this.
+RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}
 EOF
 
   success "Configuration written to ${ENV_FILE}"
@@ -326,6 +336,12 @@ else
   # Ensure RIGGER_PORT is up to date if user passed a custom port
   if [[ "$RIGGER_PORT" != "8080" ]]; then
     sed -i.bak "s/^RIGGER_PORT=.*/RIGGER_PORT=${RIGGER_PORT}/" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+  fi
+  # Ensure the image tag is recorded (append if a pre-image-era .env lacks it).
+  if grep -q '^RIGGER_IMAGE_TAG=' "$ENV_FILE"; then
+    sed -i.bak "s/^RIGGER_IMAGE_TAG=.*/RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}/" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
+  else
+    echo "RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG}" >> "$ENV_FILE"
   fi
 fi
 
@@ -342,12 +358,23 @@ fi
 
 # ── Build and start ───────────────────────────────────────────────────────────
 
-step "Building and starting Rigger"
+step "Starting Rigger"
 
-# The toolkit scripts are baked into the image (Phase 6.5d) — the build context
-# is the repo root, so no separate scripts mount is needed.
 cd "${RIGGER_DIR}/src"
-$DOCKER_CMD compose up --build -d
+
+# Prefer the published image (no local build): pull the requested tag, then start.
+# Fall back to building from source if the user asked (RIGGER_BUILD=1) or the
+# image can't be pulled (e.g. no release published yet, or an air-gapped host).
+if [[ "$RIGGER_BUILD" == "1" ]]; then
+  info "RIGGER_BUILD=1 — building Rigger from source…"
+  $DOCKER_CMD compose up --build -d
+elif $DOCKER_CMD compose pull rigger; then
+  success "Pulled ghcr.io/mansoor/rigger:${RIGGER_IMAGE_TAG}"
+  $DOCKER_CMD compose up -d
+else
+  warn "Couldn't pull the published image (tag '${RIGGER_IMAGE_TAG}') — building from source instead."
+  $DOCKER_CMD compose up --build -d
+fi
 
 # ── Install the `rigger` CLI wrapper ────────────────────────────────────────────
 
@@ -387,6 +414,6 @@ echo ""
 echo -e "  ${BOLD}Useful commands:${RESET}"
 echo -e "    Stop:    cd ${RIGGER_DIR}/src && docker compose down"
 echo -e "    Start:   cd ${RIGGER_DIR}/src && docker compose up -d"
-echo -e "    Update:  cd ${RIGGER_DIR} && git pull && cd src && docker compose up --build -d"
+echo -e "    Update:  in the UI → Admin → Updates  (or: cd ${RIGGER_DIR}/src && docker compose pull && docker compose up -d)"
 echo -e "    Logs:    cd ${RIGGER_DIR}/src && docker compose logs -f rigger"
 echo ""

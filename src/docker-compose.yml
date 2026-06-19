@@ -6,6 +6,11 @@ services:
 
   # ── Rigger ──────────────────────────────────────────────────────────────────────
   rigger:
+    # The published image (self-update Phase 1). `docker compose pull` fetches this
+    # from GHCR; installs run the image without building. `image:` and `build:`
+    # coexist intentionally: it's also the tag a local `--build` produces, so
+    # contributors/dev still build from source with `docker compose up --build`.
+    image: ghcr.io/mansoor/rigger:${RIGGER_IMAGE_TAG:-latest}
     build:
       # Build context is the repo root so the image can bake in templates/
       # (single-image distribution; toolkit logic lives in the Go binary).
