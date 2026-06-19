@@ -1295,7 +1295,12 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 	wsRoot := wspath.ProjectDir(h.workspacesDir, workspaceName, project)
 	baseDomain := settings.WorkspaceBaseDomain(h.db, workspaceName)
-	prefix, registry := cfg.Project.Prefix(), cfg.Project.Registry
+	prefix := cfg.Project.Prefix()
+	// Effective registry (project → workspace/global system) drives the .env rebase
+	// AND the regenerated compose image refs, so a project inheriting a system
+	// registry re-prefixes its {SVC}_IMAGE pointers to it (Phase 0: resolves to the
+	// project's own value, so identical output).
+	registry := settings.EffectiveRegistry(h.db, workspaceName, cfg.Project.Registry)
 
 	for envName := range cfg.Environments {
 		envDir := filepath.Join(wsRoot, "envs", envName)
@@ -1316,7 +1321,7 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
@@ -1840,7 +1845,11 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 	if cfgData, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name)); rerr == nil {
 		envDir := wspath.EnvDir(h.workspacesDir, wsName, name, env)
 		envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), EnvFile: string(envContent)}
+		reg := ""
+		if cfg, perr := wsconfig.Parse(cfgData); perr == nil {
+			reg = settings.EffectiveRegistry(h.db, wsName, cfg.Project.Registry)
+		}
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), Registry: reg, EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgData, env, ro); gerr == nil {
 			outPath := filepath.Join(envDir, "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck

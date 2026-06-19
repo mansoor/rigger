@@ -482,6 +482,35 @@ func EffectiveBaseDomain(d *db.DB, wsKey string) string {
 	return AppSetting(d, "apps_base_domain")
 }
 
+// EffectiveRegistry resolves the registry an environment's images live in:
+// the project's own registry (config.json `registry`) wins, else the workspace
+// system registry, else the global system registry, else "" (local-only — no
+// registry resolvable). This mirrors the host/domain inheritance. projectRegistry
+// is the project's own value, passed in so this package needn't depend on wsconfig.
+//
+// Phase 0 (foundation): the system-registry designation does not exist yet, so the
+// workspace/global lookups return "" and this returns projectRegistry — i.e.
+// today's behavior, byte-for-byte. Phase 1 adds the `system` flag on
+// docker_registries and implements WorkspaceSystemRegistry/GlobalSystemRegistry.
+func EffectiveRegistry(d *db.DB, wsKey, projectRegistry string) string {
+	if r := strings.TrimSpace(projectRegistry); r != "" {
+		return r
+	}
+	if r := WorkspaceSystemRegistry(d, wsKey); r != "" {
+		return r
+	}
+	return GlobalSystemRegistry(d)
+}
+
+// WorkspaceSystemRegistry returns the URL of the registry designated "system" for
+// a workspace, or "" when none. Phase 0 stub — the `system` designation does not
+// exist yet (Phase 1 implements it on docker_registries + this lookup).
+func WorkspaceSystemRegistry(d *db.DB, wsKey string) string { return "" }
+
+// GlobalSystemRegistry returns the URL of the registry designated "system" globally
+// (the admin default), or "" when none. Phase 0 stub — see WorkspaceSystemRegistry.
+func GlobalSystemRegistry(d *db.DB) string { return "" }
+
 // AutoURLMode returns how to build an env URL when no base domain is set:
 // "sslip" | "nip" | "traefikme" | "localhost" | "off". Defaults to "localhost"
 // (the historical behaviour) when unset.

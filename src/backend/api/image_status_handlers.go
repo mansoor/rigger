@@ -44,6 +44,9 @@ func (h *Handler) GetImageStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
+	// Use the effective registry (project → workspace/global system) so the "latest"
+	// tag shown matches what build/deploy produce (Phase 0: project's own value).
+	cfg.Project.Registry = settings.EffectiveRegistry(h.db, ws, cfg.Project.Registry)
 	// Resolve gives the effective image per build service (.env override or tag).
 	eff := deployhistory.Resolve(h.workspacesDir, ws, name, env)
 
@@ -84,6 +87,8 @@ func (h *Handler) TrackLatest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
+	// Track against the effective registry so the pinned .env tag matches build/deploy.
+	cfg.Project.Registry = settings.EffectiveRegistry(h.db, ws, cfg.Project.Registry)
 	updates := map[string]string{}
 	for _, svc := range cfg.BuildServices() {
 		updates[deployhistory.OverrideKey(svc.Name)] = cfg.ImageTag(svc.Name, env)
@@ -100,7 +105,7 @@ func (h *Handler) TrackLatest(w http.ResponseWriter, r *http.Request) {
 	envDir := wspath.EnvDir(h.workspacesDir, ws, name, env)
 	if cfgBytes, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, ws, name)); rerr == nil {
 		envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, ws), EnvFile: string(envContent)}
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, ws), Registry: cfg.Project.Registry, EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgBytes, env, ro); gerr == nil {
 			os.WriteFile(filepath.Join(envDir, "docker-compose.yml"), content, 0o644) //nolint:errcheck
 		}

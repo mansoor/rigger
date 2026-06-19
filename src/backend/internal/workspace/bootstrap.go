@@ -23,7 +23,7 @@ import (
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
-func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain string, out io.Writer) error {
+func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain, registry string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -40,6 +40,14 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	}
 	if err := cfg.ValidateEnv(env); err != nil {
 		return err
+	}
+	// Override config.json's `registry` with the EFFECTIVE registry resolved by the
+	// caller (project → workspace/global system). envgen reads cfg.Project.Registry to
+	// write the .env REGISTRY + {SVC}_IMAGE pointers, so they target the resolved
+	// registry. composegen reads the raw bytes, so it gets the same value via
+	// RouteOpts.Registry below. Empty ⇒ keep the project's own (Phase 0 always does).
+	if registry != "" {
+		cfg.Project.Registry = registry
 	}
 	e := cfg.Environments[env]
 
@@ -65,7 +73,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		// Read the just-written .env so services that set env_file_mount get it
 		// embedded as a compose config (best-effort; missing ⇒ no mount).
 		envContent, _ := os.ReadFile(envFile)
-		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			return fmt.Errorf("generate compose: %w", err)
 		}

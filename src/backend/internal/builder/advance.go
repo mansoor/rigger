@@ -82,7 +82,10 @@ func (o Options) advancePointers(cfg *wsconfig.Config, builds []wsconfig.Service
 		AutoURLHost:  o.AutoURLHost,
 		DNSProvider:  o.DNSProvider,
 		OverrideCert: o.OverrideCert,
-		EnvFile:      string(envContent),
+		// cfgBytes is read from disk (the project's own registry); pass the effective
+		// registry so the regenerated compose's image: defaults match the advanced tags.
+		Registry: o.Registry,
+		EnvFile:  string(envContent),
 	})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)

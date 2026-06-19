@@ -42,6 +42,11 @@ type Options struct {
 	// that 404'd until a manual Refresh regenerated them. See composegen.RouteOpts.
 	DNSProvider  string
 	OverrideCert bool
+	// Registry is the EFFECTIVE registry (settings.EffectiveRegistry: project →
+	// workspace-system → global-system), resolved by the bridge. When non-empty it
+	// overrides config.json's `registry` so images are tagged/pushed/advanced against
+	// the resolved registry. Empty ⇒ use config.json's own (Phase 0 always does).
+	Registry string
 	// TemplatesDir is the toolkit's templates/ dir, used to scaffold a blueprint
 	// Dockerfile into a source build context that ships source but no Dockerfile.
 	TemplatesDir string
@@ -138,5 +143,16 @@ func (o Options) info(format string, a ...any)    { fmt.Fprintf(o.out(), "⚑ "+
 func (o Options) success(format string, a ...any) { fmt.Fprintf(o.out(), "✓ "+format+"\n", a...) }
 
 func (o Options) loadConfig() (*wsconfig.Config, error) {
-	return wsconfig.Load(o.configPath())
+	cfg, err := wsconfig.Load(o.configPath())
+	if err != nil {
+		return nil, err
+	}
+	// Override config.json's `registry` with the EFFECTIVE registry resolved by the
+	// bridge (project → workspace/global system). This is the single chokepoint for
+	// build/promote, so cfg.ImageTag (build, promote, advance) tags/pushes against
+	// the resolved registry. Empty ⇒ keep the project's own (Phase 0 always does).
+	if o.Registry != "" {
+		cfg.Project.Registry = o.Registry
+	}
+	return cfg, nil
 }

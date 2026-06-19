@@ -37,6 +37,13 @@ type RouteOpts struct {
 	// not a host bind — because Rigger runs in a container and the host daemon
 	// can't resolve Rigger's bind paths. Empty ⇒ no .env file mount is emitted.
 	EnvFile string
+	// Registry is the EFFECTIVE registry for this project (settings.EffectiveRegistry:
+	// project → workspace-system → global-system), resolved by the caller (which has
+	// DB access). When non-empty it overrides config.json's `registry` for image
+	// refs (the baked `image:` defaults), so a project that inherits a system
+	// registry tags/pulls against it. Empty ⇒ use config.json's own `registry`
+	// (today's behavior; Phase 0 always resolves to this).
+	Registry string
 }
 
 func Generate(configJSON []byte, env string) ([]byte, error) {
@@ -95,6 +102,12 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	// need to supply the (DB-sourced) base domain.
 	if cfg.Project.LocalTLS {
 		ro.LocalTLS = true
+	}
+	// Effective registry (project → workspace/global system) is resolved by the
+	// caller and passed in; when set it overrides config.json's own `registry` for
+	// every image ref so a project inheriting a system registry tags against it.
+	if ro.Registry != "" {
+		cfg.Project.Registry = ro.Registry
 	}
 	resolveRoute(&e, cfg.resourcePrefix(), env, ro)
 	// Per-email override: serve the out-of-band file-provider cert (no ACME resolver).

@@ -984,7 +984,21 @@ func (b *Bridge) Bootstrap(workspaceName, project, env string, stdout, stderr io
 func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, out io.Writer) error {
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
 	baseDomain := settings.EffectiveBaseDomain(b.db, workspaceName)
-	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, out)
+	registry := b.effectiveRegistry(workspaceName, project)
+	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, registry, out)
+}
+
+// effectiveRegistry resolves the registry an env's images live in for a project:
+// the project's own registry (config.json) wins, else the workspace/global system
+// registry (settings.EffectiveRegistry). "" ⇒ local-only — no registry resolvable
+// (Phase 0: the system designation doesn't exist yet, so this returns the project's
+// own value). Threaded into builder/dockerops/bootstrap so every image ref agrees.
+func (b *Bridge) effectiveRegistry(workspaceName, project string) string {
+	projReg := ""
+	if cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project)); err == nil {
+		projReg = cfg.Project.Registry
+	}
+	return settings.EffectiveRegistry(b.db, workspaceName, projReg)
 }
 
 // runScript runs a one-off tool container for a pipeline `script` stage, injecting
@@ -1055,11 +1069,9 @@ func (b *Bridge) ensureRegistryLogin(workspaceName, project string, ex executor.
 	if b.db == nil {
 		return nil
 	}
-	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
-	if err != nil {
-		return nil // can't read config — let the push/pull surface its own error
-	}
-	host := normalizeRegistryHost(cfg.Project.Registry)
+	// Match the EFFECTIVE registry (project → workspace/global system), so a project
+	// inheriting a system registry authenticates to it before push/pull.
+	host := normalizeRegistryHost(b.effectiveRegistry(workspaceName, project))
 	if host == "" {
 		return nil // no registry configured (local-only images)
 	}
@@ -1313,6 +1325,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
@@ -1385,6 +1398,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
