@@ -171,7 +171,10 @@ function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDele
   // Poll the latest run so the Run button disables and a "View log" link appears
   // while a run is in flight — regardless of who/what started it (UI or webhook).
   const { data: latest = [] } = useQuery({
-    queryKey: ['pipeline-runs', workspace, name, pipeline.id],
+    // Distinct from the Run-history query (same prefix, different limit) so the
+    // frequent limit-1 poll here doesn't clobber the limit-20 history cache —
+    // both still match invalidations on the ['pipeline-runs', ws, name, id] prefix.
+    queryKey: ['pipeline-runs', workspace, name, pipeline.id, 'latest'],
     queryFn: () => fetchPipelineRuns(workspace, name, pipeline.id, 1),
     // Fast while active; slow baseline when idle so a webhook-started run is picked
     // up without a manual interaction (a bare `false` froze this until reload).
@@ -331,7 +334,9 @@ function RunHistory({ workspace, name, pipeline }) {
   const qc = useQueryClient()
   const [logRun, setLogRun] = useState(null) // run id whose saved logs are open
   const { data: runs = [], isLoading } = useQuery({
-    queryKey: ['pipeline-runs', workspace, name, pipelineId],
+    // 'history' keeps this limit-20 cache separate from the card's limit-1 'latest'
+    // poll (see PipelineCard); invalidations use the shared 4-element prefix.
+    queryKey: ['pipeline-runs', workspace, name, pipelineId, 'history'],
     queryFn: () => fetchPipelineRuns(workspace, name, pipelineId, 20),
     // Slow baseline when idle so a webhook-started run appears in history without a
     // manual interaction; fast while one is in flight.
