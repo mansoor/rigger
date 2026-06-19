@@ -333,6 +333,8 @@ func main() {
 				handler.CreateWorkspaceRegistry(w, r)
 			case r.Method == "POST" && sub == "test":
 				handler.TestWorkspaceRegistry(w, r)
+			case r.Method == "POST" && sub == "system":
+				handler.MarkWorkspaceRegistrySystem(w, r)
 			case r.Method == "PUT" && id != "":
 				handler.UpdateWorkspaceRegistry(w, r)
 			case r.Method == "DELETE" && id != "":

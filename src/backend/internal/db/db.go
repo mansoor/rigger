@@ -636,6 +636,11 @@ func (d *DB) migrate() error {
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck
 	}
+	// Image-distribution Phase 1: a registry can be designated the "system" registry
+	// used wherever a project sets none (settings.EffectiveRegistry). At most one
+	// global system registry + at most one per workspace; enforced in the store, not
+	// the schema. Pre-existing registries default to non-system (0).
+	d.addColumn("docker_registries", "system INTEGER NOT NULL DEFAULT 0")
 	// Same scoping for backup targets (Phase 3); pre-scope targets → '*'.
 	if d.addColumn("backup_targets", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_backup_target_grants (target_id, workspace) SELECT id, '*' FROM backup_targets`) //nolint:errcheck

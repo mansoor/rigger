@@ -12,7 +12,7 @@ import { fetchWorkspaceRegistries, createWorkspaceRegistry, testRegistryCredenti
 // (cfg.Project.Registry); the saved record supplies the push credentials.
 
 const CUSTOM = '__custom__'
-const LOCAL = '__local__' // "no registry" — build images locally, never push/pull a registry
+const LOCAL = '__local__' // empty value — inherit the workspace/global SYSTEM registry (image distribution)
 const inputCls = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors'
 
 function FieldLabel({ children }) {
@@ -127,13 +127,13 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
       {hasRegistries && (
         <select value={selectValue} onChange={e => chooseSelect(e.target.value)}
           className={`${inputCls} ${error ? 'border-danger' : ''}`}>
-          <option value={LOCAL}>Local — no registry (build images locally)</option>
-          {registries.map(r => <option key={r.id} value={r.url}>{r.name} — {r.url}</option>)}
+          <option value={LOCAL}>System registry (workspace / global default)</option>
+          {registries.map(r => <option key={r.id} value={r.url}>{r.name} — {r.url}{r.system ? ' · system' : ''}</option>)}
           <option value={CUSTOM}>Other (enter manually)…</option>
         </select>
       )}
       {hasRegistries && selectValue === LOCAL && (
-        <p className="text-xs text-content-faint mt-1">Images are built locally and never pushed/pulled. Pick a registry only if remote hosts need to pull them.</p>
+        <p className="text-xs text-content-faint mt-1">Uses the system registry configured for this workspace (or the global default). If none is set, images stay local — fine for a single-node compose deploy, but a Swarm or remote-host deploy will be blocked until a system registry is configured.</p>
       )}
       {hasRegistries && wsDefault && value === wsDefault.url && (
         <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>

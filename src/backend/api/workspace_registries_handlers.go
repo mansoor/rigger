@@ -120,6 +120,42 @@ func (h *Handler) DeleteWorkspaceRegistry(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /api/workspaces/{ws}/registries/{id}/system — designate (or clear) this
+// workspace's system registry, used wherever a project in this workspace sets no
+// registry (and there's no project-level override). Must be a registry OWNED by the
+// workspace; a shared global registry's system status is managed by an admin.
+// Body: {"system": bool}. At most one per workspace (enforced in the store).
+func (h *Handler) MarkWorkspaceRegistrySystem(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsRegistryID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	reg, owned := h.ownsRegistry(ws, id)
+	if reg == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if !owned {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this is a shared global registry — its system status is managed from Settings"})
+		return
+	}
+	var body struct {
+		System bool `json:"system"`
+	}
+	_ = readJSON(r, &body) //nolint:errcheck — absent/invalid body ⇒ unset (false)
+	if err := settings.SetRegistrySystem(h.db, id, body.System); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	updated, _ := settings.GetRegistry(h.db, id)
+	if updated != nil {
+		updated.Password = ""
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // POST /api/workspaces/{ws}/registries/test-credentials — docker login test for
 // AD-HOC credentials that aren't saved yet. Used by the project registry picker so
 // a user can verify a registry before creating the workspace record. Adds no new

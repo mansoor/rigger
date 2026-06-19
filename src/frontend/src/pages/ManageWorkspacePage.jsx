@@ -13,7 +13,7 @@ import RoleHelp from '../components/RoleHelp'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
-  fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry,
+  fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
@@ -596,6 +596,10 @@ function RegistriesSection({ workspace, qc }) {
     mutationFn: (id) => deleteWorkspaceRegistry(workspace, id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: regsKey }); setDeleting(null) },
   })
+  const sysMut = useMutation({
+    mutationFn: ({ id, system }) => markWorkspaceRegistrySystem(workspace, id, system),
+    onSuccess: () => qc.invalidateQueries({ queryKey: regsKey }),
+  })
 
   async function handleTest(id) {
     setTestStatus(s => ({ ...s, [id]: { loading: true } }))
@@ -615,7 +619,7 @@ function RegistriesSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Docker registries</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator.</p>
+          <p className="text-xs text-content-subtle mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator. Mark one of your own <span className="text-content-muted font-medium">system</span> to use it for projects here that set no registry (overrides the global default).</p>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -642,6 +646,9 @@ function RegistriesSection({ workspace, qc }) {
                       {owned
                         ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">this workspace</span>
                         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator — managed in Settings">shared</span>}
+                      {r.system && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40" title="Used by this workspace's projects that set no registry">★ system</span>
+                      )}
                     </div>
                     <p className="text-xs text-content-subtle mt-0.5">{r.url} · {r.username}</p>
                   </div>
@@ -653,6 +660,9 @@ function RegistriesSection({ workspace, qc }) {
                       className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
                     {owned ? (
                       <>
+                        <button onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
+                          title={r.system ? 'Stop using this as the workspace system registry' : 'Use for this workspace\'s projects that set no registry'}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">{r.system ? 'Unset system' : 'Set system'}</button>
                         <button onClick={() => setModal({ editing: r })}
                           className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
                         <button onClick={() => setDeleting(r)}

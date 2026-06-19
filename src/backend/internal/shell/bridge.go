@@ -1001,6 +1001,38 @@ func (b *Bridge) effectiveRegistry(workspaceName, project string) string {
 	return settings.EffectiveRegistry(b.db, workspaceName, projReg)
 }
 
+// deployRegistryGate blocks a deploy whose built image would have nowhere to be
+// pulled from (image-distribution Phase 1). A project that builds its own images
+// needs a registry when the target is a Swarm (every node pulls) or a remote host
+// (the image built on the control plane is absent there). A local single-node
+// compose deploy builds and runs on one daemon, so a local-only image is fine and
+// no registry is required. Returns nil (allow) for image-only projects, when a
+// registry resolves, or for the local case. remote ⇒ the env is bound to a host.
+func (b *Bridge) deployRegistryGate(workspaceName, project, env string, remote bool) error {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil // can't read config — let the normal deploy path surface the error
+	}
+	if len(cfg.BuildServices()) == 0 {
+		return nil // image-only project: pulls its pinned public images, no Rigger registry
+	}
+	if settings.EffectiveRegistry(b.db, workspaceName, cfg.Project.Registry) != "" {
+		return nil // a registry resolves (project / workspace-system / global-system)
+	}
+	swarm := false
+	if e, ok := cfg.Environments[env]; ok && e.Deployment == "swarm" {
+		swarm = true
+	}
+	if !swarm && !remote {
+		return nil // local single-node compose: the locally-built image runs in place
+	}
+	target := "a remote host"
+	if swarm {
+		target = "a Swarm"
+	}
+	return fmt.Errorf("this project builds its own images but no registry is configured — deploying to %s needs one so the image can be pulled. Designate a system registry (Settings → Docker Registries, or Manage Workspace → Registries) or set a project registry, then redeploy", target)
+}
+
 // runScript runs a one-off tool container for a pipeline `script` stage, injecting
 // the env's context as RIGGER_* variables and streaming output. Runs on the env's
 // host (remote) or the local daemon. A non-zero exit fails the stage.
@@ -1271,6 +1303,15 @@ func (b *Bridge) Run(opts RunOptions) error {
 		baseExec = rt.exec
 	}
 	runExec := executor.WithContext(baseExec, opts.Context)
+
+	// Image-distribution Phase 1 gate: block a build-service deploy to a Swarm/remote
+	// host when no registry resolves (the image would be unpullable there). Local
+	// single-node deploys are unaffected (a local image runs in place).
+	if opts.Command == "start" || opts.Command == "update" || opts.Command == "refresh" {
+		if gerr := b.deployRegistryGate(opts.Workspace, opts.Project, opts.Env, rt != nil); gerr != nil {
+			return gerr
+		}
+	}
 
 	// Phase 9 tool stage: run a one-off tool container (Trivy/Cypress/Sonar/custom)
 	// with the env's context injected as RIGGER_* variables.

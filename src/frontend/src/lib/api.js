@@ -402,6 +402,8 @@ export const createRegistry       = (body)      => api.post('/settings/registrie
 export const updateRegistry       = (id, body)  => api.put(`/settings/registries/${id}`, body).then(r => r.data)
 export const deleteRegistry       = (id)        => api.delete(`/settings/registries/${id}`)
 export const testRegistry         = (id)        => api.post(`/settings/registries/${id}/test`).then(r => r.data)
+// Designate (or clear) the GLOBAL system registry — used wherever a project sets none.
+export const markRegistrySystem   = (id, system) => api.post(`/settings/registries/${id}/system`, { system }).then(r => r.data)
 
 // Workspace-scoped registry pool (Phase 3): own registries + granted globals.
 export const fetchWorkspaceRegistries = (ws)         => api.get(`/workspaces/${ws}/registries`).then(r => r.data)
@@ -411,6 +413,8 @@ export const deleteWorkspaceRegistry  = (ws, id)     => api.delete(`/workspaces/
 export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${ws}/registries/${id}/test`).then(r => r.data)
 // Test ad-hoc credentials before they're saved (project registry picker).
 export const testRegistryCredentials  = (ws, body)   => api.post(`/workspaces/${ws}/registries/test-credentials`, body).then(r => r.data)
+// Designate (or clear) this workspace's system registry (must be a ws-owned registry).
+export const markWorkspaceRegistrySystem = (ws, id, system) => api.post(`/workspaces/${ws}/registries/${id}/system`, { system }).then(r => r.data)
 
 // Workspace membership + per-project overrides (Phase 5.2).
 export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)

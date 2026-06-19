@@ -12,7 +12,7 @@ import RoleHelp from '../components/RoleHelp'
 import { globalRoleOptions, wsRoleOptions } from '../lib/roles'
 import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
-  fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry,
+  fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
@@ -268,6 +268,11 @@ function RegistriesTab() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['registries'] }); setDeleting(null) },
   })
 
+  const sysMut = useMutation({
+    mutationFn: ({ id, system }) => markRegistrySystem(id, system),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['registries'] }),
+  })
+
   async function handleTest(id) {
     setTestStatus(s => ({ ...s, [id]: { loading: true } }))
     try {
@@ -291,7 +296,7 @@ function RegistriesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Docker Registries</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Pre-authenticated registries available when creating new workspaces.</p>
+          <p className="text-sm text-content-subtle mt-0.5">Pre-authenticated registries available when creating new workspaces. Mark one <span className="text-content-muted font-medium">system</span> to use it wherever a project sets no registry — required to deploy built images to a Swarm or remote host.</p>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add registry</Btn>
       </div>
@@ -320,6 +325,9 @@ function RegistriesTab() {
                     ) : (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40" title="Private to a workspace">workspace · {r.owner_scope.replace(/^ws:/, '')}</span>
                     )}
+                    {r.system && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40" title="Used wherever a project sets no registry">★ system</span>
+                    )}
                   </div>
                   <p className="text-xs text-content-subtle mt-0.5">{r.url} · {r.username}</p>
                 </div>
@@ -328,6 +336,12 @@ function RegistriesTab() {
                   {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(r.id)} disabled={ts?.loading}>Test</Btn>
+                  {r.owner_scope === 'global' && (
+                    <Btn variant="ghost" size="sm" onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
+                      title={r.system ? 'Stop using this as the system registry' : 'Use wherever a project sets no registry'}>
+                      {r.system ? 'Unset system' : 'Set system'}
+                    </Btn>
+                  )}
                   <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: r })}>Edit</Btn>
                   <Btn variant="danger" size="sm" onClick={() => setDeleting(r)}>Delete</Btn>
                 </div>

@@ -278,6 +278,42 @@ func (h *Handler) DeleteRegistry(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// POST /api/settings/registries/{id}/system — admin: designate (or clear) the
+// GLOBAL system registry, used wherever a project sets no registry (image
+// distribution). Body: {"system": bool}. At most one global system registry —
+// marking one clears any previous (enforced in the store).
+func (h *Handler) MarkRegistrySystem(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/system")
+	id, err := parseSettingsID(path, "/api/settings/registries/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	reg, err := settings.GetRegistry(h.db, id)
+	if err != nil || reg == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "registry not found"})
+		return
+	}
+	if reg.WorkspaceScope() != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only a global registry can be the global system registry — set a workspace system registry from Manage Workspace"})
+		return
+	}
+	var body struct {
+		System bool `json:"system"`
+	}
+	_ = readJSON(r, &body) //nolint:errcheck — absent/invalid body ⇒ unset (false)
+	if err := settings.SetRegistrySystem(h.db, id, body.System); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	updated, _ := settings.GetRegistry(h.db, id)
+	if updated != nil {
+		updated.Password = ""
+		updated.Grants, _ = settings.RegistryGrants(h.db, id) //nolint:errcheck
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // POST /api/settings/registries/{id}/test
 func (h *Handler) TestRegistry(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimSuffix(r.URL.Path, "/test")

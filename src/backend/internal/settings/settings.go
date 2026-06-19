@@ -227,6 +227,7 @@ type DockerRegistry struct {
 	Username   string    `json:"username"`
 	Password   string    `json:"password,omitempty"` // omitted in list responses
 	OwnerScope string    `json:"owner_scope"`        // 'global' or 'ws:{key}'
+	System     bool      `json:"system"`             // the system registry for its scope (image-distribution)
 	Grants     []string  `json:"grants,omitempty"`   // for global registries: workspaces offered to ('*' = all)
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -241,7 +242,7 @@ func (r DockerRegistry) WorkspaceScope() string {
 }
 
 func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
-	rows, err := d.Query(`SELECT id, name, url, username, owner_scope, created_at, updated_at FROM docker_registries ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, url, username, owner_scope, system, created_at, updated_at FROM docker_registries ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +251,7 @@ func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
 	var out []DockerRegistry
 	for rows.Next() {
 		var r DockerRegistry
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.System, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -265,7 +266,7 @@ func ListRegistries(d *db.DB) ([]DockerRegistry, error) {
 // its own (owner_scope='ws:{key}') plus any global registry granted to it (or '*').
 func ListRegistriesForWorkspace(d *db.DB, wsKey string) ([]DockerRegistry, error) {
 	rows, err := d.Query(`
-		SELECT id, name, url, username, owner_scope, created_at, updated_at
+		SELECT id, name, url, username, owner_scope, system, created_at, updated_at
 		FROM docker_registries r
 		WHERE r.owner_scope = ?
 		   OR (r.owner_scope = 'global' AND EXISTS(
@@ -279,7 +280,7 @@ func ListRegistriesForWorkspace(d *db.DB, wsKey string) ([]DockerRegistry, error
 	var out []DockerRegistry
 	for rows.Next() {
 		var r DockerRegistry
-		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.OwnerScope, &r.System, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -327,12 +328,14 @@ func SetRegistryGrants(d *db.DB, id int64, workspaces []string) error {
 }
 
 // SetRegistryScope changes a registry's ownership ('global' or 'ws:{key}').
-// Re-scoping to a workspace clears its global grants.
+// Re-scoping to a workspace clears its global grants. It also clears the system
+// flag: "system" is scoped (≤1 global, ≤1 per workspace), so a re-scoped registry
+// must be re-designated in its new scope rather than silently becoming its system.
 func SetRegistryScope(d *db.DB, id int64, ownerScope string) error {
 	if ownerScope == "" {
 		ownerScope = "global"
 	}
-	if _, err := d.Exec(`UPDATE docker_registries SET owner_scope=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, ownerScope, id); err != nil {
+	if _, err := d.Exec(`UPDATE docker_registries SET owner_scope=?, system=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`, ownerScope, id); err != nil {
 		return err
 	}
 	if ownerScope != "global" {
@@ -340,6 +343,28 @@ func SetRegistryScope(d *db.DB, id int64, ownerScope string) error {
 		return err
 	}
 	return nil
+}
+
+// SetRegistrySystem marks (system=true) or unmarks a registry as the system
+// registry for ITS scope — the registry used wherever a project sets none
+// (settings.EffectiveRegistry). At most one global system registry and one per
+// workspace: marking one clears any existing system flag in the same owner_scope,
+// so the latest choice wins. Unmarking just clears this registry's flag.
+func SetRegistrySystem(d *db.DB, id int64, system bool) error {
+	if !system {
+		_, err := d.Exec(`UPDATE docker_registries SET system=0, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+		return err
+	}
+	var scope string
+	if err := d.QueryRow(`SELECT owner_scope FROM docker_registries WHERE id=?`, id).Scan(&scope); err != nil {
+		return err
+	}
+	// Enforce ≤1 system per scope: clear any sibling in the same owner_scope first.
+	if _, err := d.Exec(`UPDATE docker_registries SET system=0 WHERE owner_scope=? AND id<>?`, scope, id); err != nil {
+		return err
+	}
+	_, err := d.Exec(`UPDATE docker_registries SET system=1, updated_at=CURRENT_TIMESTAMP WHERE id=?`, id)
+	return err
 }
 
 // WorkspaceOwnedRegistryIDs returns the ids of registries private to a workspace.
@@ -362,8 +387,8 @@ func WorkspaceOwnedRegistryIDs(d *db.DB, wsKey string) ([]int64, error) {
 
 func GetRegistry(d *db.DB, id int64) (*DockerRegistry, error) {
 	var r DockerRegistry
-	err := d.QueryRow(`SELECT id, name, url, username, password, owner_scope, created_at, updated_at FROM docker_registries WHERE id=?`, id).
-		Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.Password, &r.OwnerScope, &r.CreatedAt, &r.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, url, username, password, owner_scope, system, created_at, updated_at FROM docker_registries WHERE id=?`, id).
+		Scan(&r.ID, &r.Name, &r.URL, &r.Username, &r.Password, &r.OwnerScope, &r.System, &r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -502,14 +527,29 @@ func EffectiveRegistry(d *db.DB, wsKey, projectRegistry string) string {
 	return GlobalSystemRegistry(d)
 }
 
-// WorkspaceSystemRegistry returns the URL of the registry designated "system" for
-// a workspace, or "" when none. Phase 0 stub — the `system` designation does not
-// exist yet (Phase 1 implements it on docker_registries + this lookup).
-func WorkspaceSystemRegistry(d *db.DB, wsKey string) string { return "" }
+// WorkspaceSystemRegistry returns the URL of the workspace-owned registry
+// designated "system" for a workspace, or "" when none. The URL is stored
+// scheme-less (the image-tag prefix), so it is usable verbatim as cfg.Project.Registry.
+func WorkspaceSystemRegistry(d *db.DB, wsKey string) string {
+	if d == nil {
+		return ""
+	}
+	var url string
+	d.QueryRow(`SELECT url FROM docker_registries WHERE owner_scope=? AND system=1 LIMIT 1`, WorkspaceOwnerScope(wsKey)).Scan(&url) //nolint:errcheck
+	return strings.TrimSpace(url)
+}
 
-// GlobalSystemRegistry returns the URL of the registry designated "system" globally
-// (the admin default), or "" when none. Phase 0 stub — see WorkspaceSystemRegistry.
-func GlobalSystemRegistry(d *db.DB) string { return "" }
+// GlobalSystemRegistry returns the URL of the global registry designated "system"
+// (the admin instance-wide default), or "" when none. Applies to every workspace
+// that has neither its own project registry nor a workspace system registry.
+func GlobalSystemRegistry(d *db.DB) string {
+	if d == nil {
+		return ""
+	}
+	var url string
+	d.QueryRow(`SELECT url FROM docker_registries WHERE owner_scope='global' AND system=1 LIMIT 1`).Scan(&url) //nolint:errcheck
+	return strings.TrimSpace(url)
+}
 
 // AutoURLMode returns how to build an env URL when no base domain is set:
 // "sslip" | "nip" | "traefikme" | "localhost" | "off". Defaults to "localhost"
