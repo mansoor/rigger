@@ -647,8 +647,16 @@ type Host struct {
 	WorkspacesDir string    `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
 	OwnerScope    string    `json:"owner_scope"`     // 'global' or 'ws:{key}'
 	Grants        []string  `json:"grants,omitempty"` // for global hosts: workspaces offered to ('*' = all)
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// Capabilities probed from `docker info` on the last Test (image-distribution
+	// Phase 5). SwarmState is "" (never probed), "inactive", "active", "pending", …;
+	// SwarmManager is true when the node is a Swarm manager (can `stack deploy`).
+	SwarmState   string `json:"swarm_state,omitempty"`
+	SwarmManager bool   `json:"swarm_manager"`
+	// BuildOnly marks a host as a dedicated builder: offered in build-host pickers,
+	// excluded from deploy-host pickers + blocked from env→host binding.
+	BuildOnly bool      `json:"build_only"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // WorkspaceScope returns the workspace key a host is private to, or "" if the
@@ -664,7 +672,7 @@ func (h Host) WorkspaceScope() string {
 func WorkspaceOwnerScope(wsKey string) string { return "ws:" + wsKey }
 
 func ListHosts(d *db.DB) ([]Host, error) {
-	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -672,7 +680,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -687,7 +695,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 // hosts (owner_scope='ws:{key}') plus any global host granted to it (or to '*').
 func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	rows, err := d.Query(`
-		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at
+		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at
 		FROM hosts h
 		WHERE h.owner_scope = ?
 		   OR (h.owner_scope = 'global' AND EXISTS(
@@ -701,7 +709,7 @@ func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -767,12 +775,27 @@ func SetHostGrants(d *db.DB, hostID int64, workspaces []string) error {
 // GetHost returns a host including the encrypted SSH key (for dialing).
 func GetHost(d *db.DB, id int64) (*Host, error) {
 	var h Host
-	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, created_at, updated_at FROM hosts WHERE id=?`, id).
-		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.CreatedAt, &h.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at FROM hosts WHERE id=?`, id).
+		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &h, err
+}
+
+// SetHostCapability records what `docker info` reported on the last Test (Phase 5):
+// the Swarm node state + whether the node is a manager. Used by the deploy preflight
+// and the host-list capability badges.
+func SetHostCapability(d *db.DB, id int64, swarmState string, swarmManager bool) error {
+	_, err := d.Exec(`UPDATE hosts SET swarm_state=?, swarm_manager=? WHERE id=?`, swarmState, swarmManager, id)
+	return err
+}
+
+// SetHostBuildOnly marks (or unmarks) a host as a dedicated builder — offered in
+// build-host pickers but excluded from deploy-host pickers + env→host binding.
+func SetHostBuildOnly(d *db.DB, id int64, buildOnly bool) error {
+	_, err := d.Exec(`UPDATE hosts SET build_only=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, buildOnly, id)
+	return err
 }
 
 func CreateHost(d *db.DB, name, address string, port int, user, keyEnc, workspacesDir, ownerScope string) (*Host, error) {

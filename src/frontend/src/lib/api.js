@@ -444,6 +444,8 @@ export const fetchManagedHostKey = () => api.get('/hosts/managed-key').then(r =>
 export const scanHost   = (id)       => api.post(`/hosts/${id}/scan`).then(r => r.data)
 export const importHost = (id, workspaces) => api.post(`/hosts/${id}/import`, { workspaces }).then(r => r.data)
 export const fetchHostStats = (id)   => api.get(`/hosts/${id}/stats`).then(r => r.data)
+// Mark/unmark a host as a dedicated builder (excluded from deploy-host pickers).
+export const markHostBuildOnly = (id, buildOnly) => api.post(`/hosts/${id}/build-only`, { build_only: buildOnly }).then(r => r.data)
 
 // Workspace-scoped host pool (Phase 3): a workspace's own hosts + globals granted
 // to it. owner_scope is 'global' or 'ws:{key}'. Create/edit/delete are allowed for
@@ -454,6 +456,7 @@ export const updateWorkspaceHost  = (ws, id, body) => api.put(`/workspaces/${ws}
 export const deleteWorkspaceHost  = (ws, id)     => api.delete(`/workspaces/${ws}/hosts/${id}`)
 export const testWorkspaceHost    = (ws, id)     => api.post(`/workspaces/${ws}/hosts/${id}/test`).then(r => r.data)
 export const fetchWorkspaceHostStats = (ws, id)  => api.get(`/workspaces/${ws}/hosts/${id}/stats`).then(r => r.data)
+export const markWorkspaceHostBuildOnly = (ws, id, buildOnly) => api.post(`/workspaces/${ws}/hosts/${id}/build-only`, { build_only: buildOnly }).then(r => r.data)
 // Per-project build host (image-distribution Phase 4). host_id 0 = inherit (ws default / deploy host).
 export const fetchProjectBuildHost = (ws, name)        => api.get(`/workspaces/${ws}/projects/${name}/build-host`).then(r => r.data)
 export const setProjectBuildHost   = (ws, name, hostId) => api.put(`/workspaces/${ws}/projects/${name}/build-host`, { host_id: hostId }).then(r => r.data)

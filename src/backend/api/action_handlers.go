@@ -208,6 +208,11 @@ func (h *Handler) SetEnvHost(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "that host is not available to this workspace"})
 			return
 		}
+		// A build-only host is a dedicated builder, not a deploy target (Phase 5).
+		if hb, _ := settings.GetHost(h.db, body.TargetHostID); hb != nil && hb.BuildOnly {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "that host is marked build-only and can't be a deploy target — pick another host or clear its build-only flag in Settings"})
+			return
+		}
 	}
 
 	// Bind-only: just record the (env → host) binding, no migration. Used when an

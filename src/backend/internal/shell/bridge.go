@@ -1055,6 +1055,34 @@ func (b *Bridge) deployRegistryGate(workspaceName, project, env string, remote b
 	return fmt.Errorf("this project builds its own images but no registry is configured — deploying to %s needs one so the image can be pulled. Designate a system registry (Settings → Docker Registries, or Manage Workspace → Registries) or set a project registry, then redeploy", target)
 }
 
+// deploySwarmGate blocks a Swarm-mode deploy to a remote host that is known NOT to be
+// a Swarm manager (image-distribution Phase 5 preflight). `docker stack deploy` on a
+// non-manager fails with a cryptic "this node is not a swarm manager" — this surfaces
+// it early and clearly. It uses the capability probed on the host's last Test; if the
+// host was never probed (SwarmState ""), it can't assert and allows the deploy. Local
+// (control-plane) deploys are not gated here — rt is nil and Docker's own error is clear.
+func (b *Bridge) deploySwarmGate(workspaceName, project, env string, rt *remoteTarget) error {
+	if rt == nil {
+		return nil // local control plane — not probed; Docker reports clearly
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil
+	}
+	e, ok := cfg.Environments[env]
+	if !ok || e.Deployment != "swarm" {
+		return nil // only Swarm-mode envs need a manager
+	}
+	host, err := settings.GetHost(b.db, rt.hostID)
+	if err != nil || host == nil || host.SwarmState == "" {
+		return nil // never probed → can't assert; don't block on missing data
+	}
+	if !host.SwarmManager {
+		return fmt.Errorf("environment %q is set to Swarm mode but host %q is not a Swarm manager (docker swarm state: %s). Initialise or join a Swarm and promote it to a manager, then click Test on the host to refresh — or switch the environment to compose", env, host.Name, host.SwarmState)
+	}
+	return nil
+}
+
 // runScript runs a one-off tool container for a pipeline `script` stage, injecting
 // the env's context as RIGGER_* variables and streaming output. Runs on the env's
 // host (remote) or the local daemon. A non-zero exit fails the stage.
@@ -1331,6 +1359,12 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// single-node deploys are unaffected (a local image runs in place).
 	if opts.Command == "start" || opts.Command == "update" || opts.Command == "refresh" {
 		if gerr := b.deployRegistryGate(opts.Workspace, opts.Project, opts.Env, rt != nil); gerr != nil {
+			return gerr
+		}
+		// Image-distribution Phase 5 preflight: a Swarm-mode env on a remote host that
+		// isn't a Swarm manager fails cryptically at `stack deploy` — block it early
+		// with a clear message (uses the capability probed on the host's last Test).
+		if gerr := b.deploySwarmGate(opts.Workspace, opts.Project, opts.Env, rt); gerr != nil {
 			return gerr
 		}
 	}

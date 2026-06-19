@@ -642,6 +642,12 @@ func (d *DB) migrate() error {
 	if d.addColumn("hosts", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_host_grants (host_id, workspace) SELECT id, '*' FROM hosts`) //nolint:errcheck
 	}
+	// Image-distribution Phase 5: host capabilities probed from `docker info` on Test
+	// (swarm node state + manager flag) + a build-only marker (dedicated builder,
+	// excluded from deploy pickers). All default to "unknown"/false for existing hosts.
+	d.addColumn("hosts", "swarm_state TEXT NOT NULL DEFAULT ''")
+	d.addColumn("hosts", "swarm_manager INTEGER NOT NULL DEFAULT 0")
+	d.addColumn("hosts", "build_only INTEGER NOT NULL DEFAULT 0")
 	// Same scoping for docker registries (Phase 3); pre-scope registries → '*'.
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck

@@ -217,8 +217,54 @@ func (h *Handler) testHostByID(w http.ResponseWriter, id int64) {
 			"error": "connected, but docker not reachable on host: " + strings.TrimSpace(out)})
 		return
 	}
+	// Image-distribution Phase 5: probe Swarm capability so the deploy preflight and
+	// the host-list badges know whether this host can run a Swarm stack. Best-effort —
+	// a probe failure doesn't fail the Test (it just leaves the capability as-is).
+	swarmState, swarmManager := "", false
+	if info, perr := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); perr == nil {
+		swarmState, swarmManager = parseSwarmInfo(info)
+		_ = settings.SetHostCapability(h.db, id, swarmState, swarmManager) //nolint:errcheck
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok",
-		"message": "Connected — Docker " + strings.TrimSpace(out)})
+		"message":       "Connected — Docker " + strings.TrimSpace(out),
+		"swarm_state":   swarmState,
+		"swarm_manager": swarmManager})
+}
+
+// POST /api/hosts/{id}/build-only — admin: mark/unmark a host as a dedicated
+// builder (excluded from deploy-host pickers + env binding). Body: {"build_only": bool}.
+func (h *Handler) SetHostBuildOnly(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/build-only")
+	id, err := parseSettingsID(path, "/api/hosts/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
+		return
+	}
+	var body struct {
+		BuildOnly bool `json:"build_only"`
+	}
+	_ = readJSON(r, &body) //nolint:errcheck — absent/invalid ⇒ unset (false)
+	if err := settings.SetHostBuildOnly(h.db, id, body.BuildOnly); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "build_only": body.BuildOnly})
+}
+
+// parseSwarmInfo parses `docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`
+// output (e.g. "active|true") into the node's swarm state and whether it is a manager.
+func parseSwarmInfo(out string) (state string, manager bool) {
+	parts := strings.SplitN(strings.TrimSpace(out), "|", 2)
+	state = strings.TrimSpace(parts[0])
+	if len(parts) > 1 {
+		manager = strings.EqualFold(strings.TrimSpace(parts[1]), "true")
+	}
+	return state, manager
 }
 
 // dialHost loads a host, decrypts its key, dials it, and persists the TOFU

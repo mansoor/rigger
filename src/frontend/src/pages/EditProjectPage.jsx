@@ -1406,7 +1406,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             <Select
               value={String(cfg._host_id || 0)}
               onChange={v => upd('_host_id', Number(v))}
-              options={[{ value: '0', label: 'Local Docker' }, ...hosts.map(h => ({ value: String(h.id), label: `${h.name} — ${h.address}` }))]}
+              options={[{ value: '0', label: 'Local Docker' }, ...hosts.filter(h => !h.build_only).map(h => ({ value: String(h.id), label: `${h.name} — ${h.address}` }))]}
             />
             <p className="text-xs text-content-subtle mt-1">The stack starts here the first time you deploy this environment.</p>
           </div>
@@ -2583,7 +2583,7 @@ function EnvHostsSection({ name }) {
           {envs.map(env => {
             const curId = envHosts[env]?.host_id || 0
             const opts = [{ id: 0, label: 'Local control plane' },
-              ...hosts.map(h => ({ id: h.id, label: `${h.name} (${h.address})` }))]
+              ...hosts.filter(h => !h.build_only).map(h => ({ id: h.id, label: `${h.name} (${h.address})` }))]
               .filter(o => o.id !== curId)
             return (
               <div key={env} className="flex items-center gap-3">
@@ -2699,7 +2699,7 @@ function MigrateSection({ name }) {
 
   // Build target options: local + every host, excluding the current location.
   const options = [{ id: 0, label: 'Local control plane' },
-    ...hosts.map(h => ({ id: h.id, label: `${h.name} (${h.address})` }))]
+    ...hosts.filter(h => !h.build_only).map(h => ({ id: h.id, label: `${h.name} (${h.address})` }))]
     .filter(o => o.id !== currentHostId)
 
   async function run() {

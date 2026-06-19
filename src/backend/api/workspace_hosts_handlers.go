@@ -145,6 +145,36 @@ func (h *Handler) TestWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 	h.testHostByID(w, id)
 }
 
+// POST /api/workspaces/{ws}/hosts/{id}/build-only — mark/unmark a workspace-owned
+// host as a dedicated builder (excluded from deploy pickers). A shared global host's
+// build-only status is managed by an admin. Body: {"build_only": bool}.
+func (h *Handler) SetWorkspaceHostBuildOnly(w http.ResponseWriter, r *http.Request) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if host.WorkspaceScope() != ws {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this is a shared global host — its build-only status is managed from Settings"})
+		return
+	}
+	var body struct {
+		BuildOnly bool `json:"build_only"`
+	}
+	_ = readJSON(r, &body) //nolint:errcheck
+	if err := settings.SetHostBuildOnly(h.db, id, body.BuildOnly); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "build_only": body.BuildOnly})
+}
+
 // GET /api/workspaces/{ws}/hosts/{id}/stats — host health, gated to the pool.
 func (h *Handler) WorkspaceHostStats(w http.ResponseWriter, r *http.Request) {
 	ws := r.PathValue("workspace")

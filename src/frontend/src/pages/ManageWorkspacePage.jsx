@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import HostCapabilityBadges from '../components/HostBadges'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
@@ -12,7 +13,7 @@ import VerticalTabs from '../components/VerticalTabs'
 import RoleHelp from '../components/RoleHelp'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
-  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
+  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost, markWorkspaceHostBuildOnly,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
@@ -434,7 +435,7 @@ function WorkspaceDefaults({ workspace, qc }) {
           <select value={host} onChange={e => setHost(e.target.value)} className={sel}>
             <option value="">No default (Local)</option>
             <option value="0">Local control plane</option>
-            {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
+            {hosts.filter(h => !h.build_only).map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
           </select>
         </div>
         <div>
@@ -480,6 +481,10 @@ function HostsSection({ workspace, qc }) {
   const delMut = useMutation({
     mutationFn: (id) => deleteWorkspaceHost(workspace, id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: hostsKey }); setDeleting(null) },
+  })
+  const buildOnlyMut = useMutation({
+    mutationFn: ({ id, buildOnly }) => markWorkspaceHostBuildOnly(workspace, id, buildOnly),
+    onSuccess: () => qc.invalidateQueries({ queryKey: hostsKey }),
   })
 
   async function handleTest(id) {
@@ -528,6 +533,7 @@ function HostsSection({ workspace, qc }) {
                       {owned
                         ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40">this workspace</span>
                         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator — managed in Settings">shared</span>}
+                      <HostCapabilityBadges host={host} />
                     </div>
                     <p className="text-xs text-content-subtle mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
                   </div>
@@ -539,6 +545,9 @@ function HostsSection({ workspace, qc }) {
                       className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
                     {owned ? (
                       <>
+                        <button onClick={() => buildOnlyMut.mutate({ id: host.id, buildOnly: !host.build_only })} disabled={buildOnlyMut.isPending}
+                          title={host.build_only ? 'Allow this host as a deploy target again' : 'Mark as a dedicated builder (excluded from deploy-host pickers)'}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">{host.build_only ? 'Allow deploys' : 'Build-only'}</button>
                         <button onClick={() => setModal({ editing: host })}
                           className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
                         <button onClick={() => setDeleting(host)}

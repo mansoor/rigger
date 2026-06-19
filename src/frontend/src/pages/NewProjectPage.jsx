@@ -130,7 +130,7 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
           className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
         >
           <option value="0">Local control plane</option>
-          {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} — {h.address}</option>)}
+          {hosts.filter(h => !h.build_only).map(h => <option key={h.id} value={String(h.id)}>{h.name} — {h.address}</option>)}
         </select>
         {defaultHostId > 0 && data.default_host_id === defaultHostId && (
           <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
@@ -1101,7 +1101,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
   const sslBlocked = looksLocalOrIP(env.domain)
   const canSSL = !!env.domain && !sslBlocked
   const hostOptions = [{ value: '0', label: 'Local control plane' },
-    ...hosts.map(h => ({ value: String(h.id), label: h.name }))]
+    ...hosts.filter(h => !h.build_only).map(h => ({ value: String(h.id), label: h.name }))]
   return (
     <div className="bg-surface-raised/50 border border-border-strong rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between">
