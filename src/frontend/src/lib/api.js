@@ -554,6 +554,9 @@ export function openActionSocket(workspace, name, command, env, extra = [], serv
 // Rigger's own build version (self-update Phase 0).
 export const fetchVersion = () => api.get('/version').then(r => r.data)
 
+// Check for a newer Rigger release (self-update Phase 2; admin). force=true bypasses the cache.
+export const checkUpdates = (force = false) => api.get(`/updates/check${force ? '?force=1' : ''}`).then(r => r.data)
+
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'

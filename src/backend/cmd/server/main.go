@@ -186,6 +186,9 @@ func main() {
 	// Wrapped inside authSvc.Middleware so claims are present.
 	adminOnly := authSvc.RequireSuperadmin()
 
+	// Self-update Phase 2 — check for a newer Rigger release (admin only).
+	mux.Handle("GET /api/updates/check", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.CheckUpdates))))
+
 	// User management (Phase 5 / roadmap 10a) — admin only.
 	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

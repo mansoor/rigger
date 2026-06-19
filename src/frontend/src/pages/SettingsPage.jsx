@@ -16,6 +16,7 @@ import {
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
+  fetchVersion, checkUpdates,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -1902,6 +1903,96 @@ function SystemEmailTab() {
 }
 
 // Tab order mirrors the Manage Workspace screen for the shared resource tabs
+// ── Updates (self-update Phase 2) ─────────────────────────────────────────────
+// Shows the running Rigger version, checks GitHub Releases for a newer one, and
+// renders its changelog. Applying the update (Phase 3) is not wired yet, so for
+// now this surfaces the manual command.
+function UpdatesTab() {
+  const { data: ver } = useQuery({ queryKey: ['rigger-version'], queryFn: fetchVersion, staleTime: Infinity })
+  const [checking, setChecking] = useState(false)
+  const [info, setInfo] = useState(null)
+  const [err, setErr] = useState('')
+
+  async function runCheck() {
+    setChecking(true); setErr('')
+    try {
+      setInfo(await checkUpdates(true))
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Failed to check for updates')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const current = info?.current || ver?.version || '—'
+  const isDev = info ? info.dev : (ver?.version === 'dev')
+
+  return (
+    <div className="max-w-2xl">
+      <div className="mb-6">
+        <h2 className="text-base font-semibold text-content-strong">Updates</h2>
+        <p className="text-sm text-content-subtle mt-0.5">Check for a newer Rigger release and see what changed.</p>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-content-muted">Current version</p>
+            <p className="text-lg font-semibold text-content-strong mt-0.5">
+              {current === 'dev' ? 'dev build' : current}
+              {ver?.commit && <span className="ml-2 text-xs font-mono text-content-faint">{ver.commit.slice(0, 7)}</span>}
+            </p>
+          </div>
+          <button onClick={runCheck} disabled={checking}
+            className="shrink-0 text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+            {checking ? 'Checking…' : 'Check for updates'}
+          </button>
+        </div>
+
+        {isDev && (
+          <p className="text-xs text-content-faint border-t border-border pt-3">
+            This is a source/dev build — version comparison only works for released images installed from GHCR.
+          </p>
+        )}
+
+        {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+
+        {info && !err && (
+          <div className="border-t border-border pt-4 space-y-3">
+            {info.error ? (
+              <p className="text-sm text-warning-fg">Couldn’t check: {info.error}</p>
+            ) : !info.latest ? (
+              <p className="text-sm text-content-subtle">No published releases found yet.</p>
+            ) : info.update_available ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-success-subtle text-success-fg border border-success-border/60">Update available</span>
+                  <span className="text-sm text-content-strong font-semibold">{info.latest}</span>
+                  {info.published_at && <span className="text-xs text-content-faint">· {new Date(info.published_at).toLocaleDateString()}</span>}
+                </div>
+                {info.notes && (
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-content-muted mb-1">Changelog</p>
+                    <pre className="text-xs whitespace-pre-wrap break-words bg-surface-raised border border-border-strong rounded-lg p-3 max-h-72 overflow-y-auto text-content">{info.notes}</pre>
+                  </div>
+                )}
+                <div className="rounded-lg bg-surface-raised border border-border-strong px-3 py-2 text-xs text-content-muted">
+                  <p className="font-semibold text-content mb-1">To update now:</p>
+                  <code className="font-mono">cd ~/rigger/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code>
+                  <p className="mt-1 text-content-faint">One-click apply lands in a later release.</p>
+                </div>
+                {info.html_url && <a href={info.html_url} target="_blank" rel="noreferrer" className="inline-block text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
+              </>
+            ) : (
+              <p className="text-sm text-success-fg">✓ You’re on the latest release ({info.latest}).</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // (Remote Hosts → Docker Registries → Backup Targets → Notifications → Alert
 // Rules) so the two settings surfaces feel consistent.
 const TABS = [
@@ -1910,6 +2001,7 @@ const TABS = [
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
   { id: 'system-email',   label: 'System Email',     icon: '✉' },
   { id: 'api-keys',       label: 'API Keys',         icon: '🔑' },
+  { id: 'updates',        label: 'Updates',          icon: '⬆' },
   { group: 'Shared resources' },
   { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
   { id: 'registries',     label: 'Docker Registries', icon: '📦' },
@@ -1936,6 +2028,7 @@ export default function SettingsPage() {
           {tab === 'access-requests' && <AccessRequestsInbox />}
           {tab === 'system-email'   && <SystemEmailTab />}
           {tab === 'api-keys'       && <ApiKeysManager />}
+          {tab === 'updates'        && <UpdatesTab />}
           {tab === 'appearance'     && <AppearanceTab />}
           {tab === 'alerts'         && <RulesTab />}
           {tab === 'notifications'  && <NotificationsTab />}
