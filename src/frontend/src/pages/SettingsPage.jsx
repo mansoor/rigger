@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import HostCapabilityBadges from '../components/HostBadges'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
 import ChannelForm from '../components/ChannelForm'
@@ -14,7 +15,7 @@ import {
   fetchBackupTargets, createBackupTarget, updateBackupTarget, deleteBackupTarget, testBackupTarget,
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
-  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
+  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, markHostBuildOnly,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -476,6 +477,10 @@ function HostsTab() {
     mutationFn: (id) => deleteHost(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['hosts'] }); setDeleting(null) },
   })
+  const buildOnlyMut = useMutation({
+    mutationFn: ({ id, buildOnly }) => markHostBuildOnly(id, buildOnly),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hosts'] }),
+  })
 
   async function handleTest(id) {
     setTestStatus(s => ({ ...s, [id]: { loading: true } }))
@@ -527,6 +532,7 @@ function HostsTab() {
                     ) : (
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800/40" title="Private to a workspace">workspace · {host.owner_scope.replace(/^ws:/, '')}</span>
                     )}
+                    <HostCapabilityBadges host={host} />
                   </div>
                   <p className="text-xs text-content-subtle mt-0.5">{host.ssh_user}@{host.address}:{host.ssh_port}</p>
                 </div>
@@ -535,6 +541,10 @@ function HostsTab() {
                   {ts?.ok && <span className="text-xs text-success-fg max-w-[200px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
+                  <Btn variant="ghost" size="sm" onClick={() => buildOnlyMut.mutate({ id: host.id, buildOnly: !host.build_only })} disabled={buildOnlyMut.isPending}
+                    title={host.build_only ? 'Allow this host as a deploy target again' : 'Mark as a dedicated builder (excluded from deploy-host pickers)'}>
+                    {host.build_only ? 'Allow deploys' : 'Build-only'}
+                  </Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setHealth(host)}>Health</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setScanning(host)}>Scan</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: host })}>Edit</Btn>
