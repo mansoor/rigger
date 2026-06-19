@@ -149,13 +149,34 @@ A guaranteed registry makes preflight simple:
 
 ## 9. Cleanup (retire vestigial no-registry code)
 
-Once "Local — none" is gone and a registry always resolves:
-- Remove `pull_policy: never` emission (composegen `buildService`) and the `registry==""`
-  skip-pull branch in `dockerops.update()`.
-- Remove the "Local — no registry" dropdown option + handling.
-- **Keep** the stale-pointer **resync** (advance.go) — pointers still lag after failed builds *with*
-  a registry — but make its existence check **registry-aware** (a tag may be pushed but pruned
-  locally; "exists" should mean "resolvable for deploy", not "in the local store").
+> **DECISION (Phase 3, revised):** local single-node (no-registry) builds are KEPT as a
+> first-class fallback, not removed. The original plan assumed "a registry always
+> resolves" once the system registry exists, but Rigger ships with none configured and
+> simple local custom apps are a legitimate, zero-infra use case. So `pull_policy: never`
+> is **not** vestigial — it's the mechanism that makes the empty-effective-registry case
+> work. Phase 3 was reduced to a clarity reframe + this record.
+
+Done:
+- The user-picked **"Local — no registry" framing was removed in Phase 1** — the project
+  registry dropdown's empty option now reads "System registry (workspace / global
+  default)" and the empty value means *inherit the system registry, or local-only when
+  none is configured* (an automatic fallback, not a mode the user selects).
+- **Comments/messages reframed** (composegen `buildService`, `dockerops.update`,
+  RegistryPicker, the New Project wizard) so "no registry" everywhere means *no EFFECTIVE
+  registry resolves* → automatic local single-node fallback.
+
+Deliberately KEPT (would otherwise regress local single-node deploys — the original
+`kmb` "compose up pulls a local-only image" bug):
+- `pull_policy: never` emission (composegen `buildService`) when no effective registry
+  resolves, and the matching skip-pull branch in `dockerops.update()`. The deploy gate
+  (§6, Phase 1) already blocks build-service deploys to Swarm/remote when no registry
+  resolves, so these only ever apply to the safe local single-node case.
+
+Not needed:
+- The advance.go stale-pointer **resync** already operates on EFFECTIVE-registry tags
+  (Phase 0 sets `cfg.Project.Registry` to the effective value in `builder.loadConfig`),
+  and runs right after a build when the image is present on the build daemon — so a
+  registry-store existence probe adds cost/auth complexity for no real gain. Left as-is.
 - The vendor/composer template fix (laravel-template-vendor-skip) is independent and untouched.
 
 ## 10. Open / future (not v1)

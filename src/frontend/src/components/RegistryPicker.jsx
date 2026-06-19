@@ -47,8 +47,9 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
   // Auto-select the workspace's DEFAULT registry once the pool loads and nothing is
   // chosen — but only when a default is actually configured (create flow inheriting
   // it). Never force registries[0]: an empty value is a valid, deliberate choice
-  // ("Local — no registry"), and force-picking the first pool entry made it
-  // impossible to keep a project local (it silently reverted to a random registry).
+  // (inherit the system registry, or local-only when none is configured), and
+  // force-picking the first pool entry made it impossible to keep a project on the
+  // system/local default (it silently reverted to a random registry).
   const wsDefault = registries.find(r => String(r.id) === String(defaultRegistryId))
   useEffect(() => {
     if (!isLoading && !value && wsDefault) {
@@ -71,7 +72,8 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
   }, [isCustomValue, didInit, value])
 
   const showManual = manual || (!hasRegistries && !isLoading)
-  // An empty value with no manual form open means "Local — no registry".
+  // An empty value with no manual form open means "inherit the system registry"
+  // (or local-only when no system registry is configured).
   const selectValue = manual ? CUSTOM : matched ? value : value ? '' : LOCAL
 
   function chooseSelect(v) {

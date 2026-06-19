@@ -48,16 +48,22 @@
   app deploys to the swarm with zero per-node config.
 - **Commit:** `feat(registry): one-click Rigger-managed registry (Traefik/ACME + auto-auth + GC)`
 
-## Phase 3 — Cleanup of vestigial no-registry paths
-- Remove the "Local — no registry" dropdown option; migrate existing `registry==""` projects to
-  resolve via the system registry (envgen `RebaseImageRegistry` already re-prefixes `{SVC}_IMAGE`
-  on regen; a post-migration rebuild+push lands images in the registry).
-- Remove `pull_policy: never` (composegen `buildService`) + the `registry==""` skip-pull branch in
-  `dockerops.update()`.
-- Make the advance.go **pointer resync registry-aware** (existence = resolvable for deploy, not
-  local-store only).
-- **Verify:** golden parity (no `pull_policy` lines); a migrated project deploys.
-- **Commit:** `refactor(registry): drop no-registry option + registry-aware pointer resync`
+## Phase 3 — Cleanup of vestigial no-registry paths  ✅ DONE (revised — local-only KEPT) `9cf…`
+> **Revised:** local single-node (no-registry) builds are a first-class fallback, NOT removed
+> (Rigger ships with no system registry; simple local apps need zero infra). The literal
+> "remove `pull_policy: never`" would regress the local case (re-introduces the `kmb` pull bug),
+> so Phase 3 became a clarity reframe rather than a removal. See design §9.
+- ~~Remove the "Local — no registry" dropdown option~~ → already done in **Phase 1** (the empty
+  option reads "System registry (workspace / global default)"; empty = inherit system, else local).
+- ~~Remove `pull_policy: never` + the skip-pull branch~~ → **KEPT** as the automatic local
+  single-node fallback (the deploy gate already blocks Swarm/remote build-service deploys when no
+  registry resolves, so these only apply to the safe local case). Comments/messages **reframed** so
+  "no registry" means *no EFFECTIVE registry resolves*.
+- advance.go pointer resync → **already effective-registry-aware** (Phase 0 sets the effective
+  registry in `builder.loadConfig`); a registry-store existence probe adds auth/cost for no gain. Left as-is.
+- **Verify:** golden parity UNCHANGED (`pull_policy: never` still emitted for no-registry build
+  services — intended); build/vet/test + eslint/vite green.
+- **Commit:** `refactor(registry): reframe no-registry path as automatic local fallback (keep pull_policy)`
 
 ## Phase 4 — Build hosts
 - **4a.** Host capability probe: `docker info` at add/bind → record `build`, `swarm-active`,

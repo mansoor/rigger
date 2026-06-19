@@ -2174,9 +2174,10 @@ export default function NewProjectPage() {
     if (!data.name.trim()) e.name = 'Required'
     else if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,31}$/.test(data.name.trim())) e.name = '1–32 chars: letters, digits, space, dash, underscore'
     if (step === 1 && nameConflict) e.key = 'Choose a valid, available key' // key validity from Step1
-    // Registry is OPTIONAL for build stacks: "Local — no registry" builds images on
-    // the deploy host and is valid for single-host deploys. A registry is only needed
-    // so remote hosts can pull, so don't force one here.
+    // Registry is OPTIONAL for build stacks: an empty registry inherits the system
+    // registry, or falls back to local-only (build + run on one daemon) when none is
+    // configured — valid for single-host deploys. A registry is only required so a
+    // Swarm/remote host can pull (enforced at deploy time), so don't force one here.
     if (step === 2 && data.stackType === 'scan') {
       if (!(data.source_repo || '').trim()) e.source_repo = 'Enter a repository URL'
       else if (!data.scanDraft) e.source_repo = 'Click Scan to detect the stack first'

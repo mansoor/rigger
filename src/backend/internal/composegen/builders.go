@@ -233,12 +233,15 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line(sectionComment(svc.Name+" ("+serviceLabel(svc)+")", dashService))
 	g.line("  " + key + ":")
 	g.line("    image: " + serviceImageRef(svc, rp, registry, tag))
-	// A Rigger-built service with NO registry only ever exists locally (built by
-	// `docker build`, never pushed). Its tag has no registry prefix, so `compose up`
+	// When no EFFECTIVE registry resolves (project → workspace/global system all
+	// empty), a Rigger-built service only ever exists on the local build daemon (built
+	// by `docker build`, never pushed). Its tag has no registry prefix, so `compose up`
 	// would resolve a missing/mis-tagged image against Docker Hub and fail. Pin
 	// pull_policy=never: use the local image, or error clearly if it isn't built —
-	// never silently pull. (Image-type services keep the default so they still pull;
-	// with a registry set, built images are pullable, so leave the default there too.)
+	// never silently pull. This is the automatic local single-node fallback (the
+	// deploy gate already blocks build-service deploys to Swarm/remote when no registry
+	// resolves). Image-type services keep the default so they still pull; once a
+	// registry resolves, built images are pullable, so leave the default there too.
 	if svc.Build != nil && registry == "" {
 		g.line("    pull_policy: never")
 	}

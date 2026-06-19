@@ -222,7 +222,7 @@ type runner struct {
 	opts        Options
 	cfgBytes    []byte
 	projectType string
-	registry    string // empty ⇒ local-only (built images have no registry prefix)
+	registry    string // effective registry; empty ⇒ none resolved → local-only (no prefix)
 	stack       string
 	envDir      string
 	composePath string
@@ -376,12 +376,14 @@ func (r *runner) update() error {
 	if out, err := r.composeOutput(append([]string{"ps", "--status", "running", "--quiet"}, target...)...); err == nil {
 		runningBefore = len(bytes.TrimSpace(out)) > 0
 	}
-	// Local-only registry: built images have NO registry prefix, so `compose pull`
-	// would resolve them against Docker Hub and fail. Skip the pull and recreate with
-	// the locally-built images (the env's {SVC}_IMAGE pointers already track the latest
-	// build). With a registry set, pull as before to fetch the pushed image.
+	// No EFFECTIVE registry resolved: built images have NO registry prefix and only
+	// exist on the local build daemon, so `compose pull` would resolve them against
+	// Docker Hub and fail. Skip the pull and recreate with the locally-built images
+	// (the env's {SVC}_IMAGE pointers already track the latest build) — the automatic
+	// local single-node fallback. With a registry set, pull as before to fetch the
+	// pushed image.
 	if r.registry == "" {
-		r.info("Local-only registry — skipping pull; using locally-built images")
+		r.info("No registry configured — skipping pull; using locally-built images")
 	} else {
 		r.info("Pulling latest images...")
 		if err := r.compose(append([]string{"pull"}, target...)...); err != nil {
