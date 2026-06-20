@@ -87,13 +87,13 @@ export default function LoginPage() {
               <div>
                 <label className="block text-sm font-medium text-content mb-1">Authentication code</label>
                 <input
-                  type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
-                  value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
+                  type="text" autoComplete="one-time-code" maxLength={14}
+                  value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+                  placeholder="123456 or recovery code"
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
                   autoFocus required
                 />
-                <p className="text-xs text-content-subtle mt-1">Enter the 6-digit code from your authenticator app.</p>
+                <p className="text-xs text-content-subtle mt-1">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
               </div>
             )}
             <button

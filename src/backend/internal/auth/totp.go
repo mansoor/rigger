@@ -113,24 +113,28 @@ func (s *Service) BeginTOTPEnroll(id int64) (secret, uri string, err error) {
 	return secret, totpURI(secret, account, "Rigger"), nil
 }
 
-// EnableTOTP turns 2FA on after verifying a code against the enrolled secret.
-func (s *Service) EnableTOTP(id int64, code string) error {
+// EnableTOTP turns 2FA on after verifying a code against the enrolled secret, then
+// generates and returns a fresh set of single-use recovery codes (shown to the user
+// once — only their hashes are stored).
+func (s *Service) EnableTOTP(id int64, code string) ([]string, error) {
 	var secret string
 	if err := s.db.QueryRow(`SELECT totp_secret FROM users WHERE id=?`, id).Scan(&secret); err != nil {
-		return err
+		return nil, err
 	}
 	if secret == "" {
-		return errors.New("start two-factor enrollment first")
+		return nil, errors.New("start two-factor enrollment first")
 	}
 	if !validateTOTP(secret, code) {
-		return ErrTOTPInvalid
+		return nil, ErrTOTPInvalid
 	}
-	_, err := s.db.Exec(`UPDATE users SET totp_enabled=1 WHERE id=?`, id)
-	return err
+	if _, err := s.db.Exec(`UPDATE users SET totp_enabled=1 WHERE id=?`, id); err != nil {
+		return nil, err
+	}
+	return s.resetRecoveryCodes(id)
 }
 
-// DisableTOTP turns 2FA off, requiring a valid current code so a hijacked session
-// can't drop the second factor.
+// DisableTOTP turns 2FA off (and discards recovery codes), requiring a valid current
+// code (TOTP or a recovery code) so a hijacked session can't drop the second factor.
 func (s *Service) DisableTOTP(id int64, code string) error {
 	var secret string
 	var enabled int
@@ -140,16 +144,44 @@ func (s *Service) DisableTOTP(id int64, code string) error {
 	if enabled == 0 {
 		return nil
 	}
-	if !validateTOTP(secret, code) {
+	if !validateTOTP(secret, code) && !s.consumeRecoveryCode(id, code) {
 		return ErrTOTPInvalid
 	}
-	_, err := s.db.Exec(`UPDATE users SET totp_secret='', totp_enabled=0 WHERE id=?`, id)
+	if _, err := s.db.Exec(`UPDATE users SET totp_secret='', totp_enabled=0 WHERE id=?`, id); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM user_recovery_codes WHERE user_id=?`, id)
 	return err
 }
 
+// RegenerateRecoveryCodes issues a new set (invalidating the old), gated on a valid
+// current TOTP or recovery code. Returns the new plaintext codes (shown once).
+func (s *Service) RegenerateRecoveryCodes(id int64, code string) ([]string, error) {
+	var secret string
+	var enabled int
+	if err := s.db.QueryRow(`SELECT totp_secret, totp_enabled FROM users WHERE id=?`, id).Scan(&secret, &enabled); err != nil {
+		return nil, err
+	}
+	if enabled == 0 {
+		return nil, errors.New("two-factor is not enabled")
+	}
+	if !validateTOTP(secret, code) && !s.consumeRecoveryCode(id, code) {
+		return nil, ErrTOTPInvalid
+	}
+	return s.resetRecoveryCodes(id)
+}
+
+// RecoveryCodeCount returns how many unused recovery codes remain.
+func (s *Service) RecoveryCodeCount(id int64) int {
+	var n int
+	s.db.QueryRow(`SELECT COUNT(1) FROM user_recovery_codes WHERE user_id=? AND used_at IS NULL`, id).Scan(&n) //nolint:errcheck
+	return n
+}
+
 // checkTOTPForLogin enforces the second factor during login: returns ErrTOTPRequired
-// when 2FA is on but no code was supplied, ErrTOTPInvalid when the code is wrong, nil
-// otherwise (including when 2FA is off).
+// when 2FA is on but no code was supplied, ErrTOTPInvalid when neither the TOTP code
+// nor a recovery code matches, nil otherwise (including when 2FA is off). A matching
+// recovery code is consumed.
 func (s *Service) checkTOTPForLogin(id int64, code string) error {
 	var secret string
 	var enabled int
@@ -162,8 +194,71 @@ func (s *Service) checkTOTPForLogin(id int64, code string) error {
 	if strings.TrimSpace(code) == "" {
 		return ErrTOTPRequired
 	}
-	if !validateTOTP(secret, code) {
-		return ErrTOTPInvalid
+	if validateTOTP(secret, code) {
+		return nil
 	}
-	return nil
+	if s.consumeRecoveryCode(id, code) {
+		return nil
+	}
+	return ErrTOTPInvalid
+}
+
+// ── Recovery (backup) codes ─────────────────────────────────────────────────────
+
+const recoveryCodeCount = 10
+
+// generateRecoveryCodes returns N random, human-readable single-use codes
+// (e.g. "ABCDE-FGHIJ" from the base32 alphabet).
+func generateRecoveryCodes() ([]string, error) {
+	codes := make([]string, recoveryCodeCount)
+	for i := range codes {
+		b := make([]byte, 10)
+		if _, err := rand.Read(b); err != nil {
+			return nil, err
+		}
+		raw := strings.ToUpper(b32.EncodeToString(b))[:10]
+		codes[i] = raw[:5] + "-" + raw[5:]
+	}
+	return codes, nil
+}
+
+// normalizeRecovery strips formatting so codes hash consistently regardless of how
+// the user types them (case, dashes, spaces).
+func normalizeRecovery(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, " ", "")
+	return s
+}
+
+// resetRecoveryCodes replaces a user's recovery codes with a fresh set, returning the
+// plaintext (the caller surfaces them once; only hashes are stored).
+func (s *Service) resetRecoveryCodes(id int64) ([]string, error) {
+	codes, err := generateRecoveryCodes()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.db.Exec(`DELETE FROM user_recovery_codes WHERE user_id=?`, id); err != nil {
+		return nil, err
+	}
+	for _, c := range codes {
+		if _, err := s.db.Exec(`INSERT INTO user_recovery_codes (user_id, code_hash) VALUES (?, ?)`, id, hashToken(normalizeRecovery(c))); err != nil {
+			return nil, err
+		}
+	}
+	return codes, nil
+}
+
+// consumeRecoveryCode marks a matching unused recovery code used; reports success.
+func (s *Service) consumeRecoveryCode(id int64, code string) bool {
+	n := normalizeRecovery(code)
+	if n == "" {
+		return false
+	}
+	res, err := s.db.Exec(`UPDATE user_recovery_codes SET used_at=CURRENT_TIMESTAMP WHERE user_id=? AND code_hash=? AND used_at IS NULL`, id, hashToken(n))
+	if err != nil {
+		return false
+	}
+	aff, _ := res.RowsAffected()
+	return aff > 0
 }

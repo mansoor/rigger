@@ -179,6 +179,7 @@ func main() {
 	mux.Handle("POST /api/auth/2fa/begin", authSvc.Middleware(http.HandlerFunc(handler.TwoFABegin)))
 	mux.Handle("POST /api/auth/2fa/enable", authSvc.Middleware(http.HandlerFunc(handler.TwoFAEnable)))
 	mux.Handle("POST /api/auth/2fa/disable", authSvc.Middleware(http.HandlerFunc(handler.TwoFADisable)))
+	mux.Handle("POST /api/auth/2fa/recovery-codes", authSvc.Middleware(http.HandlerFunc(handler.TwoFARegenerateCodes)))
 
 	// Rigger's own build version (self-update Phase 0).
 	mux.Handle("GET /api/version", authSvc.Middleware(http.HandlerFunc(handler.GetVersion)))

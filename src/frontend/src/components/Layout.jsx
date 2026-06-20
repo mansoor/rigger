@@ -3,7 +3,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA } from '../lib/api'
+import { QRCodeSVG } from 'qrcode.react'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA, regen2FACodes } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -719,17 +720,45 @@ function AccountSecurity({ onDone }) {
   )
 }
 
+// RecoveryCodeList — shows a freshly-generated set of single-use codes ONCE, with
+// copy/download. The user must save these before continuing.
+function RecoveryCodeList({ codes, onDone }) {
+  function copy() { navigator.clipboard?.writeText(codes.join('\n')).catch(() => {}) }
+  function download() {
+    const blob = new Blob([`Rigger 2FA recovery codes\nKeep these somewhere safe — each works once.\n\n${codes.join('\n')}\n`], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'rigger-recovery-codes.txt'; a.click()
+    URL.revokeObjectURL(url)
+  }
+  return (
+    <div className="space-y-3 p-4 bg-warning-subtle/30 border border-warning-border/50 rounded-lg">
+      <p className="text-sm text-warning-fg font-semibold">Save your recovery codes</p>
+      <p className="text-xs text-content-muted">Each code works once. Use one to sign in if you lose your authenticator. They won't be shown again.</p>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm text-content-strong">
+        {codes.map(c => <span key={c} className="select-all">{c}</span>)}
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={copy} className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">Copy</button>
+        <button onClick={download} className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">Download</button>
+        <button onClick={onDone} className="text-sm bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-lg px-3 py-1.5">I've saved them</button>
+      </div>
+    </div>
+  )
+}
+
 // TwoFactorSection — optional TOTP 2FA enrollment / disable, shown in the account
-// modal's Security tab. Enrollment shows the secret + otpauth URL for manual entry
-// (or QR import) and requires a verifying code; disabling also requires a code.
+// modal's Security tab. Enrollment shows a QR (scan) + the secret (manual) and
+// requires a verifying code; on success it surfaces single-use recovery codes.
 function TwoFactorSection() {
   const qc = useQueryClient()
   const { data: status } = useQuery({ queryKey: ['twofa-status'], queryFn: fetch2FAStatus })
   const enabled = !!status?.enabled
 
-  const [enroll, setEnroll] = useState(null) // { secret, otpauth_url } while enrolling
+  const [enroll, setEnroll] = useState(null)   // { secret, otpauth_url } while enrolling
   const [code, setCode]     = useState('')
   const [error, setError]   = useState('')
+  const [newCodes, setNewCodes] = useState(null) // freshly-generated recovery codes to show once
+  const [regen, setRegen]   = useState(false)    // showing the "regenerate" code prompt
 
   const beginMut = useMutation({
     mutationFn: begin2FA,
@@ -738,7 +767,7 @@ function TwoFactorSection() {
   })
   const enableMut = useMutation({
     mutationFn: () => enable2FA(code),
-    onSuccess: () => { setEnroll(null); setCode(''); setError(''); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
+    onSuccess: (d) => { setEnroll(null); setCode(''); setError(''); setNewCodes(d.recovery_codes || []); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
     onError: (e) => setError(e.response?.data?.error || 'Invalid code'),
   })
   const disableMut = useMutation({
@@ -746,12 +775,30 @@ function TwoFactorSection() {
     onSuccess: () => { setCode(''); setError(''); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
     onError: (e) => setError(e.response?.data?.error || 'Invalid code'),
   })
+  const regenMut = useMutation({
+    mutationFn: () => regen2FACodes(code),
+    onSuccess: (d) => { setCode(''); setError(''); setRegen(false); setNewCodes(d.recovery_codes || []); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
+    onError: (e) => setError(e.response?.data?.error || 'Invalid code'),
+  })
 
+  // Accepts a 6-digit TOTP or an alphanumeric recovery code (uppercased to match
+  // the server's normalization). The enable step gates on exactly 6 chars (TOTP only,
+  // since recovery codes don't exist pre-enable); disable/regenerate accept either.
   const codeInput = (
-    <input type="text" inputMode="numeric" maxLength={6} value={code}
-      onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456"
-      className="w-40 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest focus:outline-none focus:border-brand-500" />
+    <input type="text" autoComplete="one-time-code" maxLength={14} value={code}
+      onChange={e => setCode(e.target.value.toUpperCase())} placeholder="123456 or recovery code"
+      className="w-56 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest focus:outline-none focus:border-brand-500" />
   )
+
+  // After enabling or regenerating, show the codes once before returning to status.
+  if (newCodes) {
+    return (
+      <div className="space-y-3 border-t border-border/60 pt-6">
+        <h3 className="font-semibold text-content-strong">Two-factor authentication</h3>
+        <RecoveryCodeList codes={newCodes} onDone={() => setNewCodes(null)} />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 border-t border-border/60 pt-6">
@@ -759,7 +806,7 @@ function TwoFactorSection() {
         <h3 className="font-semibold text-content-strong">Two-factor authentication</h3>
         <p className="text-sm text-content-muted">
           {enabled
-            ? 'Enabled — a code from your authenticator app is required at sign-in.'
+            ? `Enabled — a code from your authenticator app is required at sign-in.${typeof status?.recovery_remaining === 'number' ? ` ${status.recovery_remaining} recovery code${status.recovery_remaining === 1 ? '' : 's'} left.` : ''}`
             : 'Add a one-time code from an authenticator app (Google Authenticator, 1Password, Authy, …) as a second factor.'}
         </p>
       </div>
@@ -774,29 +821,52 @@ function TwoFactorSection() {
 
       {!enabled && enroll && (
         <div className="space-y-3">
-          <p className="text-sm text-content-muted">In your authenticator app, add an account using this secret (or paste the setup URL):</p>
+          <p className="text-sm text-content-muted">Scan this with your authenticator app, or add an account manually with the secret below.</p>
+          <div className="inline-block bg-white p-3 rounded-lg">
+            <QRCodeSVG value={enroll.otpauth_url} size={160} />
+          </div>
           <div className="px-3 py-2 bg-surface-raised border border-border rounded-lg font-mono text-sm break-all select-all">{enroll.secret}</div>
-          <p className="text-xs text-content-subtle break-all">Setup URL: <code className="font-mono">{enroll.otpauth_url}</code></p>
           {codeInput}
           <div className="flex gap-2">
             <button onClick={() => enableMut.mutate()} disabled={enableMut.isPending || code.length !== 6}
               className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
               {enableMut.isPending ? 'Verifying…' : 'Verify & enable'}
             </button>
-            <button onClick={() => { setEnroll(null); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
+            <button onClick={() => { setEnroll(null); setCode(''); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
           </div>
         </div>
       )}
 
-      {enabled && (
+      {enabled && !regen && (
+        <div className="space-y-3">
+          <button onClick={() => { setRegen(true); setCode(''); setError('') }}
+            className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">
+            Regenerate recovery codes
+          </button>
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to disable</label>
+            {codeInput}
+            <div>
+              <button onClick={() => disableMut.mutate()} disabled={disableMut.isPending || code.length < 6}
+                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+                {disableMut.isPending ? 'Disabling…' : 'Disable 2FA'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {enabled && regen && (
         <div className="space-y-2">
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to disable</label>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to issue new recovery codes</label>
+          <p className="text-xs text-content-subtle">This invalidates your existing recovery codes.</p>
           {codeInput}
-          <div>
-            <button onClick={() => disableMut.mutate()} disabled={disableMut.isPending || code.length !== 6}
-              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
-              {disableMut.isPending ? 'Disabling…' : 'Disable 2FA'}
+          <div className="flex gap-2">
+            <button onClick={() => regenMut.mutate()} disabled={regenMut.isPending || code.length < 6}
+              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+              {regenMut.isPending ? 'Generating…' : 'Generate new codes'}
             </button>
+            <button onClick={() => { setRegen(false); setCode(''); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
           </div>
         </div>
       )}

@@ -651,6 +651,18 @@ func (d *DB) migrate() error {
 	d.addColumn("users", "totp_secret TEXT NOT NULL DEFAULT ''")
 	d.addColumn("users", "totp_enabled INTEGER NOT NULL DEFAULT 0")
 
+	// 2FA recovery (backup) codes — single-use, stored as SHA-256 hashes (only the
+	// plaintext set is shown once at generation). Used at login when the authenticator
+	// is unavailable; each row is consumed on use.
+	d.Exec(`CREATE TABLE IF NOT EXISTS user_recovery_codes (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		code_hash  TEXT    NOT NULL,
+		used_at    DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`) //nolint:errcheck
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_recovery_user ON user_recovery_codes(user_id)`) //nolint:errcheck
+
 	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
 	// 'ws:{key}' = private to that workspace. When the column is freshly added,
 	// every existing host predates scoping — grant each to all workspaces ('*')

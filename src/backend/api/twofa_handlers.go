@@ -1,7 +1,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
@@ -17,7 +16,12 @@ func (h *Handler) TwoFAStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": h.auth.TOTPEnabled(claims.UserID)})
+	enabled := h.auth.TOTPEnabled(claims.UserID)
+	resp := map[string]any{"enabled": enabled}
+	if enabled {
+		resp["recovery_remaining"] = h.auth.RecoveryCodeCount(claims.UserID)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // POST /api/auth/2fa/begin — generate a fresh secret (still disabled) and return it
@@ -50,15 +54,35 @@ func (h *Handler) TwoFAEnable(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	if err := h.auth.EnableTOTP(claims.UserID, body.Code); err != nil {
-		status := http.StatusBadRequest
-		if errors.Is(err, auth.ErrTOTPInvalid) {
-			status = http.StatusBadRequest
-		}
-		writeJSON(w, status, map[string]string{"error": err.Error()})
+	codes, err := h.auth.EnableTOTP(claims.UserID, body.Code)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "recovery_codes": codes})
+}
+
+// POST /api/auth/2fa/recovery-codes {code} — regenerate the recovery code set
+// (invalidates the old), gated on a valid current TOTP or recovery code.
+func (h *Handler) TwoFARegenerateCodes(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	codes, err := h.auth.RegenerateRecoveryCodes(claims.UserID, body.Code)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
 }
 
 // POST /api/auth/2fa/disable {code} — verify a current code and turn 2FA off.
