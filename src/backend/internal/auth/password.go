@@ -25,6 +25,9 @@ type PasswordPolicy struct {
 	RequireLower  bool `json:"require_lower"`
 	RequireNumber bool `json:"require_number"`
 	RequireSymbol bool `json:"require_symbol"`
+	// MaxAgeDays > 0 forces a password change after that many days (rotation).
+	// 0 disables expiry. Surfaced so the UI can show the requirement.
+	MaxAgeDays int `json:"max_age_days"`
 }
 
 // authSetting reads a global app_settings value ("" when unset).
@@ -49,6 +52,9 @@ func (s *Service) PasswordPolicy() PasswordPolicy {
 	p.RequireLower = settingTrue(s.authSetting("pw_require_lower"))
 	p.RequireNumber = settingTrue(s.authSetting("pw_require_number"))
 	p.RequireSymbol = settingTrue(s.authSetting("pw_require_symbol"))
+	if n, err := strconv.Atoi(strings.TrimSpace(s.authSetting("pw_max_age_days"))); err == nil && n > 0 {
+		p.MaxAgeDays = n
+	}
 	return p
 }
 

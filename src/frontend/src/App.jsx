@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from './store/auth'
+import { changePassword } from './lib/api'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ConfirmProvider } from './context/ConfirmContext'
 import LoginPage from './pages/LoginPage'
@@ -20,9 +21,72 @@ import ToolsPage from './pages/ToolsPage'
 
 function RequireAuth({ children }) {
   const token = useAuthStore((s) => s.token)
+  const user  = useAuthStore((s) => s.user)
   const ready  = useAuthStore((s) => s.ready)
   if (!ready) return null
-  return token ? children : <Navigate to="/login" replace />
+  if (!token) return <Navigate to="/login" replace />
+  // Rotation policy: a password past its max age blocks the app until changed.
+  if (user?.mcp) return <ForcePasswordChange />
+  return children
+}
+
+// Shown in place of the app when the user's password has expired (rotation policy).
+// On success we refresh the access token so the `mcp` claim clears and the app unblocks.
+function ForcePasswordChange() {
+  const tryRefresh = useAuthStore((s) => s.tryRefresh)
+  const logout     = useAuthStore((s) => s.logout)
+  const [current, setCurrent] = useState('')
+  const [next, setNext]       = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError]     = useState('')
+  const [busy, setBusy]       = useState(false)
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (next !== confirm) { setError('Passwords do not match'); return }
+    setBusy(true)
+    try {
+      await changePassword(current, next)
+      await tryRefresh() // fresh token has mcp cleared → app unblocks
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not change password')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-canvas">
+      <div className="w-full max-w-sm">
+        <div className="bg-surface border border-border rounded-xl p-8">
+          <h1 className="text-lg font-semibold text-content-strong mb-1">Your password has expired</h1>
+          <p className="text-content-muted text-sm mb-5">Set a new password to continue.</p>
+          {error && (
+            <div className="mb-4 px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">{error}</div>
+          )}
+          <form onSubmit={submit} className="space-y-4">
+            {[['Current password', current, setCurrent], ['New password', next, setNext], ['Confirm new password', confirm, setConfirm]].map(([label, val, set]) => (
+              <div key={label}>
+                <label className="block text-sm font-medium text-content mb-1">{label}</label>
+                <input type="password" value={val} onChange={e => set(e.target.value)} required
+                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500 transition-colors" />
+              </div>
+            ))}
+            <button type="submit" disabled={busy}
+              className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2">
+              {busy ? 'Saving…' : 'Change password'}
+            </button>
+          </form>
+          <div className="mt-4 text-center">
+            <button type="button" onClick={() => logout()} className="text-sm text-content-muted hover:text-content underline">
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function AppRoutes() {

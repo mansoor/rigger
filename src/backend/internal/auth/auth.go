@@ -81,6 +81,10 @@ type Claims struct {
 	Role          string `json:"role"`
 	Email         string `json:"email,omitempty"`
 	EmailVerified bool   `json:"ev"`
+	// MustChangePassword is set when the user's password has aged past the rotation
+	// policy; the frontend forces a change before granting access. Recomputed on
+	// every token issue/refresh so it clears as soon as the password is updated.
+	MustChangePassword bool `json:"mcp,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -131,7 +135,7 @@ func (s *Service) ChangePassword(userID int64, currentPassword, newPassword stri
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("UPDATE users SET password = ? WHERE id = ?", string(newHash), userID)
+	_, err = s.db.Exec("UPDATE users SET password = ?, password_changed_at=CURRENT_TIMESTAMP WHERE id = ?", string(newHash), userID)
 	return err
 }
 
@@ -207,11 +211,12 @@ func (s *Service) Login(identifier, password string) (string, error) {
 
 func (s *Service) issueToken(id int64, username, role, email string, emailVerified bool) (string, error) {
 	claims := Claims{
-		UserID:        id,
-		Username:      username,
-		Role:          role,
-		Email:         email,
-		EmailVerified: emailVerified,
+		UserID:             id,
+		Username:           username,
+		Role:               role,
+		Email:              email,
+		EmailVerified:      emailVerified,
+		MustChangePassword: s.passwordExpired(id),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(s.jwtExpiry) * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

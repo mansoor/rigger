@@ -112,7 +112,7 @@ func (s *Service) SetupAdmin(email, username, password string) (int64, error) {
 		username = strings.SplitN(email, "@", 2)[0]
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO users (username, email, password, role, status, email_verified) VALUES (?, ?, ?, ?, 'active', 0)`,
+		`INSERT INTO users (username, email, password, role, status, email_verified, password_changed_at) VALUES (?, ?, ?, ?, 'active', 0, CURRENT_TIMESTAMP)`,
 		username, email, string(hash), RoleSuperadmin,
 	)
 	if err != nil {
@@ -204,7 +204,7 @@ func (s *Service) CompleteRegistration(rawToken, password, phone, username strin
 		}
 	}
 	_, err = s.db.Exec(
-		`UPDATE users SET password=?, phone=?, status='active', email_verified=1 WHERE id=?`,
+		`UPDATE users SET password=?, phone=?, status='active', email_verified=1, password_changed_at=CURRENT_TIMESTAMP WHERE id=?`,
 		string(hash), strings.TrimSpace(phone), id,
 	)
 	return id, err
@@ -276,11 +276,29 @@ func (s *Service) ResetPassword(rawToken, newPassword string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`UPDATE users SET password=?, email_verified=1 WHERE id=?`, string(hash), id); err != nil {
+	if _, err := s.db.Exec(`UPDATE users SET password=?, email_verified=1, password_changed_at=CURRENT_TIMESTAMP WHERE id=?`, string(hash), id); err != nil {
 		return err
 	}
 	_, err = s.consumeToken(rawToken, KindReset)
 	return err
+}
+
+// passwordExpired reports whether a user's password is older than the configured
+// rotation max-age. False when rotation is disabled (max_age_days <= 0) or the
+// timestamp is unknown — we never lock a user out on missing data.
+func (s *Service) passwordExpired(id int64) bool {
+	p := s.PasswordPolicy()
+	if p.MaxAgeDays <= 0 {
+		return false
+	}
+	var changed sql.NullTime
+	if err := s.db.QueryRow(`SELECT password_changed_at FROM users WHERE id=?`, id).Scan(&changed); err != nil {
+		return false
+	}
+	if !changed.Valid {
+		return false
+	}
+	return time.Since(changed.Time) > time.Duration(p.MaxAgeDays)*24*time.Hour
 }
 
 // UpdateProfile lets a user set their own phone/username and change email. A changed
@@ -337,7 +355,7 @@ func (s *Service) UpdateUser(id int64, role, newPassword string) (*UserInfo, err
 		if herr != nil {
 			return nil, herr
 		}
-		if _, err := s.db.Exec(`UPDATE users SET password=? WHERE id=?`, string(hash), id); err != nil {
+		if _, err := s.db.Exec(`UPDATE users SET password=?, password_changed_at=CURRENT_TIMESTAMP WHERE id=?`, string(hash), id); err != nil {
 			return nil, err
 		}
 	}

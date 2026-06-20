@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -2422,12 +2423,18 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		Current string `json:"current_password"`
 		New     string `json:"new_password"`
 	}
-	if err := readJSON(r, &body); err != nil || body.Current == "" || len(body.New) < 8 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "current_password and new_password (min 8 chars) required"})
+	if err := readJSON(r, &body); err != nil || body.Current == "" || body.New == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "current and new password are required"})
 		return
 	}
 	if err := h.auth.ChangePassword(claims.UserID, body.Current, body.New); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+		// Distinguish a wrong current password (401) from a policy rejection (400) so
+		// the user sees the actual reason instead of a misleading "incorrect password".
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

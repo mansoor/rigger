@@ -790,6 +790,13 @@ function GeneralTab() {
   const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
+  // Password policy (auth Group A)
+  const [pwMin, setPwMin] = useState(8)
+  const [pwUpper, setPwUpper] = useState(false)
+  const [pwLower, setPwLower] = useState(false)
+  const [pwNumber, setPwNumber] = useState(false)
+  const [pwSymbol, setPwSymbol] = useState(false)
+  const [pwMaxAge, setPwMaxAge] = useState(0)
 
   const saveMut = useMutation({
     mutationFn: () => updateGeneralSettings({
@@ -802,6 +809,12 @@ function GeneralTab() {
       confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
+      pw_min_length: String(pwMin),
+      pw_require_upper: pwUpper ? 'true' : 'false',
+      pw_require_lower: pwLower ? 'true' : 'false',
+      pw_require_number: pwNumber ? 'true' : 'false',
+      pw_require_symbol: pwSymbol ? 'true' : 'false',
+      pw_max_age_days: String(pwMaxAge),
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
@@ -839,6 +852,12 @@ function GeneralTab() {
     setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
     setKeyMax(Number(cfg.key_max_length) || 4)
+    setPwMin(Number(cfg.pw_min_length) || 8)
+    setPwUpper(cfg.pw_require_upper === 'true')
+    setPwLower(cfg.pw_require_lower === 'true')
+    setPwNumber(cfg.pw_require_number === 'true')
+    setPwSymbol(cfg.pw_require_symbol === 'true')
+    setPwMaxAge(Number(cfg.pw_max_age_days) || 0)
     setSynced(true)
   }
 
@@ -1063,6 +1082,36 @@ function GeneralTab() {
             1–12 characters. Collisions append a digit/letter within the max budget (e.g. <code className="font-mono">web → web2</code>).
             Larger setups may prefer 5–7 to reduce clashes.
           </p>
+        </div>
+      </div>
+
+      {/* Security — password policy */}
+      <div>
+        <h2 className="text-base font-semibold text-content-strong mb-1">Security — password policy</h2>
+        <p className="text-sm text-content-subtle mb-4">
+          Rules enforced whenever a password is set — first-run setup, invite completion, admin
+          reset, self-service change, and the forgot-password flow. Applies to <em>new</em> passwords;
+          existing ones aren't re-checked until next change (or rotation, below).
+        </p>
+        <div className="space-y-4 p-4 bg-surface border border-border rounded-xl max-w-lg">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Minimum length</Label>
+              <Input type="number" value={String(pwMin)} onChange={v => setPwMin(Math.min(128, Math.max(6, Number(v) || 6)))} />
+              <p className="text-xs text-content-subtle mt-1">At least 6.</p>
+            </div>
+            <div>
+              <Label>Rotation (max age, days)</Label>
+              <Input type="number" value={String(pwMaxAge)} onChange={v => setPwMaxAge(Math.max(0, Number(v) || 0))} />
+              <p className="text-xs text-content-subtle mt-1">0 = never expire. Users are forced to change an expired password at next sign-in.</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Toggle checked={pwUpper}  onChange={setPwUpper}  label="Require an uppercase letter" />
+            <Toggle checked={pwLower}  onChange={setPwLower}  label="Require a lowercase letter" />
+            <Toggle checked={pwNumber} onChange={setPwNumber} label="Require a number" />
+            <Toggle checked={pwSymbol} onChange={setPwSymbol} label="Require a symbol" />
+          </div>
         </div>
       </div>
 

@@ -638,6 +638,14 @@ func (d *DB) migrate() error {
 	d.addColumn("audit_log", "host TEXT NOT NULL DEFAULT ''")       // Phase 7: host name
 	d.addColumn("hosts", "workspaces_dir TEXT NOT NULL DEFAULT ''") // Phase 7: per-host WORKSPACES_DIR ('' = global default)
 
+	// Password rotation (auth Group A slice 3): when each user's password was last
+	// set. Backfill existing rows to "now" on first add so the rotation clock starts
+	// at upgrade rather than retroactively expiring everyone the moment an admin
+	// configures a max age. Stamped on every password set thereafter.
+	if d.addColumn("users", "password_changed_at DATETIME") {
+		d.Exec(`UPDATE users SET password_changed_at=CURRENT_TIMESTAMP WHERE password_changed_at IS NULL`) //nolint:errcheck
+	}
+
 	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
 	// 'ws:{key}' = private to that workspace. When the column is freshly added,
 	// every existing host predates scoping — grant each to all workspaces ('*')
