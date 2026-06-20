@@ -164,6 +164,7 @@ func main() {
 	mux.HandleFunc("POST /api/auth/verify-email", handler.VerifyEmail)
 	// Self-service (JWT) — resend own verification, update own profile.
 	mux.Handle("POST /api/auth/resend-verification", authSvc.Middleware(http.HandlerFunc(handler.ResendVerification)))
+	mux.Handle("GET /api/auth/profile", authSvc.Middleware(http.HandlerFunc(handler.GetProfile)))
 	mux.Handle("PUT /api/auth/profile", authSvc.Middleware(http.HandlerFunc(handler.UpdateProfile)))
 	// Per-user appearance (W7) — resolves user ?? workspace ?? global default.
 	mux.Handle("GET /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.GetAppearance)))

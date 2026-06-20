@@ -40,6 +40,9 @@ RIGGER_IMAGE_TAG="${RIGGER_IMAGE_TAG:-latest}"
 RIGGER_BUILD="${RIGGER_BUILD:-0}"
 ACME_EMAIL="${ACME_EMAIL:-}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
+# Local timezone for server-rendered timestamps; defaults to the host's if detectable.
+TZ_DEFAULT="$( [ -f /etc/timezone ] && cat /etc/timezone 2>/dev/null || readlink -f /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##' )"
+TZ="${TZ:-${TZ_DEFAULT:-UTC}}"
 
 # ── Colour helpers ─────────────────────────────────────────────────────────────
 

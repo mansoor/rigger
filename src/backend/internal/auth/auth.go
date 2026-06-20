@@ -138,8 +138,19 @@ type loginRow struct {
 	hash          string
 	role          string
 	email         string
+	username      string
 	emailVerified bool
 	status        string
+}
+
+// displayName is the value used for the token's username claim (JWT "sub", shown
+// in the UI as the display name): the user's username, falling back to email for
+// legacy rows that never set one.
+func displayName(username, email string) string {
+	if strings.TrimSpace(username) != "" {
+		return username
+	}
+	return email
 }
 
 // resolveLogin looks up an account by email first, then (legacy) by username for
@@ -148,12 +159,12 @@ func (s *Service) resolveLogin(identifier string) (*loginRow, error) {
 	var r loginRow
 	var ev int
 	err := s.db.QueryRow(
-		`SELECT id, password, role, email, email_verified, status FROM users WHERE email = ? LIMIT 1`, identifier,
-	).Scan(&r.id, &r.hash, &r.role, &r.email, &ev, &r.status)
+		`SELECT id, password, role, email, username, email_verified, status FROM users WHERE email = ? LIMIT 1`, identifier,
+	).Scan(&r.id, &r.hash, &r.role, &r.email, &r.username, &ev, &r.status)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = s.db.QueryRow(
-			`SELECT id, password, role, email, email_verified, status FROM users WHERE username = ? AND email = '' LIMIT 1`, identifier,
-		).Scan(&r.id, &r.hash, &r.role, &r.email, &ev, &r.status)
+			`SELECT id, password, role, email, username, email_verified, status FROM users WHERE username = ? AND email = '' LIMIT 1`, identifier,
+		).Scan(&r.id, &r.hash, &r.role, &r.email, &r.username, &ev, &r.status)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInvalidCredentials
@@ -188,7 +199,7 @@ func (s *Service) Login(identifier, password string) (string, error) {
 		return "", err
 	}
 	s.touchLastLogin(row.id)
-	return s.issueToken(row.id, row.email, row.role, row.email, row.emailVerified)
+	return s.issueToken(row.id, displayName(row.username, row.email), row.role, row.email, row.emailVerified)
 }
 
 func (s *Service) issueToken(id int64, username, role, email string, emailVerified bool) (string, error) {
@@ -233,10 +244,11 @@ func (s *Service) IssueSession(userID int64) (accessToken, refreshToken string, 
 		return "", "", err
 	}
 	s.touchLastLogin(userID)
-	if accessToken, err = s.issueToken(userID, u.Email, u.Role, u.Email, u.EmailVerified); err != nil {
+	name := displayName(u.Username, u.Email)
+	if accessToken, err = s.issueToken(userID, name, u.Role, u.Email, u.EmailVerified); err != nil {
 		return "", "", err
 	}
-	refreshToken, err = s.issueRefreshToken(userID, u.Email, u.Role, u.Email, u.EmailVerified)
+	refreshToken, err = s.issueRefreshToken(userID, name, u.Role, u.Email, u.EmailVerified)
 	return
 }
 
@@ -277,16 +289,13 @@ func (s *Service) RefreshAccessToken(refreshToken string) (accessToken, newRefre
 	).Scan(&username, &role, &email, &ev); dbErr != nil {
 		return "", "", fmt.Errorf("user not found")
 	}
-	loginName := email
-	if loginName == "" {
-		loginName = username
-	}
-	accessToken, err = s.issueToken(claims.UserID, loginName, role, email, ev != 0)
+	name := displayName(username, email)
+	accessToken, err = s.issueToken(claims.UserID, name, role, email, ev != 0)
 	if err != nil {
 		return "", "", err
 	}
 	// Rolling: issue a fresh 7-day refresh token so the session stays alive with activity
-	newRefresh, err = s.issueRefreshToken(claims.UserID, loginName, role, email, ev != 0)
+	newRefresh, err = s.issueRefreshToken(claims.UserID, name, role, email, ev != 0)
 	return accessToken, newRefresh, err
 }
 
@@ -297,11 +306,12 @@ func (s *Service) Login2(identifier, password string) (accessToken, refreshToken
 		return "", "", err
 	}
 	s.touchLastLogin(row.id)
-	accessToken, err = s.issueToken(row.id, row.email, row.role, row.email, row.emailVerified)
+	name := displayName(row.username, row.email)
+	accessToken, err = s.issueToken(row.id, name, row.role, row.email, row.emailVerified)
 	if err != nil {
 		return "", "", err
 	}
-	refreshToken, err = s.issueRefreshToken(row.id, row.email, row.role, row.email, row.emailVerified)
+	refreshToken, err = s.issueRefreshToken(row.id, name, row.role, row.email, row.emailVerified)
 	return
 }
 

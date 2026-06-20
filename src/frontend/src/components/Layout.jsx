@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, resendVerification, fetchVersion } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -640,12 +640,24 @@ function AccountModal({ user, tab, setTab, onClose }) {
 
 function AccountGeneral({ user }) {
   const tryRefresh = useAuthStore(s => s.tryRefresh)
+  // Pre-fill from the DB record (authoritative) so editing one field doesn't blank
+  // the others, and the display name shows the real value (not the login email).
+  const { data: profile } = useQuery({ queryKey: ['my-profile'], queryFn: fetchProfile })
   const [email, setEmail] = useState(user?.email || '')
   const [phone, setPhone] = useState('')
   const [username, setUsername] = useState(user?.sub || '')
+  const [seeded, setSeeded] = useState(false)
   const [msg, setMsg] = useState('')
   const [link, setLink] = useState('')
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (profile && !seeded) {
+      setEmail(profile.email || '')
+      setUsername(profile.username || '')
+      setPhone(profile.phone || '')
+      setSeeded(true)
+    }
+  }, [profile, seeded])
   const inp = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
   const lbl = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
   async function save(e) {

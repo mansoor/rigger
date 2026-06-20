@@ -80,6 +80,9 @@ services:
       - RIGGER_HOST_DIR=${RIGGER_HOST_DIR:-}
       # The image tag this instance runs — the updater's apply/rollback default.
       - RIGGER_IMAGE_TAG=${RIGGER_IMAGE_TAG:-latest}
+      # Local timezone for server-rendered timestamps (e.g. pipeline alert times).
+      # Default UTC; set e.g. America/Los_Angeles in .env. tzdata is in the image.
+      - TZ=${TZ:-UTC}
     networks:
       - traefik_net
     # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.

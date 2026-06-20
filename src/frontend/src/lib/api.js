@@ -314,6 +314,7 @@ export const fetchRegisterInfo   = (token)       => api.get('/register/info', { 
 export const completeRegistration = (body)       => api.post('/register/complete', body).then(r => r.data)
 export const verifyEmail         = (token)       => api.post('/auth/verify-email', { token }).then(r => r.data)
 export const resendVerification  = ()            => api.post('/auth/resend-verification').then(r => r.data)
+export const fetchProfile        = ()            => api.get('/auth/profile').then(r => r.data)
 export const updateProfile       = (body)        => api.put('/auth/profile', body).then(r => r.data)
 
 // System (transactional) email settings — admin.

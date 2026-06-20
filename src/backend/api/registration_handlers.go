@@ -82,6 +82,24 @@ func (h *Handler) ResendVerification(w http.ResponseWriter, r *http.Request) {
 	h.sendVerifyAndRespond(w, r, u.ID, u.Email)
 }
 
+// GET /api/auth/profile — the signed-in user's own record (email, display name,
+// phone, role, verification). The profile screen reads this to pre-fill all
+// fields from the DB rather than the JWT, so editing one field doesn't blank the
+// others.
+func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	claims := auth.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	u, err := h.auth.GetUser(claims.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, u)
+}
+
 // PUT /api/auth/profile  {email?, phone?, username?} — authenticated self-service.
 func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	claims := auth.ClaimsFromContext(r.Context())
