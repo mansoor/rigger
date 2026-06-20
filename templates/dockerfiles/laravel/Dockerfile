@@ -17,11 +17,11 @@ ENV APP_ENV=${BUILD_ENV} \
 # so the image stays lean.
 RUN apk add --no-cache \
       libpng-dev libjpeg-turbo-dev libwebp-dev freetype-dev \
-      zip unzip libzip-dev postgresql-dev oniguruma-dev git \
+      zip unzip libzip-dev postgresql-dev oniguruma-dev icu-dev git \
     && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS linux-headers \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" \
-         pdo pdo_pgsql pdo_mysql gd mbstring bcmath zip opcache pcntl \
+         pdo pdo_pgsql pdo_mysql gd intl mbstring bcmath zip opcache pcntl \
     && pecl install redis \
     && docker-php-ext-enable redis \
     && apk del .build-deps \
