@@ -1,0 +1,82 @@
+{
+  "name": "bookstack",
+  "label": "BookStack",
+  "description": "Simple, self-hosted wiki and documentation platform (LinuxServer image) backed by MariaDB. Set APP_URL to the address users reach it at, and APP_KEY to a generated base64 key (php artisan key:generate style).",
+  "tags": [
+    "wiki",
+    "documentation",
+    "knowledge-base",
+    "cms"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "mariadb",
+      "tag": "11",
+      "port": 3306,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "mariadb-admin ping -h localhost -u root -p${MYSQL_ROOT_PASSWORD} --silent",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/mysql"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "MYSQL_ROOT_PASSWORD": "${MYSQL_ROOT_PASSWORD}",
+        "MYSQL_DATABASE": "${MYSQL_DATABASE}",
+        "MYSQL_USER": "${MYSQL_USER}",
+        "MYSQL_PASSWORD": "${MYSQL_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "lscr.io/linuxserver/bookstack",
+      "tag": "latest",
+      "port": 80,
+      "web_routed": true,
+      "host_port": "${BOOKSTACK_PORT}",
+      "command": "",
+      "healthcheck": "curl -sf http://localhost:80/ -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "5",
+        "start_period": "60s"
+      },
+      "volumes": [
+        "./volumes/bookstack_config:/config"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "PUID": "1000",
+        "PGID": "1000",
+        "APP_URL": "${APP_URL}",
+        "APP_KEY": "${APP_KEY}",
+        "DB_HOST": "db",
+        "DB_PORT": "3306",
+        "DB_DATABASE": "${MYSQL_DATABASE}",
+        "DB_USERNAME": "${MYSQL_USER}",
+        "DB_PASSWORD": "${MYSQL_PASSWORD}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "MYSQL_ROOT_PASSWORD": "CHANGE_ME_ROOT",
+    "MYSQL_DATABASE": "bookstack",
+    "MYSQL_USER": "bookstack_user",
+    "MYSQL_PASSWORD": "CHANGE_ME",
+    "APP_KEY": "base64:CHANGE_ME",
+    "APP_URL": "http://localhost:6875",
+    "BOOKSTACK_PORT": "6875"
+  }
+}

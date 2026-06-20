@@ -1,0 +1,36 @@
+{
+  "name": "pocketbase",
+  "label": "PocketBase",
+  "description": "Open-source backend-in-one-file: SQLite DB, auth, file storage and a realtime API with an admin UI. Create the first admin at /_/ on first visit.",
+  "tags": [
+    "baas",
+    "backend",
+    "database",
+    "api"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "ghcr.io/muchobien/pocketbase",
+      "tag": "latest",
+      "port": 8090,
+      "web_routed": true,
+      "host_port": "8090",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:8090/api/health || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/pb_data:/pb_data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {}
+}

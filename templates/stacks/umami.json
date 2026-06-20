@@ -1,0 +1,70 @@
+{
+  "name": "umami",
+  "label": "Umami Analytics",
+  "description": "Privacy-focused, cookieless web analytics with PostgreSQL. A lightweight, self-hosted Google Analytics alternative.",
+  "tags": [
+    "analytics",
+    "privacy",
+    "metrics"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "15-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "ghcr.io/umami-software/umami",
+      "tag": "postgresql-latest",
+      "port": 3000,
+      "web_routed": true,
+      "host_port": "${UMAMI_PORT}",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:3000/api/heartbeat || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "5",
+        "start_period": "60s"
+      },
+      "volumes": [],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "DATABASE_TYPE": "postgresql",
+        "DATABASE_URL": "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}",
+        "APP_SECRET": "${APP_SECRET}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "umami",
+    "POSTGRES_USER": "umami_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "APP_SECRET": "CHANGE_ME",
+    "UMAMI_PORT": "3000"
+  }
+}

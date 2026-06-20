@@ -1,0 +1,35 @@
+{
+  "name": "actual-budget",
+  "label": "Actual Budget",
+  "description": "Local-first personal finance and envelope-budgeting app with optional sync. Single container; create the budget and password on first visit.",
+  "tags": [
+    "finance",
+    "budget",
+    "productivity"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "actualbudget/actual-server",
+      "tag": "latest",
+      "port": 5006,
+      "web_routed": true,
+      "host_port": "5006",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:5006/ || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/actual_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {}
+}

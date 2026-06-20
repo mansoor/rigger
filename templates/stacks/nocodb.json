@@ -1,0 +1,72 @@
+{
+  "name": "nocodb",
+  "label": "NocoDB",
+  "description": "Open-source Airtable alternative: turn a PostgreSQL database into a smart spreadsheet with a no-code UI and REST/GraphQL APIs.",
+  "tags": [
+    "low-code",
+    "database",
+    "spreadsheet",
+    "internal-tools"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "15-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "app",
+      "image": "nocodb/nocodb",
+      "tag": "latest",
+      "port": 8080,
+      "web_routed": true,
+      "host_port": "${NOCODB_PORT}",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:8080/api/health || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/nc_data:/usr/app/data"
+      ],
+      "depends_on": [
+        "db"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "NC_DB": "pg://db:5432?u=${POSTGRES_USER}&p=${POSTGRES_PASSWORD}&d=${POSTGRES_DB}",
+        "NC_AUTH_JWT_SECRET": "${NC_AUTH_JWT_SECRET}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "nocodb",
+    "POSTGRES_USER": "nocodb_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "NC_AUTH_JWT_SECRET": "CHANGE_ME",
+    "NOCODB_PORT": "8080"
+  }
+}
