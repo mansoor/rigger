@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -8,6 +10,69 @@ import (
 )
 
 // Invite registration + email verification + self-service profile (Phase 5.1b).
+
+// resetLimiter throttles anonymous password-reset requests per client IP (anti-abuse
+// + anti-enumeration): same shape as loginLimiter, separate counter so reset traffic
+// doesn't consume the login budget.
+var resetLimiter = &rateLimiter{entries: make(map[string]*rlEntry)}
+
+// GET /api/auth/password-policy — public. Lets the setup/register/reset/change
+// password forms show the active requirements (no secrets).
+func (h *Handler) PasswordPolicyInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.auth.PasswordPolicy())
+}
+
+// POST /api/auth/forgot-password {email} — public. Always returns 200 with a generic
+// body so it never reveals whether an email is registered. When an eligible account
+// exists AND system SMTP is configured, emails a reset link; otherwise it's a no-op
+// the requester can't distinguish (the admin can still reset from the Users tab).
+func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	if !resetLimiter.allow(clientIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many requests — please try again later"})
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	raw, _, ok, err := h.auth.CreateResetToken(body.Email)
+	if err == nil && ok {
+		link := h.baseURL(r) + "/reset-password?token=" + raw
+		if sent, _ := h.sendUserLink(strings.ToLower(strings.TrimSpace(body.Email)),
+			"Reset your Rigger password",
+			"We received a request to reset your Rigger password. The link below expires in 1 hour.",
+			"Reset your password", link); !sent {
+			// SMTP not configured: we must NOT surface the link to an anonymous requester
+			// (that would let anyone reset any account). Record it server-side for the admin.
+			log.Printf("password-reset requested for %q but system SMTP is not configured — no email sent (admin can reset from the Users tab)", strings.TrimSpace(body.Email))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+// POST /api/auth/reset-password {token, password} — public (the token proves ownership).
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token    string `json:"token"`
+		Password string `json:"password"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := h.auth.ResetPassword(body.Token, body.Password); err != nil {
+		if errors.Is(err, auth.ErrInvalidToken) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this reset link is invalid or has expired"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
 
 // GET /api/register/info?token=  — unauthenticated; returns the invitee's email
 // so the registration page can show who it's for.

@@ -55,7 +55,9 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true}
+	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true,
+		// Password policy (auth Group A): min length + complexity requirements.
+		"pw_min_length": true, "pw_require_upper": true, "pw_require_lower": true, "pw_require_number": true, "pw_require_symbol": true}
 	for k, v := range body {
 		if !allowed[k] {
 			continue

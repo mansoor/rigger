@@ -124,6 +124,9 @@ func (s *Service) ChangePassword(userID int64, currentPassword, newPassword stri
 	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(currentPassword)); err != nil {
 		return ErrInvalidCredentials
 	}
+	if err := s.ValidatePassword(newPassword); err != nil {
+		return err
+	}
 	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err

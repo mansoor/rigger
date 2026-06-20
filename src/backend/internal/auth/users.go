@@ -19,6 +19,7 @@ const (
 
 	inviteTTL = 7 * 24 * time.Hour
 	verifyTTL = 24 * time.Hour
+	resetTTL  = 1 * time.Hour
 )
 
 var (
@@ -99,6 +100,9 @@ func (s *Service) SetupAdmin(email, username, password string) (int64, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if !validEmail(email) {
 		return 0, ErrInvalidEmail
+	}
+	if err := s.ValidatePassword(password); err != nil {
+		return 0, err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -183,8 +187,8 @@ func (s *Service) RegisterInfo(rawToken string) (*UserInfo, error) {
 // phone/username), and activates the account with a verified email (the user
 // proved ownership by following the emailed link).
 func (s *Service) CompleteRegistration(rawToken, password, phone, username string) (int64, error) {
-	if len(password) < 8 {
-		return 0, errors.New("password must be at least 8 characters")
+	if err := s.ValidatePassword(password); err != nil {
+		return 0, err
 	}
 	id, err := s.consumeToken(rawToken, KindInvite)
 	if err != nil {
@@ -226,6 +230,57 @@ func (s *Service) VerifyEmail(rawToken string) (int64, error) {
 func (s *Service) IsVerified(id int64) bool {
 	u, err := s.getUserByID(id)
 	return err == nil && u.EmailVerified
+}
+
+// CreateResetToken mints a password-reset token for the ACTIVE account with the
+// given email. ok is false (with no error) when no eligible account exists — the
+// caller MUST respond identically either way so the endpoint never reveals which
+// emails are registered. Invited (not-yet-registered) accounts reset via their
+// invite link, not here.
+func (s *Service) CreateResetToken(email string) (rawToken, username string, ok bool, err error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if !validEmail(email) {
+		return "", "", false, nil
+	}
+	var id int64
+	var uname, status string
+	e := s.db.QueryRow(`SELECT id, username, status FROM users WHERE email=? LIMIT 1`, email).Scan(&id, &uname, &status)
+	if errors.Is(e, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if e != nil {
+		return "", "", false, e
+	}
+	if status != StatusActive {
+		return "", "", false, nil
+	}
+	raw, e := s.createToken(id, KindReset, resetTTL)
+	if e != nil {
+		return "", "", false, e
+	}
+	return raw, uname, true, nil
+}
+
+// ResetPassword validates the new password against the policy, consumes a
+// password-reset token, and sets the new password. The email is marked verified
+// since following the emailed link proves ownership.
+func (s *Service) ResetPassword(rawToken, newPassword string) error {
+	if err := s.ValidatePassword(newPassword); err != nil {
+		return err
+	}
+	id, err := s.peekToken(rawToken, KindReset)
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`UPDATE users SET password=?, email_verified=1 WHERE id=?`, string(hash), id); err != nil {
+		return err
+	}
+	_, err = s.consumeToken(rawToken, KindReset)
+	return err
 }
 
 // UpdateProfile lets a user set their own phone/username and change email. A changed
@@ -275,6 +330,9 @@ func (s *Service) UpdateUser(id int64, role, newPassword string) (*UserInfo, err
 		return nil, err
 	}
 	if newPassword != "" {
+		if verr := s.ValidatePassword(newPassword); verr != nil {
+			return nil, verr
+		}
 		hash, herr := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 		if herr != nil {
 			return nil, herr

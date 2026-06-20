@@ -162,6 +162,11 @@ func main() {
 	mux.HandleFunc("GET /api/register/info", handler.RegisterInfo)
 	mux.HandleFunc("POST /api/register/complete", handler.CompleteRegistration)
 	mux.HandleFunc("POST /api/auth/verify-email", handler.VerifyEmail)
+	// Public self-service: password policy (for form hints) + forgot/reset-password
+	// (token-authenticated, no JWT). reset is rate-limited + non-enumerating.
+	mux.HandleFunc("GET /api/auth/password-policy", handler.PasswordPolicyInfo)
+	mux.HandleFunc("POST /api/auth/forgot-password", handler.ForgotPassword)
+	mux.HandleFunc("POST /api/auth/reset-password", handler.ResetPassword)
 	// Self-service (JWT) — resend own verification, update own profile.
 	mux.Handle("POST /api/auth/resend-verification", authSvc.Middleware(http.HandlerFunc(handler.ResendVerification)))
 	mux.Handle("GET /api/auth/profile", authSvc.Middleware(http.HandlerFunc(handler.GetProfile)))

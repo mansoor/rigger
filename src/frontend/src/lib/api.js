@@ -27,6 +27,12 @@ api.interceptors.response.use(
 
 export default api
 
+// ── Auth: password policy + self-service reset ─────────────────────────────────
+// Public endpoints (no JWT). Policy drives the requirement hints on password forms.
+export const fetchPasswordPolicy = ()                => api.get('/auth/password-policy').then(r => r.data)
+export const forgotPassword      = (email)           => api.post('/auth/forgot-password', { email }).then(r => r.data)
+export const resetPassword       = (token, password) => api.post('/auth/reset-password', { token, password }).then(r => r.data)
+
 // ── Workspace (tier) + Project helpers ─────────────────────────────────────────
 //
 // Hierarchy: Workspace (tier) → Project → Environment. Project/env functions take
