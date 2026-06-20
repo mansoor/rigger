@@ -24,6 +24,12 @@
 
 set -euo pipefail
 
+# Move to a stable directory before anything else: if the caller's CWD was just
+# deleted (e.g. they ran uninstall.sh from inside the install dir), git and other
+# tools fail with "cannot access parent directories: getcwd". Re-root to a dir
+# that's guaranteed to exist so the install proceeds regardless.
+cd "$HOME" 2>/dev/null || cd /
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 RIGGER_REPO="${RIGGER_REPO:-https://github.com/mansoor/rigger.git}"

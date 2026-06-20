@@ -103,3 +103,16 @@ if [[ "$NUKE" == "1" ]]; then
 fi
 
 echo -e "${BOLD}${CYAN}[teardown] Done.${RESET} Re-install with install.sh for a clean run."
+
+# If the caller is standing inside the (now-deleted) install dir, their shell's
+# CWD no longer exists — the next git/docker command would fail with
+# "getcwd: cannot access parent directories". A script can't change the parent
+# shell's directory, so warn loudly to cd out first.
+case "${PWD:-}/" in
+  "$RIGGER_DIR"|"$RIGGER_DIR"/*)
+    echo ""
+    echo -e "${YELLOW}${BOLD}  ⚠  Your current directory ($RIGGER_DIR) was just removed.${RESET}"
+    echo -e "${YELLOW}     Run ${BOLD}cd /${RESET}${YELLOW} (or any existing dir) before re-installing, or the next${RESET}"
+    echo -e "${YELLOW}     command will fail with 'getcwd: cannot access parent directories'.${RESET}"
+    ;;
+esac
