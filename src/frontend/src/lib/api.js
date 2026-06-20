@@ -33,6 +33,12 @@ export const fetchPasswordPolicy = ()                => api.get('/auth/password-
 export const forgotPassword      = (email)           => api.post('/auth/forgot-password', { email }).then(r => r.data)
 export const resetPassword       = (token, password) => api.post('/auth/reset-password', { token, password }).then(r => r.data)
 
+// Optional 2FA (TOTP) self-service.
+export const fetch2FAStatus = ()     => api.get('/auth/2fa').then(r => r.data)
+export const begin2FA       = ()     => api.post('/auth/2fa/begin').then(r => r.data)
+export const enable2FA      = (code) => api.post('/auth/2fa/enable', { code }).then(r => r.data)
+export const disable2FA     = (code) => api.post('/auth/2fa/disable', { code }).then(r => r.data)
+
 // ── Workspace (tier) + Project helpers ─────────────────────────────────────────
 //
 // Hierarchy: Workspace (tier) → Project → Environment. Project/env functions take

@@ -190,6 +190,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Code     string `json:"code"` // optional TOTP code (2FA)
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -200,8 +201,19 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		identifier = body.Username // legacy clients / emailless accounts
 	}
 
-	accessToken, refreshToken, err := h.auth.Login2(identifier, body.Password)
+	accessToken, refreshToken, err := h.auth.Login2(identifier, body.Password, body.Code)
 	if err != nil {
+		// 2FA is on but no code yet → prompt for one (200, not an auth failure).
+		if errors.Is(err, auth.ErrTOTPRequired) {
+			writeJSON(w, http.StatusOK, map[string]any{"totp_required": true})
+			return
+		}
+		// Wrong code → 400 (NOT 401, so the client's global 401→logout/redirect
+		// interceptor doesn't fire) and keep prompting for the code.
+		if errors.Is(err, auth.ErrTOTPInvalid) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid authentication code", "totp_required": true})
+			return
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
 		return
 	}

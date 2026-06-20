@@ -308,9 +308,14 @@ func (s *Service) RefreshAccessToken(refreshToken string) (accessToken, newRefre
 }
 
 // Login2 authenticates by email (or legacy username) and returns access + refresh tokens.
-func (s *Service) Login2(identifier, password string) (accessToken, refreshToken string, err error) {
+// When the account has 2FA enabled, a valid TOTP code is also required: an empty code
+// yields ErrTOTPRequired (the caller prompts for one), a wrong code ErrTOTPInvalid.
+func (s *Service) Login2(identifier, password, code string) (accessToken, refreshToken string, err error) {
 	row, err := s.authenticate(identifier, password)
 	if err != nil {
+		return "", "", err
+	}
+	if err := s.checkTOTPForLogin(row.id, code); err != nil {
 		return "", "", err
 	}
 	s.touchLastLogin(row.id)

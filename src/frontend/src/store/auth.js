@@ -31,10 +31,14 @@ export const useAuthStore = create((set) => ({
   user:  null,
   ready: false, // true once the startup refresh attempt has completed
 
-  login: async (email, password) => {
-    const { data } = await api.post('/auth/login', { email, password })
+  // Returns { totpRequired: true } when the account has 2FA on and a code is needed
+  // (the caller then prompts and re-calls with `code`). Otherwise logs in.
+  login: async (email, password, code) => {
+    const { data } = await api.post('/auth/login', { email, password, code })
+    if (data.totp_required) return { totpRequired: true }
     set({ token: data.token, user: parseJwt(data.token), ready: true })
     scheduleRefresh()
+    return {}
   },
 
   // Adopt a session returned by another flow (e.g. completing invite registration).

@@ -6,6 +6,8 @@ import api from '../lib/api'
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode]         = useState('')
+  const [needCode, setNeedCode] = useState(false)
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
   const [notice, setNotice]     = useState('')
@@ -26,7 +28,12 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      const res = await login(email, password, needCode ? code : '')
+      if (res?.totpRequired) {
+        setNeedCode(true)   // 2FA on — reveal the code field and ask for it
+        setError('')
+        return
+      }
       navigate('/', { replace: true })
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed')
@@ -76,11 +83,24 @@ export default function LoginPage() {
                 required
               />
             </div>
+            {needCode && (
+              <div>
+                <label className="block text-sm font-medium text-content mb-1">Authentication code</label>
+                <input
+                  type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+                  value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456"
+                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                  autoFocus required
+                />
+                <p className="text-xs text-content-subtle mt-1">Enter the 6-digit code from your authenticator app.</p>
+              </div>
+            )}
             <button
               type="submit" disabled={loading}
               className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2"
             >
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Signing in…' : needCode ? 'Verify' : 'Sign in'}
             </button>
           </form>
 

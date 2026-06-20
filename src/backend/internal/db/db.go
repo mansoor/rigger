@@ -646,6 +646,11 @@ func (d *DB) migrate() error {
 		d.Exec(`UPDATE users SET password_changed_at=CURRENT_TIMESTAMP WHERE password_changed_at IS NULL`) //nolint:errcheck
 	}
 
+	// Optional 2FA / TOTP (auth Group A slice 4). totp_secret holds the base32 shared
+	// secret (set at enrollment); totp_enabled flips on only after a code is verified.
+	d.addColumn("users", "totp_secret TEXT NOT NULL DEFAULT ''")
+	d.addColumn("users", "totp_enabled INTEGER NOT NULL DEFAULT 0")
+
 	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
 	// 'ws:{key}' = private to that workspace. When the column is freshly added,
 	// every existing host predates scoping — grant each to all workspaces ('*')

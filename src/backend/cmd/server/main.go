@@ -174,6 +174,11 @@ func main() {
 	// Per-user appearance (W7) — resolves user ?? workspace ?? global default.
 	mux.Handle("GET /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.GetAppearance)))
 	mux.Handle("PUT /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.PutAppearance)))
+	// Optional 2FA (TOTP) self-service.
+	mux.Handle("GET /api/auth/2fa", authSvc.Middleware(http.HandlerFunc(handler.TwoFAStatus)))
+	mux.Handle("POST /api/auth/2fa/begin", authSvc.Middleware(http.HandlerFunc(handler.TwoFABegin)))
+	mux.Handle("POST /api/auth/2fa/enable", authSvc.Middleware(http.HandlerFunc(handler.TwoFAEnable)))
+	mux.Handle("POST /api/auth/2fa/disable", authSvc.Middleware(http.HandlerFunc(handler.TwoFADisable)))
 
 	// Rigger's own build version (self-update Phase 0).
 	mux.Handle("GET /api/version", authSvc.Middleware(http.HandlerFunc(handler.GetVersion)))

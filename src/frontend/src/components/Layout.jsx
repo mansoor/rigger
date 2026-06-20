@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -699,7 +699,8 @@ function AccountSecurity({ onDone }) {
     mutation.mutate()
   }
   return (
-    <form onSubmit={submit} className="space-y-3 max-w-md">
+    <div className="space-y-10 max-w-md">
+    <form onSubmit={submit} className="space-y-3">
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
       {['Current password', 'New password', 'Confirm new password'].map((label, i) => {
         const val = [current, next, confirm][i]; const set = [setCurrent, setNext, setConfirm][i]
@@ -713,6 +714,93 @@ function AccountSecurity({ onDone }) {
       })}
       <button type="submit" disabled={mutation.isPending} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{mutation.isPending ? 'Saving…' : 'Update password'}</button>
     </form>
+    <TwoFactorSection />
+    </div>
+  )
+}
+
+// TwoFactorSection — optional TOTP 2FA enrollment / disable, shown in the account
+// modal's Security tab. Enrollment shows the secret + otpauth URL for manual entry
+// (or QR import) and requires a verifying code; disabling also requires a code.
+function TwoFactorSection() {
+  const qc = useQueryClient()
+  const { data: status } = useQuery({ queryKey: ['twofa-status'], queryFn: fetch2FAStatus })
+  const enabled = !!status?.enabled
+
+  const [enroll, setEnroll] = useState(null) // { secret, otpauth_url } while enrolling
+  const [code, setCode]     = useState('')
+  const [error, setError]   = useState('')
+
+  const beginMut = useMutation({
+    mutationFn: begin2FA,
+    onSuccess: (d) => { setEnroll(d); setCode(''); setError('') },
+    onError: (e) => setError(e.response?.data?.error || 'Could not start enrollment'),
+  })
+  const enableMut = useMutation({
+    mutationFn: () => enable2FA(code),
+    onSuccess: () => { setEnroll(null); setCode(''); setError(''); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
+    onError: (e) => setError(e.response?.data?.error || 'Invalid code'),
+  })
+  const disableMut = useMutation({
+    mutationFn: () => disable2FA(code),
+    onSuccess: () => { setCode(''); setError(''); qc.invalidateQueries({ queryKey: ['twofa-status'] }) },
+    onError: (e) => setError(e.response?.data?.error || 'Invalid code'),
+  })
+
+  const codeInput = (
+    <input type="text" inputMode="numeric" maxLength={6} value={code}
+      onChange={e => setCode(e.target.value.replace(/\D/g, ''))} placeholder="123456"
+      className="w-40 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest focus:outline-none focus:border-brand-500" />
+  )
+
+  return (
+    <div className="space-y-3 border-t border-border/60 pt-6">
+      <div>
+        <h3 className="font-semibold text-content-strong">Two-factor authentication</h3>
+        <p className="text-sm text-content-muted">
+          {enabled
+            ? 'Enabled — a code from your authenticator app is required at sign-in.'
+            : 'Add a one-time code from an authenticator app (Google Authenticator, 1Password, Authy, …) as a second factor.'}
+        </p>
+      </div>
+      {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
+
+      {!enabled && !enroll && (
+        <button onClick={() => beginMut.mutate()} disabled={beginMut.isPending}
+          className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+          {beginMut.isPending ? 'Starting…' : 'Enable 2FA'}
+        </button>
+      )}
+
+      {!enabled && enroll && (
+        <div className="space-y-3">
+          <p className="text-sm text-content-muted">In your authenticator app, add an account using this secret (or paste the setup URL):</p>
+          <div className="px-3 py-2 bg-surface-raised border border-border rounded-lg font-mono text-sm break-all select-all">{enroll.secret}</div>
+          <p className="text-xs text-content-subtle break-all">Setup URL: <code className="font-mono">{enroll.otpauth_url}</code></p>
+          {codeInput}
+          <div className="flex gap-2">
+            <button onClick={() => enableMut.mutate()} disabled={enableMut.isPending || code.length !== 6}
+              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+              {enableMut.isPending ? 'Verifying…' : 'Verify & enable'}
+            </button>
+            <button onClick={() => { setEnroll(null); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {enabled && (
+        <div className="space-y-2">
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to disable</label>
+          {codeInput}
+          <div>
+            <button onClick={() => disableMut.mutate()} disabled={disableMut.isPending || code.length !== 6}
+              className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+              {disableMut.isPending ? 'Disabling…' : 'Disable 2FA'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
