@@ -208,10 +208,15 @@ func (h *Handler) startUpdate(w http.ResponseWriter, target, prev string) {
 
 	// Helper base = the currently-running Rigger image (already local, guaranteed to
 	// have docker + the compose plugin) with sh as entrypoint. It bind-mounts the
-	// install dir, points .env at the target tag, then pulls + recreates only the
-	// rigger service. The 2s sleep lets this HTTP 202 flush before we get killed.
+	// install dir AT ITS REAL HOST PATH ($hostDir:$hostDir) — this is critical:
+	// compose resolves the relative bind mounts in the compose file (../workspaces,
+	// ../templates) to absolute paths from where it runs, then hands them to the
+	// HOST daemon. Mounting at a different path (e.g. /work) would make compose emit
+	// /work/workspaces, which doesn't exist on the host → the daemon creates an empty
+	// dir and Rigger loses its workspaces. Same path in and out keeps them correct.
+	// The 2s sleep lets this HTTP 202 flush before we get recreated.
 	script := `sleep 2
-cd /work/src || exit 1
+cd "$RIGGER_WORK/src" || exit 1
 if grep -q '^RIGGER_IMAGE_TAG=' .env 2>/dev/null; then
   sed -i "s|^RIGGER_IMAGE_TAG=.*|RIGGER_IMAGE_TAG=${RIGGER_TARGET_TAG}|" .env
 else
@@ -222,8 +227,10 @@ docker compose pull rigger && docker compose up -d rigger`
 	args := []string{
 		"run", "-d", "--rm",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
-		"-v", hostDir + ":/work",
+		"-v", hostDir + ":" + hostDir,
+		"-w", hostDir,
 		"-e", "RIGGER_TARGET_TAG=" + target,
+		"-e", "RIGGER_WORK=" + hostDir,
 		"--entrypoint", "sh",
 		imageRepo + ":" + currentImageTag(),
 		"-c", script,
