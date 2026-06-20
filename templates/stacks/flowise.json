@@ -1,0 +1,48 @@
+{
+  "name": "flowise",
+  "label": "Flowise AI",
+  "description": "Low-code drag-and-drop builder for LLM apps and AI agents (LangChain-based). Uses an embedded SQLite store by default. Protected by a username/password (FLOWISE_USERNAME/PASSWORD — reveal the generated password in Env Vars).",
+  "tags": [
+    "ai",
+    "llm",
+    "low-code",
+    "automation"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "flowiseai/flowise",
+      "tag": "latest",
+      "port": 3000,
+      "web_routed": true,
+      "host_port": "${FLOWISE_PORT}",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/flowise_data:/root/.flowise"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "PORT": "3000",
+        "DATABASE_PATH": "/root/.flowise",
+        "APIKEY_PATH": "/root/.flowise",
+        "SECRETKEY_PATH": "/root/.flowise",
+        "LOG_PATH": "/root/.flowise/logs",
+        "FLOWISE_USERNAME": "${FLOWISE_USERNAME}",
+        "FLOWISE_PASSWORD": "${FLOWISE_PASSWORD}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "FLOWISE_PORT": "3000",
+    "FLOWISE_USERNAME": "admin",
+    "FLOWISE_PASSWORD": "CHANGE_ME"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "mealie",
+  "label": "Mealie",
+  "description": "Self-hosted recipe manager and meal planner with a recipe-URL importer. Uses an embedded SQLite store by default. Set BASE_URL to the address users reach it at. Default first login is changeme@example.com / MyPassword — change it immediately.",
+  "tags": [
+    "recipes",
+    "meal-planning",
+    "productivity"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "ghcr.io/mealie-recipes/mealie",
+      "tag": "latest",
+      "port": 9000,
+      "web_routed": true,
+      "host_port": "${MEALIE_PORT}",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/mealie_data:/app/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "BASE_URL": "${BASE_URL}",
+        "ALLOW_SIGNUP": "false"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "MEALIE_PORT": "9000",
+    "BASE_URL": "http://localhost:9000"
+  }
+}

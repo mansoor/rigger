@@ -1,0 +1,43 @@
+{
+  "name": "wg-easy",
+  "label": "WireGuard Easy",
+  "description": "The easiest way to run WireGuard VPN with a web UI. Set WG_HOST to your server's PUBLIC IP/hostname and reveal the generated PASSWORD in Env Vars. IMPORTANT: WireGuard needs kernel capabilities this template cannot set — after creating, edit the generated compose to add cap_add: [NET_ADMIN, SYS_MODULE] and the net.ipv4 sysctls, or tunnels won't establish. Single-node only.",
+  "tags": [
+    "vpn",
+    "networking",
+    "wireguard"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "ghcr.io/wg-easy/wg-easy",
+      "tag": "14",
+      "port": 51821,
+      "web_routed": true,
+      "host_port": "51821",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/wg_data:/etc/wireguard"
+      ],
+      "depends_on": [],
+      "extra_ports": [
+        "51820:51820/udp"
+      ],
+      "env_vars": {
+        "WG_HOST": "${WG_HOST}",
+        "PASSWORD": "${WG_PASSWORD}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "WG_HOST": "your.public.ip.or.host",
+    "WG_PASSWORD": "CHANGE_ME"
+  }
+}

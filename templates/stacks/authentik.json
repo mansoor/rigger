@@ -1,0 +1,137 @@
+{
+  "name": "authentik",
+  "label": "Authentik",
+  "description": "Self-hosted SSO / identity provider (SAML, OAuth2/OIDC, LDAP, proxy). Server + worker share the image, backed by PostgreSQL + Redis. First admin (akadmin) is bootstrapped from AUTHENTIK_BOOTSTRAP_EMAIL/PASSWORD — reveal the generated password in Env Vars, then finish setup at /if/flow/initial-setup/.",
+  "tags": [
+    "identity",
+    "sso",
+    "security",
+    "auth"
+  ],
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "16-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "redis",
+      "image": "redis",
+      "tag": "7-alpine",
+      "port": 6379,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "redis-cli ping || exit 1",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "10s"
+      },
+      "volumes": [
+        "./volumes/redis_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    },
+    {
+      "name": "server",
+      "image": "ghcr.io/goauthentik/server",
+      "tag": "latest",
+      "port": 9000,
+      "web_routed": true,
+      "host_port": "${AUTHENTIK_PORT}",
+      "command": "server",
+      "healthcheck": "ak healthcheck",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "30s",
+        "retries": "5",
+        "start_period": "120s"
+      },
+      "volumes": [
+        "./volumes/authentik_media:/media",
+        "./volumes/authentik_templates:/templates"
+      ],
+      "depends_on": [
+        "db",
+        "redis"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "AUTHENTIK_POSTGRESQL__HOST": "db",
+        "AUTHENTIK_POSTGRESQL__USER": "${POSTGRES_USER}",
+        "AUTHENTIK_POSTGRESQL__NAME": "${POSTGRES_DB}",
+        "AUTHENTIK_POSTGRESQL__PASSWORD": "${POSTGRES_PASSWORD}",
+        "AUTHENTIK_REDIS__HOST": "redis",
+        "AUTHENTIK_SECRET_KEY": "${AUTHENTIK_SECRET_KEY}",
+        "AUTHENTIK_BOOTSTRAP_EMAIL": "${AUTHENTIK_BOOTSTRAP_EMAIL}",
+        "AUTHENTIK_BOOTSTRAP_PASSWORD": "${AUTHENTIK_BOOTSTRAP_PASSWORD}"
+      }
+    },
+    {
+      "name": "worker",
+      "image": "ghcr.io/goauthentik/server",
+      "tag": "latest",
+      "port": 9000,
+      "host_port": "",
+      "command": "worker",
+      "healthcheck": "ak healthcheck",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "30s",
+        "retries": "5",
+        "start_period": "120s"
+      },
+      "volumes": [
+        "./volumes/authentik_media:/media",
+        "./volumes/authentik_templates:/templates"
+      ],
+      "depends_on": [
+        "db",
+        "redis"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "AUTHENTIK_POSTGRESQL__HOST": "db",
+        "AUTHENTIK_POSTGRESQL__USER": "${POSTGRES_USER}",
+        "AUTHENTIK_POSTGRESQL__NAME": "${POSTGRES_DB}",
+        "AUTHENTIK_POSTGRESQL__PASSWORD": "${POSTGRES_PASSWORD}",
+        "AUTHENTIK_REDIS__HOST": "redis",
+        "AUTHENTIK_SECRET_KEY": "${AUTHENTIK_SECRET_KEY}",
+        "AUTHENTIK_BOOTSTRAP_EMAIL": "${AUTHENTIK_BOOTSTRAP_EMAIL}",
+        "AUTHENTIK_BOOTSTRAP_PASSWORD": "${AUTHENTIK_BOOTSTRAP_PASSWORD}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "authentik",
+    "POSTGRES_USER": "authentik",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "AUTHENTIK_SECRET_KEY": "CHANGE_ME",
+    "AUTHENTIK_BOOTSTRAP_EMAIL": "admin@example.com",
+    "AUTHENTIK_BOOTSTRAP_PASSWORD": "CHANGE_ME",
+    "AUTHENTIK_PORT": "9000"
+  }
+}

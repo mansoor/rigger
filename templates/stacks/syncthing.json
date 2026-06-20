@@ -1,0 +1,44 @@
+{
+  "name": "syncthing",
+  "label": "Syncthing",
+  "description": "Continuous, open-source peer-to-peer file synchronization (LinuxServer image). Web UI on 8384; sync (22000) and local discovery (21027) ports are exposed for device connectivity.",
+  "tags": [
+    "files",
+    "sync",
+    "backup"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "lscr.io/linuxserver/syncthing",
+      "tag": "latest",
+      "port": 8384,
+      "web_routed": true,
+      "host_port": "8384",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/syncthing_config:/config",
+        "./volumes/syncthing_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [
+        "22000:22000/tcp",
+        "22000:22000/udp",
+        "21027:21027/udp"
+      ],
+      "env_vars": {
+        "PUID": "1000",
+        "PGID": "1000",
+        "TZ": "Etc/UTC"
+      }
+    }
+  ],
+  "default_env_vars": {}
+}

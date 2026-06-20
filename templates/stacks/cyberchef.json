@@ -1,0 +1,33 @@
+{
+  "name": "cyberchef",
+  "label": "CyberChef",
+  "description": "The \"Cyber Swiss-Army Knife\" — a web app for encryption, encoding, compression and data analysis (official GCHQ image). Fully static, no state or dependencies.",
+  "tags": [
+    "dev-tools",
+    "security",
+    "utilities"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "ghcr.io/gchq/cyberchef",
+      "tag": "latest",
+      "port": 80,
+      "web_routed": true,
+      "host_port": "8000",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:80/ || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "10s"
+      },
+      "volumes": [],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {}
+}

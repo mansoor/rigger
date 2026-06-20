@@ -1,0 +1,32 @@
+{
+  "name": "it-tools",
+  "label": "IT Tools",
+  "description": "A handy collection of developer/IT utilities (encoders, converters, generators, formatters) in one static web app. No state, no dependencies.",
+  "tags": [
+    "dev-tools",
+    "utilities"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "corentinth/it-tools",
+      "tag": "latest",
+      "port": 80,
+      "web_routed": true,
+      "host_port": "8080",
+      "command": "",
+      "healthcheck": "wget -q --spider http://127.0.0.1:80/ || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "10s"
+      },
+      "volumes": [],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {}
+}

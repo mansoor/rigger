@@ -1,0 +1,38 @@
+{
+  "name": "sftpgo",
+  "label": "SFTPGo",
+  "description": "Full-featured SFTP / FTP / WebDAV / HTTP file server with a web admin UI and built-in storage backends. Create the first admin in the web UI on first visit. SFTP is exposed on port 2022.",
+  "tags": [
+    "files",
+    "sftp",
+    "storage"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "drakkan/sftpgo",
+      "tag": "latest",
+      "port": 8080,
+      "web_routed": true,
+      "host_port": "8080",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/sftpgo_data:/var/lib/sftpgo",
+        "./volumes/sftpgo_home:/srv/sftpgo"
+      ],
+      "depends_on": [],
+      "extra_ports": [
+        "2022:2022"
+      ],
+      "env_vars": {}
+    }
+  ],
+  "default_env_vars": {}
+}

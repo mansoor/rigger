@@ -1,0 +1,44 @@
+{
+  "name": "transmission",
+  "label": "Transmission",
+  "description": "Lightweight BitTorrent client with a web UI (LinuxServer image). Peer port 51413 is exposed for connectivity. Set USER/PASS in Env Vars to password-protect the web UI.",
+  "tags": [
+    "downloads",
+    "torrent",
+    "media"
+  ],
+  "images": [
+    {
+      "name": "app",
+      "image": "lscr.io/linuxserver/transmission",
+      "tag": "latest",
+      "port": 9091,
+      "web_routed": true,
+      "host_port": "9091",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "20s"
+      },
+      "volumes": [
+        "./volumes/transmission_config:/config",
+        "./volumes/downloads:/downloads",
+        "./volumes/watch:/watch"
+      ],
+      "depends_on": [],
+      "extra_ports": [
+        "51413:51413/tcp",
+        "51413:51413/udp"
+      ],
+      "env_vars": {
+        "PUID": "1000",
+        "PGID": "1000",
+        "TZ": "Etc/UTC"
+      }
+    }
+  ],
+  "default_env_vars": {}
+}
