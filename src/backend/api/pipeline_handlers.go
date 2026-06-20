@@ -417,7 +417,7 @@ func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipeli
 	// "Started" fires once, at the genuine start of a run (startIdx 0) — not when
 	// resuming after a gate approval (startIdx > 0).
 	if startIdx == 0 {
-		h.notifyPipelineRun(p, "started", nil)
+		h.notifyPipelineRun(p, "started", nil, time.Now().UnixMilli(), 0)
 	}
 	progress := func(seg []pipelines.StageResult) {
 		all := append(append([]pipelines.StageResult{}, prior...), seg...)
@@ -434,7 +434,7 @@ func (h *Handler) continueRun(runID int64, p *pipelines.Pipeline, prior []pipeli
 // The message carries the workspace/project display names, environment, pipeline
 // name, and — on failure — the stage that failed plus a short error excerpt.
 // No-op when no dispatcher, no channels, or the event is off.
-func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages []pipelines.StageResult) {
+func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages []pipelines.StageResult, startedMs, finishedMs int64) {
 	if h.notifier == nil || len(p.NotifyChannelIDs) == 0 {
 		return
 	}
@@ -456,15 +456,19 @@ func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages 
 	var n notify.Notification
 	switch event {
 	case "started":
+		body := "▶ Pipeline run started.\n" + ctxLine
+		if s := fmtTS(startedMs); s != "" {
+			body += "\nStarted: " + s
+		}
 		n = notify.Notification{
 			Title: fmt.Sprintf("Pipeline started: %s", p.Name),
-			Body:  "▶ Pipeline run started.\n" + ctxLine,
+			Body:  body,
 			Level: notify.LevelInfo,
 		}
 	case "succeeded":
 		n = notify.Notification{
 			Title: fmt.Sprintf("Pipeline succeeded: %s", p.Name),
-			Body:  "✓ Pipeline completed successfully.\n" + ctxLine,
+			Body:  "✓ Pipeline completed successfully.\n" + ctxLine + timeFooter(startedMs, finishedMs),
 			Level: notify.LevelSuccess,
 		}
 	case "failed":
@@ -487,6 +491,7 @@ func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages 
 		if errMsg != "" {
 			body += "\nError: " + errMsg
 		}
+		body += timeFooter(startedMs, finishedMs)
 		n = notify.Notification{
 			Title: fmt.Sprintf("Pipeline failed: %s", p.Name),
 			Body:  body,
@@ -496,6 +501,30 @@ func (h *Handler) notifyPipelineRun(p *pipelines.Pipeline, event string, stages 
 		return
 	}
 	h.notifier.DispatchToChannels(p.NotifyChannelIDs, n)
+}
+
+// fmtTS renders an epoch-ms instant as a readable local timestamp (with zone),
+// or "" when unset.
+func fmtTS(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).Format("2006-01-02 15:04:05 MST")
+}
+
+// timeFooter builds the Started/Finished/Duration lines for a finished run.
+func timeFooter(startMs, endMs int64) string {
+	var b strings.Builder
+	if s := fmtTS(startMs); s != "" {
+		b.WriteString("\nStarted: " + s)
+	}
+	if s := fmtTS(endMs); s != "" {
+		b.WriteString("\nFinished: " + s)
+	}
+	if startMs > 0 && endMs > startMs {
+		b.WriteString("\nDuration: " + (time.Duration(endMs-startMs) * time.Millisecond).Round(time.Second).String())
+	}
+	return b.String()
 }
 
 // shortErr returns a compact single-paragraph excerpt of a failing stage's
@@ -538,11 +567,16 @@ func (h *Handler) finalizeRun(runID int64, p *pipelines.Pipeline, stages []pipel
 		}
 	}
 	// Run-event alerting (only on a terminal outcome — a gate pause is not a finish).
+	// Pull the run's StartedAt so the alert can report start + end + duration.
+	var startedMs int64
+	if run, _ := pipelines.GetRun(h.db, runID); run != nil {
+		startedMs = run.StartedAt
+	}
 	switch outcome {
 	case pipelines.OutcomeOK:
-		h.notifyPipelineRun(p, "succeeded", stages)
+		h.notifyPipelineRun(p, "succeeded", stages, startedMs, finished)
 	case pipelines.OutcomeFail:
-		h.notifyPipelineRun(p, "failed", stages)
+		h.notifyPipelineRun(p, "failed", stages, startedMs, finished)
 	}
 }
 

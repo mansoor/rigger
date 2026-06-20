@@ -37,6 +37,14 @@ services:
       # Host root (read-only): lets dashboard disk stats and the disk_above_pct
       # alert measure the REAL host filesystem instead of the container overlay.
       - /:/host:ro
+      # Proxmox LXC note: a Docker container reads the kernel's /proc, so the
+      # dashboard's Host memory + uptime reflect the PROXMOX HOST, not this LXC
+      # (a nested container bypasses the LXC's lxcfs-virtualized /proc). If this
+      # LXC runs lxcfs, UNCOMMENT the two lines below to make those stats reflect
+      # the LXC. Leave commented on bare-metal/VM hosts (the paths won't exist).
+      # Verify the path first: `ls /var/lib/lxcfs/proc/` inside the LXC.
+      # - /var/lib/lxcfs/proc/meminfo:/proc/meminfo:ro
+      # - /var/lib/lxcfs/proc/uptime:/proc/uptime:ro
       # Persistent data: SQLite DB
       - rigger-data:/data
       # Traefik's ACME cert store (read-only): lets the env card show the live

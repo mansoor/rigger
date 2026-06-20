@@ -321,11 +321,9 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
     retry: false,
   })
+  // summary still drives the per-workspace alert dots in the table (the bell icon
+  // covers the global count, so there's no dedicated Active-alerts stat card).
   const summary    = alertSummary || { total: 0, critical: 0, warning: 0, info: 0, by_workspace: {} }
-  const alertAccent = summary.critical > 0 ? 'red' : summary.warning > 0 ? 'amber' : summary.total > 0 ? 'blue' : 'green'
-  const alertSub    = summary.total > 0
-    ? `${summary.critical} critical · ${summary.warning} warning`
-    : 'all clear'
 
   const docker = stats?.docker || {}
   const host   = stats?.host   || {}
@@ -408,13 +406,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Stat cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard
-            label="Active alerts"
-            value={summary.total}
-            sub={alertSub}
-            accent={alertAccent}
-          />
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatCard
             label="Projects"
             value={ws.total ?? '—'}
@@ -429,7 +421,9 @@ export default function DashboardPage() {
           />
           <StatCard
             label="Running containers"
-            value={docker.containers_running ?? '—'}
+            value={docker.containers_running != null
+              ? `${docker.containers_running}/${(docker.containers_running || 0) + (docker.containers_stopped || 0) + (docker.containers_paused || 0)}`
+              : '—'}
             sub={`${docker.containers_stopped ?? 0} stopped · ${docker.containers_paused ?? 0} paused`}
             accent={docker.containers_running > 0 ? 'green' : 'gray'}
           />
