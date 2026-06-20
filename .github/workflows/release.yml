@@ -1,8 +1,11 @@
 name: release
 
-# Build + publish the Rigger image to GHCR on a semver tag (self-update Phase 1).
+# Build + publish the Rigger image to GHCR on a semver tag (self-update Phase 1),
+# AND create a GitHub Release for the tag so the in-app updater can detect it.
 # Tag a release with `git tag v1.2.3 && git push origin v1.2.3` → this publishes
 #   ghcr.io/mansoor/rigger:1.2.3  and  ghcr.io/mansoor/rigger:latest
+# and a GitHub Release v1.2.3 (Admin → Updates reads /releases/latest, NOT tags —
+# a pushed tag alone is invisible to the updater).
 # The version is stamped into the binary via the RIGGER_VERSION/RIGGER_COMMIT
 # build args (see src/Dockerfile + internal/buildinfo).
 #
@@ -15,7 +18,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write   # create the GitHub Release (the in-app updater reads /releases/latest)
   packages: write
 
 jobs:
@@ -59,3 +62,13 @@ jobs:
             RIGGER_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Publish a GitHub Release for the tag so the in-app updater (which reads the
+      # GitHub Releases API) can see the new version + show its changelog. A pushed
+      # tag alone is NOT a Release. Notes are auto-generated from commits/PRs.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
