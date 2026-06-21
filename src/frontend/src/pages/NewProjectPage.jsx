@@ -1961,7 +1961,11 @@ function Step6({ data }) {
 
 // ── Step 7: Creating (live terminal) ─────────────────────────────────────────
 
-function Step7({ payload, onDone, onResult, onGoBack }) {
+function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorkspace, onResult, onGoBack }) {
+  // Pull-only stacks (image / prebuilt / database) can deploy straight away;
+  // build stacks (custom / from-repo / blueprint) need a build first, so they
+  // don't get the "Deploy project" shortcut.
+  const deployable = payload.type === 'image' || payload.type === 'database'
   const termRef      = useRef(null)
   const containerRef = useRef(null)
   const [status, setStatus] = useState(null) // null | 'success' | 'failure'
@@ -2041,27 +2045,47 @@ function Step7({ payload, onDone, onResult, onGoBack }) {
         </div>
       )}
 
-      {isDone && (
-        <div className="flex gap-3">
-          {isFailure && (
-            <button
-              onClick={onGoBack}
-              className="flex-1 py-2.5 border border-border-strong hover:border-border-strong text-content hover:text-content-strong font-medium rounded-lg transition-colors"
-            >
-              ← Go back &amp; fix
-            </button>
-          )}
+      {isFailure && (
+        <button
+          onClick={onGoBack}
+          className="w-full py-2.5 border border-border-strong hover:border-border-strong text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+        >
+          ← Go back &amp; fix
+        </button>
+      )}
+
+      {isSuccess && (
+        <div className="space-y-2.5">
+          {/* Primary action — open the new project. */}
           <button
             onClick={onDone}
-            disabled={!isSuccess}
-            className={`flex-1 py-2.5 font-medium rounded-lg transition-colors ${
-              isSuccess
-                ? 'bg-brand-600 hover:bg-brand-700 text-white'
-                : 'bg-surface-raised text-content-faint cursor-not-allowed border border-border-strong'
-            }`}
+            className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg transition-colors"
           >
-            Open workspace →
+            Open project →
           </button>
+          {/* Secondary actions. "Deploy project" only for pull-only stacks. */}
+          <div className="flex flex-wrap gap-2.5">
+            {deployable && (
+              <button
+                onClick={onDeployProject}
+                className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+              >
+                Deploy project
+              </button>
+            )}
+            <button
+              onClick={onEditProject}
+              className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+            >
+              Edit project
+            </button>
+            <button
+              onClick={onBackToWorkspace}
+              className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+            >
+              Back to workspace
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -2124,6 +2148,7 @@ export default function NewProjectPage() {
   const navigate = useNavigate()
   const params = useParams()
   const storeWs = useWorkspaceStore(s => s.current)
+  const setCurrentWs = useWorkspaceStore(s => s.setCurrent)
   // The parent-tier workspace: from the route (/workspaces/:workspace/projects/new),
   // falling back to the selected workspace for the bare /new shortcut.
   const workspace = params.workspace || storeWs
@@ -2293,6 +2318,28 @@ export default function NewProjectPage() {
     navigate(`/workspaces/${workspace}/projects/${data.key}`)
   }
 
+  // Edit the freshly-created project.
+  function handleEditProject() {
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
+    navigate(`/workspaces/${workspace}/projects/${data.key}/edit`)
+  }
+
+  // Open the project page and immediately kick off a deploy of its first env.
+  // Only offered for pull-only stacks (image/prebuilt/database) — build stacks
+  // need a build first, so deploying right away wouldn't work.
+  function handleDeployProject() {
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
+    navigate(`/workspaces/${workspace}/projects/${data.key}`, { state: { autoDeploy: true } })
+  }
+
+  // Back to the active workspace's dashboard. This page has its own nav (no Layout),
+  // so sync the workspace store before navigating so the dashboard scopes correctly.
+  function handleBackToWorkspace() {
+    qc.invalidateQueries({ queryKey: ['projects', workspace] })
+    if (workspace) setCurrentWs(workspace)
+    navigate('/')
+  }
+
   return (
     <div className="min-h-screen bg-canvas flex flex-col">
       {/* Nav bar (same style as Layout) */}
@@ -2336,6 +2383,9 @@ export default function NewProjectPage() {
               <Step7
                 payload={buildPayload()}
                 onDone={handleDone}
+                onEditProject={handleEditProject}
+                onDeployProject={handleDeployProject}
+                onBackToWorkspace={handleBackToWorkspace}
                 onResult={result => setCreateResult(result)}
                 onGoBack={() => { setCreateResult(null); setStep(6) }}
               />

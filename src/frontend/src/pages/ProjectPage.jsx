@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo } from '../lib/api'
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
@@ -2098,6 +2098,20 @@ export default function ProjectPage() {
     setActionMeta({ cmd, env, extra, user: username, ts: Date.now() })
     setActionWs(socket)
   }
+
+  // "Deploy project" from the create wizard lands here with state.autoDeploy — kick
+  // off a deploy of the first environment once, then clear the flag so a manual
+  // refresh of the page doesn't redeploy.
+  const location = useLocation()
+  const autoDeployedRef = useRef(false)
+  useEffect(() => {
+    if (autoDeployedRef.current || !location.state?.autoDeploy) return
+    const firstEnv = (ws?.envs || [])[0]
+    if (!firstEnv) return // wait for the project to load
+    autoDeployedRef.current = true
+    navigate(location.pathname, { replace: true, state: {} })
+    runAction('start', firstEnv)
+  }, [ws, location.state]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) return <Layout><div className="p-8 text-content-subtle text-sm">Loading…</div></Layout>
   if (error) {

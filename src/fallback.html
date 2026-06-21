@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Auto-retry: once the app's router comes up, this reload lands on the real app. -->
-  <meta http-equiv="refresh" content="10" />
+  <!-- JS drives the auto-retry (with a visible countdown). The <noscript> meta
+       refresh is the fallback when JS is disabled. -->
+  <noscript><meta http-equiv="refresh" content="10" /></noscript>
   <title>Starting up…</title>
   <style>
     :root { color-scheme: dark; }
@@ -20,12 +21,21 @@
       border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 16px; padding: 40px 36px;
       box-shadow: 0 0 60px rgba(99, 102, 241, 0.12); text-align: center;
     }
-    .spinner {
-      width: 46px; height: 46px; margin: 0 auto 22px; border-radius: 50%;
-      border: 3px solid rgba(129, 140, 248, 0.25); border-top-color: #818cf8;
-      animation: spin 0.9s linear infinite;
+    /* Countdown ring: a depleting progress arc with the seconds remaining in the center. */
+    .ring { position: relative; width: 96px; height: 96px; margin: 0 auto 24px; }
+    .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .ring .track { fill: none; stroke: rgba(129, 140, 248, 0.18); stroke-width: 6; }
+    .ring .prog {
+      fill: none; stroke: #818cf8; stroke-width: 6; stroke-linecap: round;
+      transition: stroke-dashoffset 0.95s linear;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .ring .count {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 30px; font-weight: 650; color: #f3f4ff; font-variant-numeric: tabular-nums;
+    }
+    .ring .count.refreshing {
+      font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #a5b0ff;
+    }
     h1 { font-size: 22px; margin: 0 0 8px; font-weight: 650; color: #f3f4ff; }
     p { font-size: 14.5px; line-height: 1.6; color: #b6bbd4; margin: 0 0 14px; }
     .hint { font-size: 13px; color: #8a90ad; }
@@ -36,11 +46,17 @@
 </head>
 <body>
   <div class="card">
-    <div class="spinner" aria-hidden="true"></div>
+    <div class="ring" role="status" aria-live="polite">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="track" cx="50" cy="50" r="45"></circle>
+        <circle class="prog"  cx="50" cy="50" r="45"></circle>
+      </svg>
+      <div class="count" id="count">10</div>
+    </div>
     <h1>This app isn't ready yet</h1>
     <p>If you just deployed it, it's most likely still <strong>starting up</strong> — a first
       launch can take a minute or two while the app initializes (database setup, migrations,
-      building its index, etc.). This page refreshes itself, so it'll load automatically once
+      building its index, etc.). This page retries on its own, so it'll load automatically once
       the app is ready.</p>
     <p class="hint">Still not loading after a few minutes? It may be:</p>
     <ul>
@@ -48,7 +64,36 @@
       <li>crash-looping — check the app's logs from the env card</li>
       <li>reached at the wrong address — verify the URL</li>
     </ul>
-    <div class="foot">Served by <b>Rigger</b> · retrying every 10s</div>
+    <div class="foot">Served by <b>Rigger</b> · retrying automatically</div>
   </div>
+
+  <script>
+    (function () {
+      var SECONDS = 10;
+      var countEl = document.getElementById('count');
+      var progEl  = document.querySelector('.ring .prog');
+      var R = 45, C = 2 * Math.PI * R;
+      progEl.style.strokeDasharray = C;
+      progEl.style.strokeDashoffset = 0; // full ring at the start
+      var remaining = SECONDS;
+
+      function tick() {
+        // Deplete the arc proportionally to the time elapsed.
+        progEl.style.strokeDashoffset = (C * (1 - remaining / SECONDS)).toFixed(2);
+        if (remaining <= 0) {
+          countEl.textContent = 'Refreshing';
+          countEl.className = 'count refreshing';
+          // Reload to re-check the app. If it's still down, the fallback is served
+          // again and this countdown restarts from 10.
+          window.location.reload();
+          return;
+        }
+        countEl.textContent = remaining;
+        remaining -= 1;
+        setTimeout(tick, 1000);
+      }
+      tick();
+    })();
+  </script>
 </body>
 </html>

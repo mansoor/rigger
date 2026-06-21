@@ -562,9 +562,13 @@ export default function Layout({ children }) {
       {newWsOpen && (
         <NewWorkspaceModal
           onClose={() => setNewWsOpen(false)}
-          onCreated={(key) => {
+          onCreated={async (key) => {
             setNewWsOpen(false)
-            qc.invalidateQueries({ queryKey: ['workspaces'] })
+            // Refetch the list FIRST so it contains the new key before we select it.
+            // Otherwise the sync effect sees `current` as "not in workspaces" and
+            // reverts to workspaces[0] (the previous workspace) — the just-created
+            // workspace would silently lose the selection.
+            await qc.refetchQueries({ queryKey: ['workspaces'] })
             setCurrent(key)
             navigate('/')
           }}
