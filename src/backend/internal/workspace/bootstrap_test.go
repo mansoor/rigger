@@ -27,7 +27,7 @@ func TestBootstrapImageStack(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, "", "", &out); err != nil {
+	if err := Bootstrap(wsDir, tmplDir, "ws", "wp", "prod", false, "", "", "", "", &out); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 
@@ -50,6 +50,34 @@ func TestBootstrapImageStack(t *testing.T) {
 	}
 }
 
+// Regression: the create/bootstrap compose must honour the auto-URL settings, so a
+// brand-new Traefik env is routed at the configured magic-DNS host — not silently
+// `.localhost` until a manual Refresh.
+func TestBootstrapThreadsAutoURL(t *testing.T) {
+	wsDir := t.TempDir()
+	wsRoot := filepath.Join(wsDir, "ws", "projects", "wp")
+	envDir := filepath.Join(wsRoot, "envs", "prod")
+	if err := os.MkdirAll(envDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `{
+  "project": { "name": "wp" },
+  "services": [ { "name": "app", "image": "wordpress", "tag": "latest", "port": "80", "web_routed": true, "host_port": "8080" } ],
+  "environments": { "prod": { "traefik_enabled": true, "traefik_network": "rigger-traefik" } }
+}`
+	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(cfg), 0o644) //nolint:errcheck
+	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, "", "", "nip", "10.10.10.111", nil); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	compose, _ := os.ReadFile(filepath.Join(envDir, "docker-compose.yml"))
+	if !strings.Contains(string(compose), ".10.10.10.111.nip.io`)") {
+		t.Errorf("expected a nip.io Host rule in the bootstrap compose, got:\n%s", compose)
+	}
+	if strings.Contains(string(compose), ".localhost`)") {
+		t.Errorf("compose should NOT fall back to .localhost when auto-URL is configured:\n%s", compose)
+	}
+}
+
 func TestBootstrapPreservesEnvWithoutRegen(t *testing.T) {
 	wsDir := t.TempDir()
 	wsRoot := filepath.Join(wsDir, "ws", "projects", "wp")
@@ -60,7 +88,7 @@ func TestBootstrapPreservesEnvWithoutRegen(t *testing.T) {
 	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(imageConfig), 0o644) //nolint:errcheck
 	os.WriteFile(filepath.Join(envDir, ".env"), []byte("SENTINEL=keepme\n"), 0o644) //nolint:errcheck
 
-	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, "", "", nil); err != nil {
+	if err := Bootstrap(wsDir, t.TempDir(), "ws", "wp", "prod", false, "", "", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(filepath.Join(envDir, ".env"))

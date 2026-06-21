@@ -105,7 +105,7 @@ func (h *Handler) TrackLatest(w http.ResponseWriter, r *http.Request) {
 	envDir := wspath.EnvDir(h.workspacesDir, ws, name, env)
 	if cfgBytes, rerr := os.ReadFile(wspath.ConfigPath(h.workspacesDir, ws, name)); rerr == nil {
 		envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, ws), Registry: cfg.Project.Registry, EnvFile: string(envContent)}
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, ws), AutoURLMode: settings.AutoURLMode(h.db), AutoURLHost: settings.AutoURLHost(h.db), Registry: cfg.Project.Registry, EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgBytes, env, ro); gerr == nil {
 			os.WriteFile(filepath.Join(envDir, "docker-compose.yml"), content, 0o644) //nolint:errcheck
 		}

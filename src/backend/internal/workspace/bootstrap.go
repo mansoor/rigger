@@ -23,7 +23,7 @@ import (
 //	                     — custom stacks only, from templatesDir
 //
 // Progress is written to out. templatesDir is the toolkit's templates/ directory.
-func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain, registry string, out io.Writer) error {
+func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, regenEnv bool, baseDomain, registry, autoMode, autoHost string, out io.Writer) error {
 	if out == nil {
 		out = io.Discard
 	}
@@ -73,7 +73,7 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		// Read the just-written .env so services that set env_file_mount get it
 		// embedded as a compose config (best-effort; missing ⇒ no mount).
 		envContent, _ := os.ReadFile(envFile)
-		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, Registry: registry, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted(data, env, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: autoMode, AutoURLHost: autoHost, Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			return fmt.Errorf("generate compose: %w", err)
 		}

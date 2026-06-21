@@ -1007,7 +1007,12 @@ func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, ou
 	templatesDir := filepath.Join(b.toolkitRoot, "templates")
 	baseDomain := settings.EffectiveBaseDomain(b.db, workspaceName)
 	registry := b.effectiveRegistry(workspaceName, project)
-	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv, baseDomain, registry, out)
+	// Thread the auto-URL settings (magic-DNS mode + host) so the FIRST compose a
+	// new env gets matches what a later Refresh would produce — otherwise a no-base-
+	// domain env is created with a `.localhost` route and only flips to the configured
+	// sslip/nip URL after a manual Refresh. magicDNSHost mirrors the deploy/refresh path.
+	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv,
+		baseDomain, registry, settings.AutoURLMode(b.db), b.magicDNSHost(workspaceName, project, env), out)
 }
 
 // effectiveRegistry resolves the registry an env's images live in for a project:

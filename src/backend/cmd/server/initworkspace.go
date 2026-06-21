@@ -97,9 +97,10 @@ func runInitWorkspace(args []string) int {
 	failed := false
 	for _, env := range envs {
 		fmt.Printf("\nBootstrapping environment: %s\n", env)
-		// No DB in the CLI path → no system-registry resolution; pass "" so bootstrap
-		// uses the project's own config.json registry (today's behavior).
-		if err := workspace.Bootstrap(workspacesDir, templatesDir, *workspaceName, *name, env, false, "", "", os.Stdout); err != nil {
+		// No DB in the CLI path → no system-registry / auto-URL resolution; pass "" so
+		// bootstrap uses the project's own config.json registry + the localhost route
+		// (today's behavior). The API regenerates with the real auto-URL on first deploy/refresh.
+		if err := workspace.Bootstrap(workspacesDir, templatesDir, *workspaceName, *name, env, false, "", "", "", "", os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "✗ bootstrap %s: %v\n", env, err)
 			failed = true
 		}

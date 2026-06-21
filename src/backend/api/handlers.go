@@ -1334,7 +1334,7 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, Registry: registry, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: settings.AutoURLMode(h.db), AutoURLHost: settings.AutoURLHost(h.db), Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
@@ -1862,7 +1862,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		if cfg, perr := wsconfig.Parse(cfgData); perr == nil {
 			reg = settings.EffectiveRegistry(h.db, wsName, cfg.Project.Registry)
 		}
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), Registry: reg, EnvFile: string(envContent)}
+		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), AutoURLMode: settings.AutoURLMode(h.db), AutoURLHost: settings.AutoURLHost(h.db), Registry: reg, EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgData, env, ro); gerr == nil {
 			outPath := filepath.Join(envDir, "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
