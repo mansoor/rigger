@@ -36,9 +36,39 @@ type Service struct {
 	Image          string `json:"image,omitempty"`
 	ImageFrom      string `json:"image_from,omitempty"`
 	Tag            string `json:"tag,omitempty"`
+	Port           int    `json:"port,omitempty"`        // container port the app listens on (Traefik target for web_routed)
+	WebRouted      bool   `json:"web_routed,omitempty"`  // this service is the HTTP entry routed by Traefik
+	HostPort       string `json:"host_port,omitempty"`   // published host port (older port-exposed stacks); maps host→Port
 	ConfigTemplate string `json:"config_template,omitempty"` // bootstrap renders templates/nginx/<x>.conf → nginx.conf
 	EnvFileMount   string `json:"env_file_mount,omitempty"`   // container path the env's .env is delivered at
 	EnvFileWritable bool  `json:"env_file_writable,omitempty"` // deliver .env writable (app owns it) — see composegen
+}
+
+// WebPort returns the container port of the project's web/app service — the port
+// composegen routes (Traefik) or publishes (host_port) to, and therefore the port
+// an app honoring $PORT must listen on. It checks, in order: the Traefik web entry,
+// then the single host-port-published service (older port-exposed stacks). Returns
+// 0 when neither is unambiguous, so the caller can pick its own default.
+//
+// Because composegen targets the same `port` field, setting $PORT to it keeps a
+// $PORT-honoring app's listen port aligned with where traffic is sent.
+func (c *Config) WebPort() int {
+	for _, s := range c.Services {
+		if s.WebRouted && s.Port > 0 {
+			return s.Port
+		}
+	}
+	// No Traefik entry: the lone service publishing a host port is the app.
+	pub, n := 0, 0
+	for _, s := range c.Services {
+		if s.HostPort != "" && s.Port > 0 {
+			pub, n = s.Port, n+1
+		}
+	}
+	if n == 1 {
+		return pub
+	}
+	return 0
 }
 
 // HasWritableEnvFile reports whether any service owns its .env at runtime (writable

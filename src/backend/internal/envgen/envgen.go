@@ -581,13 +581,20 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("MAIL_FROM_ADDRESS=noreply@%s\n", mailDomain)
 	p("MAIL_FROM_NAME=%s\n\n", envQuote(project))
 
-	p("# ── Node.js specific ───────────────────────────────────────\n")
+	p("# ── App listen port ────────────────────────────────────────\n")
 	if env == "prod" {
 		p("NODE_ENV=production\n")
 	} else {
 		p("NODE_ENV=development\n")
 	}
-	p("PORT=3000\n")
+	// PORT must match the port Traefik routes to (the web-routed service's port);
+	// otherwise an app that honors $PORT listens somewhere Traefik can't reach
+	// (502). Fall back to 3000 (the common Node default) when no web port is set.
+	webPort := 3000
+	if wp := cfg.WebPort(); wp > 0 {
+		webPort = wp
+	}
+	p("PORT=%d\n", webPort)
 
 	// Append extra env_vars from config, auto-resolving placeholder secrets (the
 	// former image-stack secret generation) and preserving any existing values.
