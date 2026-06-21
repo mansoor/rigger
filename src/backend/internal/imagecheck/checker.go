@@ -227,20 +227,32 @@ func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
 		return nil
 	}
 
+	type imgRef struct {
+		Name  string `json:"name"`
+		Image string `json:"image"`
+		Tag   string `json:"tag"`
+	}
 	var cfg struct {
-		Project struct{ Type string } `json:"project"`
-		Images  []struct {
-			Name  string `json:"name"`
-			Image string `json:"image"`
-			Tag   string `json:"tag"`
-		} `json:"images"`
+		Project  struct{ Type string } `json:"project"`
+		Images   []imgRef              `json:"images"`   // legacy image-stack model
+		Services []imgRef              `json:"services"` // unified service graph (current)
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil || cfg.Project.Type != "image" {
 		return nil
 	}
 
+	// Image/prebuilt projects now store their images under `services`; older configs
+	// used `images`. Prefer services, fall back to images.
+	refs := cfg.Services
+	if len(refs) == 0 {
+		refs = cfg.Images
+	}
+
 	var results []ServiceUpdate
-	for _, img := range cfg.Images {
+	for _, img := range refs {
+		if img.Image == "" {
+			continue // build-only / synthetic service with no upstream image to check
+		}
 		tag := img.Tag
 		if tag == "" {
 			tag = "latest"
