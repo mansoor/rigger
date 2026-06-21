@@ -5,6 +5,7 @@ import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchC
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
 import { useAuthStore } from '../store/auth'
+import { useTheme } from '../theme/ThemeProvider'
 import { useConfirm } from '../context/ConfirmContext'
 import Layout from '../components/Layout'
 import ComposeEditor from '../components/ComposeEditor'
@@ -1535,10 +1536,13 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
   const [activeEnv, setActiveEnv]           = useState(initialEnv)
   const [activeContainers, setContainers]   = useState(initialContainers || [])
   const [filter, setFilter]                 = useState('')
-  const [wrap, setWrap]                     = useState(false)
   const [autoScroll, setAutoScroll]         = useState(true)
   const [rowLimit, setRowLimit]             = useState(0)
-  const [showRowNumbers, setShowRowNumbers] = useState(false)
+  // wrap + row-numbers are viewing preferences → persisted per-user (cross-device)
+  // via the appearance prefs, alongside log font size / line height.
+  const { prefs, setPrefs } = useTheme()
+  const wrap = prefs.logWrap
+  const showRowNumbers = prefs.logRowNumbers
 
   const { data: containers } = useQuery({
     queryKey: ['containers', workspace, wsName, activeEnv, 'modal'],
@@ -1589,6 +1593,15 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
     </button>
   )
 
+  // Uniform action button (icon + text) so the reconnect/clear/copy/download group
+  // reads consistently instead of the old icon-only / text-only / icon+text mix.
+  const actionBtn = (icon, label, onClick, title, danger = false) => (
+    <button onClick={onClick} title={title}
+      className={`flex items-center gap-1 text-xs transition-colors shrink-0 ${danger ? 'text-content-subtle hover:text-danger-fg' : 'text-content-subtle hover:text-content'}`}>
+      <span aria-hidden="true">{icon}</span><span>{label}</span>
+    </button>
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas" style={{ fontFamily: 'inherit' }}>
       {/* ── Top bar ── */}
@@ -1634,19 +1647,19 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
 
         <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
-        {/* Toggle buttons */}
-        {toggleBtn(wrap,           () => setWrap(v => !v),           'wrap',       'Toggle line wrap')}
-        {toggleBtn(autoScroll,     () => setAutoScroll(v => !v),     '↓ auto',     'Toggle auto-scroll')}
-        {toggleBtn(paused,         () => setPaused(v => !v),         paused ? '▶ resume' : '⏸ pause', 'Pause / resume stream')}
-        {toggleBtn(showRowNumbers, () => setShowRowNumbers(v => !v), '# rows',     'Toggle row numbers')}
+        {/* Toggle buttons — uniform "symbol + word", boxed, highlight when active */}
+        {toggleBtn(wrap,           () => setPrefs({ logWrap: !wrap }),                 '↩ wrap',  'Toggle line wrap')}
+        {toggleBtn(autoScroll,     () => setAutoScroll(v => !v),                       '↓ auto',  'Toggle auto-scroll')}
+        {toggleBtn(paused,         () => setPaused(v => !v),       paused ? '▶ resume' : '⏸ pause', 'Pause / resume stream')}
+        {toggleBtn(showRowNumbers, () => setPrefs({ logRowNumbers: !showRowNumbers }), '# rows',  'Toggle row numbers')}
 
         <span className="w-px h-4 bg-surface-overlay shrink-0" />
 
-        {/* Action buttons */}
-        <button onClick={connect}       title="Reconnect"          className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">↺</button>
-        <button onClick={() => setLines([])} title="Clear buffer"  className="text-xs text-content-subtle hover:text-danger-fg transition-colors shrink-0">clear</button>
-        <button onClick={copyAll}       title="Copy visible log"   className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">⎘ copy</button>
-        <button onClick={download}      title="Download as .txt"   className="text-xs text-content-subtle hover:text-content transition-colors shrink-0">⬇ download</button>
+        {/* Action buttons — all icon + text for a consistent group */}
+        {actionBtn('↺', 'reconnect', connect,            'Reconnect')}
+        {actionBtn('⌫', 'clear',     () => setLines([]),  'Clear buffer', true)}
+        {actionBtn('⎘', 'copy',      copyAll,            'Copy visible log')}
+        {actionBtn('⬇', 'download',  download,           'Download as .txt')}
 
         <div className="flex-1" />
         <button onClick={onClose} title="Close (Esc)" className="text-content-subtle hover:text-content-strong transition-colors text-lg leading-none shrink-0">✕</button>

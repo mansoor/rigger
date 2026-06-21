@@ -43,6 +43,8 @@ export const DEFAULT_PREFS = {
   density: 'comfortable',    // 'comfortable' | 'compact'
   logFontSize: 13,           // px, clamped to [MIN, MAX]
   logLineHeight: 1.5,        // unitless
+  logWrap: false,            // log viewer: wrap long lines (per-user)
+  logRowNumbers: false,      // log viewer: show row numbers (per-user)
 }
 
 const SYS_SANS = 'ui-sans-serif, system-ui, sans-serif'
@@ -66,6 +68,8 @@ export function normalizePrefs(raw) {
   p.logFontSize = clamp(Number(p.logFontSize) || DEFAULT_PREFS.logFontSize,
     LOG_FONT_SIZE_MIN, LOG_FONT_SIZE_MAX)
   p.logLineHeight = Number(p.logLineHeight) || DEFAULT_PREFS.logLineHeight
+  p.logWrap = !!p.logWrap
+  p.logRowNumbers = !!p.logRowNumbers
   return p
 }
 
