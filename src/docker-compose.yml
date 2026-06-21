@@ -203,6 +203,31 @@ services:
     networks:
       - traefik_net
 
+  # ── Fallback "app starting / not reachable" page ──────────────────────────────
+  # A catch-all router at the LOWEST Traefik priority. When the requested host has no
+  # app router (the app is still starting, stopped, building, or the address is wrong),
+  # Traefik would otherwise return a bare "404 page not found" — this serves a friendly,
+  # auto-refreshing page instead. Real app routers carry a Host(...) rule, so their
+  # priority is far higher and they ALWAYS win once the app is up; this only shows when
+  # nothing else answers. HTTP (web) entrypoint only — HTTPS/base-domain envs still get
+  # Traefik's default until a per-host cert/catch-all is added (future).
+  fallback:
+    image: nginx:1.27-alpine
+    container_name: rigger-fallback
+    restart: unless-stopped
+    volumes:
+      - ./fallback.default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./fallback.html:/usr/share/nginx/html/index.html:ro
+    networks:
+      - traefik_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rigger-fallback.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.rigger-fallback.entrypoints=web"
+      - "traefik.http.routers.rigger-fallback.priority=1"
+      - "traefik.http.routers.rigger-fallback.service=rigger-fallback"
+      - "traefik.http.services.rigger-fallback.loadbalancer.server.port=80"
+
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
   # Shared Docker network for Traefik routing.
