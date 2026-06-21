@@ -32,6 +32,7 @@ import {
   THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS,
   LOG_FONT_SIZE_MIN, LOG_FONT_SIZE_MAX,
 } from '../theme/themes'
+import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -1554,6 +1555,37 @@ function SettingsSection({ title, description, children }) {
   )
 }
 
+// PreferencesTab (Admin) — the instance-wide DEFAULT appearance (theme + typography).
+// Workspaces override it; each user overrides it for themselves (Profile → Appearance).
+function PreferencesTab() {
+  const qc = useQueryClient()
+  const { data: general } = useQuery({ queryKey: ['general-settings'], queryFn: fetchGeneralSettings })
+  const mut = useMutation({
+    mutationFn: (blob) => updateGeneralSettings({ appearance_prefs: blob ? JSON.stringify(blob) : '' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
+  })
+  let value // undefined while loading → null when none → parsed object
+  if (general !== undefined) {
+    try { value = general?.appearance_prefs ? JSON.parse(general.appearance_prefs) : null } catch { value = null }
+  }
+  return (
+    <div className="space-y-5 max-w-2xl">
+      <SettingsSection
+        title="Default appearance"
+        description="The instance-wide default theme & typography. Workspaces can override it (Manage Workspace → Preferences), and each user can override it for themselves (Profile → Appearance)."
+      >
+        <AppearanceDefaultEditor
+          value={value}
+          onSave={(blob) => mut.mutate(blob)}
+          saving={mut.isPending}
+          savedOk={mut.isSuccess}
+          inheritLabel="No default (built-in)"
+        />
+      </SettingsSection>
+    </div>
+  )
+}
+
 export function AppearanceTab() {
   const { prefs, setPrefs, resolvedTheme, resetPrefs } = useTheme()
   const opt = (list) => list.map(o => ({ value: o.id, label: o.label }))
@@ -2131,6 +2163,7 @@ function UpdatesTab() {
 // Rules) so the two settings surfaces feel consistent.
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
+  { id: 'preferences',    label: 'Preferences',      icon: '🎨' },
   { id: 'users',          label: 'Users',            icon: '👤' },
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
   { id: 'system-email',   label: 'System Email',     icon: '✉' },
@@ -2158,12 +2191,12 @@ export default function SettingsPage() {
 
         <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
           {tab === 'general'        && <GeneralTab />}
+          {tab === 'preferences'    && <PreferencesTab />}
           {tab === 'users'          && <UsersTab />}
           {tab === 'access-requests' && <AccessRequestsInbox />}
           {tab === 'system-email'   && <SystemEmailTab />}
           {tab === 'api-keys'       && <ApiKeysManager />}
           {tab === 'updates'        && <UpdatesTab />}
-          {tab === 'appearance'     && <AppearanceTab />}
           {tab === 'alerts'         && <RulesTab />}
           {tab === 'notifications'  && <NotificationsTab />}
           {tab === 'registries'     && <RegistriesTab />}

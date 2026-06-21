@@ -11,6 +11,7 @@ import AccessRequestsInbox from '../components/AccessRequestsInbox'
 import ApiKeysManager from '../components/ApiKeysManager'
 import VerticalTabs from '../components/VerticalTabs'
 import RoleHelp from '../components/RoleHelp'
+import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -26,6 +27,7 @@ import { WS_ROLES, wsRoleOptions } from '../lib/roles'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
+  { id: 'preferences',    label: 'Preferences',      icon: '🎨' },
   { id: 'members',        label: 'Members',          icon: '👥' },
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
   { id: 'api-keys',       label: 'API Keys',         icon: '🔑' },
@@ -73,9 +75,9 @@ export default function ManageWorkspacePage() {
               <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
               <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
               <WorkspaceDefaults workspace={workspace} qc={qc} />
-              <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
             </div>
           )}
+          {tab === 'preferences'    && <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />}
           {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
           {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
           {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
@@ -147,52 +149,36 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   )
 }
 
-// WorkspaceAppearanceDefault sets the workspace's default theme (W7). Members who
-// haven't set a personal appearance inherit this; a per-user choice overrides it.
-const WS_THEME_OPTIONS = [
-  { value: '',       label: 'No default — use the global default' },
-  { value: 'system', label: 'System' },
-  { value: 'light',  label: 'Light' },
-  { value: 'dark',   label: 'Dark' },
-]
+// WorkspaceAppearanceDefault sets the workspace's default theme + typography (W7).
+// Members who haven't set a personal appearance inherit it; a per-user choice
+// (Profile → Appearance) always overrides. Any field left to "inherit" falls back
+// to the global default. Lives in the workspace Preferences tab.
 function WorkspaceAppearanceDefault({ workspace, qc }) {
   const settingsKey = ['ws-settings', workspace]
   const { data: saved } = useQuery({
     queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
   })
-  const [theme, setTheme] = useState(null) // null = not yet seeded
-  if (theme === null && saved !== undefined) {
-    let t = ''
-    try { t = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
-    setTheme(t)
-  }
   const mut = useMutation({
-    mutationFn: () => updateWorkspaceSettings(workspace, { appearance_prefs: theme ? JSON.stringify({ theme }) : '' }),
+    mutationFn: (blob) => updateWorkspaceSettings(workspace, { appearance_prefs: blob ? JSON.stringify(blob) : '' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
-  let savedTheme = ''
-  try { savedTheme = saved?.appearance_prefs ? (JSON.parse(saved.appearance_prefs).theme || '') : '' } catch { /* ignore */ }
-  const dirty = theme !== null && theme !== savedTheme
+  let value // undefined while loading → null when none → parsed object
+  if (saved !== undefined) {
+    try { value = saved?.appearance_prefs ? JSON.parse(saved.appearance_prefs) : null } catch { value = null }
+  }
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-content mb-3">Default appearance</h2>
-      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Default theme</label>
-          <select value={theme ?? ''} onChange={e => setTheme(e.target.value)}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
-            {WS_THEME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <p className="text-xs text-content-subtle mt-1">Applied to members who haven't set their own appearance. A personal choice (Account → Appearance) always overrides this.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-            {mut.isPending ? 'Saving…' : 'Save'}
-          </button>
-          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
-        </div>
+      <h2 className="text-sm font-semibold text-content mb-1">Default appearance</h2>
+      <p className="text-xs text-content-subtle mb-3">Applied to members who haven't set their own appearance (Profile → Appearance always overrides). Any field left to inherit falls back to the global default.</p>
+      <div className="bg-surface border border-border rounded-xl p-5">
+        <AppearanceDefaultEditor
+          value={value}
+          onSave={(blob) => mut.mutate(blob)}
+          saving={mut.isPending}
+          savedOk={mut.isSuccess}
+          inheritLabel="Inherit global default"
+        />
       </div>
     </section>
   )

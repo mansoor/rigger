@@ -301,7 +301,7 @@ function UserMenu({ user, onLogout }) {
               onClick={() => { setOpen(false); setAcct('general') }}
               className="w-full text-left px-3 py-2 text-sm text-content hover:bg-surface-overlay hover:text-content-strong transition-colors"
             >
-              Account settings
+              Profile
             </button>
             <button
               onClick={() => { setOpen(false); setReqOpen(true) }}
@@ -618,7 +618,7 @@ function AccountModal({ user, tab, setTab, onClose }) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-content-strong">Account settings</h3>
+          <h3 className="font-semibold text-content-strong">Profile</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
         <div className="flex gap-1 border-b border-border mb-5">
