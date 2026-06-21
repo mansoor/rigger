@@ -174,6 +174,9 @@ func main() {
 	// Per-user appearance (W7) — resolves user ?? workspace ?? global default.
 	mux.Handle("GET /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.GetAppearance)))
 	mux.Handle("PUT /api/auth/appearance", authSvc.Middleware(http.HandlerFunc(handler.PutAppearance)))
+	// Per-user destructive-confirm override (resolves user ?? workspace ?? global, with per-tier lock).
+	mux.Handle("GET /api/auth/confirm", authSvc.Middleware(http.HandlerFunc(handler.GetConfirm)))
+	mux.Handle("PUT /api/auth/confirm", authSvc.Middleware(http.HandlerFunc(handler.PutConfirm)))
 	// Optional 2FA (TOTP) self-service.
 	mux.Handle("GET /api/auth/2fa", authSvc.Middleware(http.HandlerFunc(handler.TwoFAStatus)))
 	mux.Handle("POST /api/auth/2fa/begin", authSvc.Middleware(http.HandlerFunc(handler.TwoFABegin)))

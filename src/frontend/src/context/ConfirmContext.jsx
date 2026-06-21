@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchGeneralSettings } from '../lib/api'
+import { fetchConfirmSettings } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { useWorkspaceStore } from '../store/workspace'
 
 // confirm(opts) → Promise<boolean>. opts: { title, message, confirmLabel,
 // cancelLabel, danger }. When the global "Confirm destructive actions" setting
@@ -14,15 +15,18 @@ export function useConfirm() {
 
 export function ConfirmProvider({ children }) {
   const token = useAuthStore(s => s.token)
+  const currentWs = useWorkspaceStore(s => s.current)
+  // Effective confirm state for this user (user ?? workspace ?? global, with per-tier
+  // lock), resolved by the backend and scoped to the selected workspace.
   const { data: settings } = useQuery({
-    queryKey: ['general-settings'],
-    queryFn: fetchGeneralSettings,
+    queryKey: ['confirm-settings', currentWs],
+    queryFn: () => fetchConfirmSettings(currentWs),
     enabled: !!token,
     staleTime: 60_000,
     retry: false,
   })
-  // Default ON — only an explicit "false" disables confirmations.
-  const enabled = settings?.confirm_destructive !== 'false'
+  // Default ON until resolved (safer default while loading).
+  const enabled = settings ? settings.enabled !== false : true
   const enabledRef = useRef(enabled)
   useEffect(() => { enabledRef.current = enabled }, [enabled])
 

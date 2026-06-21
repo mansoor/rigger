@@ -350,6 +350,12 @@ export const fetchAppearancePrefs = (ws) =>
   })
 export const saveAppearancePrefs = (prefs) =>
   api.put('/auth/appearance', { appearance_prefs: JSON.stringify(prefs) }).then(r => r.data)
+// Destructive-confirm: effective state for the current user (user ?? workspace ??
+// global, with per-tier lock) + whether they may override it.
+export const fetchConfirmSettings = (ws) =>
+  api.get('/auth/confirm', { params: ws ? { ws } : {} }).then(r => r.data)
+export const saveUserConfirm = (value, ws) =>
+  api.put('/auth/confirm', { value, ws: ws || '' }).then(r => r.data)
 // Workspace default appearance (admins) — stored in workspace settings.
 export const saveWorkspaceAppearance = (ws, prefs) =>
   api.put(`/workspaces/${ws}/settings`, { appearance_prefs: prefs ? JSON.stringify(prefs) : '' }).then(r => r.data)

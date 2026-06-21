@@ -20,7 +20,7 @@ import (
 
 // GET /api/settings/general
 func (h *Handler) GetGeneralSettings(w http.ResponseWriter, r *http.Request) {
-	keys := []string{"acme_email", "rigger_domain", "app_host", "traefik_enabled", "confirm_destructive", "appearance_prefs", "key_min_length", "key_max_length", "apps_base_domain", "auto_url_mode", "auto_url_host", "apps_dns_provider",
+	keys := []string{"acme_email", "rigger_domain", "app_host", "traefik_enabled", "confirm_destructive", "confirm_destructive_allow_override", "appearance_prefs", "key_min_length", "key_max_length", "apps_base_domain", "auto_url_mode", "auto_url_host", "apps_dns_provider",
 		"pw_min_length", "pw_require_upper", "pw_require_lower", "pw_require_number", "pw_require_symbol", "pw_max_age_days"}
 	result := map[string]string{}
 	for _, k := range keys {
@@ -56,7 +56,7 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true,
+	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "confirm_destructive_allow_override": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true,
 		// Password policy (auth Group A): min length + complexity + rotation max-age.
 		"pw_min_length": true, "pw_require_upper": true, "pw_require_lower": true, "pw_require_number": true, "pw_require_symbol": true, "pw_max_age_days": true}
 	for k, v := range body {

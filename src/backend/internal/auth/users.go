@@ -405,6 +405,24 @@ func (s *Service) SetAppearance(id int64, prefs string) error {
 	return err
 }
 
+// GetConfirmPref returns a user's own destructive-confirm override:
+// "" (inherit), "true" (always confirm) or "false" (skip).
+func (s *Service) GetConfirmPref(id int64) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT confirm_destructive FROM users WHERE id=?`, id).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrUserNotFound
+	}
+	return v, err
+}
+
+// SetConfirmPref stores a user's own destructive-confirm override ("" clears it,
+// so they fall back to the workspace/global default).
+func (s *Service) SetConfirmPref(id int64, v string) error {
+	_, err := s.db.Exec(`UPDATE users SET confirm_destructive=? WHERE id=?`, v, id)
+	return err
+}
+
 func (s *Service) touchLastLogin(id int64) {
 	_, _ = s.db.Exec(`UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?`, id) //nolint:errcheck
 }

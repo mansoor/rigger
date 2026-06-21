@@ -24,6 +24,10 @@ var workspaceSettingKeys = map[string]bool{
 	"default_build_host_id": true,
 	// W7: workspace default appearance (JSON blob; users can override per-account).
 	"appearance_prefs": true,
+	// Workspace default for destructive-action confirmations + whether members may
+	// override it ("" inherit | "true" | "false"). See api/confirm_handlers.go.
+	"confirm_destructive":                true,
+	"confirm_destructive_allow_override": true,
 	// Release pipeline: env tier names (low→high, comma/newline) driving the
 	// auto-guess deploy order. Empty ⇒ envorder.DefaultTiers.
 	"env_tier_names": true,

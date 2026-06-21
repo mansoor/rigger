@@ -33,6 +33,7 @@ import {
   LOG_FONT_SIZE_MIN, LOG_FONT_SIZE_MAX,
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
+import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -788,7 +789,6 @@ function GeneralTab() {
   const [appsBaseDomain, setAppsBaseDomain] = useState('')
   const [autoUrlMode, setAutoUrlMode] = useState('localhost')
   const [dnsProvider, setDnsProvider] = useState('')
-  const [confirmDestructive, setConfirmDestructive] = useState(true)
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
   // Password policy (auth Group A)
@@ -807,7 +807,6 @@ function GeneralTab() {
       apps_base_domain: appsBaseDomain.trim(),
       auto_url_mode: autoUrlMode,
       apps_dns_provider: dnsProvider,
-      confirm_destructive: confirmDestructive ? 'true' : 'false',
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
       pw_min_length: String(pwMin),
@@ -849,8 +848,6 @@ function GeneralTab() {
     setAppsBaseDomain(cfg.apps_base_domain || '')
     setAutoUrlMode(cfg.auto_url_mode || 'localhost')
     setDnsProvider(cfg.apps_dns_provider || '')
-    // Default ON — only an explicit "false" disables confirmations.
-    setConfirmDestructive(cfg.confirm_destructive !== 'false')
     setKeyMin(Number(cfg.key_min_length) || 3)
     setKeyMax(Number(cfg.key_max_length) || 4)
     setPwMin(Number(cfg.pw_min_length) || 8)
@@ -1039,26 +1036,6 @@ function GeneralTab() {
               </p>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Confirmations */}
-      <div>
-        <h2 className="text-base font-semibold text-content-strong mb-1">Confirmations</h2>
-        <p className="text-sm text-content-subtle mb-4">
-          Show a confirmation dialog before destructive actions — removing a service or
-          environment, deleting backups/archives, clearing history, inactivating a stack, and the like.
-        </p>
-        <div className="p-4 bg-surface border border-border rounded-xl">
-          <Toggle
-            checked={confirmDestructive}
-            onChange={setConfirmDestructive}
-            label="Confirm before destructive actions"
-          />
-          <p className="text-xs text-content-subtle mt-2">
-            Recommended (on by default). Turn off to skip these prompts. Stronger safeguards —
-            type-to-confirm workspace deletion and the Housekeeping prune flows — always stay on.
-          </p>
         </div>
       </div>
 
@@ -1560,13 +1537,18 @@ function SettingsSection({ title, description, children }) {
 function PreferencesTab() {
   const qc = useQueryClient()
   const { data: general } = useQuery({ queryKey: ['general-settings'], queryFn: fetchGeneralSettings })
-  const mut = useMutation({
+  const apMut = useMutation({
     mutationFn: (blob) => updateGeneralSettings({ appearance_prefs: blob ? JSON.stringify(blob) : '' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
-  let value // undefined while loading → null when none → parsed object
+  const cfMut = useMutation({
+    mutationFn: (c) => updateGeneralSettings({ confirm_destructive: c.confirm, confirm_destructive_allow_override: c.allow }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['general-settings'] }); qc.invalidateQueries({ queryKey: ['confirm-settings'] }) },
+  })
+  let apValue, cfValue // undefined while loading → null/object when loaded
   if (general !== undefined) {
-    try { value = general?.appearance_prefs ? JSON.parse(general.appearance_prefs) : null } catch { value = null }
+    try { apValue = general?.appearance_prefs ? JSON.parse(general.appearance_prefs) : null } catch { apValue = null }
+    cfValue = { confirm: general?.confirm_destructive || '', allow: general?.confirm_destructive_allow_override || '' }
   }
   return (
     <div className="space-y-5 max-w-2xl">
@@ -1575,11 +1557,24 @@ function PreferencesTab() {
         description="The instance-wide default theme & typography. Workspaces can override it (Manage Workspace → Preferences), and each user can override it for themselves (Profile → Appearance)."
       >
         <AppearanceDefaultEditor
-          value={value}
-          onSave={(blob) => mut.mutate(blob)}
-          saving={mut.isPending}
-          savedOk={mut.isSuccess}
+          value={apValue}
+          onSave={(blob) => apMut.mutate(blob)}
+          saving={apMut.isPending}
+          savedOk={apMut.isSuccess}
           inheritLabel="No default (built-in)"
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Confirmations"
+        description="Whether destructive actions (Inactivate, Down, Delete, …) prompt for confirmation. The instance-wide default; workspaces and users can narrow it unless you lock it."
+      >
+        <ConfirmDefaultEditor
+          value={cfValue}
+          onSave={(c) => cfMut.mutate(c)}
+          saving={cfMut.isPending}
+          savedOk={cfMut.isSuccess}
+          allowInherit={false}
         />
       </SettingsSection>
     </div>

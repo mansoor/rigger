@@ -508,15 +508,15 @@ function TemplateCard({ tmpl, selected, onClick }) {
       }`}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
-        <p className="font-medium text-content-strong text-sm">{tmpl.label}</p>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <p className="font-medium text-content-strong text-sm flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{tmpl.label}</span>
           {tmpl.website && (
             <span
               role="link" tabIndex={0}
               title={`Open ${tmpl.website} in a new tab`}
               onClick={e => { e.stopPropagation(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') }}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') } }}
-              className="text-content-faint hover:text-brand-400 cursor-pointer"
+              className="text-content-faint hover:text-brand-400 cursor-pointer shrink-0"
               aria-label="Open project website"
             >
               <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 inline-block align-middle" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -524,8 +524,8 @@ function TemplateCard({ tmpl, selected, onClick }) {
               </svg>
             </span>
           )}
-          <span className="text-xs text-content-subtle">{tmpl.image_count} container{tmpl.image_count !== 1 ? 's' : ''}</span>
-        </div>
+        </p>
+        <span className="text-xs text-content-subtle shrink-0">{tmpl.image_count} container{tmpl.image_count !== 1 ? 's' : ''}</span>
       </div>
       <p className="text-xs text-content-muted mb-2">{tmpl.description}</p>
       <div className="flex flex-wrap gap-1">

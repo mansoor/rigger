@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
 import { QRCodeSVG } from 'qrcode.react'
-import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA, regen2FACodes } from '../lib/api'
+import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA, regen2FACodes, fetchConfirmSettings, saveUserConfirm } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
@@ -683,14 +683,52 @@ function AccountGeneral({ user }) {
     } catch (err) { setMsg(err.response?.data?.error || 'Failed to save') } finally { setBusy(false) }
   }
   return (
-    <form onSubmit={save} className="space-y-3 max-w-md">
-      <div><label className={lbl}>Email</label><input className={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
-      <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
-      <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
-      {msg && <p className="text-xs text-content-muted">{msg}</p>}
-      {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a></div>}
-      <button type="submit" disabled={busy} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{busy ? 'Saving…' : 'Save profile'}</button>
-    </form>
+    <div className="space-y-6 max-w-md">
+      <form onSubmit={save} className="space-y-3">
+        <div><label className={lbl}>Email</label><input className={inp} type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+        <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
+        <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
+        {msg && <p className="text-xs text-content-muted">{msg}</p>}
+        {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a></div>}
+        <button type="submit" disabled={busy} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{busy ? 'Saving…' : 'Save profile'}</button>
+      </form>
+      <AccountConfirmPref lbl={lbl} field={inp} />
+    </div>
+  )
+}
+
+// AccountConfirmPref — the user's own destructive-confirm override (Profile → General).
+// Editable only when the workspace/global default allows override; otherwise shown
+// disabled with a "locked by your administrator" note.
+function AccountConfirmPref({ lbl, field }) {
+  const qc = useQueryClient()
+  const currentWs = useWorkspaceStore(s => s.current)
+  const { data } = useQuery({ queryKey: ['confirm-settings', currentWs], queryFn: () => fetchConfirmSettings(currentWs) })
+  const mut = useMutation({
+    mutationFn: (value) => saveUserConfirm(value, currentWs),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['confirm-settings'] }),
+  })
+  if (!data) return null
+  const canOverride = data.can_override
+  return (
+    <div className="border-t border-border pt-5">
+      <label className={lbl}>Confirm destructive actions</label>
+      <select
+        className={`${field} disabled:opacity-50`}
+        value={data.user_value || ''}
+        disabled={!canOverride || mut.isPending}
+        onChange={e => mut.mutate(e.target.value)}
+      >
+        <option value="">Use default ({data.inherited ? 'On' : 'Off'})</option>
+        <option value="true">Always ask me to confirm</option>
+        <option value="false">Never ask — skip confirmations</option>
+      </select>
+      <p className="text-xs text-content-subtle mt-1">
+        {canOverride
+          ? 'Whether destructive actions (Inactivate, Down, Delete, …) prompt you first. "Use default" follows your workspace / instance setting.'
+          : 'Locked by your administrator — confirmations are enforced for your account.'}
+      </p>
+    </div>
   )
 }
 

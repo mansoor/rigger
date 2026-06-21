@@ -12,6 +12,7 @@ import ApiKeysManager from '../components/ApiKeysManager'
 import VerticalTabs from '../components/VerticalTabs'
 import RoleHelp from '../components/RoleHelp'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
+import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
@@ -77,7 +78,12 @@ export default function ManageWorkspacePage() {
               <WorkspaceDefaults workspace={workspace} qc={qc} />
             </div>
           )}
-          {tab === 'preferences'    && <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />}
+          {tab === 'preferences'    && (
+            <div className="space-y-8">
+              <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
+              <WorkspaceConfirmDefault workspace={workspace} qc={qc} />
+            </div>
+          )}
           {tab === 'members'        && <MembersSection workspace={workspace} projects={projects} qc={qc} />}
           {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
           {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
@@ -178,6 +184,39 @@ function WorkspaceAppearanceDefault({ workspace, qc }) {
           saving={mut.isPending}
           savedOk={mut.isSuccess}
           inheritLabel="Inherit global default"
+        />
+      </div>
+    </section>
+  )
+}
+
+// WorkspaceConfirmDefault sets the workspace default for destructive-action
+// confirmations + whether members may override it. Inherits the global default.
+function WorkspaceConfirmDefault({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({
+    queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const mut = useMutation({
+    mutationFn: (c) => updateWorkspaceSettings(workspace, { confirm_destructive: c.confirm, confirm_destructive_allow_override: c.allow }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: settingsKey }); qc.invalidateQueries({ queryKey: ['confirm-settings'] }) },
+  })
+  let value
+  if (saved !== undefined) {
+    value = { confirm: saved?.confirm_destructive || '', allow: saved?.confirm_destructive_allow_override || '' }
+  }
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-1">Confirmations</h2>
+      <p className="text-xs text-content-subtle mb-3">Default for destructive-action confirmations in this workspace. Inherits the global default unless set; a personal choice (Profile → General) overrides it unless you lock it.</p>
+      <div className="bg-surface border border-border rounded-xl p-5">
+        <ConfirmDefaultEditor
+          value={value}
+          onSave={(c) => mut.mutate(c)}
+          saving={mut.isPending}
+          savedOk={mut.isSuccess}
+          allowInherit
         />
       </div>
     </section>
