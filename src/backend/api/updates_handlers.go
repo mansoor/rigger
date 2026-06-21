@@ -215,7 +215,26 @@ func (h *Handler) startUpdate(w http.ResponseWriter, target, prev string) {
 	// /work/workspaces, which doesn't exist on the host → the daemon creates an empty
 	// dir and Rigger loses its workspaces. Same path in and out keeps them correct.
 	// The 2s sleep lets this HTTP 202 flush before we get recreated.
+	//
+	// Best-effort host-file sync: the install is a git checkout and several runtime
+	// files are bind-mounted from it (templates/, fallback.html, the compose file
+	// itself), so an image-only pull would leave them stale. Align them to the target
+	// tag BEFORE the compose pull. This is strictly best-effort and must never abort
+	// the image update: it's skipped when the working tree is dirty (so local
+	// customizations to compose/templates are never clobbered), and any git failure
+	// is swallowed. "latest" (no concrete tag) falls back to a fast-forward pull.
 	script := `sleep 2
+cd "$RIGGER_WORK" || exit 1
+if [ -d .git ] && command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory "$RIGGER_WORK" 2>/dev/null || true
+  if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
+    git fetch --tags --quiet 2>/dev/null && \
+      { git checkout --quiet "v${RIGGER_TARGET_TAG}" 2>/dev/null \
+        || git pull --ff-only --quiet 2>/dev/null; } || true
+  else
+    echo "rigger-update: working tree has local changes — skipping host-file sync (image still updates)"
+  fi
+fi
 cd "$RIGGER_WORK/src" || exit 1
 if grep -q '^RIGGER_IMAGE_TAG=' .env 2>/dev/null; then
   sed -i "s|^RIGGER_IMAGE_TAG=.*|RIGGER_IMAGE_TAG=${RIGGER_TARGET_TAG}|" .env
