@@ -19,6 +19,7 @@ package managedregistry
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -202,6 +203,43 @@ func (m *Manager) Exists() bool {
 		Args: []string{"inspect", "-f", "{{.Name}}", Container},
 	})
 	return err == nil
+}
+
+// hostPortInUse reports whether a container OTHER than the managed registry already
+// publishes the given host port on the daemon (best-effort; false on query error).
+func (m *Manager) hostPortInUse(port string) bool {
+	out, err := m.Exec.DockerOutput(executor.Spec{
+		Args: []string{"ps", "--filter", "publish=" + port, "--format", "{{.Names}}"},
+	})
+	if err != nil {
+		return false
+	}
+	for _, name := range strings.Fields(string(out)) {
+		if name != Container { // our own container reusing its port is fine
+			return true
+		}
+	}
+	return false
+}
+
+// FreeHostPort returns `preferred` if no other container publishes it, otherwise the
+// first higher port that's free (bounded scan). Lets local-mode coexist with an
+// existing registry already on :5000 instead of failing with "port allocated".
+func (m *Manager) FreeHostPort(preferred string) string {
+	if !m.hostPortInUse(preferred) {
+		return preferred
+	}
+	base, err := strconv.Atoi(preferred)
+	if err != nil {
+		base = 5000
+	}
+	for i := 1; i < 50; i++ {
+		cand := strconv.Itoa(base + i)
+		if !m.hostPortInUse(cand) {
+			return cand
+		}
+	}
+	return preferred // give up; the run will surface the bind error
 }
 
 // Up (re)creates the registry container: it writes the htpasswd, removes any prior

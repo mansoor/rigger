@@ -406,6 +406,20 @@ func (h *Handler) ManagedRegistryAction(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) managedRegistryUp(w http.ResponseWriter, mgr *managedregistry.Manager) {
 	cfg := h.managedConfig()
 	entry, _ := settings.GetRegistryByName(h.db, managedregistry.EntryName)
+	// Local mode (no base domain) publishes a host port. Pick one that doesn't clash
+	// with an existing container already on :5000 — reuse this registry's own prior
+	// port (from its stored URL) across restarts so image refs stay stable.
+	if cfg.Host() == "" {
+		preferred := managedregistry.DefaultPort
+		if entry != nil {
+			if i := strings.LastIndex(entry.URL, ":"); i >= 0 {
+				if p := entry.URL[i+1:]; p != "" {
+					preferred = p
+				}
+			}
+		}
+		cfg.Port = mgr.FreeHostPort(preferred)
+	}
 	password := ""
 	if entry != nil {
 		password = entry.Password
