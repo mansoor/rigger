@@ -1,4 +1,7 @@
 {
+  "categories": [
+    "Developer Tools"
+  ],
   "default_env_vars": {},
   "description": "A powerful, intuitive Docker platform. Free for homelabs, ready for enterprises",
   "images": [
@@ -30,8 +33,5 @@
     "homelab",
     "devools"
   ],
-  "categories": [
-    "Developer Tools"
-  ],
-  "website": ""
+  "website": "https://dockhand.pro/"
 }
