@@ -1,12 +1,16 @@
 {
   "name": "vaultwarden",
   "label": "Vaultwarden (Bitwarden)",
-  "description": "Unofficial Bitwarden-compatible server \u2014 self-hosted password manager",
+  "description": "Unofficial Bitwarden-compatible server — self-hosted password manager",
   "tags": [
     "security",
     "passwords",
     "bitwarden"
   ],
+  "categories": [
+    "Security"
+  ],
+  "website": "https://github.com/dani-garcia/vaultwarden",
   "images": [
     {
       "name": "app",

@@ -7,6 +7,10 @@
     "sharing",
     "productivity"
   ],
+  "categories": [
+    "File Sharing & Storage"
+  ],
+  "website": "https://github.com/schlagmichdoch/PairDrop",
   "images": [
     {
       "name": "app",

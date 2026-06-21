@@ -7,6 +7,11 @@
     "productivity",
     "files"
   ],
+  "categories": [
+    "File Sharing & Storage",
+    "Productivity"
+  ],
+  "website": "https://nextcloud.com",
   "images": [
     {
       "name": "db",

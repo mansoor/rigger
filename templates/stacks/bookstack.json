@@ -8,6 +8,11 @@
     "knowledge-base",
     "cms"
   ],
+  "categories": [
+    "Productivity",
+    "CMS & Blogs"
+  ],
+  "website": "https://www.bookstackapp.com",
   "images": [
     {
       "name": "db",

@@ -7,6 +7,10 @@
     "networking",
     "wireguard"
   ],
+  "categories": [
+    "Networking & VPN"
+  ],
+  "website": "https://github.com/wg-easy/wg-easy",
   "images": [
     {
       "name": "app",

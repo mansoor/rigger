@@ -509,7 +509,23 @@ function TemplateCard({ tmpl, selected, onClick }) {
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <p className="font-medium text-content-strong text-sm">{tmpl.label}</p>
-        <span className="text-xs text-content-subtle shrink-0">{tmpl.image_count} container{tmpl.image_count !== 1 ? 's' : ''}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {tmpl.website && (
+            <span
+              role="link" tabIndex={0}
+              title={`Open ${tmpl.website} in a new tab`}
+              onClick={e => { e.stopPropagation(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') } }}
+              className="text-content-faint hover:text-brand-400 cursor-pointer"
+              aria-label="Open project website"
+            >
+              <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 inline-block align-middle" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 3h6v6" /><path d="M17 3l-8 8" /><path d="M15 12v4a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1h4" />
+              </svg>
+            </span>
+          )}
+          <span className="text-xs text-content-subtle">{tmpl.image_count} container{tmpl.image_count !== 1 ? 's' : ''}</span>
+        </div>
       </div>
       <p className="text-xs text-content-muted mb-2">{tmpl.description}</p>
       <div className="flex flex-wrap gap-1">
@@ -805,9 +821,16 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange, 
 
 // ── Template picker section (popular + recently used + Browse all modal) ──────
 
+const UNCATEGORIZED = '__uncat__'
+
 function TemplatePickerSection({ templates, selected, onSelect }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('') // '' = all; UNCATEGORIZED = no categories
+
+  // Union of all categories across templates, for the filter dropdown.
+  const allCategories = [...new Set(templates.flatMap(t => t.categories || []))].sort((a, b) => a.localeCompare(b))
+  const hasUncategorized = templates.some(t => !(t.categories || []).length)
 
   // Popular: templates with popular=true, sorted by popular_rank
   const popular = templates
@@ -822,13 +845,19 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
     .sort((a, b) => new Date(b.last_used_at) - new Date(a.last_used_at))
     .slice(0, 4)
 
-  // All templates for modal, filtered by search
-  const filtered = templates.filter(t =>
-    !search ||
-    t.label.toLowerCase().includes(search.toLowerCase()) ||
-    t.name.toLowerCase().includes(search.toLowerCase()) ||
-    (t.tags || []).some(tag => tag.toLowerCase().includes(search.toLowerCase()))
-  )
+  // All templates for modal, filtered by search + category.
+  const filtered = templates.filter(t => {
+    const s = search.toLowerCase()
+    const matchesSearch = !search ||
+      t.label.toLowerCase().includes(s) ||
+      t.name.toLowerCase().includes(s) ||
+      (t.tags || []).some(tag => tag.toLowerCase().includes(s)) ||
+      (t.categories || []).some(c => c.toLowerCase().includes(s))
+    const cats = t.categories || []
+    const matchesCategory = !category ||
+      (category === UNCATEGORIZED ? cats.length === 0 : cats.includes(category))
+    return matchesSearch && matchesCategory
+  })
 
   const selectedTmpl = templates.find(t => t.name === selected)
 
@@ -882,33 +911,44 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
       {/* Browse all modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl">
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-5xl max-h-[85vh] flex flex-col shadow-2xl">
             {/* Modal header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-              <h3 className="text-base font-semibold text-content-strong">All templates</h3>
+              <h3 className="text-base font-semibold text-content-strong">All templates <span className="font-normal text-content-faint">({filtered.length})</span></h3>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
                 className="text-content-subtle hover:text-content-strong transition-colors text-xl leading-none"
               >×</button>
             </div>
-            {/* Search */}
-            <div className="px-5 py-3 border-b border-border">
+            {/* Search + category filter */}
+            <div className="px-5 py-3 border-b border-border flex items-center gap-2">
               <input
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search templates…"
                 autoFocus
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
+                className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
               />
+              {(allCategories.length > 0 || hasUncategorized) && (
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  className="px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 shrink-0 max-w-[12rem]"
+                >
+                  <option value="">All categories</option>
+                  {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                  {hasUncategorized && <option value={UNCATEGORIZED}>Uncategorized</option>}
+                </select>
+              )}
             </div>
-            {/* Template grid */}
-            <div className="overflow-y-auto p-5">
+            {/* Template grid — 1→4 columns by viewport width */}
+            <div className="overflow-y-auto p-5 flex-1">
               {filtered.length === 0 ? (
-                <p className="text-sm text-content-subtle text-center py-8">No templates match "{search}"</p>
+                <p className="text-sm text-content-subtle text-center py-8">No templates match your search{category ? ' in this category' : ''}.</p>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                   {filtered.map(tmpl => (
                     <TemplateCard
                       key={tmpl.name}
@@ -919,6 +959,15 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
                   ))}
                 </div>
               )}
+            </div>
+            {/* Footer hint — point to the Template Manager when nothing fits */}
+            <div className="px-5 py-3 border-t border-border bg-surface-raised/30">
+              <p className="text-xs text-content-subtle">
+                Can't find what you're looking for? Build your own in{' '}
+                <strong className="text-content">Tools → Template Manager</strong> — convert a
+                <span className="font-mono text-content-muted"> docker-compose.yml</span> to a template, import a
+                template file, or generate one from an existing image stack.
+              </p>
             </div>
           </div>
         </div>

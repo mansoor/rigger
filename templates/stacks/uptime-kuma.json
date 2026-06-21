@@ -7,6 +7,10 @@
     "uptime",
     "status"
   ],
+  "categories": [
+    "Monitoring"
+  ],
+  "website": "https://github.com/louislam/uptime-kuma",
   "images": [
     {
       "name": "app",

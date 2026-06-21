@@ -7,6 +7,10 @@
     "workflow",
     "nocode"
   ],
+  "categories": [
+    "Automation"
+  ],
+  "website": "https://n8n.io",
   "images": [
     {
       "name": "db",

@@ -8,6 +8,11 @@
     "database",
     "api"
   ],
+  "categories": [
+    "Developer Tools",
+    "Databases"
+  ],
+  "website": "https://pocketbase.io",
   "images": [
     {
       "name": "app",

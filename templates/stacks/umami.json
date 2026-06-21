@@ -7,6 +7,10 @@
     "privacy",
     "metrics"
   ],
+  "categories": [
+    "Analytics"
+  ],
+  "website": "https://umami.is",
   "images": [
     {
       "name": "db",

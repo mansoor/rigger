@@ -8,6 +8,10 @@
     "security",
     "auth"
   ],
+  "categories": [
+    "Security"
+  ],
+  "website": "https://goauthentik.io",
   "images": [
     {
       "name": "db",

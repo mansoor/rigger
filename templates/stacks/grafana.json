@@ -7,6 +7,11 @@
     "metrics",
     "dashboards"
   ],
+  "categories": [
+    "Monitoring",
+    "Analytics"
+  ],
+  "website": "https://grafana.com",
   "images": [
     {
       "name": "prometheus",

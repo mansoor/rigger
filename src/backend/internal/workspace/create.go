@@ -576,6 +576,8 @@ type TemplateInfo struct {
 	Label       string   `json:"label"`
 	Description string   `json:"description"`
 	Tags        []string `json:"tags"`
+	Categories  []string `json:"categories"` // 0+ groupings for the picker's category filter
+	Website     string   `json:"website"`    // app homepage / git repo (open-site link)
 	ImageCount  int      `json:"image_count"`
 }
 
@@ -601,6 +603,8 @@ func ListTemplates(templatesDir string) ([]TemplateInfo, error) {
 			Label       string   `json:"label"`
 			Description string   `json:"description"`
 			Tags        []string `json:"tags"`
+			Categories  []string `json:"categories"`
+			Website     string   `json:"website"`
 			Images      []any    `json:"images"`
 		}
 		if err := json.Unmarshal(data, &raw); err != nil {
@@ -611,6 +615,8 @@ func ListTemplates(templatesDir string) ([]TemplateInfo, error) {
 			Label:       raw.Label,
 			Description: raw.Description,
 			Tags:        raw.Tags,
+			Categories:  raw.Categories,
+			Website:     raw.Website,
 			ImageCount:  len(raw.Images),
 		})
 	}

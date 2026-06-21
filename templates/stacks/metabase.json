@@ -7,6 +7,10 @@
     "bi",
     "dashboards"
   ],
+  "categories": [
+    "Analytics"
+  ],
+  "website": "https://www.metabase.com",
   "images": [
     {
       "name": "db",

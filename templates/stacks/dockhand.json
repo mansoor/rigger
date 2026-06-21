@@ -5,11 +5,13 @@
     {
       "command": "",
       "depends_on": [],
-      "env_vars": {},
+      "env_vars": {
+        "DOCKHAND_PORT": "${DOCKHAND_PORT}"
+      },
       "extra_ports": [],
       "healthcheck": "",
       "healthcheck_config": {},
-      "host_port": "3000",
+      "host_port": "${DOCKHAND_PORT}",
       "image": "fnsys/dockhand",
       "name": "dockhand_prod_app",
       "port": 3000,
@@ -27,5 +29,9 @@
     "docker",
     "homelab",
     "devools"
-  ]
+  ],
+  "categories": [
+    "Developer Tools"
+  ],
+  "website": ""
 }

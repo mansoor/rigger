@@ -7,6 +7,10 @@
     "sync",
     "backup"
   ],
+  "categories": [
+    "File Sharing & Storage"
+  ],
+  "website": "https://syncthing.net",
   "images": [
     {
       "name": "app",

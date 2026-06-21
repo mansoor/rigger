@@ -7,6 +7,10 @@
     "media",
     "backup"
   ],
+  "categories": [
+    "Media"
+  ],
+  "website": "https://immich.app",
   "images": [
     {
       "name": "db",

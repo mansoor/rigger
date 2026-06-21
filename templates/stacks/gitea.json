@@ -7,6 +7,10 @@
     "devtools",
     "vcs"
   ],
+  "categories": [
+    "Developer Tools"
+  ],
+  "website": "https://about.gitea.com",
   "images": [
     {
       "name": "db",

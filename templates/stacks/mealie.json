@@ -7,6 +7,10 @@
     "meal-planning",
     "productivity"
   ],
+  "categories": [
+    "Productivity"
+  ],
+  "website": "https://mealie.io",
   "images": [
     {
       "name": "app",

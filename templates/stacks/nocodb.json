@@ -8,6 +8,11 @@
     "spreadsheet",
     "internal-tools"
   ],
+  "categories": [
+    "Databases",
+    "Productivity"
+  ],
+  "website": "https://nocodb.com",
   "images": [
     {
       "name": "db",

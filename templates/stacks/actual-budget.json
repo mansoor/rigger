@@ -7,6 +7,10 @@
     "budget",
     "productivity"
   ],
+  "categories": [
+    "Finance"
+  ],
+  "website": "https://actualbudget.org",
   "images": [
     {
       "name": "app",

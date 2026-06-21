@@ -8,6 +8,11 @@
     "ocr",
     "archive"
   ],
+  "categories": [
+    "Productivity",
+    "File Sharing & Storage"
+  ],
+  "website": "https://docs.paperless-ngx.com",
   "images": [
     {
       "name": "db",

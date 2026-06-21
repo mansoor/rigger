@@ -8,6 +8,11 @@
     "low-code",
     "automation"
   ],
+  "categories": [
+    "Developer Tools",
+    "Automation"
+  ],
+  "website": "https://flowiseai.com",
   "images": [
     {
       "name": "app",

@@ -7,6 +7,10 @@
     "privacy",
     "sharing"
   ],
+  "categories": [
+    "Security"
+  ],
+  "website": "https://privatebin.info",
   "images": [
     {
       "name": "app",

@@ -7,6 +7,11 @@
     "security",
     "utilities"
   ],
+  "categories": [
+    "Developer Tools",
+    "Security"
+  ],
+  "website": "https://github.com/gchq/CyberChef",
   "images": [
     {
       "name": "app",

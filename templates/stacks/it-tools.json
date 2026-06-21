@@ -6,6 +6,10 @@
     "dev-tools",
     "utilities"
   ],
+  "categories": [
+    "Developer Tools"
+  ],
+  "website": "https://github.com/CorentinTh/it-tools",
   "images": [
     {
       "name": "app",

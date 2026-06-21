@@ -8,6 +8,11 @@
     "ad-blocker",
     "privacy"
   ],
+  "categories": [
+    "Networking & VPN",
+    "Security"
+  ],
+  "website": "https://adguard.com/en/adguard-home/overview.html",
   "images": [
     {
       "name": "app",

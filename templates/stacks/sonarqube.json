@@ -59,5 +59,9 @@
     "code-review",
     "devops",
     "ci/cd"
-  ]
+  ],
+  "categories": [
+    "Developer Tools"
+  ],
+  "website": "https://www.sonarsource.com/products/sonarqube/"
 }

@@ -1,0 +1,112 @@
+{
+  "default_env_vars": {
+    "DATABASE_HOST": "database",
+    "DATABASE_NAME": "teslamate",
+    "DATABASE_PASS": "password #insert your secure database password!",
+    "DATABASE_USER": "teslamate",
+    "ENCRYPTION_KEY": "secretkey #replace with a secure key to encrypt your Tesla API tokens",
+    "MQTT_HOST": "mosquitto",
+    "POSTGRES_DB": "teslamate",
+    "POSTGRES_PASSWORD": "password #insert your secure database password!",
+    "POSTGRES_USER": "teslamate"
+  },
+  "description": "TeslaMate is a data logger for your Tesla and provides dashboard with insights about charging stats, trip details, trip stats and more...",
+  "images": [
+    {
+      "command": "",
+      "depends_on": [],
+      "env_vars": {
+        "DATABASE_HOST": "${DATABASE_HOST}",
+        "DATABASE_NAME": "${DATABASE_NAME}",
+        "DATABASE_PASS": "${DATABASE_PASS}",
+        "DATABASE_USER": "${DATABASE_USER}",
+        "ENCRYPTION_KEY": "${ENCRYPTION_KEY}",
+        "MQTT_HOST": "${MQTT_HOST}"
+      },
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "",
+      "image": "teslamate/teslamate",
+      "name": "teslamate",
+      "port": 4000,
+      "restart": "always",
+      "tag": "latest",
+      "volumes": [
+        "./import:/opt/app/import"
+      ]
+    },
+    {
+      "command": "",
+      "depends_on": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "POSTGRES_USER": "${POSTGRES_USER}"
+      },
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "",
+      "image": "postgres",
+      "name": "database",
+      "port": 0,
+      "restart": "always",
+      "tag": "18-trixie",
+      "volumes": [
+        "./volumes/teslamate-db:/var/lib/postgresql"
+      ]
+    },
+    {
+      "command": "",
+      "depends_on": [],
+      "env_vars": {
+        "DATABASE_HOST": "${DATABASE_HOST}",
+        "DATABASE_NAME": "${DATABASE_NAME}",
+        "DATABASE_PASS": "${DATABASE_PASS}",
+        "DATABASE_USER": "${DATABASE_USER}"
+      },
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "",
+      "image": "teslamate/grafana",
+      "name": "grafana",
+      "port": 3000,
+      "restart": "always",
+      "tag": "latest",
+      "volumes": [
+        "./volumes/teslamate-grafana-data:/var/lib/grafana"
+      ]
+    },
+    {
+      "command": "mosquitto -c /mosquitto-no-auth.conf",
+      "depends_on": [],
+      "env_vars": {},
+      "extra_ports": [],
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "host_port": "",
+      "image": "eclipse-mosquitto",
+      "name": "mosquitto",
+      "port": 0,
+      "restart": "always",
+      "tag": "2",
+      "volumes": [
+        "./volumes/mosquitto-conf:/mosquitto/config",
+        "./volumes/mosquitto-data:/mosquitto/data"
+      ]
+    }
+  ],
+  "label": "TeslaMate (Grafana)",
+  "name": "teslamate",
+  "tags": [
+    "Tesla",
+    "Grafana",
+    "Vehicle"
+  ],
+  "categories": [
+    "Monitoring"
+  ],
+  "website": "https://github.com/teslamate-org/teslamate"
+}

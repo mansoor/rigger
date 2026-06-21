@@ -7,6 +7,10 @@
     "s3",
     "object-storage"
   ],
+  "categories": [
+    "File Sharing & Storage"
+  ],
+  "website": "https://min.io",
   "images": [
     {
       "name": "app",

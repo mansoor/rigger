@@ -7,6 +7,10 @@
     "blog",
     "publishing"
   ],
+  "categories": [
+    "CMS & Blogs"
+  ],
+  "website": "https://ghost.org",
   "images": [
     {
       "name": "db",

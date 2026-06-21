@@ -2353,13 +2353,15 @@ func (h *Handler) GenerateTemplateDraft(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Draft template: name/label/description/tags are left for the user to fill in
-	// (validated & saved via the Template Manager). images carry over as-is.
+	// Draft template: name/label/description/tags/categories/website are left for the
+	// user to fill in (validated & saved via the Template Manager). images carry over as-is.
 	draft := map[string]any{
 		"name":             "",
 		"label":            "",
 		"description":      "",
 		"tags":             []string{},
+		"categories":       []string{},
+		"website":          "",
 		"images":           cfg["images"],
 		"default_env_vars": defaultEnvVars,
 	}

@@ -8,6 +8,10 @@
     "ssl",
     "reverse-proxy"
   ],
+  "categories": [
+    "Networking & VPN"
+  ],
+  "website": "https://nginxproxymanager.com",
   "images": [
     {
       "name": "db",

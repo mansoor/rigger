@@ -7,6 +7,10 @@
     "php",
     "blog"
   ],
+  "categories": [
+    "CMS & Blogs"
+  ],
+  "website": "https://wordpress.org",
   "images": [
     {
       "name": "db",

@@ -282,6 +282,8 @@ function buildTemplate(services, templateName) {
     label: templateName.trim() || 'My Stack',
     description: '',
     tags: [],
+    categories: [],
+    website: '',
     images,
     default_env_vars: allEnvVars,
   }
@@ -592,6 +594,7 @@ function ComposeModal({ onLoad, onClose }) {
 function ComposeToTemplate() {
   const [tplJson, setTplJson]       = useState('')      // editable template JSON — the source of truth
   const [tagsText, setTagsText]     = useState('')      // comma-separated tags helper (synced on load)
+  const [catsText, setCatsText]     = useState('')      // comma-separated categories helper (synced on load)
   const [validation, setValidation] = useState(null)    // null | {checking} | {ok:true,...} | {ok:false,errors:[]}
   const [copied, setCopied]         = useState(false)
   const [saveState, setSaveState]   = useState(null)    // null | 'saving' | 'saved' | { error }
@@ -618,6 +621,10 @@ function ComposeToTemplate() {
   // Only image stacks can become templates (project.type lives in the nested config).
   const imageWorkspaces = allProjects.filter(w => w.config?.project?.type === 'image')
 
+  // Known categories across existing templates — power the category datalist.
+  const { data: allTemplates = [] } = useQuery({ queryKey: ['templates'], queryFn: fetchTemplates, staleTime: 30_000 })
+  const knownCategories = [...new Set(allTemplates.flatMap(t => t.categories || []))].sort((a, b) => a.localeCompare(b))
+
   // Parse the editable JSON for the summary chips, metadata helpers and download.
   let parsed = null
   try { parsed = tplJson.trim() ? JSON.parse(tplJson) : null } catch { parsed = null }
@@ -637,6 +644,7 @@ function ComposeToTemplate() {
   function loadTemplate(tpl) {
     editJson(JSON.stringify(tpl, null, 2))
     setTagsText(Array.isArray(tpl?.tags) ? tpl.tags.join(', ') : '')
+    setCatsText(Array.isArray(tpl?.categories) ? tpl.categories.join(', ') : '')
     setEditingName(null)
   }
 
@@ -689,7 +697,11 @@ function ComposeToTemplate() {
       const text = ev.target.result || ''
       editJson(text)
       setEditingName(null)
-      try { const obj = JSON.parse(text); setTagsText(Array.isArray(obj?.tags) ? obj.tags.join(', ') : '') } catch { setTagsText('') }
+      try {
+        const obj = JSON.parse(text)
+        setTagsText(Array.isArray(obj?.tags) ? obj.tags.join(', ') : '')
+        setCatsText(Array.isArray(obj?.categories) ? obj.categories.join(', ') : '')
+      } catch { setTagsText(''); setCatsText('') }
     }
     reader.readAsText(file)
     e.target.value = ''  // reset so the same file can be re-uploaded
@@ -876,6 +888,43 @@ function ComposeToTemplate() {
                   placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
                   className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
+                {/* Categories — comma-separated; the datalist suggests existing ones.
+                    Drives the category filter on the New Project template picker. */}
+                <input
+                  type="text"
+                  list="rigger-template-categories"
+                  value={catsText}
+                  disabled={!parsed}
+                  onChange={e => { setCatsText(e.target.value); patchField('categories', e.target.value.split(',').map(c => c.trim()).filter(Boolean)) }}
+                  placeholder="Categories (comma-separated, e.g. Productivity, Databases) — blank = Uncategorized"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                />
+                <datalist id="rigger-template-categories">
+                  {knownCategories.map(c => <option key={c} value={c} />)}
+                </datalist>
+                {/* Application website / git repo — shows an open-site link in the picker. */}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="url"
+                    value={parsed?.website ?? ''}
+                    disabled={!parsed}
+                    onChange={e => patchField('website', e.target.value)}
+                    placeholder="Website / git repo URL (e.g. https://github.com/owner/app)"
+                    className="flex-1 px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  />
+                  {parsed?.website && (
+                    <a
+                      href={parsed.website} target="_blank" rel="noopener noreferrer"
+                      title={`Open ${parsed.website} in a new tab`}
+                      className="shrink-0 p-1.5 text-content-subtle hover:text-brand-400 border border-border-strong rounded-lg"
+                      aria-label="Open website"
+                    >
+                      <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M11 3h6v6" /><path d="M17 3l-8 8" /><path d="M15 12v4a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1h4" />
+                      </svg>
+                    </a>
+                  )}
+                </div>
               </div>
 
               {/* Editable template JSON — color-coded, line-numbered, scrolls internally */}

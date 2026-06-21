@@ -7,6 +7,10 @@
     "sftp",
     "storage"
   ],
+  "categories": [
+    "File Sharing & Storage"
+  ],
+  "website": "https://sftpgo.com",
   "images": [
     {
       "name": "app",
