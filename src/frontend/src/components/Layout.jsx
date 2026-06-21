@@ -10,7 +10,7 @@ import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
 import KeyField from './KeyField'
 import RequestAccessModal from './RequestAccessModal'
-import { AppearanceTab } from '../pages/SettingsPage'
+import { AppearanceTab, LogsTerminalTab } from '../pages/SettingsPage'
 
 const STATUS_DOT = {
   running: 'bg-green-400',
@@ -612,6 +612,7 @@ function AccountModal({ user, tab, setTab, onClose }) {
     { id: 'general',    label: 'General' },
     { id: 'security',   label: 'Security' },
     { id: 'appearance', label: 'Appearance' },
+    { id: 'logs',       label: 'Logs & Terminal' },
   ]
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={onClose}>
@@ -636,6 +637,12 @@ function AccountModal({ user, tab, setTab, onClose }) {
           <div className="space-y-3">
             <p className="text-sm text-content-subtle">Your personal appearance. It overrides the workspace and global defaults on every device you sign in to.</p>
             <AppearanceTab />
+          </div>
+        )}
+        {tab === 'logs' && (
+          <div className="space-y-3">
+            <p className="text-sm text-content-subtle">Per-user log &amp; terminal preferences, applied on every device you sign in to.</p>
+            <LogsTerminalTab />
           </div>
         )}
       </div>

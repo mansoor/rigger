@@ -1615,8 +1615,24 @@ export function AppearanceTab() {
         </div>
       </SettingsSection>
 
+      <div>
+        <Btn variant="secondary" onClick={resetPrefs}>Reset appearance to defaults</Btn>
+      </div>
+    </div>
+  )
+}
+
+// LogsTerminalTab — per-user preferences for live log views + the container
+// terminal. Split out of Appearance (which was getting crowded) into its own
+// Account-settings tab: font size, line spacing, and the wrap / line-number
+// defaults. All persist to the same user appearance prefs as the log toolbar's
+// own toggles, so the two stay in sync.
+export function LogsTerminalTab() {
+  const { prefs, setPrefs } = useTheme()
+  return (
+    <div className="space-y-5 max-w-2xl">
       <SettingsSection
-        title="Logs & terminal"
+        title="Display"
         description="Applies to live log views and the container terminal."
       >
         <div className="grid sm:grid-cols-2 gap-5 items-start">
@@ -1659,9 +1675,23 @@ export function AppearanceTab() {
         </div>
       </SettingsSection>
 
-      <div>
-        <Btn variant="secondary" onClick={resetPrefs}>Reset appearance to defaults</Btn>
-      </div>
+      <SettingsSection
+        title="Defaults"
+        description="How log views open by default. You can still toggle these per-view from the log toolbar — your last choice is remembered here."
+      >
+        <div className="space-y-3">
+          <Toggle
+            checked={prefs.logWrap}
+            onChange={v => setPrefs({ logWrap: v })}
+            label="Wrap long lines"
+          />
+          <Toggle
+            checked={prefs.logRowNumbers}
+            onChange={v => setPrefs({ logRowNumbers: v })}
+            label="Show line numbers"
+          />
+        </div>
+      </SettingsSection>
     </div>
   )
 }
