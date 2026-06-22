@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, parseCompose, uploadSource, fetchBlueprints, fetchWorkspaces } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, parseCompose, uploadSource, fetchBlueprints, fetchWorkspaces, createPipeline } from '../lib/api'
 import { resolveEnvRoute } from '../lib/envRoute'
 import RegistryPicker from '../components/RegistryPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
@@ -1325,6 +1325,21 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
         <EnvVarsSection vars={env.vars || {}} secretKeys={env.secret_keys || []} deployment={env.deployment}
           onChange={v => upd('vars', v)} onSecretKeysChange={s => upd('secret_keys', s)} />
       </div>
+
+      {/* Optional default CI for build-type stacks: one build→deploy pipeline per
+          checked env, created right after the project (refine later in Pipelines). */}
+      {['custom', 'scan', 'blueprint'].includes(stackType) && (
+        <label className="pt-3 border-t border-border-strong/60 flex items-start gap-2 cursor-pointer select-none">
+          <input type="checkbox" className="mt-0.5" checked={!!env.auto_pipeline}
+            onChange={e => upd('auto_pipeline', e.target.checked)} />
+          <span className="text-xs text-content">
+            <span className="font-medium text-content-strong">Auto-create a build &amp; deploy pipeline</span>
+            <span className="block text-content-subtle">
+              Adds a “{env.name || 'env'} — build &amp; deploy” pipeline (version bump → build → deploy this env) you can run or refine later in the Pipelines tab.
+            </span>
+          </span>
+        </label>
+      )}
     </div>
   )
 }
@@ -2053,6 +2068,32 @@ function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorksp
       resolved = true
       setStatus(result)
       onResult(result)
+      if (result === 'success') seedAutoPipelines(term)
+    }
+
+    // For build-type projects, create one "build & deploy" pipeline per environment
+    // the user opted into (Environments step checkbox). Best-effort — runs after the
+    // project exists; a failure is logged to the terminal but never blocks the result.
+    async function seedAutoPipelines(term) {
+      if (payload.type !== 'custom') return // build stacks only (custom/scan/blueprint)
+      const envs = (payload.environments || []).filter(e => e.auto_pipeline && e.name)
+      if (!envs.length) return
+      term.write('\r\n\x1b[36mCreating build & deploy pipelines…\x1b[0m\r\n')
+      for (const e of envs) {
+        try {
+          await createPipeline(payload.workspace, payload.key, {
+            name: `${e.name} — build & deploy`,
+            enabled: true,
+            stages: [
+              { type: 'build', env: e.name, part: 'build', on_failure: 'stop' },
+              { type: 'deploy', env: e.name, on_failure: 'stop' },
+            ],
+          })
+          term.write(`  \x1b[32m✓\x1b[0m ${e.name} — build & deploy\r\n`)
+        } catch (err) {
+          term.write(`  \x1b[31m✗\x1b[0m ${e.name}: ${err?.response?.data?.error || err.message}\r\n`)
+        }
+      }
     }
 
     let sawError = false
