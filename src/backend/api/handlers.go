@@ -1087,46 +1087,12 @@ func validateConfigServices(content []byte) string {
 	if err := json.Unmarshal(content, &doc); err != nil {
 		return "" // malformed JSON is reported by the caller's own parse check
 	}
-	names := map[string]bool{}
-	for _, s := range doc.Services {
-		switch {
-		case s.Name == "":
-			return "each service needs a name"
-		case !serviceNameOK(s.Name):
-			return fmt.Sprintf("service name %q must be 1–30 chars of lowercase letters, digits or hyphens", s.Name)
-		case reserved[s.Name]:
-			return fmt.Sprintf("service name %q is reserved for a managed dependency", s.Name)
-		case names[s.Name]:
-			return fmt.Sprintf("duplicate service name %q", s.Name)
-		}
-		sources := 0
-		if s.Build != nil {
-			sources++
-		}
-		if s.Image != "" {
-			sources++
-		}
-		if s.ImageFrom != "" {
-			sources++
-		}
-		if sources != 1 {
-			return fmt.Sprintf("service %q must have exactly one source (build, image, or image_from)", s.Name)
-		}
-		if s.Build != nil {
-			for k := range s.Build.Args {
-				if !buildArgKeyOK(k) {
-					return fmt.Sprintf("service %q build arg %q must be a valid identifier (letters, digits, underscores; not starting with a digit)", s.Name, k)
-				}
-			}
-		}
-		if m := s.EnvFileMount; m != "" && !strings.HasPrefix(m, "/") {
-			return fmt.Sprintf("service %q .env mount path %q must be absolute (e.g. /var/www/html/.env)", s.Name, m)
-		}
-		names[s.Name] = true
-	}
-	// managedDep reports whether name is an enabled managed dependency. Deps are
-	// project-level; the per-env fields are also consulted for back-compat.
-	managedDep := func(name string) bool {
+	// managedActive reports whether name is an ENABLED managed dependency.
+	// composegen only emits a managed-dep service at its bare name when the dep is
+	// turned on, so a real service may safely reuse e.g. "postgres" in a
+	// self-contained stack (a template that bundles its own DB, no managed DB).
+	// Deps are project-level; the per-env fields are also consulted for back-compat.
+	managedActive := func(name string) bool {
 		switch name {
 		case "postgres", "mysql", "mariadb":
 			if doc.Project.Database == name {
@@ -1155,12 +1121,55 @@ func validateConfigServices(content []byte) string {
 		}
 		return false
 	}
+	// A managed-dep engine name (postgres/redis/minio/…) only collides with a real
+	// service when that managed dep is actually enabled. Rigger-owned auxiliary
+	// containers (minio_init/storage_console/mailpit) are always reserved.
+	alwaysReserved := map[string]bool{"minio_init": true, "storage_console": true, "mailpit": true}
+	reservedActive := func(name string) bool { return alwaysReserved[name] || managedActive(name) }
+
+	names := map[string]bool{}
+	for _, s := range doc.Services {
+		switch {
+		case s.Name == "":
+			return "each service needs a name"
+		case !serviceNameOK(s.Name):
+			return fmt.Sprintf("service name %q must be 1–30 chars of lowercase letters, digits or hyphens", s.Name)
+		case reserved[s.Name] && reservedActive(s.Name):
+			return fmt.Sprintf("service name %q is reserved for the enabled managed dependency — disable the managed dependency or rename this service", s.Name)
+		case names[s.Name]:
+			return fmt.Sprintf("duplicate service name %q", s.Name)
+		}
+		sources := 0
+		if s.Build != nil {
+			sources++
+		}
+		if s.Image != "" {
+			sources++
+		}
+		if s.ImageFrom != "" {
+			sources++
+		}
+		if sources != 1 {
+			return fmt.Sprintf("service %q must have exactly one source (build, image, or image_from)", s.Name)
+		}
+		if s.Build != nil {
+			for k := range s.Build.Args {
+				if !buildArgKeyOK(k) {
+					return fmt.Sprintf("service %q build arg %q must be a valid identifier (letters, digits, underscores; not starting with a digit)", s.Name, k)
+				}
+			}
+		}
+		if m := s.EnvFileMount; m != "" && !strings.HasPrefix(m, "/") {
+			return fmt.Sprintf("service %q .env mount path %q must be absolute (e.g. /var/www/html/.env)", s.Name, m)
+		}
+		names[s.Name] = true
+	}
 	for _, s := range doc.Services {
 		if s.ImageFrom != "" && !names[s.ImageFrom] {
 			return fmt.Sprintf("service %q reuses the image of unknown service %q", s.Name, s.ImageFrom)
 		}
 		for _, d := range s.DependsOn {
-			if d == "" || names[d] || managedDep(d) {
+			if d == "" || names[d] || managedActive(d) {
 				continue
 			}
 			return fmt.Sprintf("service %q depends_on unknown service %q", s.Name, d)

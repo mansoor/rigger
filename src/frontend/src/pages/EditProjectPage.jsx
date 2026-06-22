@@ -626,8 +626,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         )}
       </div>
 
-      {/* depends_on */}
-      {depOptions.length > 0 && (
+      {/* depends_on — selectable targets plus any DANGLING refs (e.g. left over
+          from a renamed/removed service) so they stay visible and removable. */}
+      {(() => {
+        const danglingDeps = (img.depends_on || []).filter(d => d && !depOptions.includes(d))
+        const depCheckboxes = [...depOptions, ...danglingDeps]
+        if (depCheckboxes.length === 0) return null
+        return (
         <div>
           <Label>Depends on</Label>
           <p className="text-xs text-content-subtle mb-2">
@@ -635,8 +640,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
             before starting. Compose waits for healthy status when available.
           </p>
           <div className="flex flex-wrap gap-3">
-            {depOptions.map(svcName => {
+            {depCheckboxes.map(svcName => {
               const checked = (img.depends_on || []).includes(svcName)
+              const dangling = danglingDeps.includes(svcName)
               return (
                 <label key={svcName} className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input type="checkbox" checked={checked}
@@ -648,13 +654,15 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                     }}
                     className="rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500"
                   />
-                  <span className="text-sm text-content font-mono">{svcName}</span>
+                  <span className={`text-sm font-mono ${dangling ? 'text-warning-fg' : 'text-content'}`}>{svcName}</span>
+                  {dangling && <span className="text-[11px] text-warning-fg" title="No such service — uncheck to remove">(missing)</span>}
                 </label>
               )
             })}
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* Service links — wire an env var to another service's in-network URL. */}
       <div>
@@ -1056,7 +1064,24 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch, managedDeps = [] }
           idx={i}
           allImages={images}
           managedDeps={managedDeps}
-          onUpdate={(idx, updated) => onChange(images.map((m, j) => j === idx ? updated : m))}
+          onUpdate={(idx, updated) => {
+            const oldName = images[idx]?.name
+            const newName = updated.name
+            let next = images.map((m, j) => (j === idx ? updated : m))
+            // Cascade a service rename to references in OTHER services so a save
+            // can't fail on a now-dangling depends_on / image_from pointer.
+            if (oldName && newName && oldName !== newName) {
+              next = next.map((m, j) => {
+                if (j === idx) return m
+                const patch = {}
+                if (Array.isArray(m.depends_on) && m.depends_on.includes(oldName))
+                  patch.depends_on = m.depends_on.map(d => (d === oldName ? newName : d))
+                if (m.image_from === oldName) patch.image_from = newName
+                return Object.keys(patch).length ? { ...m, ...patch } : m
+              })
+            }
+            onChange(next)
+          }}
           onRemove={idx => onChange(images.filter((_, j) => j !== idx))}
         />
       ))}
