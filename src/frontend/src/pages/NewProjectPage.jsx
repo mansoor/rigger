@@ -1074,19 +1074,35 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
               if (Object.keys(envs).length > 0) onChange('_distributeVars', envs)
               // Pre-populate services with full config from template (ports/volumes/healthcheck in Step 4)
               if (detail?.images?.length > 0) {
-                onChange('images', detail.images.map(img => ({
-                  ...DEFAULT_IMAGE,
-                  name:  img.name  || '',
-                  image: img.image || '',
-                  tag:   img.tag   || 'latest',
-                  // Port mappings from template (port = container port, host_port = host)
-                  portMappings: img.port
-                    ? [{ host: img.host_port || '', container: String(img.port) }]
-                    : DEFAULT_IMAGE.portMappings,
-                  volumes: img.volumes || [],
-                  healthcheck: img.healthcheck || '',
-                  healthcheck_config: img.healthcheck_config || DEFAULT_IMAGE.healthcheck_config,
-                })))
+                onChange('images', detail.images.map(img => {
+                  // Faithful copy of the template service so wizard edits (e.g. removing
+                  // a host port) are what gets created. Build port rows from the main
+                  // port + extra_ports, flagging any host port the template links.
+                  const linkSet = new Set((img.link_ports || []).map(String))
+                  const rows = []
+                  if (img.port) rows.push({ host: String(img.host_port || ''), container: String(img.port), link: linkSet.has(String(img.host_port || '')) })
+                  for (const ep of (img.extra_ports || [])) {
+                    const parts = splitColonOutsideBraces(String(ep))
+                    const host = parts.length > 1 ? parts[0] : ''
+                    rows.push({ host, container: parts[parts.length - 1], link: linkSet.has(host) })
+                  }
+                  return {
+                    ...DEFAULT_IMAGE,
+                    name:  img.name  || '',
+                    image: img.image || '',
+                    tag:   img.tag   || 'latest',
+                    command: img.command || '',
+                    web_routed: !!img.web_routed,
+                    subdomain: img.subdomain || '',
+                    restart: img.restart || '',
+                    depends_on: img.depends_on || [],
+                    portMappings: rows.length ? rows : DEFAULT_IMAGE.portMappings,
+                    volumes: img.volumes || [],
+                    env_vars: img.env_vars || {},
+                    healthcheck: img.healthcheck || '',
+                    healthcheck_config: img.healthcheck_config || DEFAULT_IMAGE.healthcheck_config,
+                  }
+                }))
                 // Build templateVolumes display list for Step 4
                 const seen = new Set()
                 const templateVols = []
@@ -2309,23 +2325,29 @@ export default function NewProjectPage() {
       db_seed_file: (isUpload && data.database && data.database !== 'none') ? (data.dbSeedFile || '') : '',
       db_seed_auto: data.dbSeedAuto ?? true,
       images: (() => {
-        if (data.stackType !== 'image') return []
+        // Both custom image stacks AND prebuilt templates are authored/edited as
+        // data.images here, so send them — otherwise the backend falls back to the
+        // template file and silently discards wizard edits (e.g. a removed host port).
+        if (!isImage) return []
+        const isPrebuilt = data.stackType === 'prebuilt'
         const imgs = data.images.filter(img => img.name && img.image)
         return imgs.map(img => {
             const ports = (img.portMappings || []).filter(p => p.container)
             return {
               name: img.name, image: img.image, tag: img.tag || 'latest',
               command: img.command || '',
-              // A single-image stack is the web entry by default, so enabling
-              // Traefik routes to it (composegen defaults its port to 80 when
-              // unset). Multi-image stacks set the web entry in Edit Project.
-              web_routed: !!img.web_routed || imgs.length === 1,
+              // Prebuilt templates carry their own web entry verbatim. For a hand-built
+              // single-image stack, default it to the web entry so enabling Traefik
+              // routes to it (composegen defaults its port to 80 when unset).
+              web_routed: isPrebuilt ? !!img.web_routed : (!!img.web_routed || imgs.length === 1),
+              subdomain: img.subdomain || '',
+              restart: img.restart || '',
               port: parseInt((ports[0] || {}).container) || 0,
               host_port: (ports[0] || {}).host || '',
               extra_ports: ports.slice(1).filter(p => p.host && p.container).map(p => `${p.host}:${p.container}`),
               link_ports: ports.filter(p => p.link && p.host).map(p => p.host),
               volumes: (img.volumes || []).filter(v => typeof v === 'string' ? v.includes(':') : false),
-              depends_on: [],
+              depends_on: img.depends_on || [],
               env_vars: img.env_vars || {},
               healthcheck: img.healthcheck || '',
               healthcheck_config: img.healthcheck_config || {},
