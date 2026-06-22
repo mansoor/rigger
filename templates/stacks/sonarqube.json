@@ -26,6 +26,7 @@
       "image": "sonarqube",
       "name": "sonarqube",
       "port": 9000,
+      "web_routed": true,
       "restart": "always",
       "tag": "26.5.0.122743-community",
       "volumes": []
