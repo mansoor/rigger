@@ -286,6 +286,13 @@ func (m *Manager) GC() (string, error) {
 	})
 	out := strings.TrimSpace(buf.String())
 	if err != nil {
+		// A registry that has never had an image pushed has no
+		// .../v2/repositories directory, so `garbage-collect` exits non-zero with
+		// "Path not found: ...repositories". That's not a failure — there's simply
+		// nothing to collect. Report it cleanly instead of as an error.
+		if strings.Contains(out, "repositories") && strings.Contains(out, "not found") {
+			return "Registry is empty — nothing to garbage-collect yet.", nil
+		}
 		if out == "" {
 			out = err.Error() // exec itself failed (e.g. container gone) — surface that
 		}
