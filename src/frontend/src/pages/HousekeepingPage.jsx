@@ -221,7 +221,11 @@ function UnusedImagesSection() {
 
   const purgeMut = useMutation({
     mutationFn: () => pruneUnusedImages({ image_ids: selectedIDs }),
-    onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-status', 'hk-images'] }) },
+    onSuccess: (d) => {
+      setOutput(d.output); setSelected({})
+      qc.invalidateQueries({ queryKey: ['hk-status'] })
+      qc.invalidateQueries({ queryKey: ['hk-images'] })
+    },
   })
 
   return (
@@ -298,7 +302,11 @@ function StoppedContainersSection() {
   })
   const purgeMut = useMutation({
     mutationFn: pruneContainers,
-    onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-status', 'hk-containers'] }) },
+    onSuccess: (d) => {
+      setOutput(d.output); setConfirm('')
+      qc.invalidateQueries({ queryKey: ['hk-status'] })
+      qc.invalidateQueries({ queryKey: ['hk-containers'] })
+    },
   })
 
   return (
@@ -390,7 +398,11 @@ function VolumePurgingSection() {
 
   const purgeMut = useMutation({
     mutationFn: () => pruneVolumes({ volume_names: selectedNames }),
-    onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-status', 'hk-volumes'] }) },
+    onSuccess: (d) => {
+      setOutput(d.output); setToggled({}); setHoldProgress(0)
+      qc.invalidateQueries({ queryKey: ['hk-status'] })
+      qc.invalidateQueries({ queryKey: ['hk-volumes'] })
+    },
   })
 
   function startHold() {
@@ -438,6 +450,11 @@ function VolumePurgingSection() {
                   ⚠ WARNING: Volumes contain application data. Deletion is permanent and cannot be undone. Only remove volumes you are certain are abandoned.
                 </p>
               </div>
+              <p className="text-xs text-content-subtle">
+                These are <strong>anonymous</strong> dangling volumes — Docker only gives them a hash, not a human name
+                (named workspace volumes are hidden here). Use the <strong>size</strong> and <strong>age</strong> below to judge:
+                a 0 B or long-abandoned volume is usually safe; a large or recent one likely still holds data.
+              </p>
               <div className="space-y-2">
                 {volumes.map(v => (
                   <div key={v.name} className="flex items-center gap-3 p-3 bg-surface border border-border rounded-lg">
@@ -448,9 +465,20 @@ function VolumePurgingSection() {
                       <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${toggled[v.name] ? 'translate-x-5' : ''}`} />
                     </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-mono text-content-strong truncate">{v.name}</p>
-                      <p className="text-xs text-content-subtle">{v.driver} · {v.mount_point || 'local'}</p>
+                      <p className="text-sm font-mono text-content-strong truncate" title={v.name}>
+                        {v.name.length > 20 ? `${v.name.slice(0, 12)}…${v.name.slice(-4)}` : v.name}
+                      </p>
+                      <p className="text-xs text-content-subtle">
+                        {v.created_at ? `Created ${timeAgo(v.created_at)}` : v.driver}
+                        {' · '}{v.driver}
+                        {v.mount_point ? <span className="text-content-faint"> · {v.mount_point}</span> : null}
+                      </p>
                     </div>
+                    {v.size && (
+                      <span className="text-xs font-medium text-content-muted shrink-0 px-2 py-1 bg-surface-raised rounded-md" title="Disk usage reported by Docker">
+                        {v.size}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

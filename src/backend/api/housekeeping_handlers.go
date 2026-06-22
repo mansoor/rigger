@@ -441,6 +441,9 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 		Driver     string `json:"driver"`
 		MountPoint string `json:"mount_point"`
 		Labels     string `json:"labels"`
+		// Enrichment to help operators judge anonymous (hash-named) volumes:
+		CreatedAt string `json:"created_at"` // RFC3339 from `docker volume inspect`
+		Size      string `json:"size"`       // human-readable, best-effort from `docker system df -v`
 	}
 
 	// dangling=true already excludes volumes attached to any container (running or stopped).
@@ -471,6 +474,50 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 	if volumes == nil {
 		volumes = []DanglingVolume{}
 	}
+
+	// Anonymous volumes only have a hash name, so enrich with size + creation time —
+	// the two signals an operator actually uses to decide whether a volume is safe to
+	// delete (an empty/old volume vs. one holding recent data). Both are best-effort:
+	// failures leave the fields blank rather than breaking the listing.
+	if len(volumes) > 0 {
+		// Size map from `docker system df -v` (the only command that reports volume size).
+		sizeByName := map[string]string{}
+		if dfOut, derr := dockerRun("system", "df", "-v", "--format", "{{json .Volumes}}"); derr == nil {
+			var dfVols []struct {
+				Name string `json:"Name"`
+				Size string `json:"Size"`
+			}
+			if json.Unmarshal([]byte(strings.TrimSpace(dfOut)), &dfVols) == nil {
+				for _, dv := range dfVols {
+					sizeByName[dv.Name] = dv.Size
+				}
+			}
+		}
+
+		// Creation time from a single batched `docker volume inspect`.
+		createdByName := map[string]string{}
+		names := make([]string, len(volumes))
+		for i, v := range volumes {
+			names[i] = v.Name
+		}
+		if insOut, ierr := dockerRun(append([]string{"volume", "inspect"}, names...)...); ierr == nil {
+			var inspected []struct {
+				Name      string `json:"Name"`
+				CreatedAt string `json:"CreatedAt"`
+			}
+			if json.Unmarshal([]byte(insOut), &inspected) == nil {
+				for _, iv := range inspected {
+					createdByName[iv.Name] = iv.CreatedAt
+				}
+			}
+		}
+
+		for i := range volumes {
+			volumes[i].Size = sizeByName[volumes[i].Name]
+			volumes[i].CreatedAt = createdByName[volumes[i].Name]
+		}
+	}
+
 	writeJSON(w, http.StatusOK, volumes)
 }
 
