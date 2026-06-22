@@ -55,11 +55,18 @@ function MetricTile({ label, value, series, stroke }) {
 
 // ── Env status badge ──────────────────────────────────────────────────────────
 
+// Present-tense label shown while a lifecycle action runs, keyed by the action cmd.
+const ACTION_VERB = {
+  start: 'deploying…', update: 'updating…', refresh: 'refreshing…',
+  restart: 'restarting…', stop: 'stopping…', down: 'stopping…', build: 'building…',
+}
+
 function StatusBadge({ label, color }) {
   const colors = {
     running:  'bg-green-500/20 text-success-fg border-success/30',
     partial:  'bg-amber-500/20 text-warning-fg border-warning/30',
     building: 'bg-amber-500/20 text-warning-fg border-warning/30',
+    working:  'bg-brand-500/20 text-brand-300 border-brand-500/30',
     stopped:  'bg-red-500/15 text-danger-fg border-danger/30',
     unknown:  'bg-surface-overlay/40 text-content-subtle border-border-strong/30',
   }
@@ -67,6 +74,7 @@ function StatusBadge({ label, color }) {
     running:  'bg-green-400',
     partial:  'bg-amber-400 animate-pulse',
     building: 'bg-amber-400 animate-pulse',
+    working:  'bg-brand-400 animate-pulse',
     stopped:  'bg-red-500',
     unknown:  'bg-surface-overlay',
   }
@@ -479,8 +487,15 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     else if (port && url) accessUrls.push({ label: `:${port}`, href: url })
   }
 
+  // In-progress lifecycle action (deploy/update/etc.), shown as a transient status
+  // badge until the action's WebSocket closes. onAction wires our done-callback to
+  // the socket 'close' event, so clearing it there tracks completion accurately.
+  const [busyAction, setBusyAction] = useState(null)
+
   function handleAction(cmd, extra = [], services = []) {
+    setBusyAction(cmd)
     onAction(cmd, envName, () => {
+      setBusyAction(null)
       // Refresh env status, container details, image-update and metric state
       // after any action (deploy/refresh/etc.) so the card reflects reality.
       setTimeout(() => {
@@ -578,7 +593,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           </span>
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
-          <StatusBadge label={containerStatus} color={containerStatus} />
+          <StatusBadge
+            label={busyAction ? (ACTION_VERB[busyAction] || 'working…') : containerStatus}
+            color={busyAction ? 'working' : containerStatus} />
           {imgStatus?.pinned && (
             <div className="flex items-center gap-1.5">
               <span title={`Pinned: ${(imgStatus.services || []).filter(s => s.pinned).map(s => `${s.name}→${s.effective.split(':').pop()}`).join(', ')}. Latest is ${imgStatus.version}.`}
