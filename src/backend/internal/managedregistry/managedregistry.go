@@ -275,13 +275,23 @@ func (m *Manager) Down() error {
 // GC runs `registry garbage-collect` inside the container to reclaim space from
 // deleted/overwritten tags. Requires the container to be running (delete enabled).
 func (m *Manager) GC() (string, error) {
-	out, err := m.Exec.DockerOutput(executor.Spec{
-		Args: []string{"exec", Container, "bin/registry", "garbage-collect", configPath},
+	// `registry garbage-collect` writes its progress AND its errors to STDERR, so
+	// capture both streams — DockerOutput (cmd.Output) keeps only stdout, which left
+	// failures showing a blank message. Combine into one buffer for a real diagnostic.
+	var buf bytes.Buffer
+	err := m.Exec.Docker(executor.Spec{
+		Args:   []string{"exec", Container, "bin/registry", "garbage-collect", configPath},
+		Stdout: &buf,
+		Stderr: &buf,
 	})
+	out := strings.TrimSpace(buf.String())
 	if err != nil {
-		return strings.TrimSpace(string(out)), fmt.Errorf("garbage-collect failed (is the registry running?): %s", strings.TrimSpace(string(out)))
+		if out == "" {
+			out = err.Error() // exec itself failed (e.g. container gone) — surface that
+		}
+		return out, fmt.Errorf("garbage-collect failed (is the registry running?): %s", out)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return out, nil
 }
 
 // DiskUsage returns a human-readable size of the registry data volume (e.g. "42M"),
