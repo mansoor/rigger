@@ -806,7 +806,11 @@ func (h *Handler) CreateWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	for _, pk := range workspace.ProjectKeys(h.workspacesDir, wsName) {
+		// Capture each project's prefix before the dir is removed so its project-scoped
+		// DB rows can be purged (else they leak to a same-key workspace recreated later).
+		prefix := h.resourcePrefix(wsName, pk)
 		h.teardownProjectStacks(wsName, pk)
+		h.purgeProjectData(prefix, wsName, pk)
 	}
 	if err := workspace.DeleteWorkspace(h.workspacesDir, wsName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1935,6 +1939,11 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture the resource prefix BEFORE removing the dir — it's read from
+	// config.json (a transferred project keeps its original prefix) and is the key
+	// for project-scoped DB rows we purge below.
+	prefix := h.resourcePrefix(wsName, name)
+
 	// Tear down each env's stack first so containers/networks/volumes aren't orphaned.
 	h.teardownProjectStacks(wsName, name)
 
@@ -1942,6 +1951,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete project: " + err.Error()})
 		return
 	}
+
+	// Purge project-scoped DB rows so a future project reusing the same keys/prefix
+	// doesn't inherit stale action output, pipelines, history, alerts, metrics, etc.
+	h.purgeProjectData(prefix, wsName, name)
 
 	claims := auth.ClaimsFromContext(r.Context())
 	if claims != nil {
@@ -1951,6 +1964,35 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// purgeProjectData removes all project-scoped DB rows on project deletion so a
+// future project reusing the same workspace/project keys (and resource prefix)
+// doesn't inherit the deleted project's action output, pipelines, deploy history,
+// alerts, metrics, host bindings, etc. Best-effort: each delete ignores errors and
+// never blocks deletion. `prefix` MUST be captured before the project dir is removed.
+//
+// Intentionally NOT purged: audit_log (security record, retained) and
+// migration_leftovers (tracks data still physically present on a source host).
+func (h *Handler) purgeProjectData(prefix, wsName, name string) {
+	// Tables keyed by the single resource-prefix `project` column.
+	for _, tbl := range []string{
+		"action_runs", "alert_rules", "alert_events",
+		"backup_log", "backup_syncs", "backup_schedule_runs",
+		"secret_events", "metrics_snapshots",
+		"workspace_hosts", "workspace_host_envs", "project_build_hosts",
+	} {
+		h.db.Exec("DELETE FROM "+tbl+" WHERE project=?", prefix) //nolint:errcheck
+	}
+	// Tables keyed by separate (workspace, project=key) columns.
+	for _, tbl := range []string{
+		"pipelines", "pipeline_runs", "pipeline_webhooks", "deploy_history",
+		"managed_db_users", "api_key_projects",
+		"preview_webhooks", "preview_environments", "preview_writeback_tokens",
+		"acme_certs",
+	} {
+		h.db.Exec("DELETE FROM "+tbl+" WHERE workspace=? AND project=?", wsName, name) //nolint:errcheck
+	}
 }
 
 // POST /api/workspaces/{name}/action  — runs a run.sh command, streams output via WebSocket
