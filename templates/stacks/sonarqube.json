@@ -1,5 +1,6 @@
 {
   "default_env_vars": {
+    "POSTGRES_DB": "sonar",
     "POSTGRES_PASSWORD": "CHANGE_ME",
     "POSTGRES_USER": "sonar",
     "SONAR_JDBC_PASSWORD": "CHANGE_ME",
@@ -37,7 +38,7 @@
         "POSTGRES_USER": "${POSTGRES_USER}"
       },
       "extra_ports": [],
-      "healthcheck": "pg_isready -q || exit 1",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
       "healthcheck_config": {
         "interval": "30s",
         "retries": "3",
