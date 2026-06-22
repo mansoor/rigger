@@ -1862,6 +1862,14 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Mirror the edits into config.json's env_vars so they survive the next
+	// refresh/redeploy (which regenerates .env FROM config.json). Without this, an
+	// env edit written only to .env reverts on refresh — and a bundled DB whose
+	// password regenerates that way stops matching its initialised data volume.
+	// Best-effort: .env is already saved, so a failure here doesn't block the action.
+	if cerr := workspace.UpdateConfigEnvVars(h.workspacesDir, wsName, name, env, body.Updates, body.Deletes, skipEnvFile); cerr != nil && warn == "" {
+		warn = "saved .env but could not persist to config.json (edits may revert on refresh): " + cerr.Error()
+	}
 	if err := workspace.SetSecretMeta(h.workspacesDir, wsName, name, env, body.SecretKeys, versions); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved .env but failed to persist secret flags: " + err.Error()})
 		return

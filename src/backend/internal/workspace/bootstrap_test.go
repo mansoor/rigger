@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,75 @@ func TestBootstrapImageStack(t *testing.T) {
 	envContent, _ := os.ReadFile(filepath.Join(envDir, ".env"))
 	if strings.Contains(string(envContent), "WP_PASSWORD=CHANGE_ME") {
 		t.Error(".env still has placeholder WP_PASSWORD")
+	}
+}
+
+// Regression: env-var edits must be mirrored into config.json so they survive a
+// refresh (which regenerates .env FROM config.json). Without this, an edit to e.g.
+// AP_FRONTEND_URL — or a bundled DB password — reverts to the create-time seed on
+// the next refresh, breaking the running stack.
+func TestUpdateConfigEnvVars(t *testing.T) {
+	wsDir := t.TempDir()
+	wsRoot := filepath.Join(wsDir, "ws", "projects", "act")
+	if err := os.MkdirAll(wsRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cfgJSON = `{
+  "project": { "name": "act", "type": "image" },
+  "environments": { "dev": { "deployment": "compose", "env_vars": {
+    "AP_FRONTEND_URL": "http://localhost:8080",
+    "POSTGRES_PASSWORD": "rigger-original",
+    "AP_JWT_SECRET": "keepme"
+  } } }
+}`
+	cfgPath := filepath.Join(wsRoot, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(cfgJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	updates := map[string]string{
+		"AP_FRONTEND_URL":   "http://act.example.com", // user edit must persist
+		"POSTGRES_PASSWORD": "rigger-swarm-secret",    // secured below → must NOT land in config
+		"NEW_KEY":           "added",
+	}
+	skip := map[string]bool{"POSTGRES_PASSWORD": true} // secured as a Docker secret
+	if err := UpdateConfigEnvVars(wsDir, "ws", "act", "dev", updates, []string{"AP_JWT_SECRET"}, skip); err != nil {
+		t.Fatalf("UpdateConfigEnvVars: %v", err)
+	}
+
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		Project      map[string]any `json:"project"`
+		Environments map[string]struct {
+			Deployment string            `json:"deployment"`
+			EnvVars    map[string]string `json:"env_vars"`
+		} `json:"environments"`
+	}
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("config.json no longer valid JSON: %v", err)
+	}
+	ev := root.Environments["dev"].EnvVars
+	if ev["AP_FRONTEND_URL"] != "http://act.example.com" {
+		t.Errorf("AP_FRONTEND_URL = %q, want the persisted edit", ev["AP_FRONTEND_URL"])
+	}
+	if ev["NEW_KEY"] != "added" {
+		t.Errorf("NEW_KEY = %q, want added", ev["NEW_KEY"])
+	}
+	if _, ok := ev["AP_JWT_SECRET"]; ok {
+		t.Error("AP_JWT_SECRET should have been deleted from config env_vars")
+	}
+	if _, ok := ev["POSTGRES_PASSWORD"]; ok {
+		t.Error("POSTGRES_PASSWORD is secured as a Docker secret — must NOT be written to config.json")
+	}
+	// Other config fields must be preserved.
+	if root.Project["name"] != "act" {
+		t.Errorf("project.name = %v, want act (other fields must survive)", root.Project["name"])
+	}
+	if root.Environments["dev"].Deployment != "compose" {
+		t.Errorf("env deployment = %q, want compose (other env fields must survive)", root.Environments["dev"].Deployment)
 	}
 }
 

@@ -753,6 +753,60 @@ func UpdateEnvVars(workspacesDir, workspaceName, name, env string, updates map[s
 	return os.WriteFile(envFile, []byte(content), 0600)
 }
 
+// UpdateConfigEnvVars mirrors env-var edits into config.json's
+// environments[env].env_vars. The .env is REGENERATED from config.json on every
+// refresh/redeploy (envgen reads cfg.Environments[env].EnvVars), so an edit written
+// only to .env (UpdateEnvVars) silently reverts on the next refresh — and a managed
+// bundled DB whose password is regenerated that way no longer matches its already-
+// initialised data volume. Persisting the user's values to config.json makes them
+// durable: the regenerated .env keeps them, and create-seeded secrets stay pinned to
+// what the running stack was built with.
+//
+// Keys secured as Docker secrets (skipConfig) are NOT written to config.json — their
+// values live only in the secret store, never in plaintext config. Best-effort
+// read-modify-write that preserves every other config field; map keys re-serialise
+// alphabetically, matching the existing config.json layout.
+func UpdateConfigEnvVars(workspacesDir, workspaceName, name, env string, updates map[string]string, deletes []string, skipConfig map[string]bool) error {
+	cfgPath := wspath.ConfigPath(workspacesDir, workspaceName, name)
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	envs, _ := root["environments"].(map[string]any)
+	if envs == nil {
+		return nil // no environments block — nothing to mirror
+	}
+	envObj, _ := envs[env].(map[string]any)
+	if envObj == nil {
+		return nil // env not in config — created elsewhere; skip
+	}
+	ev, _ := envObj["env_vars"].(map[string]any)
+	if ev == nil {
+		ev = map[string]any{}
+	}
+	for k, v := range updates {
+		if skipConfig[k] {
+			delete(ev, k) // secured as a Docker secret → keep it out of plaintext config
+			continue
+		}
+		ev[k] = v
+	}
+	for _, k := range deletes {
+		delete(ev, k)
+	}
+	envObj["env_vars"] = ev
+
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfgPath, append(out, '\n'), 0o644)
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
