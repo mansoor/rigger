@@ -431,9 +431,14 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].sans=*." + wildcard + "\"")
 			}
 		}
+		// Always attach the shared "loading" errors middleware so a backend that's
+		// still starting / crash-looping shows the friendly retry page on 502/503/504
+		// instead of a bare gateway error; prepend basic-auth when this router uses it.
+		mws := "rigger-loading@docker"
 		if auth {
-			g.line("      - \"traefik.http.routers." + router + ".middlewares=" + router + "_auth\"")
+			mws = router + "_auth," + mws
 		}
+		g.line("      - \"traefik.http.routers." + router + ".middlewares=" + mws + "\"")
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
 		// Companion HTTP router → redirect to HTTPS (per-router, not global).
 		g.line("      - \"traefik.http.routers." + router + "_web.rule=" + rule + "\"")
@@ -443,9 +448,14 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 	} else {
 		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=web\"")
+		// Always attach the shared "loading" errors middleware so a backend that's
+		// still starting / crash-looping shows the friendly retry page on 502/503/504
+		// instead of a bare gateway error; prepend basic-auth when this router uses it.
+		mws := "rigger-loading@docker"
 		if auth {
-			g.line("      - \"traefik.http.routers." + router + ".middlewares=" + router + "_auth\"")
+			mws = router + "_auth," + mws
 		}
+		g.line("      - \"traefik.http.routers." + router + ".middlewares=" + mws + "\"")
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
 	}
 }

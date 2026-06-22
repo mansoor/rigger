@@ -227,6 +227,15 @@ services:
       - "traefik.http.routers.rigger-fallback.priority=1"
       - "traefik.http.routers.rigger-fallback.service=rigger-fallback"
       - "traefik.http.services.rigger-fallback.loadbalancer.server.port=80"
+      # "rigger-loading" errors middleware — when an APP router's backend is down
+      # (502/503/504 while it's still starting or crash-looping), serve this same
+      # friendly page instead of a bare gateway error. App routers reference it as
+      # rigger-loading@docker (see composegen). The catch-all router above only
+      # handles the "no router at all" case; this covers "router exists, backend not
+      # ready", which is what users hit during a slow first boot (e.g. SonarQube).
+      - "traefik.http.middlewares.rigger-loading.errors.status=502-504"
+      - "traefik.http.middlewares.rigger-loading.errors.service=rigger-fallback"
+      - "traefik.http.middlewares.rigger-loading.errors.query=/"
 
 # ── Networks ──────────────────────────────────────────────────────────────────
 networks:
