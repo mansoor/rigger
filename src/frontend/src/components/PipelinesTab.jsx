@@ -445,11 +445,61 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
   const labelAt = (i) => res[i]?.label || (defs[i] ? stageSummary(defs[i]) : `stage ${i + 1}`)
   const overall = run?.status || 'running'
 
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [run])
+  // Log-viewer UX: search (filter + highlight), per-stage anchors for jump-to,
+  // and a full-log download.
+  const [q, setQ] = useState('')
+  const stageRefs = useRef([])
+  const query = q.trim().toLowerCase()
+  const stripAnsi = (s) => (s || '').replace(/\[[0-9;]*m/g, '')
+  const stageMatches = (i) =>
+    !query || labelAt(i).toLowerCase().includes(query) || stripAnsi(res[i]?.output).toLowerCase().includes(query)
+  const matchCount = query ? Array.from({ length: count }, (_, i) => stageMatches(i)).filter(Boolean).length : 0
+  const jumpTo = (i) => stageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  function downloadLog() {
+    const lines = []
+    for (let i = 0; i < count; i++) {
+      if (!res[i] && statusAt(i) === 'pending') continue
+      lines.push(`=== ${labelAt(i)} [${statusAt(i)}] ===`)
+      if (res[i]?.output) lines.push(stripAnsi(res[i].output))
+      lines.push('')
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(pipeline.name || 'pipeline').replace(/[^a-z0-9._-]+/gi, '-')}-run${runId}.log`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  // Highlight query matches in plain text (search mode strips ANSI for clarity).
+  function highlight(text) {
+    const plain = stripAnsi(text)
+    if (!query) return plain
+    const parts = []
+    const lc = plain.toLowerCase()
+    let idx = 0, n = 0
+    for (;;) {
+      const at = lc.indexOf(query, idx)
+      if (at < 0) { parts.push(plain.slice(idx)); break }
+      if (at > idx) parts.push(plain.slice(idx, at))
+      parts.push(<mark key={n++} className="bg-amber-400/40 text-amber-100 rounded-sm">{plain.slice(at, at + query.length)}</mark>)
+      idx = at + query.length
+    }
+    return parts
+  }
+
+  // Auto-scroll to the tail only for an active run and when not searching/jumping.
+  useEffect(() => {
+    if (!query && logRef.current && (overall === 'running' || overall === 'awaiting')) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [run, query, overall])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-3xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-5xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-semibold text-content-strong truncate">▶ {pipeline.name}</span>
@@ -459,6 +509,15 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
             <span className="text-[11px] text-content-faint shrink-0">run #{runId}{run?.trigger === 'webhook' ? ' · webhook' : ''}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <div className="relative">
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search log…"
+                className="text-xs pl-2 pr-6 py-1 rounded border border-border-strong bg-surface-raised text-content-strong w-44 focus:outline-none focus:border-brand-500" />
+              {q && <button onClick={() => setQ('')} title="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-faint hover:text-content text-xs">✕</button>}
+            </div>
+            {query && <span className="text-[10px] text-content-faint shrink-0">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>}
+            <button onClick={downloadLog} title="Download the full log"
+              className="text-[11px] px-2 py-1 rounded border border-border-strong text-content-muted hover:text-content hover:border-brand-600 shrink-0">⬇ Log</button>
             {(overall === 'running' || overall === 'awaiting') && (
               <button
                 onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
@@ -478,10 +537,12 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
             const st = statusAt(i)
             return (
               <div key={i} className="flex items-center">
-                <div className="flex flex-col items-center gap-1.5 min-w-[86px]">
-                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold ${stepCls(st)}`}>{stepIcon(st)}</div>
-                  <span className="text-[10px] text-center leading-tight text-content">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
-                </div>
+                <button type="button" onClick={() => jumpTo(i)}
+                  title={st === 'pending' ? 'Not started yet' : 'Jump to this stage’s log'}
+                  className="flex flex-col items-center gap-1.5 min-w-[86px] group focus:outline-none">
+                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-transform group-hover:scale-110 ${stepCls(st)}`}>{stepIcon(st)}</div>
+                  <span className="text-[10px] text-center leading-tight text-content group-hover:text-brand-300">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
+                </button>
                 {i < count - 1 && <div className="h-0.5 w-6 shrink-0 mx-1 bg-surface-overlay" />}
               </div>
             )
@@ -497,9 +558,10 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
           ) : Array.from({ length: count }, (_, i) => {
             const st = statusAt(i)
             if (st === 'pending') return null
+            if (!stageMatches(i)) return null
             const r = res[i]
             return (
-              <div key={i}>
+              <div key={i} ref={el => (stageRefs.current[i] = el)} className="scroll-mt-2">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs">{STAGE_ICON[typeAt(i)] || '•'}</span>
                   <span className="text-xs font-medium text-content-strong">{labelAt(i)}</span>
@@ -515,12 +577,15 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                     vanish on this bg. */}
                 {(r?.output || st === 'running') && (
                   <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-gray-100">
-                    {r?.output ? renderAnsi(r.output) : <span className="text-gray-400">running…</span>}
+                    {r?.output ? (query ? highlight(r.output) : renderAnsi(r.output)) : <span className="text-gray-400">running…</span>}
                   </pre>
                 )}
               </div>
             )
           })}
+          {run && count > 0 && query && matchCount === 0 && (
+            <p className="text-xs text-content-subtle">No log lines match “{q}”.</p>
+          )}
         </div>
       </div>
     </div>
