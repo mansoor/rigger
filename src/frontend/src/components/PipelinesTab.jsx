@@ -499,8 +499,8 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-5xl flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border gap-3">
+      <div className="bg-surface border border-border-strong rounded-xl w-full max-w-5xl flex flex-col h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border gap-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="font-semibold text-content-strong truncate">▶ {pipeline.name}</span>
             <span className={`text-[11px] px-1.5 py-0.5 rounded border ${statusChipCls(overall)}`}>
@@ -517,7 +517,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
             </div>
             {query && <span className="text-[10px] text-content-faint shrink-0">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>}
             <button onClick={downloadLog} title="Download the full log"
-              className="text-[11px] px-2 py-1 rounded border border-border-strong text-content-muted hover:text-content hover:border-brand-600 shrink-0">⬇ Log</button>
+              className="text-[11px] px-2 py-1 rounded border border-border-strong text-content-muted hover:text-content hover:border-brand-600 shrink-0">⬇ Download</button>
             {(overall === 'running' || overall === 'awaiting') && (
               <button
                 onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
@@ -532,7 +532,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
         </div>
 
         {/* Stage graph — current step pulses, completed steps go green. */}
-        <div className="flex items-center gap-0 px-5 py-4 border-b border-border overflow-x-auto">
+        <div className="flex items-center gap-0 px-5 py-4 border-b border-border overflow-x-auto shrink-0">
           {Array.from({ length: count }, (_, i) => {
             const st = statusAt(i)
             return (
