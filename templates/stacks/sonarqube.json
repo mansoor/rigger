@@ -3,7 +3,6 @@
     "POSTGRES_DB": "sonar",
     "POSTGRES_PASSWORD": "CHANGE_ME",
     "POSTGRES_USER": "sonar",
-    "SONAR_JDBC_PASSWORD": "CHANGE_ME",
     "SONAR_JDBC_URL": "jdbc:postgresql://postgres:5432/sonar",
     "SONAR_JDBC_USERNAME": "sonar"
   },
@@ -15,7 +14,7 @@
         "postgres"
       ],
       "env_vars": {
-        "SONAR_JDBC_PASSWORD": "${SONAR_JDBC_PASSWORD}",
+        "SONAR_JDBC_PASSWORD": "${POSTGRES_PASSWORD}",
         "SONAR_JDBC_URL": "${SONAR_JDBC_URL}",
         "SONAR_JDBC_USERNAME": "${SONAR_JDBC_USERNAME}"
       },
