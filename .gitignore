@@ -32,3 +32,6 @@ src/backend/cmd/server/dist/
 
 # Windows crash dumps
 *.stackdump
+
+# Self-update host-file-sync log (written by the in-app updater's helper)
+.rigger-update.log

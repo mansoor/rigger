@@ -233,17 +233,33 @@ func (h *Handler) startUpdate(w http.ResponseWriter, target, prev string) {
 	// falls back to a fast-forward pull of the current branch.
 	script := `sleep 2
 cd "$RIGGER_WORK" || exit 1
-if [ -d .git ] && command -v git >/dev/null 2>&1; then
-  git config --global --add safe.directory "$RIGGER_WORK" 2>/dev/null || true
-  git fetch --tags --quiet 2>/dev/null || true
-  if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-    git stash push --quiet -m "rigger-update: auto-stash before sync to v${RIGGER_TARGET_TAG}" 2>/dev/null || true
-    echo "rigger-update: stashed local edits to tracked files (recover via: git -C $RIGGER_WORK stash list)"
+# Host-file sync is OBSERVABLE: every step is logged (with exit codes) to
+# .rigger-update.log in the install dir so a silent failure leaves evidence —
+# previous versions sent all git output to /dev/null, making failures
+# undiagnosable. Still strictly best-effort: the whole block is wrapped so a git
+# failure never aborts the image update that follows.
+{
+  echo "=== rigger-update host-file sync $(date -u 2>/dev/null) -> v${RIGGER_TARGET_TAG} ==="
+  if [ -d .git ] && command -v git >/dev/null 2>&1; then
+    git config --global --add safe.directory "$RIGGER_WORK" || true
+    # stash internally creates a commit, which needs an identity; without this it
+    # fails on a dirty tree and the checkout is then blocked. Set a throwaway one.
+    git config --global user.email "rigger-update@localhost" || true
+    git config --global user.name  "Rigger Updater" || true
+    echo "-- before: $(git describe --tags --always 2>/dev/null) (branch $(git rev-parse --abbrev-ref HEAD 2>/dev/null))"
+    echo "-- git fetch --tags --force origin"
+    git fetch --tags --force origin || echo "   fetch FAILED rc=$?"
+    if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+      echo "-- tracked drift present, stashing"
+      git stash push -m "rigger-update: auto-stash before sync to v${RIGGER_TARGET_TAG}" || echo "   stash FAILED rc=$?"
+    fi
+    echo "-- git checkout v${RIGGER_TARGET_TAG}"
+    git checkout "v${RIGGER_TARGET_TAG}" || git pull --ff-only || echo "   checkout/pull FAILED rc=$?"
+    echo "-- after:  $(git describe --tags --always 2>/dev/null)"
+  else
+    echo "-- not a git checkout or git unavailable; skipping host-file sync"
   fi
-  git checkout --quiet "v${RIGGER_TARGET_TAG}" 2>/dev/null \
-    || git pull --ff-only --quiet 2>/dev/null \
-    || echo "rigger-update: could not align host files to v${RIGGER_TARGET_TAG} (image still updated)"
-fi
+} >> "$RIGGER_WORK/.rigger-update.log" 2>&1 || true
 cd "$RIGGER_WORK/src" || exit 1
 if grep -q '^RIGGER_IMAGE_TAG=' .env 2>/dev/null; then
   sed -i "s|^RIGGER_IMAGE_TAG=.*|RIGGER_IMAGE_TAG=${RIGGER_TARGET_TAG}|" .env
