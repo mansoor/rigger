@@ -1,0 +1,50 @@
+{
+  "name": "code-server",
+  "label": "VS Code Server (code-server)",
+  "description": "Run VS Code in the browser — a full IDE on your server, handy for editing and driving a development pipeline from anywhere. Access is password-protected (reveal the generated password in Env Vars); your workspace and settings persist in the config volume. SUDO_PASSWORD lets you install tools from the built-in terminal.",
+  "tags": [
+    "ide",
+    "vscode",
+    "development",
+    "editor"
+  ],
+  "categories": [
+    "Developer Tools"
+  ],
+  "website": "https://github.com/coder/code-server",
+  "images": [
+    {
+      "name": "app",
+      "image": "lscr.io/linuxserver/code-server",
+      "tag": "latest",
+      "port": 8443,
+      "web_routed": true,
+      "host_port": "8443",
+      "command": "",
+      "healthcheck": "curl -fs http://localhost:8443/healthz -o /dev/null || exit 1",
+      "healthcheck_config": {
+        "interval": "30s",
+        "timeout": "10s",
+        "retries": "3",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/code_config:/config"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "PUID": "1000",
+        "PGID": "1000",
+        "TZ": "Etc/UTC",
+        "PASSWORD": "${CODE_SERVER_PASSWORD}",
+        "SUDO_PASSWORD": "${CODE_SERVER_SUDO_PASSWORD}",
+        "DEFAULT_WORKSPACE": "/config/workspace"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "CODE_SERVER_PASSWORD": "CHANGE_ME",
+    "CODE_SERVER_SUDO_PASSWORD": "CHANGE_ME"
+  }
+}

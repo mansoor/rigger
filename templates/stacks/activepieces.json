@@ -1,0 +1,108 @@
+{
+  "name": "activepieces",
+  "label": "Activepieces",
+  "description": "Open-source no-code automation / workflow builder — an open Zapier alternative. Backed by PostgreSQL + Redis. The encryption key and JWT secret are generated for you (reveal them in Env Vars). After the first deploy, set AP_FRONTEND_URL to this environment's public URL so logins and webhooks resolve correctly.",
+  "tags": [
+    "automation",
+    "workflow",
+    "no-code",
+    "integrations"
+  ],
+  "categories": [
+    "Developer Tools",
+    "Productivity"
+  ],
+  "website": "https://www.activepieces.com",
+  "images": [
+    {
+      "name": "db",
+      "image": "postgres",
+      "tag": "16-alpine",
+      "port": 5432,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "30s"
+      },
+      "volumes": [
+        "./volumes/db_data:/var/lib/postgresql/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}"
+      }
+    },
+    {
+      "name": "redis",
+      "image": "redis",
+      "tag": "7-alpine",
+      "port": 6379,
+      "host_port": "",
+      "command": "",
+      "healthcheck": "redis-cli ping || exit 1",
+      "healthcheck_config": {
+        "interval": "10s",
+        "timeout": "5s",
+        "retries": "5",
+        "start_period": "10s"
+      },
+      "volumes": [
+        "./volumes/redis_data:/data"
+      ],
+      "depends_on": [],
+      "extra_ports": [],
+      "env_vars": {}
+    },
+    {
+      "name": "app",
+      "image": "activepieces/activepieces",
+      "tag": "latest",
+      "port": 80,
+      "web_routed": true,
+      "host_port": "8080",
+      "command": "",
+      "healthcheck": "",
+      "healthcheck_config": {},
+      "volumes": [
+        "./volumes/ap_cache:/root/.activepieces"
+      ],
+      "depends_on": [
+        "db",
+        "redis"
+      ],
+      "extra_ports": [],
+      "env_vars": {
+        "AP_ENGINE_EXECUTABLE_PATH": "dist/packages/engine/main.js",
+        "AP_ENVIRONMENT": "prod",
+        "AP_EXECUTION_MODE": "UNSANDBOXED",
+        "AP_FRONTEND_URL": "${AP_FRONTEND_URL}",
+        "AP_TELEMETRY_ENABLED": "false",
+        "AP_QUEUE_MODE": "REDIS",
+        "AP_REDIS_HOST": "redis",
+        "AP_REDIS_PORT": "6379",
+        "AP_POSTGRES_HOST": "db",
+        "AP_POSTGRES_PORT": "5432",
+        "AP_POSTGRES_DATABASE": "${POSTGRES_DB}",
+        "AP_POSTGRES_USERNAME": "${POSTGRES_USER}",
+        "AP_POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "AP_ENCRYPTION_KEY": "${AP_ENCRYPTION_KEY}",
+        "AP_JWT_SECRET": "${AP_JWT_SECRET}"
+      }
+    }
+  ],
+  "default_env_vars": {
+    "POSTGRES_DB": "activepieces",
+    "POSTGRES_USER": "activepieces",
+    "POSTGRES_PASSWORD": "CHANGE_ME",
+    "AP_ENCRYPTION_KEY": "CHANGE_ME",
+    "AP_JWT_SECRET": "CHANGE_ME",
+    "AP_FRONTEND_URL": "http://localhost:8080"
+  }
+}
