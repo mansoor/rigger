@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import DropZone from '../components/DropZone'
+import TemplateBrowserModal from '../components/TemplateBrowserModal'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
@@ -468,43 +469,25 @@ function EditTemplateModal({ busy, error, onLoad, onClose }) {
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ['templates'], queryFn: fetchTemplates,
   })
-  const sorted = [...templates].sort((a, b) => (a.label || a.name).localeCompare(b.label || b.name))
 
+  // Reuse the wizard's wide, searchable, category-filtered browser. Picking a
+  // template loads its full JSON into the editor (same name overwrites; rename
+  // saves a copy).
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-content-strong">Open an existing template</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
-        </div>
-        <p className="text-sm text-content-subtle">
-          Loads the template's full JSON into the editor. Keeping the same <strong className="text-content">name</strong> and saving overwrites it; changing the name saves a copy.
-        </p>
-
-        {isLoading ? (
-          <p className="text-sm text-content-subtle py-4 text-center">Loading templates…</p>
-        ) : sorted.length === 0 ? (
-          <p className="text-sm text-content-muted bg-surface-raised/50 border border-border-strong/60 rounded-lg px-3 py-3">
-            No saved templates yet. Create one from a source below first.
-          </p>
-        ) : (
-          <div className="max-h-72 overflow-y-auto space-y-1.5 -mx-1 px-1">
-            {sorted.map(t => (
-              <button key={t.name} onClick={() => onLoad(t.name)} disabled={busy}
-                className="w-full text-left px-3 py-2 rounded-lg border border-border-strong bg-surface-raised/40 hover:border-brand-500 hover:bg-surface-raised transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-content-strong">{t.label || t.name}</span>
-                  <span className="text-[11px] font-mono text-content-faint">{t.name}</span>
-                  <span className="ml-auto text-[11px] text-content-subtle">{t.image_count} service{t.image_count !== 1 ? 's' : ''}</span>
-                </div>
-                {t.description && <p className="text-xs text-content-subtle mt-0.5 line-clamp-2">{t.description}</p>}
-              </button>
-            ))}
-          </div>
-        )}
-        {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-      </div>
-    </div>
+    <TemplateBrowserModal
+      templates={templates}
+      onSelect={t => { if (!busy) onLoad(t.name) }}
+      onClose={onClose}
+      title="Open an existing template"
+      subtitle="Loads the full JSON into the editor — keep the name to overwrite, or rename to save a copy."
+      footer={
+        error
+          ? <p className="text-sm text-danger-fg">{error}</p>
+          : <p className="text-xs text-content-subtle">
+              {isLoading ? 'Loading templates…' : `${templates.length} saved template${templates.length === 1 ? '' : 's'}.`}
+            </p>
+      }
+    />
   )
 }
 
