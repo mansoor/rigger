@@ -197,10 +197,40 @@ func (h *Handler) ContainerImageHistory(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "could not resolve container image"})
 		return
 	}
-	out, err := ex.DockerOutput(executor.Spec{Args: []string{"image", "history", "--no-trunc", img}})
+	// JSON-per-line so the frontend can render a structured, collapsible layer
+	// stack (instruction + size per layer) instead of a raw text table.
+	out, err := ex.DockerOutput(executor.Spec{Args: []string{"image", "history", "--no-trunc", "--format", "{{json .}}", img}})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": strings.TrimSpace(err.Error())})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"output": string(out)})
+
+	type histLayer struct {
+		CreatedBy string `json:"created_by"`
+		CreatedAt string `json:"created_at"`
+		Size      string `json:"size"`
+		Comment   string `json:"comment"`
+		ID        string `json:"id"`
+	}
+	layers := []histLayer{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		var raw struct {
+			CreatedBy string `json:"CreatedBy"`
+			CreatedAt string `json:"CreatedAt"`
+			Size      string `json:"Size"`
+			Comment   string `json:"Comment"`
+			ID        string `json:"ID"`
+		}
+		if json.Unmarshal([]byte(line), &raw) != nil {
+			continue
+		}
+		layers = append(layers, histLayer{
+			CreatedBy: raw.CreatedBy, CreatedAt: raw.CreatedAt,
+			Size: raw.Size, Comment: raw.Comment, ID: raw.ID,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"layers": layers})
 }

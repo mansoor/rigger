@@ -30,6 +30,43 @@ function parseSize(s) {
 }
 // ioSum parses a docker "a / b" pair (NetIO, BlockIO) into total bytes.
 function ioSum(s) { const [a, b] = String(s || '').split('/'); return parseSize(a) + parseSize(b) }
+// fmtDuration formats a docker healthcheck duration (nanoseconds) as e.g. "10s" / "1m 30s".
+function fmtDuration(ns) {
+  if (!ns || ns <= 0) return '—'
+  const s = ns / 1e9
+  if (s < 60) return `${Number.isInteger(s) ? s : s.toFixed(1)}s`
+  const m = Math.floor(s / 60), rem = Math.round(s % 60)
+  return rem ? `${m}m ${rem}s` : `${m}m`
+}
+
+// parseLayer turns a `docker history` CreatedBy string into the underlying
+// Dockerfile instruction + a cleaned command, stripping the /bin/sh wrappers and
+// buildkit markers that make the raw output noisy.
+const LAYER_INSTRUCTIONS = ['ADD', 'COPY', 'RUN', 'CMD', 'ENV', 'ENTRYPOINT', 'EXPOSE', 'LABEL', 'USER', 'WORKDIR', 'VOLUME', 'ARG', 'HEALTHCHECK', 'STOPSIGNAL', 'ONBUILD', 'SHELL', 'MAINTAINER']
+const LAYER_COLORS = {
+  ADD: 'bg-pink-600 text-white', COPY: 'bg-pink-600 text-white',
+  RUN: 'bg-emerald-600 text-white',
+  CMD: 'bg-red-600 text-white', ENTRYPOINT: 'bg-red-600 text-white',
+  ENV: 'bg-amber-500 text-black', ARG: 'bg-amber-500 text-black',
+  LABEL: 'bg-sky-600 text-white', EXPOSE: 'bg-indigo-600 text-white',
+  WORKDIR: 'bg-purple-600 text-white', USER: 'bg-purple-600 text-white',
+  VOLUME: 'bg-cyan-600 text-white', HEALTHCHECK: 'bg-teal-600 text-white',
+}
+function parseLayer(createdBy) {
+  let cmd = (createdBy || '').trim()
+    .replace(/^\/bin\/sh -c #\(nop\)\s+/, '') // legacy meta instruction (CMD/ENV/ADD…)
+    .replace(/^\/bin\/sh -c\s+/, 'RUN ')      // legacy shell form → RUN
+    .replace(/\s*#\s*buildkit\s*$/, '')        // buildkit marker
+    .trim()
+  let instr = (cmd.split(/\s+/)[0] || '').toUpperCase()
+  if (LAYER_INSTRUCTIONS.includes(instr)) {
+    cmd = cmd.slice(instr.length).trim()
+  } else {
+    instr = 'RUN' // unrecognised → almost always a shell layer
+  }
+  if (instr === 'RUN') cmd = cmd.replace(/^\/bin\/sh -c\s+/, '').trim() // buildkit RUN wrapper
+  return { instr, command: cmd || '—' }
+}
 
 function KV({ k, v, mono = true }) {
   return (
@@ -46,10 +83,6 @@ function Section({ title, children }) {
       {children}
     </div>
   )
-}
-function Pre({ text, empty }) {
-  if (!text || !text.trim()) return <div className="text-content-faint text-xs">{empty || 'No output.'}</div>
-  return <pre className="text-[11px] text-content font-mono whitespace-pre overflow-x-auto bg-canvas/60 rounded-lg p-3 border border-border">{text}</pre>
 }
 
 // ── tabs ──────────────────────────────────────────────────────────────────────
@@ -192,25 +225,50 @@ function Labels({ c }) {
 }
 
 function Health({ c }) {
+  const cfg = c.Config?.Healthcheck
   const h = c.State?.Health
-  if (!h) return <div className="text-content-faint text-xs">No healthcheck configured.</div>
+  // A healthcheck can be configured (image/compose) even before any run has produced
+  // State.Health, so render the configuration whenever it exists.
+  if (!cfg && !h) return <div className="text-content-faint text-xs">No healthcheck configured.</div>
+  const test = cfg?.Test || []
+  // Test is ["CMD-SHELL", "cmd…"] or ["CMD", "exe", "arg"…]; "NONE" disables it.
+  const disabled = test[0] === 'NONE'
+  const cmd = test.length > 1 ? test.slice(1).join(' ') : (test[0] && test[0] !== 'NONE' ? test[0] : '')
   return (
     <div className="text-xs">
-      <Section>
-        <KV k="Status" v={h.Status} />
-        <KV k="Failing streak" v={h.FailingStreak} />
-      </Section>
-      <Section title="Recent checks">
-        {(h.Log || []).slice(-5).reverse().map((l, i) => (
-          <div key={i} className="border-b border-border/40 py-1.5">
-            <div className="flex gap-3 text-content-subtle">
-              <span>{fmtDate(l.Start)}</span>
-              <span className={l.ExitCode === 0 ? 'text-success-fg' : 'text-danger-fg'}>exit {l.ExitCode}</span>
-            </div>
-            {l.Output?.trim() && <div className="text-content-muted font-mono whitespace-pre-wrap break-all mt-0.5">{l.Output.trim().slice(0, 500)}</div>}
+      {cfg && !disabled && (
+        <Section title="Configuration">
+          <KV k="Command" v={cmd} />
+          <div className="grid grid-cols-2 gap-x-6">
+            <KV k="Interval" v={fmtDuration(cfg.Interval)} />
+            <KV k="Timeout" v={fmtDuration(cfg.Timeout)} />
+            <KV k="Retries" v={cfg.Retries ?? '—'} />
+            <KV k="Start period" v={fmtDuration(cfg.StartPeriod)} />
           </div>
-        ))}
+        </Section>
+      )}
+      {cfg && disabled && (
+        <Section title="Configuration">
+          <div className="text-content-faint">Healthcheck explicitly disabled (NONE).</div>
+        </Section>
+      )}
+      <Section title="Status">
+        <KV k="Current status" v={h?.Status || 'no checks recorded yet'} />
+        <KV k="Failing streak" v={h?.FailingStreak ?? '—'} />
       </Section>
+      {h?.Log?.length > 0 && (
+        <Section title="Recent checks">
+          {h.Log.slice(-5).reverse().map((l, i) => (
+            <div key={i} className="border-b border-border/40 py-1.5">
+              <div className="flex gap-3 text-content-subtle">
+                <span>{fmtDate(l.Start)}</span>
+                <span className={l.ExitCode === 0 ? 'text-success-fg' : 'text-danger-fg'}>exit {l.ExitCode}</span>
+              </div>
+              {l.Output?.trim() && <div className="text-content-muted font-mono whitespace-pre-wrap break-all mt-0.5">{l.Output.trim().slice(0, 500)}</div>}
+            </div>
+          ))}
+        </Section>
+      )}
     </div>
   )
 }
@@ -225,6 +283,68 @@ function Security({ c }) {
       <KV k="Cap add" v={(hc.CapAdd || []).join(', ')} />
       <KV k="Cap drop" v={(hc.CapDrop || []).join(', ')} />
       <KV k="Security opt" v={(hc.SecurityOpt || []).join(', ')} />
+    </div>
+  )
+}
+
+// Layers — Dockhand-style image history: a summary header (layer count + total
+// size) over a collapsible, numbered layer stack (base → top). Each row shows the
+// Dockerfile instruction + size; expanding reveals the full command and metadata.
+function Layers({ layers }) {
+  const [openIdx, setOpenIdx] = useState(null)
+  if (!layers || !layers.length) return <div className="text-content-faint text-xs">No layer history available.</div>
+  // docker history returns newest-first; reverse to read like a Dockerfile (base first).
+  const ordered = [...layers].reverse().map((l, i) => {
+    const { instr, command } = parseLayer(l.createdBy ?? l.created_by)
+    const bytes = parseSize(l.size ?? l.Size)
+    return { ...l, n: i + 1, instr, command, bytes }
+  })
+  const total = ordered.reduce((s, l) => s + l.bytes, 0)
+  const big = total > 0 ? total * 0.1 : 50 * 1e6 // a layer is "large" if >10% of the image (min 50MB)
+  return (
+    <div className="text-xs">
+      <div className="flex items-center justify-between bg-surface/50 border border-border rounded-lg px-3 py-2 mb-3">
+        <div className="flex gap-5">
+          <span className="text-content-subtle">Total layers <span className="text-content-strong font-semibold ml-1">{ordered.length}</span></span>
+          <span className="text-content-subtle">Total size <span className="text-content-strong font-semibold ml-1">{fmtBytes(total)}</span></span>
+        </div>
+      </div>
+      <div className="text-[11px] text-content-subtle mb-2">Layer stack (base → top) — click a row to expand</div>
+      <div className="space-y-1">
+        {ordered.map((l, i) => {
+          const open = openIdx === i
+          const large = l.bytes >= big && l.bytes > 0
+          const missing = !l.id || (l.id ?? l.ID) === '<missing>'
+          return (
+            <div key={i} className="border border-border rounded-lg overflow-hidden">
+              <button type="button" onClick={() => setOpenIdx(open ? null : i)}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-surface-raised/50 transition-colors text-left">
+                <span className="text-content-faint shrink-0 w-4">{open ? '▾' : '▸'}</span>
+                <span className="text-content-subtle font-mono shrink-0 w-7 text-right">#{l.n}</span>
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold font-mono ${LAYER_COLORS[l.instr] || 'bg-surface-overlay text-content'}`}>{l.instr}</span>
+                <span className="flex-1 min-w-0 truncate font-mono text-content">{l.command}</span>
+                <span className="shrink-0 text-content-subtle font-mono">{fmtBytes(l.bytes)}</span>
+                {large && <span className="shrink-0 px-1.5 py-0.5 rounded-full text-[10px] bg-warning-subtle/60 text-warning-fg">Large</span>}
+              </button>
+              {open && (
+                <div className="px-3 py-2 border-t border-border bg-canvas/40 space-y-2">
+                  <div className="grid grid-cols-2 gap-x-6">
+                    <KV k="Instruction" v={l.instr} />
+                    <KV k="Size" v={fmtBytes(l.bytes)} />
+                    <KV k="Created" v={fmtDate(l.createdAt ?? l.created_at)} />
+                    {!missing && <KV k="Layer ID" v={String(l.id ?? l.ID).replace('sha256:', '').slice(0, 19)} />}
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-content-subtle uppercase tracking-wider mb-1">Command</div>
+                    <pre className="text-[11px] text-content font-mono whitespace-pre-wrap break-all bg-canvas/60 rounded-lg p-2 border border-border">{l.command}</pre>
+                  </div>
+                  {(l.comment ?? l.Comment) && <KV k="Comment" v={l.comment ?? l.Comment} />}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -386,7 +506,7 @@ export default function ContainerInfoModal({ workspace, wsName, env, service, sh
               {tab === 'Security' && <Security c={c} />}
               {tab === 'Layers' && (hist.isLoading ? <div className="text-content-subtle text-xs">Loading…</div>
                 : hist.error ? <div className="text-warning-fg text-xs">{errText(hist.error)}</div>
-                  : <Pre text={hist.data?.output} />)}
+                  : <Layers layers={hist.data?.layers} />)}
               {tab === 'JSON' && <RawJson data={insp.data} />}
             </div>
           )}
