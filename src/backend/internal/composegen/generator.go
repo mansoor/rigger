@@ -434,7 +434,7 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 		// Always attach the shared "loading" errors middleware so a backend that's
 		// still starting / crash-looping shows the friendly retry page on 502/503/504
 		// instead of a bare gateway error; prepend basic-auth when this router uses it.
-		mws := "rigger-loading@docker"
+		mws := "rigger-loading@file"
 		if auth {
 			mws = router + "_auth," + mws
 		}
@@ -451,7 +451,7 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 		// Always attach the shared "loading" errors middleware so a backend that's
 		// still starting / crash-looping shows the friendly retry page on 502/503/504
 		// instead of a bare gateway error; prepend basic-auth when this router uses it.
-		mws := "rigger-loading@docker"
+		mws := "rigger-loading@file"
 		if auth {
 			mws = router + "_auth," + mws
 		}
