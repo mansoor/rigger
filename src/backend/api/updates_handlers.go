@@ -220,20 +220,29 @@ func (h *Handler) startUpdate(w http.ResponseWriter, target, prev string) {
 	// files are bind-mounted from it (templates/, fallback.html, the compose file
 	// itself), so an image-only pull would leave them stale. Align them to the target
 	// tag BEFORE the compose pull. This is strictly best-effort and must never abort
-	// the image update: it's skipped when the working tree is dirty (so local
-	// customizations to compose/templates are never clobbered), and any git failure
-	// is swallowed. "latest" (no concrete tag) falls back to a fast-forward pull.
+	// the image update: any git failure is swallowed.
+	//
+	// Earlier this skipped entirely whenever the working tree was dirty, which made
+	// the sync a no-op on any real install: Rigger's data lives inside the repo tree
+	// and a single hand-edited template (e.g. a patched dockerfiles/laravel/Dockerfile)
+	// left the tree permanently "dirty". Rigger never writes into the repo at runtime,
+	// so a modified TRACKED file is an operator edit — we STASH it (recoverable, not
+	// discarded) so the checkout can proceed, then align to the tag. Untracked files
+	// (custom templates, generated data) are left in place; .env is git-ignored so the
+	// RIGGER_IMAGE_TAG edit below survives the checkout. "latest" (no concrete tag)
+	// falls back to a fast-forward pull of the current branch.
 	script := `sleep 2
 cd "$RIGGER_WORK" || exit 1
 if [ -d .git ] && command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$RIGGER_WORK" 2>/dev/null || true
-  if [ -z "$(git status --porcelain 2>/dev/null)" ]; then
-    git fetch --tags --quiet 2>/dev/null && \
-      { git checkout --quiet "v${RIGGER_TARGET_TAG}" 2>/dev/null \
-        || git pull --ff-only --quiet 2>/dev/null; } || true
-  else
-    echo "rigger-update: working tree has local changes — skipping host-file sync (image still updates)"
+  git fetch --tags --quiet 2>/dev/null || true
+  if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+    git stash push --quiet -m "rigger-update: auto-stash before sync to v${RIGGER_TARGET_TAG}" 2>/dev/null || true
+    echo "rigger-update: stashed local edits to tracked files (recover via: git -C $RIGGER_WORK stash list)"
   fi
+  git checkout --quiet "v${RIGGER_TARGET_TAG}" 2>/dev/null \
+    || git pull --ff-only --quiet 2>/dev/null \
+    || echo "rigger-update: could not align host files to v${RIGGER_TARGET_TAG} (image still updated)"
 fi
 cd "$RIGGER_WORK/src" || exit 1
 if grep -q '^RIGGER_IMAGE_TAG=' .env 2>/dev/null; then
