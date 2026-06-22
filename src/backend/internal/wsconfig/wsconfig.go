@@ -44,6 +44,42 @@ type Service struct {
 	EnvFileWritable bool  `json:"env_file_writable,omitempty"` // deliver .env writable (app owns it) — see composegen
 }
 
+// UnmarshalJSON tolerates a string OR numeric `port` in config.json. Detected/scan
+// services persist the container port as a string (compose ports are strings, the
+// detector keeps them as such), while wizard-created services write a number — both
+// must read back into Port (int). Composegen's own view already uses flexStr for
+// the same reason; this mirrors that on the read side.
+func (s *Service) UnmarshalJSON(b []byte) error {
+	type alias Service // avoid infinite recursion
+	aux := &struct {
+		Port json.RawMessage `json:"port"`
+		*alias
+	}{alias: (*alias)(s)}
+	if err := json.Unmarshal(b, aux); err != nil {
+		return err
+	}
+	s.Port = flexInt(aux.Port)
+	return nil
+}
+
+// flexInt parses a JSON value that may be a number (9000) or a numeric string
+// ("9000") into an int. Empty/null/non-numeric (ranges, ${VAR}) → 0.
+func flexInt(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var n int
+	if json.Unmarshal(raw, &n) == nil {
+		return n
+	}
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		n, _ = strconv.Atoi(str)
+		return n
+	}
+	return 0
+}
+
 // WebPort returns the container port of the project's web/app service — the port
 // composegen routes (Traefik) or publishes (host_port) to, and therefore the port
 // an app honoring $PORT must listen on. It checks, in order: the Traefik web entry,

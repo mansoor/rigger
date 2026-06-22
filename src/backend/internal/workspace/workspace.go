@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/composegen"
@@ -230,6 +231,28 @@ type ConfigImage struct {
 	HostPort   string   `json:"host_port"`
 	ExtraPorts []string `json:"extra_ports"`
 	LinkPorts  []string `json:"link_ports"`
+}
+
+// UnmarshalJSON tolerates a string OR numeric `port` — detected/scan services
+// persist it as a string, wizard-created ones as a number (see wsconfig.flexInt).
+func (ci *ConfigImage) UnmarshalJSON(b []byte) error {
+	type alias ConfigImage
+	aux := &struct {
+		Port json.RawMessage `json:"port"`
+		*alias
+	}{alias: (*alias)(ci)}
+	if err := json.Unmarshal(b, aux); err != nil {
+		return err
+	}
+	if len(aux.Port) > 0 {
+		if json.Unmarshal(aux.Port, &ci.Port) != nil {
+			var s string
+			if json.Unmarshal(aux.Port, &s) == nil {
+				ci.Port, _ = strconv.Atoi(s)
+			}
+		}
+	}
+	return nil
 }
 
 // EnvAccessInfo holds resolved (${VAR}-substituted) access values for one environment.
