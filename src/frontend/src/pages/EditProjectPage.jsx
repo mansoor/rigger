@@ -1586,9 +1586,14 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               { value: 'basic', label: 'Basic auth — HTTP password at the Traefik edge' },
             ]} />
             {authGate === 'basic' && (
-              <p className="text-xs text-content-subtle mt-1">
-                A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
-              </p>
+              <>
+                <p className="text-xs text-content-subtle mt-1">
+                  A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
+                </p>
+                <p className="text-xs text-warning-fg mt-1">
+                  ⚠ Use it for static sites / apps without their own login. For token-based apps (Activepieces, Grafana, most SPAs), use Cloudflare Tunnel + Access.
+                </p>
+              </>
             )}
           </div>
         )}
