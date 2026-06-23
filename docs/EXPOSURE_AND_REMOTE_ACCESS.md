@@ -1,6 +1,13 @@
 # Rigger — App Exposure Model: Cloudflare Tunnel + Auth-Gating (Design Doc)
 
-Status: **design / for review** — no code yet. Scope-compatible with the Docker + Swarm
+Status: **Phase 1 (basic auth-gate) + Phase 2 (Cloudflare Tunnel v1, token) SHIPPED** on
+develop (backend aa6343e, frontend e2b478f): `expose_mode`/`auth_gate` tri-state model +
+`cloudflared` connector + `${APP_AUTH_USERS}` basic-auth on any web router + env-editor
+Exposure section + env-card badges. Default output byte-identical (golden parity). Live
+E2E (real CF tunnel token) pending. Remaining: **P3** forwardAuth→Authentik, **P4** Tunnel
+v2 (API-managed), wizard-side controls, env-card URL = CF hostname. Original design below.
+
+Status (original): **design / for review** — no code yet. Scope-compatible with the Docker + Swarm
 harden-first stance (additive; does not touch the core deploy paths). Build *after*
 hardening; this locks the model so it isn't re-litigated.
 
