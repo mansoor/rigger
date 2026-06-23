@@ -42,6 +42,9 @@ type Options struct {
 	// that 404'd until a manual Refresh regenerated them. See composegen.RouteOpts.
 	DNSProvider  string
 	OverrideCert bool
+	// CustomDomains are the env's VERIFIED external domains (Render-style), carried so
+	// the post-build compose has the same custom-domain routers as deploy/refresh.
+	CustomDomains []string
 	// Registry is the EFFECTIVE registry (settings.EffectiveRegistry: project →
 	// workspace-system → global-system), resolved by the bridge. When non-empty it
 	// overrides config.json's `registry` so images are tagged/pushed/advanced against
