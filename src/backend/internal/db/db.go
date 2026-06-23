@@ -678,9 +678,13 @@ func (d *DB) migrate() error {
 		token       TEXT NOT NULL,
 		verified    INTEGER NOT NULL DEFAULT 0,
 		verified_at DATETIME,
+		is_primary  INTEGER NOT NULL DEFAULT 0,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`) //nolint:errcheck
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_custom_domains_env ON custom_domains(workspace, project, env)`) //nolint:errcheck
+	// is_primary (the ★ canonical domain) was added after the table shipped; add it to
+	// pre-existing tables. Errors (column already present) are ignored.
+	d.Exec(`ALTER TABLE custom_domains ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0`) //nolint:errcheck
 
 	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
 	// 'ws:{key}' = private to that workspace. When the column is freshly added,

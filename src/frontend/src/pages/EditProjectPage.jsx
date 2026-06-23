@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -1337,9 +1337,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
   const confirm = useConfirm()
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const [copyOpen, setCopyOpen] = useState(false)
-  const [tosAccepted, setTosAccepted] = useState(!!cfg.ssl_enabled) // LE ToS ack gates SSL
-  const sslBlocked = looksLocalOrIP(cfg.domain)
-  const sslEligible = !!cfg.domain && !sslBlocked
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
   // Unified exposure model: one selector drives expose_mode + the legacy traefik_enabled
   // toggle together. Legacy configs (no expose_mode) map by traefik_enabled so they keep
@@ -1471,8 +1468,8 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS, autoUrlMode, appHost)
           if (!route) return null
           // For a URL that can't get a Let's Encrypt cert (localhost / IP / magic-DNS),
-          // an inline "Enable local HTTPS" upgrades it to Traefik's self-signed cert.
-          // Per-env opt-in (legacy project local_tls is the initial default).
+          // an inline self-signed HTTPS toggle is the only TLS choice (everything else is
+          // automatic per address). Per-env opt-in (legacy project local_tls is the default).
           const showLocalHTTPS = !leCapable(route.domain)
           const localOn = cfg.ssl_self_signed != null ? !!cfg.ssl_self_signed : !!localTLS
           // An auto (magic-DNS / localhost) URL is only LAN-reachable when it resolves to a
@@ -1480,101 +1477,60 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           // from the internet. A real base domain (or a public App-host IP) is internet-wide.
           const privIP = (h) => !h || h === 'localhost' || /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
           const lan = route.auto && !(baseDomain || '').trim() && (route.domain.endsWith('.localhost') || privIP((appHost || '').trim()))
+          const source = !route.auto ? 'base domain' : (route.domain.endsWith('.localhost') ? 'local only' : `auto-URL${route.ssl ? ' · TLS' : ''}`)
           return (
-            <>
+            <div>
+              <Label>Primary URL <span className="font-normal normal-case text-content-faint">(automatic)</span></Label>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-content-subtle min-w-0 truncate">
-                  Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
-                  {route.auto && <span className="text-content-faint"> ({lan ? 'LAN' : 'auto'}{route.ssl ? ' · TLS' : ''})</span>}
+                  <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+                  <span className="text-content-faint"> ({source})</span>
+                  <button type="button" onClick={() => navigator.clipboard?.writeText(route.url)} title="Copy"
+                    className="ml-2 text-content-faint hover:text-content">⧉</button>
                 </p>
                 {showLocalHTTPS && (
                   <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0" title="Serve this URL over HTTPS with Traefik's self-signed cert (browsers warn; useful for apps that require HTTPS). No public cert is possible for localhost / IP / magic-DNS.">
                     <input type="checkbox" checked={localOn}
                       onChange={e => onChange({ ...cfg, ssl_self_signed: e.target.checked, ssl_enabled: e.target.checked })}
                       className="w-3.5 h-3.5 accent-brand-500" />
-                    Enable local HTTPS
+                    Serve HTTPS (self-signed)
                   </label>
                 )}
               </div>
-              {route.auto && (
-                <p className="text-xs text-content-faint">
-                  {lan
-                    ? <>Magic-DNS name pointing at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — resolvable anywhere but only <strong>reachable on this network/host</strong>. For internet access, set a real public domain below (or point the App host at a public IP).</>
-                    : <>Auto-generated URL — reachable wherever this hostname resolves and the host is reachable.</>}
-                </p>
-              )}
-            </>
+              <p className="text-xs text-content-faint mt-1">
+                {route.auto
+                  ? (lan
+                    ? <>Magic-DNS name at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — only reachable on this network/host. For a public address, set a base domain (admin Settings) or add a custom domain below. TLS is issued automatically once it&apos;s public.</>
+                    : <>Auto-generated — reachable wherever this hostname resolves. TLS issued automatically.</>)
+                  : <>On the base domain. TLS issued automatically (wildcard or per-host).</>}
+              </p>
+            </div>
           )
         })()}
         {exMode === 'traefik' && (
-          <>
-            {/* Domain + "Request SSL" on one row. SSL enables only once a real public
-                domain is entered (localhost/IP can't get a Let's Encrypt cert). */}
-            <div>
-              <Label>Domain <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-              <div className="flex items-center gap-3">
-                <div className="flex-1"><Input value={cfg.domain} onChange={v => upd('domain', v)} placeholder="leave blank for an automatic URL" /></div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className={`text-xs ${sslEligible ? 'text-content' : 'text-content-faint'}`}>Request SSL</span>
-                  <button
-                    type="button"
-                    disabled={!sslEligible}
-                    title={!cfg.domain ? 'Enter a domain to enable SSL' : sslBlocked ? 'Not available for localhost or IP addresses' : 'Request a Let\'s Encrypt certificate'}
-                    onClick={() => upd('ssl_enabled', !cfg.ssl_enabled)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${cfg.ssl_enabled && sslEligible ? 'bg-green-600' : 'bg-surface-overlay'} disabled:opacity-40`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${cfg.ssl_enabled && sslEligible ? 'translate-x-5' : ''}`} />
-                  </button>
-                </div>
-              </div>
-              {!cfg.domain && (
+          /* Advanced — Traefik network + per-env Let's Encrypt account email override.
+             TLS is automatic per address now, so there's no SSL toggle here. */
+          <details className="text-xs">
+            <summary className="cursor-pointer text-content-faint hover:text-content-subtle select-none">Advanced</summary>
+            <div className="mt-2 pl-3 border-l-2 border-border-strong space-y-3">
+              <div>
+                <Label>Let&apos;s Encrypt email <span className="font-normal normal-case text-content-faint">(override)</span></Label>
+                <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
+                  placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'inherit workspace / instance email'} />
                 <p className="text-xs text-content-subtle mt-1">
-                  Blank → an automatic URL: {baseDomain
-                    ? <>the base domain (<code className="font-mono text-xs">{resourcePrefix?.replace(/_/g, '-')}-{envName}.{baseDomain}</code>)</>
-                    : <>the admin auto-URL (sslip/nip via the App host, else <code className="font-mono text-xs">*.localhost</code>)</>}.
-                  Set a value only to use your own custom domain (point a CNAME at this server).
+                  Account/recovery contact for this env&apos;s certs — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Only set this to use a different LE account for this environment.
                 </p>
-              )}
-              {sslBlocked && (
-                <p className="text-xs text-content-faint mt-1">SSL isn&apos;t available for localhost or IP addresses — use a public domain.</p>
-              )}
-            </div>
-
-            {/* When SSL is on: the LE email (inherited, overridable) + the ToS
-                acknowledgment on one row. Unchecking the ToS turns SSL back off. */}
-            {cfg.ssl_enabled && sslEligible && (
-              <div className="pl-3 border-l-2 border-success-border space-y-1.5">
-                <div className="flex items-end gap-3">
-                  <div className="flex-1">
-                    <Label>Let&apos;s Encrypt email</Label>
-                    <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
-                      placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'inherit workspace / instance email'} />
-                  </div>
-                  <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0 pb-2 max-w-[48%]">
-                    <input type="checkbox" checked={tosAccepted}
-                      onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
-                      className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
-                    <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a></span>
-                  </label>
-                </div>
-                <p className="text-xs text-content-faint">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. After saving, click <strong>Refresh</strong> on the env card (or redeploy) to apply TLS.</p>
               </div>
-            )}
-
-            {/* Traefik network — advanced; changing it breaks routing unless the
-                proxy actually listens on the new network. Hidden by default. */}
-            <details className="text-xs">
-              <summary className="cursor-pointer text-content-faint hover:text-content-subtle select-none">Advanced</summary>
-              <div className="mt-2 pl-3 border-l-2 border-border-strong">
+              <div>
                 <Label>Traefik network</Label>
                 <Input value={cfg.traefik_network} onChange={v => upd('traefik_network', v)} placeholder="traefik_net" />
                 <p className="text-xs text-content-subtle mt-1">
                   The shared proxy network. Leave as <code className="font-mono text-xs">traefik_net</code> unless you run a
-                  differently-named Traefik — a mismatch means the proxy can't reach this env and routing 404s.
+                  differently-named Traefik — a mismatch means the proxy can&apos;t reach this env and routing 404s.
                 </p>
               </div>
-            </details>
-          </>
+            </div>
+          </details>
         )}
 
         {/* Auth gate — only under Traefik (basic-auth is a Traefik edge middleware). */}
@@ -1932,6 +1888,10 @@ function CustomDomainsPanel({ workspaceName, envName }) {
     mutationFn: (id) => deleteCustomDomain(workspace, workspaceName, envName, id),
     onSuccess: refresh,
   })
+  const star = useMutation({
+    mutationFn: ({ id, primary }) => setPrimaryCustomDomain(workspace, workspaceName, envName, id, primary),
+    onSuccess: refresh,
+  })
   const verify = async (id) => {
     setBusy(id); setMsg(null)
     try {
@@ -1968,9 +1928,16 @@ function CustomDomainsPanel({ workspaceName, envName }) {
           {domains.map(d => (
             <div key={d.id} className="border border-border rounded-lg bg-surface-raised/40">
               <div className="flex items-center gap-2 px-3 py-2">
+                {d.verified && (
+                  <button type="button" onClick={() => star.mutate({ id: d.id, primary: !d.is_primary })}
+                    title={d.is_primary ? 'Canonical domain (drives Open-app). Click to unset.' : 'Make this the canonical domain'}
+                    className={`text-sm ${d.is_primary ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
+                    {d.is_primary ? '★' : '☆'}
+                  </button>
+                )}
                 <span className="font-mono text-xs text-content flex-1 truncate">{d.domain}</span>
                 {d.verified
-                  ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg">✓ verified</span>
+                  ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg">✓ verified{d.is_primary ? ' · canonical' : ''}</span>
                   : <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg">pending</span>}
                 {!d.verified && (
                   <button type="button" onClick={() => verify(d.id)} disabled={busy === d.id}

@@ -25,6 +25,7 @@ type Domain struct {
 	Token      string     `json:"token"`
 	Verified   bool       `json:"verified"`
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	Primary    bool       `json:"is_primary"` // ★ canonical — drives Open-app / APP_URL
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
@@ -61,12 +62,13 @@ func scan(rows *sql.Rows) ([]Domain, error) {
 	var out []Domain
 	for rows.Next() {
 		var d Domain
-		var verified int
+		var verified, isPrimary int
 		var verifiedAt sql.NullTime
-		if err := rows.Scan(&d.ID, &d.Workspace, &d.Project, &d.Env, &d.Domain, &d.Token, &verified, &verifiedAt, &d.CreatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Workspace, &d.Project, &d.Env, &d.Domain, &d.Token, &verified, &verifiedAt, &isPrimary, &d.CreatedAt); err != nil {
 			return nil, err
 		}
 		d.Verified = verified != 0
+		d.Primary = isPrimary != 0
 		if verifiedAt.Valid {
 			t := verifiedAt.Time
 			d.VerifiedAt = &t
@@ -76,7 +78,7 @@ func scan(rows *sql.Rows) ([]Domain, error) {
 	return out, rows.Err()
 }
 
-const cols = `id, workspace, project, env, domain, token, verified, verified_at, created_at`
+const cols = `id, workspace, project, env, domain, token, verified, verified_at, is_primary, created_at`
 
 // List returns all custom domains for an env (verified + pending).
 func List(d *db.DB, ws, project, env string) ([]Domain, error) {
@@ -153,6 +155,48 @@ func SetVerified(d *db.DB, id int64, verified bool) error {
 		return err
 	}
 	_, err := d.Exec(`UPDATE custom_domains SET verified=0, verified_at=NULL WHERE id=?`, id)
+	return err
+}
+
+// SetPrimary marks one domain as the env's ★ canonical (clearing any other primary for
+// the same env), or clears it when primary is false. Only a verified domain should be set
+// primary (callers enforce).
+func SetPrimary(d *db.DB, id int64, primary bool) error {
+	dom, err := Get(d, id)
+	if err != nil {
+		return err
+	}
+	if !primary {
+		_, err := d.Exec(`UPDATE custom_domains SET is_primary=0 WHERE id=?`, id)
+		return err
+	}
+	// At most one primary per env: clear siblings, then set this one.
+	if _, err := d.Exec(`UPDATE custom_domains SET is_primary=0 WHERE workspace=? AND project=? AND env=?`, dom.Workspace, dom.Project, dom.Env); err != nil {
+		return err
+	}
+	_, err = d.Exec(`UPDATE custom_domains SET is_primary=1 WHERE id=?`, id)
+	return err
+}
+
+// PrimaryDomain returns the env's ★ canonical custom domain (verified + primary), or "".
+func PrimaryDomain(d *db.DB, ws, project, env string) string {
+	var s string
+	d.QueryRow(`SELECT domain FROM custom_domains WHERE workspace=? AND project=? AND env=? AND verified=1 AND is_primary=1 LIMIT 1`, ws, project, env).Scan(&s) //nolint:errcheck
+	return s
+}
+
+// SeedPrimary inserts (or upgrades) a domain as a VERIFIED PRIMARY custom domain. Used by
+// the legacy-domain migration: a domain that was already live under the old per-env
+// `domain` field is trusted (no re-verification). Idempotent on the unique domain.
+func SeedPrimary(d *db.DB, ws, project, env, domain string) error {
+	domain = Normalize(domain)
+	if domain == "" {
+		return fmt.Errorf("domain is required")
+	}
+	_, err := d.Exec(`INSERT INTO custom_domains (workspace, project, env, domain, token, verified, verified_at, is_primary)
+		VALUES (?,?,?,?,?,1,CURRENT_TIMESTAMP,1)
+		ON CONFLICT(domain) DO UPDATE SET verified=1, is_primary=1`,
+		ws, project, env, domain, newToken())
 	return err
 }
 

@@ -162,6 +162,7 @@ export const fetchCustomDomains = (ws, name, env)        => api.get(`${projBase(
 export const addCustomDomain    = (ws, name, env, domain) => api.post(`${projBase(ws, name)}/envs/${env}/domains`, { domain }).then(r => r.data)
 export const verifyCustomDomain = (ws, name, env, id)    => api.post(`${projBase(ws, name)}/envs/${env}/domains/${id}/verify`).then(r => r.data)
 export const deleteCustomDomain = (ws, name, env, id)    => api.delete(`${projBase(ws, name)}/envs/${env}/domains/${id}`).then(r => r.data)
+export const setPrimaryCustomDomain = (ws, name, env, id, primary) => api.post(`${projBase(ws, name)}/envs/${env}/domains/${id}/primary`, { primary }).then(r => r.data)
 export const fetchActionRuns   = (ws, name, limit = 100) => api.get(`${projBase(ws, name)}/action-runs`, { params: { limit } }).then(r => r.data)
 export const clearActionRuns   = (ws, name)      => api.delete(`${projBase(ws, name)}/action-runs`).then(r => r.data)
 // Release pipeline #4: explicit env deploy-tier order.

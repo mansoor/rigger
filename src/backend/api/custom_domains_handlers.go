@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -129,6 +130,35 @@ func (h *Handler) VerifyCustomDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"verified": true, "method": method})
 }
 
+// POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}/primary
+// Body {primary: bool} — set/clear the ★ canonical domain (drives Open-app / APP_URL).
+func (h *Handler) SetPrimaryCustomDomain(w http.ResponseWriter, r *http.Request) {
+	ws, name, env := r.PathValue("workspace"), r.PathValue("name"), r.PathValue("env")
+	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	d, err := customdomains.Get(h.db, id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "domain not found"})
+		return
+	}
+	var body struct {
+		Primary bool `json:"primary"`
+	}
+	_ = readJSON(r, &body)
+	if body.Primary && !d.Verified {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "verify the domain before making it canonical"})
+		return
+	}
+	if err := customdomains.SetPrimary(h.db, id, body.Primary); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"primary": body.Primary})
+}
+
 // DELETE /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}
 func (h *Handler) DeleteCustomDomain(w http.ResponseWriter, r *http.Request) {
 	ws, name, env := r.PathValue("workspace"), r.PathValue("name"), r.PathValue("env")
@@ -143,6 +173,75 @@ func (h *Handler) DeleteCustomDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	h.regenEnvCompose(ws, name, env)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// MigrateLegacyDomains is a one-shot boot migration: the per-env `domain` field (the old
+// "this env's primary domain") is superseded by auto-URL-primary + verified custom domains.
+// For every env with a non-empty `domain`, seed it as a VERIFIED PRIMARY custom domain
+// (it was already live, so trusted) and clear the legacy field, so the env now routes at
+// its auto URL with the domain as an additive custom-domain router. Idempotent.
+func (h *Handler) MigrateLegacyDomains() {
+	var done string
+	h.db.QueryRow(`SELECT value FROM app_settings WHERE key='domains_migrated_v1'`).Scan(&done) //nolint:errcheck
+	if done == "1" {
+		return
+	}
+	if wsEntries, err := os.ReadDir(h.workspacesDir); err == nil {
+		for _, we := range wsEntries {
+			if !we.IsDir() {
+				continue
+			}
+			projEntries, perr := os.ReadDir(wspath.ProjectsDir(h.workspacesDir, we.Name()))
+			if perr != nil {
+				continue
+			}
+			for _, pe := range projEntries {
+				if pe.IsDir() {
+					h.migrateProjectDomains(we.Name(), pe.Name())
+				}
+			}
+		}
+	}
+	h.db.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES ('domains_migrated_v1','1',CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value='1', updated_at=CURRENT_TIMESTAMP`) //nolint:errcheck
+}
+
+func (h *Handler) migrateProjectDomains(ws, proj string) {
+	path := wspath.ConfigPath(h.workspacesDir, ws, proj)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var cfg map[string]any
+	if json.Unmarshal(raw, &cfg) != nil {
+		return
+	}
+	envs, ok := cfg["environments"].(map[string]any)
+	if !ok {
+		return
+	}
+	changed := false
+	for envName, ev := range envs {
+		em, ok := ev.(map[string]any)
+		if !ok {
+			continue
+		}
+		dom, _ := em["domain"].(string)
+		if strings.TrimSpace(dom) == "" {
+			continue
+		}
+		if err := customdomains.SeedPrimary(h.db, ws, proj, envName, dom); err != nil {
+			continue // keep the legacy field if we couldn't seed (retry next boot)
+		}
+		em["domain"] = ""
+		envs[envName] = em
+		changed = true
+	}
+	if changed {
+		if out, merr := json.MarshalIndent(cfg, "", "  "); merr == nil {
+			os.WriteFile(path, out, 0o644) //nolint:errcheck
+		}
+	}
 }
 
 // regenEnvCompose rewrites an env's docker-compose.yml from config.json + current

@@ -209,7 +209,8 @@ func main() {
 
 	// Start daily automated housekeeping (networks + dangling images) at 03:00 UTC
 	handler.StartHousekeepingScheduler(3)
-	handler.MigrateBackupConfig()  // one-time: legacy config.backup → per-env schedules
+	handler.MigrateBackupConfig()   // one-time: legacy config.backup → per-env schedules
+	handler.MigrateLegacyDomains()  // one-time: legacy per-env domain → verified primary custom domain
 	handler.StartBackupScheduler() // Phase 11 — per-env interval-based backup schedules
 	handler.StartPreviewReaper()   // tear down preview envs past their TTL (missed-close safety net)
 
@@ -1057,6 +1058,7 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains", authSvc.Middleware(http.HandlerFunc(handler.ListCustomDomains)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains", authSvc.Middleware(http.HandlerFunc(handler.CreateCustomDomain)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}/verify", authSvc.Middleware(http.HandlerFunc(handler.VerifyCustomDomain)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}/primary", authSvc.Middleware(http.HandlerFunc(handler.SetPrimaryCustomDomain)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeleteCustomDomain)))
 
 	// Phase 2b: repo scanner — clone + static-detect a stack into a draft service graph.
