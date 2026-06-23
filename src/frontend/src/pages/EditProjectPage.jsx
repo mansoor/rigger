@@ -1341,6 +1341,16 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
   const sslBlocked = looksLocalOrIP(cfg.domain)
   const sslEligible = !!cfg.domain && !sslBlocked
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
+  // Unified exposure model: one selector drives expose_mode + the legacy traefik_enabled
+  // toggle together. Legacy configs (no expose_mode) map by traefik_enabled so they keep
+  // routing identically. See docs/EXPOSURE_AND_REMOTE_ACCESS.md.
+  const exMode = cfg.expose_mode || (cfg.traefik_enabled ? 'traefik' : 'host_port')
+  const authGate = cfg.auth_gate || 'none'
+  const setExMode = (m) => {
+    if (m === 'traefik') onChange({ ...cfg, expose_mode: '', traefik_enabled: true })
+    else if (m === 'host_port') onChange({ ...cfg, expose_mode: 'host_port', traefik_enabled: false, ssl_enabled: false })
+    else onChange({ ...cfg, expose_mode: m, traefik_enabled: false, ssl_enabled: false })
+  }
   const updGit = (k, v) => onChange({ ...cfg, git: { ...(cfg.git || {}), [k]: v } })
   const updReplicas = (k, v) => onChange({ ...cfg, replicas: { ...(cfg.replicas || {}), [k]: parseInt(v) || 1 } })
   const updServiceOverride = (svcName, yaml) => onChange({
@@ -1436,27 +1446,28 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             <p className="text-xs text-content-subtle mt-1">The stack starts here the first time you deploy this environment.</p>
           </div>
         )}
-        {/* HTTP port — only relevant for custom stacks without Traefik (direct Nginx binding) */}
-        {projectType !== 'image' && !cfg.traefik_enabled && (
+        {/* HTTP port — the published host port for "Public — host port" mode (custom stacks). */}
+        {projectType !== 'image' && exMode === 'host_port' && (
           <div>
             <Label>HTTP port</Label>
             <Input type="number" value={cfg.http_port} onChange={v => upd('http_port', parseInt(v) || 80)} />
-            <p className="text-xs text-content-subtle mt-1">Host port Nginx binds to — access at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></p>
+            <p className="text-xs text-content-subtle mt-1">Host port the app binds to — reach it (or point your own proxy) at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></p>
           </div>
         )}
       </div>
 
       <div className="space-y-3 pt-3 border-t border-border-strong/50">
-        <Toggle
-          label="Expose via domain (Traefik)"
-          hint="Route through the shared Traefik proxy by hostname instead of binding a host port (avoids port conflicts; gives the env a URL)."
-          checked={!!cfg.traefik_enabled}
-          onChange={v => {
-            upd('traefik_enabled', v)
-            if (!v) onChange({ ...cfg, traefik_enabled: false, ssl_enabled: false })
-          }}
-        />
-        {(() => {
+        <div>
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1.5">Exposure</p>
+          <Label>How is this app reachable?</Label>
+          <Select value={exMode} onChange={setExMode} options={[
+            { value: 'traefik', label: 'Public — Rigger proxy (Traefik): route by domain + optional SSL' },
+            { value: 'host_port', label: 'Public — host port: publish a port; bring your own proxy / DNS' },
+            { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel: private origin, reachable anywhere' },
+            { value: 'none', label: 'Internal only: in-network, nothing published' },
+          ]} />
+        </div>
+        {exMode === 'traefik' && (() => {
           const route = resolveEnvRoute(cfg, resourcePrefix, envName, baseDomain, localTLS, autoUrlMode, appHost)
           if (!route) return null
           // For a URL that can't get a Let's Encrypt cert (localhost / IP / magic-DNS),
@@ -1481,7 +1492,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </div>
           )
         })()}
-        {cfg.traefik_enabled && (
+        {exMode === 'traefik' && (
           <>
             {/* Domain + "Request SSL" on one row. SSL enables only once a real public
                 domain is entered (localhost/IP can't get a Let's Encrypt cert). */}
@@ -1551,6 +1562,47 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </details>
           </>
         )}
+
+        {/* Auth gate — only under Traefik (basic-auth is a Traefik edge middleware). */}
+        {exMode === 'traefik' && (
+          <div>
+            <Label>Require sign-in (auth gate)</Label>
+            <Select value={authGate} onChange={v => upd('auth_gate', v === 'none' ? '' : v)} options={[
+              { value: 'none', label: 'None — open to anyone who has the URL' },
+              { value: 'basic', label: 'Basic auth — HTTP password at the Traefik edge' },
+            ]} />
+            {authGate === 'basic' && (
+              <p className="text-xs text-content-subtle mt-1">
+                A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
+              </p>
+            )}
+          </div>
+        )}
+
+        {exMode === 'host_port' && (
+          <p className="text-xs text-content-subtle">
+            Rigger publishes the app on a host port (above for custom stacks; the service&apos;s host port for image stacks). Point your own reverse proxy / DNS at <code className="font-mono text-xs">host:port</code> — that proxy owns the domain and TLS. Rigger does no routing and issues no certificate in this mode.
+          </p>
+        )}
+
+        {exMode === 'cloudflare_tunnel' && (
+          <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1.5">
+            <p className="text-xs text-content">A <code className="font-mono text-xs">cloudflared</code> connector runs alongside the app — no ports are opened on this server and the firewall stays closed.</p>
+            <ol className="text-xs text-content-subtle list-decimal ml-4 space-y-0.5">
+              <li>In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel.</li>
+              <li>Point its public hostname at <code className="font-mono text-xs">http://&lt;your web service&gt;:&lt;port&gt;</code> (the app over the env network).</li>
+              <li>Copy the tunnel token and add it to this env&apos;s <strong>Env Vars</strong> as <code className="font-mono text-xs">CF_TUNNEL_TOKEN</code> (flag it secret), then deploy.</li>
+              <li>Add a Cloudflare Access policy to limit who can reach it (auth is Cloudflare&apos;s job in this mode).</li>
+            </ol>
+            <p className="text-xs text-content-faint">Note: Cloudflare terminates TLS at its edge. Fine for reaching a dashboard remotely; for highly sensitive data prefer a mesh VPN.</p>
+          </div>
+        )}
+
+        {exMode === 'none' && (
+          <p className="text-xs text-content-subtle">
+            Reachable only inside this environment&apos;s Docker network (other services by name). Nothing is published to the host. Want your own proxy to reach it? Choose <strong>Public — host port</strong> instead.
+          </p>
+        )}
       </div>
 
       {/* Database access — per-environment external-port exposure. The DB engine /
@@ -1585,60 +1637,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         <TriOverride label="Mailpit (test SMTP)" projectDefault={projectMailpit} value={cfg.mailpit} onChange={v => upd('mailpit', v)} />
         <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a dev/admin sidecar in this environment only (e.g. Mailpit on in dev/stage, off in prod).</p>
       </div>
-
-      {/* Exposure — how this env's app is reachable + who gets in (app-exposure model,
-          docs/EXPOSURE_AND_REMOTE_ACCESS.md). Only relevant once something is web-routed. */}
-      {(() => {
-        const exposeMode = cfg.expose_mode || 'traefik'
-        const authGate = cfg.auth_gate || 'none'
-        return (
-          <div className="space-y-3 pt-3 border-t border-border-strong/50">
-            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Exposure</p>
-            <div>
-              <Label>How is this app reachable?</Label>
-              <Select
-                value={exposeMode}
-                onChange={v => upd('expose_mode', v === 'traefik' ? '' : v)}
-                options={[
-                  { value: 'traefik', label: 'Public (Traefik) — route by domain on this server' },
-                  { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel — private origin, reachable anywhere' },
-                  { value: 'none', label: 'Internal only — no public route (host port / in-network)' },
-                ]}
-              />
-            </div>
-            {exposeMode === 'cloudflare_tunnel' && (
-              <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1.5">
-                <p className="text-xs text-content">A <code className="font-mono text-xs">cloudflared</code> connector runs alongside the app — no ports are opened on this server and the firewall stays closed.</p>
-                <ol className="text-xs text-content-subtle list-decimal ml-4 space-y-0.5">
-                  <li>In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel.</li>
-                  <li>Point its public hostname at <code className="font-mono text-xs">http://&lt;your web service&gt;:&lt;port&gt;</code> (the app over the env network).</li>
-                  <li>Copy the tunnel token and add it to this env&apos;s <strong>Env Vars</strong> as <code className="font-mono text-xs">CF_TUNNEL_TOKEN</code> (flag it secret), then deploy.</li>
-                  <li>Add a Cloudflare Access policy to limit who can reach it (auth is Cloudflare&apos;s job in this mode).</li>
-                </ol>
-                <p className="text-xs text-content-faint">Note: Cloudflare terminates TLS at its edge. Fine for reaching a dashboard remotely; for highly sensitive data prefer a mesh VPN.</p>
-              </div>
-            )}
-            {exposeMode === 'traefik' && (
-              <div>
-                <Label>Require sign-in (auth gate)</Label>
-                <Select
-                  value={authGate}
-                  onChange={v => upd('auth_gate', v === 'none' ? '' : v)}
-                  options={[
-                    { value: 'none', label: 'None — open to anyone who has the URL' },
-                    { value: 'basic', label: 'Basic auth — HTTP password at the Traefik edge' },
-                  ]}
-                />
-                {authGate === 'basic' && (
-                  <p className="text-xs text-content-subtle mt-1">
-                    A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )
-      })()}
 
       {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
           Only meaningful when this env routes through Traefik (basic-auth is a Traefik
