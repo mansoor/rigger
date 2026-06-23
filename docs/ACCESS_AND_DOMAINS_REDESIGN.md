@@ -19,11 +19,37 @@ toggle compounds it.
 
 An environment answers on a **set of addresses**:
 
-1. **Primary URL** — every *routed* env always has one. **Derived, read-only.**
-   `https://{ws}-{prj}-{env}.{base}` (base domain) → else the auto-URL fallback
-   (sslip/nip/localhost). Never typed.
+1. **Primary URL** — every *routed* env always has one. **Derived, read-only.** Never typed.
 2. **Custom domains** — zero or more, **always verified, always additive**. The single
    place to bring your own domain.
+
+### Primary URL derivation (precedence)
+
+The read-only Primary URL is resolved at deploy/render time, in this order:
+
+1. **Workspace base domain** (Manage Workspace → General) → `{ws}-{prj}-{env}.{ws-base}`
+2. else **Global base domain** (admin Settings → General) → `{ws}-{prj}-{env}.{base}`
+3. else the **Auto-URL fallback** (admin Settings → General, applies only when NO base
+   domain is set):
+
+   | Fallback mode | Primary URL | Cross-machine? |
+   |---|---|---|
+   | `localhost` (**default**) | `{ws}-{prj}-{env}.localhost` | no — host-only |
+   | `sslip` | `{ws}-{prj}-{env}.{App host IP}.sslip.io` | yes |
+   | `nip` | `{ws}-{prj}-{env}.{App host IP}.nip.io` | yes |
+   | `traefikme` | `…{App host IP}.traefik.me` | yes (shared cert) |
+   | `off` | no auto URL | — |
+
+   The `sslip`/`nip`/`traefikme` modes embed the **App host** IP (admin Settings); without
+   an IP they degrade to `.localhost`. So nip.io appears **only when** the admin selected it
+   AND set an App host IP — it is NOT an automatic default. A fresh install with nothing
+   configured yields `.localhost`.
+
+This is exactly today's `composegen.resolveRoute` behavior (via `EnvRouteURL`); the redesign
+only makes the result **read-only/derived** instead of an editable field. The UI labels the
+Primary URL with its source ("base domain" / "auto-URL: nip.io" / "local only") and, when on
+the `.localhost` default, hints: *set a base domain (admin) or pick an sslip/nip fallback for
+a cross-machine URL — or add a custom domain.*
 
 **TLS is not a user choice** — it follows from the address type:
 
