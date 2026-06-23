@@ -1586,6 +1586,60 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a dev/admin sidecar in this environment only (e.g. Mailpit on in dev/stage, off in prod).</p>
       </div>
 
+      {/* Exposure — how this env's app is reachable + who gets in (app-exposure model,
+          docs/EXPOSURE_AND_REMOTE_ACCESS.md). Only relevant once something is web-routed. */}
+      {(() => {
+        const exposeMode = cfg.expose_mode || 'traefik'
+        const authGate = cfg.auth_gate || 'none'
+        return (
+          <div className="space-y-3 pt-3 border-t border-border-strong/50">
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Exposure</p>
+            <div>
+              <Label>How is this app reachable?</Label>
+              <Select
+                value={exposeMode}
+                onChange={v => upd('expose_mode', v === 'traefik' ? '' : v)}
+                options={[
+                  { value: 'traefik', label: 'Public (Traefik) — route by domain on this server' },
+                  { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel — private origin, reachable anywhere' },
+                  { value: 'none', label: 'Internal only — no public route (host port / in-network)' },
+                ]}
+              />
+            </div>
+            {exposeMode === 'cloudflare_tunnel' && (
+              <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1.5">
+                <p className="text-xs text-content">A <code className="font-mono text-xs">cloudflared</code> connector runs alongside the app — no ports are opened on this server and the firewall stays closed.</p>
+                <ol className="text-xs text-content-subtle list-decimal ml-4 space-y-0.5">
+                  <li>In Cloudflare Zero Trust → Networks → Tunnels, create a tunnel.</li>
+                  <li>Point its public hostname at <code className="font-mono text-xs">http://&lt;your web service&gt;:&lt;port&gt;</code> (the app over the env network).</li>
+                  <li>Copy the tunnel token and add it to this env&apos;s <strong>Env Vars</strong> as <code className="font-mono text-xs">CF_TUNNEL_TOKEN</code> (flag it secret), then deploy.</li>
+                  <li>Add a Cloudflare Access policy to limit who can reach it (auth is Cloudflare&apos;s job in this mode).</li>
+                </ol>
+                <p className="text-xs text-content-faint">Note: Cloudflare terminates TLS at its edge. Fine for reaching a dashboard remotely; for highly sensitive data prefer a mesh VPN.</p>
+              </div>
+            )}
+            {exposeMode === 'traefik' && (
+              <div>
+                <Label>Require sign-in (auth gate)</Label>
+                <Select
+                  value={authGate}
+                  onChange={v => upd('auth_gate', v === 'none' ? '' : v)}
+                  options={[
+                    { value: 'none', label: 'None — open to anyone who has the URL' },
+                    { value: 'basic', label: 'Basic auth — HTTP password at the Traefik edge' },
+                  ]}
+                />
+                {authGate === 'basic' && (
+                  <p className="text-xs text-content-subtle mt-1">
+                    A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
           Only meaningful when this env routes through Traefik (basic-auth is a Traefik
           edge middleware) and the env actually exposes an admin UI (effective web_sql/storage_ui). */}

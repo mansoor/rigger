@@ -596,6 +596,17 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           <StatusBadge
             label={busyAction ? (ACTION_VERB[busyAction] || 'working…') : containerStatus}
             color={busyAction ? 'working' : containerStatus} />
+          {cfg?.expose_mode === 'cloudflare_tunnel' && (
+            <span title="Reachable via a Cloudflare Tunnel (no public ports on this server); the public hostname + access policy live in Cloudflare."
+              className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300 border border-orange-500/40">☁ Cloudflare Tunnel</span>
+          )}
+          {cfg?.expose_mode === 'none' && (
+            <span title="Internal only — no public route." className="text-[10px] px-1.5 py-0.5 rounded bg-surface-overlay text-content-subtle border border-border-strong">internal only</span>
+          )}
+          {cfg?.auth_gate === 'basic' && (cfg?.expose_mode || 'traefik') === 'traefik' && (
+            <span title="Protected by HTTP basic-auth at the Traefik edge (APP_AUTH_USER / APP_AUTH_PASSWORD in Env Vars)."
+              className="text-[10px] px-1.5 py-0.5 rounded bg-info-subtle text-info-fg border border-info-border/60">🔒 auth</span>
+          )}
           {imgStatus?.pinned && (
             <div className="flex items-center gap-1.5">
               <span title={`Pinned: ${(imgStatus.services || []).filter(s => s.pinned).map(s => `${s.name}→${s.effective.split(':').pop()}`).join(', ')}. Latest is ${imgStatus.version}.`}
