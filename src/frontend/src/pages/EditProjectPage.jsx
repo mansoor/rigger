@@ -1461,10 +1461,10 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1.5">Exposure</p>
           <Label>How is this app reachable?</Label>
           <Select value={exMode} onChange={setExMode} options={[
-            { value: 'traefik', label: 'Public — Rigger proxy (Traefik): route by domain + optional SSL' },
-            { value: 'host_port', label: 'Public — host port: publish a port; bring your own proxy / DNS' },
-            { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel: private origin, reachable anywhere' },
-            { value: 'none', label: 'Internal only: in-network, nothing published' },
+            { value: 'traefik', label: 'Routed by domain (Rigger proxy / Traefik) + optional SSL' },
+            { value: 'host_port', label: 'Host port — publish a port; bring your own proxy / DNS' },
+            { value: 'cloudflare_tunnel', label: 'Cloudflare Tunnel — reachable anywhere, no open ports' },
+            { value: 'none', label: 'Internal only — in-network, nothing published' },
           ]} />
         </div>
         {exMode === 'traefik' && (() => {
@@ -1475,21 +1475,35 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           // Per-env opt-in (legacy project local_tls is the initial default).
           const showLocalHTTPS = !leCapable(route.domain)
           const localOn = cfg.ssl_self_signed != null ? !!cfg.ssl_self_signed : !!localTLS
+          // An auto (magic-DNS / localhost) URL is only LAN-reachable when it resolves to a
+          // PRIVATE host IP — the name is public DNS, but the IP it points at isn't routable
+          // from the internet. A real base domain (or a public App-host IP) is internet-wide.
+          const privIP = (h) => !h || h === 'localhost' || /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
+          const lan = route.auto && !(baseDomain || '').trim() && (route.domain.endsWith('.localhost') || privIP((appHost || '').trim()))
           return (
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-content-subtle min-w-0 truncate">
-                Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
-                {route.auto && <span className="text-content-faint"> (auto{route.ssl ? ' · TLS' : ''})</span>}
-              </p>
-              {showLocalHTTPS && (
-                <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0" title="Serve this URL over HTTPS with Traefik's self-signed cert (browsers warn; useful for apps that require HTTPS). No public cert is possible for localhost / IP / magic-DNS.">
-                  <input type="checkbox" checked={localOn}
-                    onChange={e => onChange({ ...cfg, ssl_self_signed: e.target.checked, ssl_enabled: e.target.checked })}
-                    className="w-3.5 h-3.5 accent-brand-500" />
-                  Enable local HTTPS
-                </label>
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-content-subtle min-w-0 truncate">
+                  Reachable at <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-600 hover:underline">{route.url}</a>
+                  {route.auto && <span className="text-content-faint"> ({lan ? 'LAN' : 'auto'}{route.ssl ? ' · TLS' : ''})</span>}
+                </p>
+                {showLocalHTTPS && (
+                  <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer shrink-0" title="Serve this URL over HTTPS with Traefik's self-signed cert (browsers warn; useful for apps that require HTTPS). No public cert is possible for localhost / IP / magic-DNS.">
+                    <input type="checkbox" checked={localOn}
+                      onChange={e => onChange({ ...cfg, ssl_self_signed: e.target.checked, ssl_enabled: e.target.checked })}
+                      className="w-3.5 h-3.5 accent-brand-500" />
+                    Enable local HTTPS
+                  </label>
+                )}
+              </div>
+              {route.auto && (
+                <p className="text-xs text-content-faint">
+                  {lan
+                    ? <>Magic-DNS name pointing at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — resolvable anywhere but only <strong>reachable on this network/host</strong>. For internet access, set a real public domain above (or point the App host at a public IP).</>
+                    : <>Auto-generated URL — reachable wherever this hostname resolves and the host is reachable.</>}
+                </p>
               )}
-            </div>
+            </>
           )
         })()}
         {exMode === 'traefik' && (
