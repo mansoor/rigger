@@ -398,7 +398,7 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 //     its default cert) — for local *.localhost envs that need HTTPS.
 // The per-router redirect replaces Traefik's old global web→websecure redirect,
 // so HTTP-only (local) envs are no longer forced onto a cert-less HTTPS.
-func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, wildcard string) {
+func (g *gen) traefikLabels(router, host, port string, usersVar, certResolver, wildcard string) {
 	if !g.e.TraefikEnabled {
 		return
 	}
@@ -408,14 +408,16 @@ func (g *gen) traefikLabels(router, host, port string, auth bool, certResolver, 
 	if certResolver == "" {
 		certResolver = "letsencrypt" // per-host HTTP-01 (default; DNS-01 sets "dns")
 	}
+	auth := usersVar != ""
 	rule := "Host(`" + host + "`)"
 	g.line("    labels:")
 	g.line("      - \"traefik.enable=true\"")
-	// Optional HTTP basic-auth middleware (admin sidecars when the env protects them).
-	// The htpasswd line comes from .env (${ADMIN_UI_USERS}) so the bcrypt '$' chars are
-	// inserted literally rather than written inline (which would need '$$' doubling).
+	// Optional HTTP basic-auth middleware: admin sidecars (${ADMIN_UI_USERS}) when the
+	// env protects them, or an app web service (${APP_AUTH_USERS}) when auth_gate=basic.
+	// The htpasswd line comes from .env so the bcrypt '$' chars are inserted literally
+	// rather than written inline (which would need '$$' doubling).
 	if auth {
-		g.line("      - \"traefik.http.middlewares." + router + "_auth.basicauth.users=${ADMIN_UI_USERS}\"")
+		g.line("      - \"traefik.http.middlewares." + router + "_auth.basicauth.users=${" + usersVar + "}\"")
 	}
 	if g.e.SSLEnabled {
 		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")

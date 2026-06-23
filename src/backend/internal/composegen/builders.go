@@ -35,6 +35,7 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
 	g.buildStorageConsole(prefix, rp, registry, tag, isSwarm)
 	g.buildMailpit(prefix, rp, registry, tag, isSwarm)
+	g.buildCloudflared(prefix, isSwarm)
 }
 
 // buildMailpit synthesizes the Mailpit test-SMTP sidecar (axllent/mailpit — the
@@ -268,7 +269,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line("        aliases:")
 	g.line("          - " + svc.Name)
 	g.line("          - " + cname)
-	if svc.WebRouted && e.TraefikEnabled {
+	if svc.WebRouted && e.TraefikEnabled && g.exposeMode() == "traefik" {
 		g.line("      " + e.TraefikNetwork + ": {}")
 	}
 
@@ -368,22 +369,40 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 func (g *gen) emitServicePorts(router string, svc Service) {
 	e := g.e
 	port := string(svc.Port)
+	mode := g.exposeMode()
 	var publishes []string
 	switch {
+	case svc.WebRouted && mode == "cloudflare_tunnel":
+		// No public router and no host port — the cloudflared connector reaches the app
+		// in-network. Falls through to `expose` below so it's reachable by service name.
+	case svc.WebRouted && mode == "none":
+		// Internal-only: publish an explicit host_port if the user set one; otherwise
+		// just expose the container port (no auto env-HTTP-port publish, no router).
+		if hp := string(svc.HostPort); hp != "" {
+			publishes = append(publishes, hp+":"+portOr(port, "80"))
+		}
 	case svc.WebRouted && e.TraefikEnabled:
 		host := e.Domain
 		if svc.Subdomain != "" && e.Domain != "" {
 			host = svc.Subdomain + "." + e.Domain
 		}
-		// Admin sidecars (Adminer / Garage UI) get a basic-auth middleware when this
-		// env opts into protection; real app services never do.
+		// Basic-auth middleware: admin sidecars when the env protects them (uses
+		// ${ADMIN_UI_USERS}); real app web services when the env's auth_gate is "basic"
+		// (uses ${APP_AUTH_USERS}). Empty usersVar ⇒ no auth middleware (today's default).
+		usersVar := ""
+		switch {
+		case svc.AuthProtect && e.ProtectAdminUIs:
+			usersVar = "ADMIN_UI_USERS"
+		case !svc.AuthProtect && g.authGate() == "basic":
+			usersVar = "APP_AUTH_USERS"
+		}
 		// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
 		// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
 		wildcard := ""
 		if e.wildcardBase != "" && svc.Subdomain == "" {
 			wildcard = e.wildcardBase
 		}
-		g.traefikLabels(router, host, port, svc.AuthProtect && e.ProtectAdminUIs, e.certResolver, wildcard)
+		g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins
 		// (the user's chosen port), else the env HTTP port. Subdomain web services
@@ -410,7 +429,10 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		}
 		return
 	}
-	if !svc.WebRouted && port != "" {
+	// Expose the container port for in-network reach: non-web services always; a web
+	// service under cloudflare_tunnel/none with no published port (so the connector or
+	// a linked service can still reach it by name).
+	if port != "" && (!svc.WebRouted || mode == "cloudflare_tunnel" || mode == "none") {
 		g.line("    expose:")
 		g.line("      - \"" + port + "\"")
 	}
@@ -549,6 +571,53 @@ func (g *gen) mailpitOn() bool {
 		return *g.e.Mailpit
 	}
 	return g.cfg.Project.Mailpit
+}
+
+// exposeMode / authGate resolve the app-exposure model (per-env override → project
+// default → baseline). Mirror wsconfig.EffExposeMode/EffAuthGate so composegen, which
+// reads config.json directly, agrees with the rest of the backend. "traefik"/"none"
+// baselines reproduce today's output (golden parity when unset).
+func (g *gen) exposeMode() string {
+	if g.e.ExposeMode != "" {
+		return g.e.ExposeMode
+	}
+	if g.cfg.Project.ExposeMode != "" {
+		return g.cfg.Project.ExposeMode
+	}
+	return "traefik"
+}
+func (g *gen) authGate() string {
+	if g.e.AuthGate != "" {
+		return g.e.AuthGate
+	}
+	if g.cfg.Project.AuthGate != "" {
+		return g.cfg.Project.AuthGate
+	}
+	return "none"
+}
+
+// buildCloudflared synthesizes the Cloudflare Tunnel connector when this env's
+// expose_mode is cloudflare_tunnel and there's a web entry to forward to. cloudflared
+// is plain outbound TCP — no ports, no caps, no host networking — so it's Swarm-native
+// and needs nothing published on the origin. The tunnel + public hostname + Access
+// policy live in the user's Cloudflare Zero Trust dashboard; Rigger only runs the
+// connector wired to the app over the env network (TUNNEL_TOKEN from .env / a Swarm
+// secret). See docs/EXPOSURE_AND_REMOTE_ACCESS.md.
+func (g *gen) buildCloudflared(prefix string, isSwarm bool) {
+	if g.exposeMode() != "cloudflare_tunnel" || !g.hasAppWebEntry() {
+		return
+	}
+	ver := g.cfg.version("cloudflared", "latest")
+	g.line(sectionComment("Cloudflare Tunnel connector", dashService))
+	g.line("  cloudflared:")
+	g.line("    image: cloudflare/cloudflared:" + ver)
+	g.line("    container_name: " + prefix + "_cloudflared")
+	g.line("    command: tunnel --no-autoupdate run")
+	g.line("    environment:")
+	g.line("      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}")
+	g.managedNet(prefix, "cloudflared")
+	g.deployBlock(isSwarm, "cloudflared", "1", "unless-stopped")
+	g.line("")
 }
 
 // minioOn / localStorageOn report the active object-storage backends (project-level,

@@ -462,6 +462,24 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 			p("ADMIN_UI_USERS='admin:%s'\n", string(hash))
 		}
 	}
+	// App basic auth-gate credential (per env, when auth_gate=basic). Same htpasswd
+	// shape as ADMIN_UI_USERS; APP_AUTH_USERS is the line Traefik's basicauth middleware
+	// reads for the app's web router. Plaintext preserved across regen (so a regen
+	// doesn't lock the user out — only the bcrypt hash re-derives).
+	if cfg.EffAuthGate(e) == "basic" {
+		appPass := ""
+		if existing != nil {
+			appPass = existing["APP_AUTH_PASSWORD"]
+		}
+		if appPass == "" {
+			appPass = "rigger-" + hexN(r, 9)
+		}
+		if hash, herr := bcrypt.GenerateFromPassword([]byte(appPass), bcrypt.DefaultCost); herr == nil {
+			p("APP_AUTH_USER=admin\n")
+			p("APP_AUTH_PASSWORD=%s\n", appPass)
+			p("APP_AUTH_USERS='admin:%s'\n", string(hash))
+		}
+	}
 	p("\n")
 
 	p("# ── Application ────────────────────────────────────────────\n")

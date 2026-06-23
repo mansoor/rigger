@@ -531,6 +531,59 @@ func TestProtectAdminUIs(t *testing.T) {
 	}
 }
 
+// Cloudflare Tunnel exposure: the app gets NO Traefik labels and NO host port (just
+// `expose`d in-network), no traefik network join, and a cloudflared connector is
+// synthesized with the tunnel token. See docs/EXPOSURE_AND_REMOTE_ACCESS.md.
+func TestExposeCloudflareTunnel(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"web","image":"nginx","tag":"alpine","port":"80","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","expose_mode":"cloudflare_tunnel"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := svcBlock(t, string(out), "web")
+	if strings.Contains(web, "traefik.enable") {
+		t.Errorf("tunnel app must NOT emit Traefik labels\n---\n%s", web)
+	}
+	if strings.Contains(web, "rigger-traefik") {
+		t.Errorf("tunnel app must NOT join the Traefik network\n---\n%s", web)
+	}
+	if !strings.Contains(web, "expose:") {
+		t.Errorf("tunnel app must expose its port for the connector\n---\n%s", web)
+	}
+	cf := svcBlock(t, string(out), "cloudflared")
+	if !strings.Contains(cf, "cloudflare/cloudflared") || !strings.Contains(cf, "TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}") {
+		t.Errorf("cloudflared connector missing/incomplete\n---\n%s", cf)
+	}
+	// Default (no expose_mode) must NOT synthesize a connector.
+	def := strings.Replace(cfg, `,"expose_mode":"cloudflare_tunnel"`, "", 1)
+	out2, _ := GenerateAt([]byte(def), "dev", time.Unix(0, 0).UTC())
+	if strings.Contains(string(out2), "cloudflared:") {
+		t.Errorf("no cloudflared expected when expose_mode is unset\n%s", out2)
+	}
+}
+
+// auth_gate=basic puts the existing basic-auth middleware (via ${APP_AUTH_USERS}) on a
+// real app's web router — not just admin sidecars.
+func TestAuthGateBasic(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"web","image":"nginx","tag":"alpine","port":"80","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","traefik_enabled":true,"traefik_network":"rigger-traefik","domain":"app1.example.com","auth_gate":"basic"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := svcBlock(t, string(out), "web")
+	if !strings.Contains(web, "basicauth.users=${APP_AUTH_USERS}") {
+		t.Errorf("auth_gate=basic must gate the app web router with APP_AUTH_USERS\n---\n%s", web)
+	}
+}
+
 // A legacy project that carries a literal "adminer" service AND the web_sql flag must
 // render exactly ONE adminer service (synth skipped — no duplicate, invalid key).
 func TestAdminerNoDoubleEmit(t *testing.T) {

@@ -201,6 +201,10 @@ type Project struct {
 	StoragePath string `json:"storage_path,omitempty"`
 	// StorageUI adds the opens3/console admin sidecar when ObjectStorage=minio.
 	StorageUI bool `json:"storage_ui,omitempty"`
+	// ExposeMode / AuthGate are the project-level DEFAULTS for the app-exposure model
+	// (per-env overridable). "" = the baseline (traefik / none). See EffExposeMode.
+	ExposeMode string `json:"expose_mode,omitempty"` // "" => traefik
+	AuthGate   string `json:"auth_gate,omitempty"`   // "" => none
 	// Deprecated: legacy Garage toggles — kept only so old config.json unmarshals.
 	// Garage generation is retired; these are ignored (read as no-op). See EffObjectStorage.
 	Garage      bool `json:"garage_enabled,omitempty"`
@@ -362,6 +366,33 @@ func (c *Config) EffMailpit(e Env) bool {
 	return c.Project.Mailpit
 }
 
+// EffExposeMode / EffAuthGate resolve the app-exposure model (docs/EXPOSURE_AND_
+// REMOTE_ACCESS.md): how an env's web entry is reachable, and who gets in. Both are
+// string overrides — per-env value wins when non-empty, else the project default,
+// else the safe baseline ("traefik" / "none") that reproduces today's behaviour
+// (so golden output is byte-identical when neither is set).
+//
+//	expose_mode: "traefik" (default) | "cloudflare_tunnel" | "none"
+//	auth_gate:   "none" (default)    | "basic"             | "forward_auth"
+func (c *Config) EffExposeMode(e Env) string {
+	if e.ExposeMode != "" {
+		return e.ExposeMode
+	}
+	if c.Project.ExposeMode != "" {
+		return c.Project.ExposeMode
+	}
+	return "traefik"
+}
+func (c *Config) EffAuthGate(e Env) string {
+	if e.AuthGate != "" {
+		return e.AuthGate
+	}
+	if c.Project.AuthGate != "" {
+		return c.Project.AuthGate
+	}
+	return "none"
+}
+
 // HasAdminerEnv reports whether THIS env exposes Adminer (effective web_sql, or a legacy
 // literal "adminer" service). Per-env variant of HasAdminer — gates the ADMINER_LOGIN_SECRET
 // and the admin-UI protection credential for the env.
@@ -409,6 +440,11 @@ type Env struct {
 	WebSQL          *bool          `json:"web_sql,omitempty"`
 	StorageUI       *bool          `json:"storage_ui,omitempty"`
 	Mailpit         *bool          `json:"mailpit,omitempty"`
+	// ExposeMode / AuthGate are per-env overrides of the project-level exposure
+	// defaults ("" = inherit project, then the traefik/none baseline). See
+	// EffExposeMode / EffAuthGate and docs/EXPOSURE_AND_REMOTE_ACCESS.md.
+	ExposeMode      string         `json:"expose_mode,omitempty"`
+	AuthGate        string         `json:"auth_gate,omitempty"`
 	RedisEnabled    bool           `json:"redis_enabled"`
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`

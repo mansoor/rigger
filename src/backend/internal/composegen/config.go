@@ -77,6 +77,10 @@ type Project struct {
 	// Deprecated: legacy Garage toggles — read only for back-compat unmarshal; ignored.
 	Garage      bool `json:"garage_enabled,omitempty"`
 	GarageWebUI bool `json:"garage_web_ui,omitempty"`
+	// ExposeMode / AuthGate are the project-level DEFAULTS for the app-exposure model
+	// (per-env overridable). "" = the baseline (traefik / none). See gen.exposeMode.
+	ExposeMode string `json:"expose_mode,omitempty"` // "" => traefik
+	AuthGate   string `json:"auth_gate,omitempty"`   // "" => none
 }
 
 type Version struct {
@@ -110,6 +114,10 @@ type Env struct {
 	WebSQL          *bool `json:"web_sql,omitempty"`
 	StorageUI       *bool `json:"storage_ui,omitempty"`
 	Mailpit         *bool `json:"mailpit,omitempty"` // per-env tri-state override of Project.Mailpit
+	// ExposeMode / AuthGate are per-env overrides of the project exposure defaults
+	// ("" = inherit project, then the traefik/none baseline). See gen.exposeMode.
+	ExposeMode      string `json:"expose_mode,omitempty"`
+	AuthGate        string `json:"auth_gate,omitempty"`
 	RedisEnabled    bool  `json:"redis_enabled"`
 	GarageEnabled   bool   `json:"garage_enabled"`
 	TraefikEnabled  bool   `json:"traefik_enabled"`
