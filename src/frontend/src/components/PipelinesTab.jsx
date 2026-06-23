@@ -448,13 +448,33 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
   // Log-viewer UX: search (filter + highlight), per-stage anchors for jump-to,
   // and a full-log download.
   const [q, setQ] = useState('')
+  const [active, setActive] = useState(0) // focused search occurrence
+  const [wrap, setWrap] = useState(true)  // soft-wrap long lines
+  const [nums, setNums] = useState(false) // per-stage line numbers
   const stageRefs = useRef([])
+  const markRefs = useRef([])             // DOM node of each occurrence, document order
+  const occCursor = useRef(0)             // running occurrence index assigned while rendering
   const query = q.trim().toLowerCase()
   const stripAnsi = (s) => (s || '').replace(/\[[0-9;]*m/g, '')
-  const stageMatches = (i) =>
-    !query || labelAt(i).toLowerCase().includes(query) || stripAnsi(res[i]?.output).toLowerCase().includes(query)
-  const matchCount = query ? Array.from({ length: count }, (_, i) => stageMatches(i)).filter(Boolean).length : 0
   const jumpTo = (i) => stageRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  // True occurrence count (every hit, not every stage) — fixes the old stage-count
+  // vs highlight-count mismatch; drives the "n/N" readout and prev/next bounds.
+  const countOcc = (text) => {
+    if (!query) return 0
+    const lc = stripAnsi(text).toLowerCase()
+    let c = 0, p = 0
+    for (;;) { const a = lc.indexOf(query, p); if (a < 0) break; c++; p = a + query.length }
+    return c
+  }
+  const occTotal = query
+    ? Array.from({ length: count }, (_, i) => statusAt(i) === 'pending' ? 0 : countOcc(res[i]?.output)).reduce((a, b) => a + b, 0)
+    : 0
+  const activeIdx = occTotal ? (((active % occTotal) + occTotal) % occTotal) : 0
+  const gotoMatch = (d) => { if (occTotal) setActive(a => (((a + d) % occTotal) + occTotal) % occTotal) }
+  // Rebuilt each render as highlight() runs over the stage outputs below.
+  markRefs.current = []
+  occCursor.current = 0
 
   function downloadLog() {
     const lines = []
@@ -473,24 +493,50 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
     URL.revokeObjectURL(url)
   }
 
-  // Highlight query matches in plain text (search mode strips ANSI for clarity).
+  // Highlight every query occurrence (search strips ANSI for clarity). The active
+  // occurrence renders solid and gets a ref so prev/next can scroll it into view;
+  // occurrence indices are global across stages/lines via occCursor.
   function highlight(text) {
     const plain = stripAnsi(text)
-    if (!query) return plain
-    const parts = []
     const lc = plain.toLowerCase()
-    let idx = 0, n = 0
+    const parts = []
+    let idx = 0, k = 0
     for (;;) {
       const at = lc.indexOf(query, idx)
       if (at < 0) { parts.push(plain.slice(idx)); break }
       if (at > idx) parts.push(plain.slice(idx, at))
-      parts.push(<mark key={n++} className="bg-amber-400/40 text-amber-100 rounded-sm">{plain.slice(at, at + query.length)}</mark>)
+      const gi = occCursor.current++
+      parts.push(
+        <mark key={k++} ref={el => { markRefs.current[gi] = el }}
+          className={gi === activeIdx ? 'bg-amber-400 text-black rounded-sm' : 'bg-amber-400/30 text-amber-100 rounded-sm'}>
+          {plain.slice(at, at + query.length)}
+        </mark>
+      )
       idx = at + query.length
     }
     return parts
   }
 
-  // Auto-scroll to the tail only for an active run and when not searching/jumping.
+  // Per-stage body: whole-block ANSI when not searching/numbering (keeps colours),
+  // else line rows so line numbers show and matches highlight.
+  const wrapCls = wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
+  function stageBody(text) {
+    if (!query && !nums) return <span className={wrapCls}>{renderAnsi(text)}</span>
+    return stripAnsi(text).split('\n').map((line, li) => (
+      <div key={li} className="flex">
+        {nums && <span className="select-none text-gray-500 pr-3 text-right tabular-nums shrink-0 w-10">{li + 1}</span>}
+        <span className={`flex-1 ${wrapCls}`}>{query ? highlight(line) : renderAnsi(line)}</span>
+      </div>
+    ))
+  }
+
+  // Reset the focused match when the query changes.
+  useEffect(() => { setActive(0) }, [query])
+  // Step the active occurrence into view as the user moves through matches.
+  useEffect(() => {
+    if (query && occTotal) markRefs.current[activeIdx]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [activeIdx, query, occTotal, run]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-scroll to the tail only for an active run and when not searching.
   useEffect(() => {
     if (!query && logRef.current && (overall === 'running' || overall === 'awaiting')) {
       logRef.current.scrollTop = logRef.current.scrollHeight
@@ -510,12 +556,26 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="relative">
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search log…"
+              <input value={q} onChange={e => setQ(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1) } }}
+                placeholder="Search log…"
                 className="text-xs pl-2 pr-6 py-1 rounded border border-border-strong bg-surface-raised text-content-strong w-44 focus:outline-none focus:border-brand-500" />
               {q && <button onClick={() => setQ('')} title="Clear search"
                 className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-faint hover:text-content text-xs">✕</button>}
             </div>
-            {query && <span className="text-[10px] text-content-faint shrink-0">{matchCount} match{matchCount === 1 ? '' : 'es'}</span>}
+            {query && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <span className="text-[10px] text-content-faint tabular-nums w-12 text-center">{occTotal ? `${activeIdx + 1}/${occTotal}` : '0/0'}</span>
+                <button onClick={() => gotoMatch(-1)} disabled={!occTotal} title="Previous match (Shift+Enter)"
+                  className="text-xs px-1.5 py-1 rounded border border-border-strong text-content-muted hover:text-content disabled:opacity-40">↑</button>
+                <button onClick={() => gotoMatch(1)} disabled={!occTotal} title="Next match (Enter)"
+                  className="text-xs px-1.5 py-1 rounded border border-border-strong text-content-muted hover:text-content disabled:opacity-40">↓</button>
+              </div>
+            )}
+            <button onClick={() => setWrap(v => !v)} title="Toggle soft-wrap"
+              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${wrap ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}>↩ Wrap</button>
+            <button onClick={() => setNums(v => !v)} title="Toggle line numbers"
+              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${nums ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}># Lines</button>
             <button onClick={downloadLog} title="Download the full log"
               className="text-[11px] px-2 py-1 rounded border border-border-strong text-content-muted hover:text-content hover:border-brand-600 shrink-0">⬇ Download</button>
             {(overall === 'running' || overall === 'awaiting') && (
@@ -558,7 +618,6 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
           ) : Array.from({ length: count }, (_, i) => {
             const st = statusAt(i)
             if (st === 'pending') return null
-            if (!stageMatches(i)) return null
             const r = res[i]
             return (
               <div key={i} ref={el => (stageRefs.current[i] = el)} className="scroll-mt-2">
@@ -576,15 +635,15 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                     fixed light colour — `text-content` is dark in light theme and would
                     vanish on this bg. */}
                 {(r?.output || st === 'running') && (
-                  <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words text-gray-100">
-                    {r?.output ? (query ? highlight(r.output) : renderAnsi(r.output)) : <span className="text-gray-400">running…</span>}
+                  <pre className="text-[11px] font-mono bg-[#0c1322] border border-border-strong rounded-lg p-3 overflow-x-auto text-gray-100">
+                    {r?.output ? stageBody(r.output) : <span className="text-gray-400">running…</span>}
                   </pre>
                 )}
               </div>
             )
           })}
-          {run && count > 0 && query && matchCount === 0 && (
-            <p className="text-xs text-content-subtle">No log lines match “{q}”.</p>
+          {run && count > 0 && query && occTotal === 0 && (
+            <p className="text-xs text-content-subtle">No matches for “{q}”.</p>
           )}
         </div>
       </div>
