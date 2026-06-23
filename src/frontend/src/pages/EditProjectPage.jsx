@@ -1499,7 +1499,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               {route.auto && (
                 <p className="text-xs text-content-faint">
                   {lan
-                    ? <>Magic-DNS name pointing at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — resolvable anywhere but only <strong>reachable on this network/host</strong>. For internet access, set a real public domain above (or point the App host at a public IP).</>
+                    ? <>Magic-DNS name pointing at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — resolvable anywhere but only <strong>reachable on this network/host</strong>. For internet access, set a real public domain below (or point the App host at a public IP).</>
                     : <>Auto-generated URL — reachable wherever this hostname resolves and the host is reachable.</>}
                 </p>
               )}
@@ -1593,11 +1593,20 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           </div>
         )}
 
-        {exMode === 'host_port' && (
-          <p className="text-xs text-content-subtle">
-            Rigger publishes the app on a host port (above for custom stacks; the service&apos;s host port for image stacks). Point your own reverse proxy / DNS at <code className="font-mono text-xs">host:port</code> — that proxy owns the domain and TLS. Rigger does no routing and issues no certificate in this mode.
-          </p>
-        )}
+        {exMode === 'host_port' && (() => {
+          const host = (appHost || '').trim() || 'localhost'
+          const port = projectType === 'image' ? '<service host port>' : (cfg.http_port || 80)
+          return (
+            <div className="space-y-1">
+              <p className="text-xs text-content-subtle">
+                Reachable at <span className="font-mono text-brand-600">http://{host}:{port}</span> — point your own reverse proxy / DNS here; that proxy owns the domain and TLS. Rigger does no routing in this mode.
+              </p>
+              {projectType === 'image' && (
+                <p className="text-xs text-content-faint">Image stacks publish each web service on its own host port (set per service in the Services tab).</p>
+              )}
+            </div>
+          )
+        })()}
 
         {exMode === 'cloudflare_tunnel' && (
           <div className="rounded-lg border border-border-strong bg-surface-raised/40 p-3 space-y-1.5">
