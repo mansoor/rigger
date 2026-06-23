@@ -136,6 +136,24 @@ the only surviving TLS control.
 - Contextual self-signed checkbox only when the primary URL is local/private.
 - Env-card URL = ★ custom (if any) else primary auto URL.
 
+## Editions / tier-awareness (future)
+
+Custom-domain **verification is a multi-tenant safety control** — it stops tenant A from
+attaching tenant B's domain. That risk only exists when untrusted users share an instance.
+So verification should be **tier-gated** once editions land (see docs/MONETIZATION_AND_LICENSING.md):
+
+- **Rigger Cloud / multi-tenant** → verification **mandatory** (cannot be disabled).
+- **Self-hosted (CE / EE)** → verification **optional**: the operator owns the box and all
+  domains, so a setting like `domains.require_verification` (default off for self-host) lets
+  them attach a domain and route it immediately, skipping the TXT/CNAME/file dance.
+
+Design implication for the build now: keep verification a **policy gate**, not a hard
+precondition baked into routing. Concretely — a domain has `verified` state, and a single
+`requireVerification` policy decides whether an *unverified* domain is allowed to route.
+Default the policy to "required" (matches today's behavior); a later edition flag flips it
+off for self-host. This avoids reworking the model when tiers arrive — the engine already
+tracks verified/unverified; only the gate's default changes per edition.
+
 ## Out of scope (later)
 - Auto-redeploy on verify (today: verify regens compose; routing applies on next deploy).
 - Custom-domain cert-expiry badge.
