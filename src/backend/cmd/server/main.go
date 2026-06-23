@@ -76,6 +76,28 @@ http:
 	}
 }
 
+// seedDNSToken materializes the Cloudflare DNS-01 token into the shared volume file
+// Traefik (CF_DNS_API_TOKEN_FILE) and out-of-band lego both read. Source of truth is
+// the admin-managed app_settings value; a legacy src/.env CF_DNS_API_TOKEN is migrated
+// into settings once so existing installs keep working. Idempotent + best-effort.
+func seedDNSToken(d *db.DB) {
+	tok := strings.TrimSpace(settings.AppSetting(d, "apps_dns_token"))
+	if tok == "" {
+		if env := strings.TrimSpace(os.Getenv("CF_DNS_API_TOKEN")); env != "" {
+			if err := settings.SetAppSetting(d, "apps_dns_token", env); err != nil {
+				log.Printf("dns-token: migrate from env failed: %v", err)
+			}
+			tok = env
+		}
+	}
+	if tok == "" {
+		return
+	}
+	if err := acme.New(nil).SetToken(tok); err != nil {
+		log.Printf("dns-token: write to shared volume failed: %v (DNS-01 may be unavailable)", err)
+	}
+}
+
 func main() {
 	// Subcommands run a one-shot task and exit instead of starting the server.
 	if len(os.Args) > 1 && os.Args[1] == "init-workspace" {
@@ -160,6 +182,13 @@ func main() {
 	// 90 days. The same interval is reported to the UI via /api/metrics/config.
 	metricsInterval := time.Duration(metrics.IntervalSeconds()) * time.Second
 	metrics.NewCollector(database, cfg.WorkspacesDir, metricsInterval, bridge).Run()
+
+	// Materialize the Cloudflare DNS token (admin-set in Settings → General, or a
+	// legacy src/.env CF_DNS_API_TOKEN) into the shared volume file Traefik + lego
+	// read, so DNS-01 wildcard/override certs work without a manual .env edit. Runs
+	// before the renewer/issuer construct their own acme.New so they see the token.
+	// Idempotent + best-effort.
+	seedDNSToken(database)
 
 	// Renew out-of-band override certs (per-env/workspace ACME email, Phase 2): every
 	// 12h, re-issue any tracked cert within 30 days of expiry via lego (DNS-01). Idle

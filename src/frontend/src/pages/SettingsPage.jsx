@@ -789,6 +789,7 @@ function GeneralTab() {
   const [appsBaseDomain, setAppsBaseDomain] = useState('')
   const [autoUrlMode, setAutoUrlMode] = useState('localhost')
   const [dnsProvider, setDnsProvider] = useState('')
+  const [dnsToken, setDnsToken] = useState('')
   const [keyMin, setKeyMin] = useState(3)
   const [keyMax, setKeyMax] = useState(4)
   // Password policy (auth Group A)
@@ -807,6 +808,7 @@ function GeneralTab() {
       apps_base_domain: appsBaseDomain.trim(),
       auto_url_mode: autoUrlMode,
       apps_dns_provider: dnsProvider,
+      apps_dns_token: dnsToken,
       key_min_length: String(keyMin),
       key_max_length: String(Math.max(keyMin, keyMax)),
       pw_min_length: String(pwMin),
@@ -848,6 +850,7 @@ function GeneralTab() {
     setAppsBaseDomain(cfg.apps_base_domain || '')
     setAutoUrlMode(cfg.auto_url_mode || 'localhost')
     setDnsProvider(cfg.apps_dns_provider || '')
+    setDnsToken(cfg.apps_dns_token || '')
     setKeyMin(Number(cfg.key_min_length) || 3)
     setKeyMax(Number(cfg.key_max_length) || 4)
     setPwMin(Number(cfg.pw_min_length) || 8)
@@ -999,13 +1002,36 @@ function GeneralTab() {
                 <option value="">Per-host certs (HTTP-01 — needs public port 80)</option>
                 <option value="cloudflare">Cloudflare — one wildcard cert for *.{appsBaseDomain.trim()}</option>
               </select>
-              <p className="text-xs text-content-subtle mt-1">
-                With Cloudflare DNS-01, Traefik issues a single <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> cert
-                (no port-80 challenge, no per-app rate limits). Set the API token as{' '}
-                <code className="font-mono text-xs">CF_DNS_API_TOKEN</code> in <code className="font-mono text-xs">src/.env</code> and
-                rebuild rigger — create it at Cloudflare → My Profile → API Tokens with <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>,
-                scoped to <code className="font-mono text-xs">{appsBaseDomain.trim()}</code>. (The token is read by Traefik from src/.env, not stored here.)
-              </p>
+              {dnsProvider === 'cloudflare' ? (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-content-subtle">
+                    Traefik issues a single <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> cert via DNS-01
+                    (no port-80 challenge, no per-app rate limits).
+                  </p>
+                  <div>
+                    <Label>Cloudflare API token</Label>
+                    <Input
+                      type="password"
+                      value={dnsToken}
+                      onChange={setDnsToken}
+                      placeholder="paste a Zone:DNS:Edit + Zone:Read token"
+                    />
+                    <p className="text-xs text-content-subtle mt-1">
+                      Create at Cloudflare → My Profile → API Tokens with <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>,
+                      scoped to <code className="font-mono text-xs">{appsBaseDomain.trim()}</code>. Stored encrypted-at-rest and
+                      never shown again; saving applies it and briefly restarts the proxy. Leave the
+                      masked value to keep the current token.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-content-subtle mt-1">
+                  Per-host: Traefik gets a separate Let&apos;s Encrypt cert for each{' '}
+                  <code className="font-mono text-xs">{'{label}'}.{appsBaseDomain.trim()}</code> on first request via the
+                  HTTP-01 challenge — needs <strong>port 80 publicly reachable</strong> and is subject to Let&apos;s Encrypt
+                  rate limits. No API token required.
+                </p>
+              )}
             </div>
           )}
           {appsBaseDomain.trim() ? (

@@ -18,15 +18,25 @@ import (
 // ── General Settings ──────────────────────────────────────────────────────────
 // Key/value store in app_settings table. Used for ACME email and future config.
 
+// dnsTokenMask is the placeholder returned for a configured (but secret) Cloudflare
+// DNS token. A PUT carrying this value (or empty) leaves the stored token unchanged.
+const dnsTokenMask = "********"
+
 // GET /api/settings/general
 func (h *Handler) GetGeneralSettings(w http.ResponseWriter, r *http.Request) {
-	keys := []string{"acme_email", "rigger_domain", "app_host", "traefik_enabled", "confirm_destructive", "confirm_destructive_allow_override", "appearance_prefs", "key_min_length", "key_max_length", "apps_base_domain", "auto_url_mode", "auto_url_host", "apps_dns_provider",
+	keys := []string{"acme_email", "rigger_domain", "app_host", "traefik_enabled", "confirm_destructive", "confirm_destructive_allow_override", "appearance_prefs", "key_min_length", "key_max_length", "apps_base_domain", "auto_url_mode", "auto_url_host", "apps_dns_provider", "apps_dns_token",
 		"pw_min_length", "pw_require_upper", "pw_require_lower", "pw_require_number", "pw_require_symbol", "pw_max_age_days"}
 	result := map[string]string{}
 	for _, k := range keys {
 		var val string
 		h.db.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, k).Scan(&val) //nolint:errcheck
 		result[k] = val
+	}
+	// Never return the raw Cloudflare DNS token; report a masked sentinel when set so
+	// the UI can show "configured" without exposing it (PUT treats the sentinel as
+	// "unchanged"). Mirrors how docker-registry passwords are write-only.
+	if result["apps_dns_token"] != "" {
+		result["apps_dns_token"] = dnsTokenMask
 	}
 	// Always report the effective (defaulted, coherent) key-length bounds so the
 	// UI shows real values even before an admin has set them.
@@ -56,11 +66,34 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
-	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "confirm_destructive_allow_override": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true,
+	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "confirm_destructive_allow_override": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true, "apps_dns_token": true,
 		// Password policy (auth Group A): min length + complexity + rotation max-age.
 		"pw_min_length": true, "pw_require_upper": true, "pw_require_lower": true, "pw_require_number": true, "pw_require_symbol": true, "pw_max_age_days": true}
 	for k, v := range body {
 		if !allowed[k] {
+			continue
+		}
+		// Cloudflare DNS token: secret + side-effecting. Blank or the masked sentinel
+		// means "unchanged" (the UI sends the mask back on save). A real new value is
+		// persisted, materialized into the shared volume Traefik reads, and applied by
+		// bouncing the proxy so its DNS-01 resolver picks it up. Handled out of band so
+		// it never lands in app_settings as the mask.
+		if k == "apps_dns_token" {
+			tok := strings.TrimSpace(v)
+			if tok == "" || tok == dnsTokenMask {
+				continue
+			}
+			h.db.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+				ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+				k, tok) //nolint:errcheck
+			if err := h.acmeIssuer.SetToken(tok); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved token but failed to write it for the proxy: " + err.Error()})
+				return
+			}
+			// Best-effort restart: the token is saved + materialized regardless; a
+			// restart failure (e.g. no docker socket on a dev box) just means the live
+			// resolver lags until the next proxy restart.
+			_ = h.acmeIssuer.RestartProxy()
 			continue
 		}
 		// Clamp the key-length bounds to a sane window on write; cross-coherence

@@ -175,12 +175,18 @@ services:
       - --api.dashboard=false
     environment:
       # Cloudflare DNS-01 API token for the wildcard cert (see the `dns` resolver
-      # above). Set CF_DNS_API_TOKEN in src/.env; leave blank to disable DNS-01.
-      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN:-}
+      # above), read from a FILE on the shared volume rather than a static env var.
+      # Rigger materializes it there from Settings → General (or a legacy src/.env
+      # CF_DNS_API_TOKEN, migrated on boot), so the token can be set/rotated in the UI
+      # without editing .env — a quick `docker restart rigger-traefik` (done for you)
+      # picks it up. lego honours the *_FILE convention. Absent file ⇒ DNS-01 unused.
+      - CF_DNS_API_TOKEN_FILE=/dynamic/secrets/cf_token
     volumes:
       # Certificate storage — mount a named volume so certs survive restarts
       - traefik-certs:/certs
-      # Out-of-band override certs + their dynamic TLS config (rigger writes; read-only here)
+      # Out-of-band override certs + dynamic TLS config + the DNS token file (rigger
+      # writes; read-only here). The token lives in /dynamic/secrets so the file
+      # provider (which scans /dynamic top-level) never tries to parse it as config.
       - rigger-dynamic:/dynamic:ro
     networks:
       - traefik_net

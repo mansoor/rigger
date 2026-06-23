@@ -37,6 +37,17 @@ const defaultLegoImage = "goacme/lego:v4.21.0"
 // one-shot lego container so its output lands where Traefik (and rigger) can read it.
 const defaultVolume = "rigger-dynamic"
 
+// ProxyContainer is the primary Traefik container name (see src/docker-compose.yml).
+// RestartProxy bounces it so a newly-set Cloudflare DNS token is picked up (Traefik
+// reads CF_DNS_API_TOKEN_FILE only at resolver init, i.e. process start).
+const ProxyContainer = "rigger-traefik"
+
+// tokenRelPath is where the Cloudflare DNS token is materialized inside the shared
+// rigger-dynamic volume. It lives in a SUBDIR (not the file-provider's top-level scan
+// dir) so Traefik's file provider never tries to parse it as a dynamic config; Traefik
+// reads it via CF_DNS_API_TOKEN_FILE and lego (out-of-band issuance) reads it too.
+var tokenRelPath = filepath.Join("secrets", "cf_token")
+
 // Issuer obtains + publishes out-of-band override certs.
 type Issuer struct {
 	Exec   executor.Executor // runs `docker` on the rigger host (local daemon)
@@ -60,13 +71,54 @@ func New(exec executor.Executor) *Issuer {
 	if vol == "" {
 		vol = defaultVolume
 	}
-	return &Issuer{
+	i := &Issuer{
 		Exec:   executor.Default(exec),
 		DynDir: dir,
 		Image:  img,
 		Token:  strings.TrimSpace(os.Getenv("CF_DNS_API_TOKEN")),
 		Volume: vol,
 	}
+	// Token precedence: src/.env (legacy) wins if set; otherwise the admin-managed
+	// token materialized into the shared volume (Settings → General). Lets DNS-01
+	// work without a manual .env edit + rebuild.
+	if i.Token == "" {
+		if b, err := os.ReadFile(i.TokenFile()); err == nil {
+			i.Token = strings.TrimSpace(string(b))
+		}
+	}
+	return i
+}
+
+// TokenFile is the absolute path (as rigger AND Traefik see it) of the materialized
+// Cloudflare DNS token in the shared volume.
+func (i *Issuer) TokenFile() string { return filepath.Join(i.DynDir, tokenRelPath) }
+
+// SetToken writes (or, when empty, removes) the Cloudflare DNS token in the shared
+// volume so Traefik (CF_DNS_API_TOKEN_FILE) and out-of-band lego both read it, and
+// updates this issuer's in-memory token. Does NOT restart Traefik — callers that
+// need the new token live in Traefik's resolver must call RestartProxy.
+func (i *Issuer) SetToken(token string) error {
+	token = strings.TrimSpace(token)
+	f := i.TokenFile()
+	if token == "" {
+		_ = os.Remove(f)
+		i.Token = ""
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(f), 0o700); err != nil {
+		return fmt.Errorf("create token dir: %w", err)
+	}
+	if err := os.WriteFile(f, []byte(token), 0o600); err != nil {
+		return fmt.Errorf("write token: %w", err)
+	}
+	i.Token = token
+	return nil
+}
+
+// RestartProxy bounces the primary Traefik container so a changed DNS token is read at
+// resolver init. Brief routing blip for all apps; expected to be rare (token changes).
+func (i *Issuer) RestartProxy() error {
+	return i.Exec.Docker(executor.Spec{Args: []string{"restart", ProxyContainer}})
 }
 
 // Enabled reports whether out-of-band DNS-01 issuance is possible (token present).
