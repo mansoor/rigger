@@ -1601,6 +1601,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               <p className="text-xs text-content-subtle">
                 Reachable at <span className="font-mono text-brand-600">http://{host}:{port}</span> — point your own reverse proxy / DNS here; that proxy owns the domain and TLS. Rigger does no routing in this mode.
               </p>
+              <p className="text-xs text-content-faint">Want Rigger to serve HTTPS itself? Use <strong>Routed by domain</strong> with <strong>Enable local HTTPS</strong> (Traefik self-signed cert). Host-port mode stays plain HTTP — TLS is your proxy&apos;s job.</p>
               {projectType === 'image' && (
                 <p className="text-xs text-content-faint">Image stacks publish each web service on its own host port (set per service in the Services tab).</p>
               )}
@@ -1622,9 +1623,18 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
 
         {exMode === 'none' && (
-          <p className="text-xs text-content-subtle">
-            Reachable only inside this environment&apos;s Docker network (other services by name). Nothing is published to the host. Want your own proxy to reach it? Choose <strong>Public — host port</strong> instead.
-          </p>
+          <>
+            <p className="text-xs text-content-subtle">
+              Reachable only inside this environment&apos;s Docker network (other services by name). Nothing is published to the host.
+            </p>
+            <div>
+              <Label>Attach to network <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+              <Input value={cfg.attach_network || ''} onChange={v => upd('attach_network', v)} placeholder="e.g. my-proxy-net" />
+              <p className="text-xs text-content-subtle mt-1">
+                Also join the web service to an <strong>existing</strong> Docker network so a container on it (your own reverse proxy, or another stack) can reach this app by service name — no host port. The network must already exist on the host (Rigger joins it as <code className="font-mono text-xs">external</code>). Leave blank to stay fully internal.
+              </p>
+            </div>
+          </>
         )}
       </div>
 

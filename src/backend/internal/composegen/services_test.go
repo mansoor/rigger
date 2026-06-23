@@ -584,6 +584,27 @@ func TestAuthGateBasic(t *testing.T) {
 	}
 }
 
+// Internal-only "attach to network": the web service joins a user-named external
+// Docker network (declared external) so an outside proxy / stack can reach it.
+func TestExposeAttachNetwork(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"web","image":"nginx","tag":"alpine","port":"80","web_routed":true}],
+		"environments": {"dev": {"deployment":"compose","expose_mode":"none","attach_network":"my-proxy-net"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "  my-proxy-net:\n    external: true") {
+		t.Errorf("attach network must be declared external at top level\n%s", s)
+	}
+	if web := svcBlock(t, s, "web"); !strings.Contains(web, "my-proxy-net: {}") {
+		t.Errorf("web service must join the attach network\n---\n%s", web)
+	}
+}
+
 // A legacy project that carries a literal "adminer" service AND the web_sql flag must
 // render exactly ONE adminer service (synth skipped — no duplicate, invalid key).
 func TestAdminerNoDoubleEmit(t *testing.T) {

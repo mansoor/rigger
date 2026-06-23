@@ -272,6 +272,11 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	if svc.WebRouted && e.TraefikEnabled && g.exposeMode() == "traefik" {
 		g.line("      " + e.TraefikNetwork + ": {}")
 	}
+	// Join a user-chosen external network so an outside proxy / another stack can reach
+	// this web service by name (e.g. expose_mode=none "attach to network").
+	if svc.WebRouted && e.AttachNetwork != "" && e.AttachNetwork != e.TraefikNetwork {
+		g.line("      " + e.AttachNetwork + ": {}")
+	}
 
 	g.emitDependsOn(prefix, svc.DependsOn, isSwarm)
 

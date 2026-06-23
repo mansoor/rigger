@@ -445,6 +445,11 @@ type Env struct {
 	// EffExposeMode / EffAuthGate and docs/EXPOSURE_AND_REMOTE_ACCESS.md.
 	ExposeMode      string         `json:"expose_mode,omitempty"`
 	AuthGate        string         `json:"auth_gate,omitempty"`
+	// AttachNetwork joins this env's web service(s) to an existing (external) Docker
+	// network so another container — e.g. the user's own reverse proxy — can reach the
+	// app in-network without publishing a host port. The network must already exist on
+	// the host. Mainly used with expose_mode=none (Internal only). See composegen.
+	AttachNetwork   string         `json:"attach_network,omitempty"`
 	RedisEnabled    bool           `json:"redis_enabled"`
 	GarageEnabled   bool           `json:"garage_enabled"`
 	TraefikEnabled  bool           `json:"traefik_enabled"`

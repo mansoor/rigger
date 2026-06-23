@@ -118,6 +118,9 @@ type Env struct {
 	// ("" = inherit project, then the traefik/none baseline). See gen.exposeMode.
 	ExposeMode      string `json:"expose_mode,omitempty"`
 	AuthGate        string `json:"auth_gate,omitempty"`
+	// AttachNetwork joins web service(s) to an existing external Docker network so a
+	// user-run proxy / another stack can reach the app in-network. Must already exist.
+	AttachNetwork   string `json:"attach_network,omitempty"`
 	RedisEnabled    bool  `json:"redis_enabled"`
 	GarageEnabled   bool   `json:"garage_enabled"`
 	TraefikEnabled  bool   `json:"traefik_enabled"`

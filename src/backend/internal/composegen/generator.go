@@ -272,6 +272,12 @@ func (g *gen) build() {
 		g.line("  " + e.TraefikNetwork + ":")
 		g.line("    external: true")
 	}
+	// A user-chosen external network (expose_mode=none "attach to network") so an
+	// outside proxy / another stack can reach the app in-network. Must already exist.
+	if e.AttachNetwork != "" && !(e.TraefikEnabled && e.AttachNetwork == e.TraefikNetwork) {
+		g.line("  " + e.AttachNetwork + ":")
+		g.line("    external: true")
+	}
 	g.line("")
 
 	// ── Secrets (swarm only) ──
