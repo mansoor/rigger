@@ -133,7 +133,7 @@ func (h *Handler) VerifyCustomDomain(w http.ResponseWriter, r *http.Request) {
 // POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}/primary
 // Body {primary: bool} — set/clear the ★ canonical domain (drives Open-app / APP_URL).
 func (h *Handler) SetPrimaryCustomDomain(w http.ResponseWriter, r *http.Request) {
-	ws, name, env := r.PathValue("workspace"), r.PathValue("name"), r.PathValue("env")
+	ws, name := r.PathValue("workspace"), r.PathValue("name")
 	if !auth.AtLeast(h.pipelineRole(r, ws, name), auth.RoleOperator) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
