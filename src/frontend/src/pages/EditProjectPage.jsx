@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -1598,6 +1598,10 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           </div>
         )}
 
+        {exMode === 'traefik' && (isNew
+          ? <p className="text-xs text-content-faint">Save this environment to attach custom domains.</p>
+          : <CustomDomainsPanel workspaceName={workspaceName} envName={envName} />)}
+
         {exMode === 'host_port' && (() => {
           const host = (appHost || '').trim() || 'localhost'
           const port = projectType === 'image' ? '<service host port>' : (cfg.http_port || 80)
@@ -1900,6 +1904,113 @@ function NewEnvVarsEditor({ cfg, onChange }) {
 }
 
 // ── Inline env vars editor (used inside EnvEditor) ────────────────────────────
+
+// CustomDomainsPanel — attach external domains (Render-style) to an env in addition to
+// its auto subdomain. Each must be verified (TXT / CNAME / file) before it's routed and
+// gets a per-host cert. workspaceName is the PROJECT key (legacy prop name); the real
+// workspace key comes from the route, mirroring EnvVarsInline.
+function CustomDomainsPanel({ workspaceName, envName }) {
+  const { workspace } = useParams()
+  const qc = useQueryClient()
+  const [newDomain, setNewDomain] = useState('')
+  const [expanded, setExpanded] = useState(null)
+  const [busy, setBusy] = useState(0)
+  const [msg, setMsg] = useState(null)
+
+  const key = ['custom-domains', workspace, workspaceName, envName]
+  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => fetchCustomDomains(workspace, workspaceName, envName) })
+  const domains = data?.domains || []
+  const autoSub = data?.auto_subdomain || ''
+  const refresh = () => qc.invalidateQueries({ queryKey: key })
+
+  const add = useMutation({
+    mutationFn: () => addCustomDomain(workspace, workspaceName, envName, newDomain.trim()),
+    onSuccess: () => { setNewDomain(''); setMsg(null); refresh() },
+    onError: (e) => setMsg({ err: true, text: e?.response?.data?.error || 'Could not add domain' }),
+  })
+  const del = useMutation({
+    mutationFn: (id) => deleteCustomDomain(workspace, workspaceName, envName, id),
+    onSuccess: refresh,
+  })
+  const verify = async (id) => {
+    setBusy(id); setMsg(null)
+    try {
+      const res = await verifyCustomDomain(workspace, workspaceName, envName, id)
+      if (res.verified) { setMsg({ err: false, text: `Verified via ${res.method?.toUpperCase()}. Redeploy this env to route it.` }); refresh() }
+      else setMsg({ err: true, text: res.error || 'Verification failed — records not found yet' })
+    } catch (e) {
+      setMsg({ err: true, text: e?.response?.data?.error || 'Verification failed' })
+    } finally { setBusy(0) }
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border/60">
+      <Label>Custom domains <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+      <p className="text-xs text-content-subtle mb-2">
+        Serve this env on your own domain in addition to its automatic URL. Add a domain,
+        prove you own it (DNS or a file), then point it here. Verified domains get their own
+        Let&apos;s Encrypt cert (needs port 80 reachable for the challenge).
+      </p>
+
+      <div className="flex gap-2">
+        <div className="flex-1"><Input value={newDomain} onChange={setNewDomain} placeholder="app.example.com" /></div>
+        <button type="button" onClick={() => newDomain.trim() && add.mutate()} disabled={add.isPending || !newDomain.trim()}
+          className="shrink-0 px-3 py-2 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+          {add.isPending ? 'Adding…' : 'Add domain'}
+        </button>
+      </div>
+      {msg && <p className={`text-xs mt-1 ${msg.err ? 'text-warning-fg' : 'text-success-fg'}`}>{msg.text}</p>}
+
+      {isLoading ? <p className="text-xs text-content-faint mt-2">Loading…</p> : domains.length === 0 ? (
+        <p className="text-xs text-content-faint mt-2">No custom domains yet.</p>
+      ) : (
+        <div className="mt-2 space-y-1.5">
+          {domains.map(d => (
+            <div key={d.id} className="border border-border rounded-lg bg-surface-raised/40">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <span className="font-mono text-xs text-content flex-1 truncate">{d.domain}</span>
+                {d.verified
+                  ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg">✓ verified</span>
+                  : <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg">pending</span>}
+                {!d.verified && (
+                  <button type="button" onClick={() => verify(d.id)} disabled={busy === d.id}
+                    className="text-[11px] px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50">
+                    {busy === d.id ? 'Checking…' : 'Verify'}
+                  </button>
+                )}
+                <button type="button" onClick={() => setExpanded(expanded === d.id ? null : d.id)}
+                  className="text-[11px] px-2 py-1 rounded border border-border hover:bg-surface-hover">
+                  {expanded === d.id ? 'Hide' : 'How to'}
+                </button>
+                <button type="button" onClick={() => del.mutate(d.id)} title="Remove"
+                  className="text-[11px] px-2 py-1 rounded border border-border text-warning-fg hover:bg-warning/10">✕</button>
+              </div>
+              {expanded === d.id && (
+                <div className="px-3 pb-3 pt-1 text-xs text-content-subtle space-y-2 border-t border-border/50">
+                  <p>Add <strong>any one</strong> of these, then click <strong>Verify</strong>:</p>
+                  <div>
+                    <div className="font-medium text-content">1 · CNAME (also routes traffic)</div>
+                    <code className="font-mono text-[11px] block bg-surface px-2 py-1 rounded mt-0.5 break-all">{d.domain} CNAME {d.challenge.cname_target || autoSub || '<enable routing first>'}</code>
+                  </div>
+                  <div>
+                    <div className="font-medium text-content">2 · TXT record</div>
+                    <code className="font-mono text-[11px] block bg-surface px-2 py-1 rounded mt-0.5 break-all">{d.challenge.txt_host} TXT &quot;{d.challenge.txt_value}&quot;</code>
+                  </div>
+                  <div>
+                    <div className="font-medium text-content">3 · File</div>
+                    <code className="font-mono text-[11px] block bg-surface px-2 py-1 rounded mt-0.5 break-all">http://{d.domain}{d.challenge.file_path}</code>
+                    <span className="text-content-faint">serving the text <code className="font-mono">{d.challenge.file_token}</code></span>
+                  </div>
+                  <p className="text-content-faint">For production, point the real traffic with the CNAME above (or an A record to this server). Verified domains route after you redeploy this env.</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function EnvVarsInline({ workspaceName, envName, deployment }) {
   const { workspace } = useParams()

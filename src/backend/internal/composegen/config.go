@@ -121,6 +121,10 @@ type Env struct {
 	// AttachNetwork joins web service(s) to an existing external Docker network so a
 	// user-run proxy / another stack can reach the app in-network. Must already exist.
 	AttachNetwork   string `json:"attach_network,omitempty"`
+	// CustomDomains are VERIFIED external domains routed to this env's apex web service
+	// in addition to its auto subdomain (Render-style). Not persisted in config.json —
+	// the bridge injects them from the DB onto RouteOpts at generation time.
+	CustomDomains   []string `json:"-"`
 	RedisEnabled    bool  `json:"redis_enabled"`
 	GarageEnabled   bool   `json:"garage_enabled"`
 	TraefikEnabled  bool   `json:"traefik_enabled"`

@@ -605,6 +605,36 @@ func TestExposeAttachNetwork(t *testing.T) {
 	}
 }
 
+// A verified custom domain emits an extra HTTPS router (per-host Let's Encrypt) on the
+// apex web service, plus a shared http→https redirect middleware. Empty list ⇒ no extra
+// routers (golden parity, covered by every other test).
+func TestCustomDomainRouting(t *testing.T) {
+	cfg := `{
+		"project":{"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services":[{"name":"web","image":"nginx","tag":"alpine","port":"80","web_routed":true}],
+		"environments":{"prod":{"deployment":"compose","traefik_enabled":true}}
+	}`
+	out, err := GenerateRouted([]byte(cfg), "prod", RouteOpts{BaseDomain: "example.com", CustomDomains: []string{"app.acme.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"Host(`app.acme.com`)",
+		"_cd0.tls.certresolver=letsencrypt",
+		"_cdredirect.redirectscheme.scheme=https",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("custom-domain output missing %q\n%s", want, s)
+		}
+	}
+	// No custom domains ⇒ no _cd routers (parity).
+	out2, _ := GenerateRouted([]byte(cfg), "prod", RouteOpts{BaseDomain: "example.com"})
+	if strings.Contains(string(out2), "_cd0") {
+		t.Errorf("empty CustomDomains must not emit _cd routers\n%s", out2)
+	}
+}
+
 // A legacy project that carries a literal "adminer" service AND the web_sql flag must
 // render exactly ONE adminer service (synth skipped — no duplicate, invalid key).
 func TestAdminerNoDoubleEmit(t *testing.T) {

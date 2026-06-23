@@ -69,6 +69,9 @@ type Options struct {
 	// under a per-env/workspace ACME email), so its router emits tls=true with NO ACME
 	// certresolver. Computed by the bridge (effective email differs from the global).
 	OverrideCert bool
+	// CustomDomains are the env's VERIFIED external domains (Render-style), routed to the
+	// apex web service in addition to its auto subdomain. Loaded from the DB by the bridge.
+	CustomDomains []string
 	// Registry is the EFFECTIVE registry (settings.EffectiveRegistry: project →
 	// workspace-system → global-system), resolved by the bridge. Drives the pull/skip
 	// decision and the regenerated compose's image refs. Empty ⇒ fall back to
@@ -147,7 +150,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, DNSProvider: opts.DNSProvider, OverrideCert: opts.OverrideCert, Registry: opts.Registry, EnvFile: readDotenv(envDir)})
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, DNSProvider: opts.DNSProvider, OverrideCert: opts.OverrideCert, CustomDomains: opts.CustomDomains, Registry: opts.Registry, EnvFile: readDotenv(envDir)})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -448,7 +451,7 @@ func (r *runner) logTail() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, OverrideCert: r.opts.OverrideCert, Registry: r.opts.Registry, EnvFile: readDotenv(filepath.Dir(r.composePath))})
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, OverrideCert: r.opts.OverrideCert, CustomDomains: r.opts.CustomDomains, Registry: r.opts.Registry, EnvFile: readDotenv(filepath.Dir(r.composePath))})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}

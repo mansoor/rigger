@@ -408,6 +408,13 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 			wildcard = e.wildcardBase
 		}
 		g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
+		// Verified custom domains (Render-style): the apex web service also answers on
+		// each external domain via its own HTTPS router with a per-host Let's Encrypt
+		// (HTTP-01) cert — the wildcard/DNS cert only covers the base domain. Subdomain
+		// web services keep just their primary route.
+		if svc.Subdomain == "" {
+			g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
+		}
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins
 		// (the user's chosen port), else the env HTTP port. Subdomain web services

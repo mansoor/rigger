@@ -1053,6 +1053,11 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/cert", authSvc.Middleware(http.HandlerFunc(handler.GetCertInfo)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/image-status", authSvc.Middleware(http.HandlerFunc(handler.GetImageStatus)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/track-latest", authSvc.Middleware(http.HandlerFunc(handler.TrackLatest)))
+	// Custom domains (Render-style): attach + verify external domains for an env.
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains", authSvc.Middleware(http.HandlerFunc(handler.ListCustomDomains)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains", authSvc.Middleware(http.HandlerFunc(handler.CreateCustomDomain)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}/verify", authSvc.Middleware(http.HandlerFunc(handler.VerifyCustomDomain)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/envs/{env}/domains/{id}", authSvc.Middleware(http.HandlerFunc(handler.DeleteCustomDomain)))
 
 	// Phase 2b: repo scanner — clone + static-detect a stack into a draft service graph.
 	mux.Handle("POST /api/scan-repo", authSvc.Middleware(http.HandlerFunc(handler.ScanRepo)))

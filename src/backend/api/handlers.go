@@ -1997,7 +1997,7 @@ func (h *Handler) purgeProjectData(prefix, wsName, name string) {
 		"pipelines", "pipeline_runs", "pipeline_webhooks", "deploy_history",
 		"managed_db_users", "api_key_projects",
 		"preview_webhooks", "preview_environments", "preview_writeback_tokens",
-		"acme_certs",
+		"acme_certs", "custom_domains",
 	} {
 		h.db.Exec("DELETE FROM "+tbl+" WHERE workspace=? AND project=?", wsName, name) //nolint:errcheck
 	}

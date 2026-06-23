@@ -3,6 +3,7 @@ package composegen
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,6 +32,11 @@ type RouteOpts struct {
 	// resolver: tls=true with NO certresolver. The bridge sets it only for an SSL env
 	// with an explicit public domain whose effective ACME email differs from the global.
 	OverrideCert bool
+	// CustomDomains are VERIFIED external domains (e.g. app.example.com) attached to
+	// this env in addition to its auto subdomain. Each gets its own websecure router on
+	// the apex web service with a per-host Let's Encrypt (HTTP-01) cert. Empty ⇒ no
+	// extra routers (golden parity). Loaded from the DB by the bridge on the deploy path.
+	CustomDomains []string
 	// EnvFile is the env's generated .env content. When a service sets
 	// env_file_mount, the generator embeds this verbatim as a compose `config`
 	// (content:) and mounts it at the target path. Delivered as inline content —
@@ -116,6 +122,7 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	if ro.OverrideCert && e.SSLEnabled && !e.SSLSelfSigned {
 		e.useFileCert = true
 	}
+	e.CustomDomains = ro.CustomDomains
 	applyWebEntryFallback(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
@@ -465,6 +472,48 @@ func (g *gen) traefikLabels(router, host, port string, usersVar, certResolver, w
 		}
 		g.line("      - \"traefik.http.routers." + router + ".middlewares=" + mws + "\"")
 		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
+	}
+}
+
+// traefikCustomDomains emits, for each VERIFIED custom domain attached to the env, an
+// additional HTTPS router on the apex web service. Each custom domain gets a per-host
+// Let's Encrypt (HTTP-01) cert — the base-domain wildcard/DNS cert doesn't cover an
+// external apex — plus a companion HTTP router that redirects to HTTPS (and lets the
+// :80 ACME challenge through). All routers reuse the apex service + its basic-auth
+// middleware (when the env gates it). No-op when the list is empty (golden parity).
+func (g *gen) traefikCustomDomains(router, port, usersVar string, domains []string) {
+	if !g.e.TraefikEnabled || len(domains) == 0 {
+		return
+	}
+	if port == "" {
+		port = "80"
+	}
+	// One shared http→https redirect middleware for all custom-domain HTTP routers
+	// (the apex router's own _redirect only exists when the apex is SSL).
+	redirect := router + "_cdredirect"
+	g.line("      - \"traefik.http.middlewares." + redirect + ".redirectscheme.scheme=https\"")
+	mws := "rigger-loading@file"
+	if usersVar != "" {
+		mws = router + "_auth," + mws // reuse the apex router's basic-auth middleware
+	}
+	for i, d := range domains {
+		d = strings.TrimSpace(d)
+		if d == "" {
+			continue
+		}
+		rt := router + "_cd" + strconv.Itoa(i)
+		rule := "Host(`" + d + "`)"
+		// HTTPS router with a per-host Let's Encrypt cert, pointing at the apex service.
+		g.line("      - \"traefik.http.routers." + rt + ".rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + rt + ".entrypoints=websecure\"")
+		g.line("      - \"traefik.http.routers." + rt + ".tls=true\"")
+		g.line("      - \"traefik.http.routers." + rt + ".tls.certresolver=letsencrypt\"")
+		g.line("      - \"traefik.http.routers." + rt + ".service=" + router + "\"")
+		g.line("      - \"traefik.http.routers." + rt + ".middlewares=" + mws + "\"")
+		// Companion HTTP router → redirect to HTTPS.
+		g.line("      - \"traefik.http.routers." + rt + "_web.rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + rt + "_web.entrypoints=web\"")
+		g.line("      - \"traefik.http.routers." + rt + "_web.middlewares=" + redirect + "\"")
 	}
 }
 

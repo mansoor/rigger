@@ -17,6 +17,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/backup"
 	"github.com/mansoor/rigger/ui/internal/builder"
 	"github.com/mansoor/rigger/ui/internal/crypto"
+	"github.com/mansoor/rigger/ui/internal/customdomains"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/deployhistory"
 	"github.com/mansoor/rigger/ui/internal/dockerops"
@@ -1427,6 +1428,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // default: env's deploy host (or local) — used by promote
@@ -1539,6 +1541,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
 			DNSProvider:   settings.AppsDNSProvider(b.db),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}

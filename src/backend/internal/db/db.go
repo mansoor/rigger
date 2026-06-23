@@ -664,6 +664,24 @@ func (d *DB) migrate() error {
 	)`) //nolint:errcheck
 	d.Exec(`CREATE INDEX IF NOT EXISTS idx_recovery_user ON user_recovery_codes(user_id)`) //nolint:errcheck
 
+	// Custom domains: a verified external domain (e.g. app.example.com) attached to an
+	// env IN ADDITION to its auto subdomain (Render-style). Ownership is proven via a
+	// per-domain token (TXT / file / CNAME) before the domain is routed + cert-issued.
+	// One domain maps to exactly one env (UNIQUE). Token persists so re-verification
+	// after a DNS change reuses the same challenge value.
+	d.Exec(`CREATE TABLE IF NOT EXISTS custom_domains (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		workspace   TEXT NOT NULL,
+		project     TEXT NOT NULL,
+		env         TEXT NOT NULL,
+		domain      TEXT NOT NULL UNIQUE,
+		token       TEXT NOT NULL,
+		verified    INTEGER NOT NULL DEFAULT 0,
+		verified_at DATETIME,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`) //nolint:errcheck
+	d.Exec(`CREATE INDEX IF NOT EXISTS idx_custom_domains_env ON custom_domains(workspace, project, env)`) //nolint:errcheck
+
 	// Phase 3 (settings scopes): host ownership. 'global' = shared via grants;
 	// 'ws:{key}' = private to that workspace. When the column is freshly added,
 	// every existing host predates scoping — grant each to all workspaces ('*')
