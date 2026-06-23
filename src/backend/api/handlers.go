@@ -24,6 +24,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
+	"github.com/mansoor/rigger/ui/internal/customdomains"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/executor"
@@ -739,6 +740,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.annotateHosts(projects)
+	h.applyPrimaryDomainURLs(projects) // env card shows the ★ canonical custom domain
 	// Per-project access: annotate each with the caller's effective role and hide
 	// the ones they can't see (project override of 'none', or no membership). A
 	// super-admin sees everything.
@@ -926,6 +928,21 @@ func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
 			}
 			if url, routed := composegen.EnvRouteURL(data, env, baseDomain, autoMode, hostRef.Address); routed {
 				info.URL = url
+				wss[i].EnvAccess[env] = info
+			}
+		}
+	}
+}
+
+// applyPrimaryDomainURLs overrides each routed env's displayed URL with its ★ canonical
+// custom domain (verified + primary) when one exists, so the env card / Open-app link
+// shows the user's own domain (e.g. weather.example.com) instead of the auto subdomain.
+// No-op for envs without a primary custom domain. Call after the EnvAccess URLs are set.
+func (h *Handler) applyPrimaryDomainURLs(wss []workspace.Workspace) {
+	for i := range wss {
+		for env, info := range wss[i].EnvAccess {
+			if pd := customdomains.PrimaryDomain(h.db, wss[i].WorkspaceName, wss[i].Name, env); pd != "" {
+				info.URL = "https://" + pd
 				wss[i].EnvAccess[env] = info
 			}
 		}
@@ -1704,7 +1721,8 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)
-	h.refineRemoteEnvURLs(wss) // remote envs: show their own host in the route URL
+	h.refineRemoteEnvURLs(wss)   // remote envs: show their own host in the route URL
+	h.applyPrimaryDomainURLs(wss) // env card shows the ★ canonical custom domain
 	out := wss[0]
 	// Surface the host-side folder path so the UI can show where the workspace
 	// actually lives (not the container's /toolkit path). Prefer the value stamped
