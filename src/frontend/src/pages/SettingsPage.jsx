@@ -902,9 +902,8 @@ function GeneralTab() {
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Rigger UI Domain</h2>
         <p className="text-sm text-content-subtle mb-4">
-          Optionally expose the Rigger UI itself through Traefik with an SSL cert.
-          After setting this, uncomment the <code className="font-mono text-xs">labels</code> block
-          in <code className="font-mono text-xs">src/docker-compose.yml</code> and rebuild.
+          Optionally expose the Rigger UI itself through Traefik with an SSL cert at the
+          domain below. Leave blank to keep reaching Rigger on its port only.
         </p>
 
         <div className="p-4 bg-surface border border-border rounded-xl">
@@ -1009,6 +1008,13 @@ function GeneralTab() {
               </p>
             </div>
           )}
+          {appsBaseDomain.trim() ? (
+            <p className="text-xs text-content-subtle">
+              A base domain is set, so every app routes under{' '}
+              <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> and the auto-URL
+              (sslip/nip) fallback isn&apos;t used. Clear the base domain above to switch back to it.
+            </p>
+          ) : (
           <div>
             <Label>Auto-URL fallback (when no base domain)</Label>
             <select value={autoUrlMode} onChange={e => setAutoUrlMode(e.target.value)}
@@ -1036,6 +1042,7 @@ function GeneralTab() {
               </p>
             )}
           </div>
+          )}
         </div>
       </div>
 
