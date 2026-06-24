@@ -214,13 +214,29 @@ Every read and write of a secret-flagged key is recorded.
 - API: `GET /api/workspaces/{name}/envs/{env}/secret-events`
 - UI: per-key audit icon that opens an event timeline in a modal
 
-### 8e — Vault Integration (Optional)
-Use HashiCorp Vault or a compatible API as a drop-in secret backend instead of encrypted `config.json`.
+### 8e — Pluggable secret backend + managed OpenBao vault (Optional)
+Make the secret backend pluggable so secrets can live in a real vault — HashiCorp Vault,
+OpenBao, or any Vault-API-compatible service — with the rest of Rigger agnostic to the choice.
+A Global/Workspace toggle picks **Off** (today's encrypted `config.json`), **Internal** (Rigger
+provisions and manages an OpenBao container), or **External** (connect to an existing vault).
+Full design: [docs/design/vault-secrets-backend.md](docs/design/vault-secrets-backend.md).
 
-- Config: `SECRETS_BACKEND=vault`, `VAULT_ADDR`, `VAULT_TOKEN` environment variables
-- Backend: `internal/secrets` package with interface — `LocalBackend` (default) and `VaultBackend`
-- Workspaces transparently read/write secrets through the interface regardless of backend
-- UI: Settings > Secrets tab showing active backend and connection status
+- **Key decision:** "Internal" = a **Rigger-managed OpenBao container** (mirrors
+  `internal/managedregistry`), NOT a Go-library embed — the binary stays flat, runtime cost is
+  one opt-in container. OpenBao's Vault API parity makes the client code identical for internal,
+  external, and HashiCorp Vault.
+- Backend: `internal/secrets` package with `Backend` interface — `LocalBackend` (default,
+  config.json + `internal/crypto`) and `VaultBackend` (Vault HTTP client, one client for both
+  internal & external). `internal/managedvault` runs/inits/unseals the internal container.
+- Settings hierarchy: `settings.EffectiveSecretsBackend(db, wsKey)` (Global default →
+  per-workspace override), like base domain / registries.
+- UI: Settings > Secrets tab — backend selector, internal provision/seal status, external
+  connect + Test/Health; honest caveat that compose still materializes plaintext `.env`
+  (Swarm secrets remain the only no-plaintext-on-disk path; Vault's win is a centralized,
+  rotatable, audited store with no plaintext source-of-truth).
+- Phasing: 8e-1 interface + LocalBackend refactor → 8e-2 VaultBackend + External (cheap, ship
+  first) → 8e-3 Internal managed OpenBao sidecar → 8e-4 Cloud-grade KMS auto-unseal + ws override.
+- Precondition: post Docker/Swarm hardening (Group C). Selling point for Rigger Cloud.
 
 ---
 
