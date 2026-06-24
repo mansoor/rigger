@@ -1476,8 +1476,17 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           // PRIVATE host IP — the name is public DNS, but the IP it points at isn't routable
           // from the internet. A real base domain (or a public App-host IP) is internet-wide.
           const privIP = (h) => !h || h === 'localhost' || /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
-          const lan = route.auto && !(baseDomain || '').trim() && (route.domain.endsWith('.localhost') || privIP((appHost || '').trim()))
-          const source = !route.auto ? 'base domain' : (route.domain.endsWith('.localhost') ? 'local only' : `auto-URL${route.ssl ? ' · TLS' : ''}`)
+          const host = (appHost || '').trim()
+          const isLocalhost = route.domain.endsWith('.localhost')
+          // Magic-DNS (sslip/nip) on a PUBLIC host IP is internet-reachable; on a private IP
+          // it's LAN-only. Either way it's plain HTTP unless self-signed is on — a real cert
+          // needs a base or custom domain.
+          const magicPublic = route.auto && !isLocalhost && host !== '' && !privIP(host)
+          const source = !route.auto
+            ? (route.ssl ? 'base domain · TLS' : 'base domain')
+            : isLocalhost ? 'local only'
+            : magicPublic ? (route.ssl ? 'public · self-signed' : 'public')
+            : (route.ssl ? 'LAN · self-signed' : 'LAN')
           return (
             <div>
               <Label>Primary URL <span className="font-normal normal-case text-content-faint">(automatic)</span></Label>
@@ -1498,11 +1507,13 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                 )}
               </div>
               <p className="text-xs text-content-faint mt-1">
-                {route.auto
-                  ? (lan
-                    ? <>Magic-DNS name at this host&apos;s private IP (<code className="font-mono text-xs">{(appHost || '').trim() || 'localhost'}</code>) — only reachable on this network/host. For a public address, set a base domain (admin Settings) or add a custom domain below. TLS is issued automatically once it&apos;s public.</>
-                    : <>Auto-generated — reachable wherever this hostname resolves. TLS issued automatically.</>)
-                  : <>On the base domain. TLS issued automatically (wildcard or per-host).</>}
+                {!route.auto
+                  ? <>On the base domain — publicly reachable. TLS is issued automatically (wildcard or per-host).</>
+                  : isLocalhost
+                    ? <>Host-only (<code className="font-mono text-xs">*.localhost</code>) — not reachable from other machines. Set a base domain or a magic-DNS fallback (admin Settings), or add a custom domain below, for a shareable URL.</>
+                    : magicPublic
+                      ? <>Magic-DNS at this host&apos;s <strong>public</strong> IP (<code className="font-mono text-xs">{host}</code>) — reachable on the internet. Served over plain HTTP; enable self-signed HTTPS, or add a custom domain / set a base domain for an automatic Let&apos;s Encrypt cert.</>
+                      : <>Magic-DNS at this host&apos;s private IP (<code className="font-mono text-xs">{host || 'localhost'}</code>) — reachable on this network/LAN, not the public internet. Point the App host at a public IP, set a base domain, or add a custom domain for a public URL.</>}
               </p>
             </div>
           )
