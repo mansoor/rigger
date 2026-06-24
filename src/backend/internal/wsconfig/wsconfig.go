@@ -461,6 +461,11 @@ type Env struct {
 	Deployment      string         `json:"deployment"`
 	Git             EnvGit         `json:"git"`
 	EnvVars         map[string]Str `json:"env_vars"`
+	// Secrets are Rigger-managed generated secrets (DB/app/MinIO passwords) pinned on
+	// first .env generation so they survive a lost/regenerated .env (envgen reads them as
+	// a preservation fallback). A SEPARATE channel from EnvVars: a repo's .env.example
+	// values must never override these. Written by bootstrap; not user-editable.
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 // EnvGit is the per-env git override (branch). The repo is project-level.

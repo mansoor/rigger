@@ -431,6 +431,38 @@ func TestExtraVarsDoNotOverrideManagedDB(t *testing.T) {
 	}
 }
 
+// A managed secret pinned in config.json's `secrets` map must be reused when the live
+// .env is gone (existing=nil) — so a regen can't reroll a DB password against an
+// already-initialized volume ("Access denied"). A repo's env_vars still can't supply it
+// (that's the separate-channel guarantee, covered by TestExtraVarsDoNotOverrideManagedDB).
+func TestPinnedSecretsSurviveLostEnv(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "myapp", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "dev": {
+        "database": "mysql", "deployment": "compose",
+        "secrets": { "MYSQL_PASSWORD": "pinnedpw123", "MYSQL_ROOT_PASSWORD": "pinnedroot456" }
+      } }
+    }`)
+	// existing=nil simulates a lost/empty .env on regen.
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	if m["MYSQL_PASSWORD"] != "pinnedpw123" || m["DB_PASSWORD"] != "pinnedpw123" {
+		t.Errorf("pinned secret not reused on lost .env: MYSQL_PASSWORD=%q DB_PASSWORD=%q", m["MYSQL_PASSWORD"], m["DB_PASSWORD"])
+	}
+	if m["MYSQL_ROOT_PASSWORD"] != "pinnedroot456" {
+		t.Errorf("MYSQL_ROOT_PASSWORD=%q, want pinned pinnedroot456", m["MYSQL_ROOT_PASSWORD"])
+	}
+	// A live .env value still wins over the pinned secret (authoritative when present).
+	env2, _, _ := Generate(c, "dev", map[string]string{"MYSQL_PASSWORD": "livepw"}, fixedRand)
+	if got := ParseEnv([]byte(env2))["MYSQL_PASSWORD"]; got != "livepw" {
+		t.Errorf("live .env value should win over pinned secret, got %q", got)
+	}
+}
+
 // TestProtectAdminUIsCreds verifies that an env opting into admin-UI protection gets a
 // generated basic-auth credential: a revealable plaintext password + an htpasswd line
 // (bcrypt) that validates it, single-quoted so the dotenv parser keeps the '$' literal.

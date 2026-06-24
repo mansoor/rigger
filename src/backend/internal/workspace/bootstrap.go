@@ -65,6 +65,10 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 			return err
 		}
 		fmt.Fprintf(out, "  .env generated\n")
+		// Pin newly-generated managed secrets (DB/app/MinIO passwords) into config.json
+		// so they survive a future regen even if the live .env is lost — otherwise a
+		// regen rerolls them and breaks against the already-initialized DB/data volume.
+		pinManagedSecrets(workspacesDir, workspaceName, name, env, cfg, envFile)
 	} else {
 		fmt.Fprintf(out, "  .env exists — skipping (regen not requested)\n")
 	}
@@ -140,6 +144,32 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 
 	fmt.Fprintf(out, "Environment '%s' bootstrapped\n", env)
 	return nil
+}
+
+// pinManagedSecrets records the resolved managed secrets (DB / app / MinIO passwords)
+// from the just-generated .env into config.json env_vars the FIRST time each appears, so
+// they become the durable source of truth. A later regen then reads them from config.json
+// even if the live .env was lost or regenerated empty — preventing a rerolled password
+// from locking out an already-initialized DB / data volume. Idempotent + best-effort.
+func pinManagedSecrets(workspacesDir, ws, name, env string, cfg *wsconfig.Config, envFile string) {
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		return
+	}
+	cur := envgen.ParseEnv(raw)
+	e := cfg.Environments[env]
+	updates := map[string]string{}
+	for _, k := range envgen.ManagedSecretKeys {
+		v, ok := cur[k]
+		if !ok || v == "" {
+			continue
+		}
+		if s, pinned := e.Secrets[k]; pinned && s != "" {
+			continue // already pinned in config.json's secrets map
+		}
+		updates[k] = v
+	}
+	_ = UpdateConfigSecrets(workspacesDir, ws, name, env, updates) //nolint:errcheck
 }
 
 // writeEnv generates .env and .env.example for env, preserving existing secrets.

@@ -807,6 +807,46 @@ func UpdateConfigEnvVars(workspacesDir, workspaceName, name, env string, updates
 	return os.WriteFile(cfgPath, append(out, '\n'), 0o644)
 }
 
+// UpdateConfigSecrets merges Rigger-managed secrets into config.json's per-env `secrets`
+// map (read-modify-write). A SEPARATE channel from env_vars so a repo's .env.example can't
+// override managed DB/app passwords; mirrors UpdateConfigEnvVars. Best-effort; no-op if the
+// env is absent. Never deletes — a managed volume's password is permanent once set.
+func UpdateConfigSecrets(workspacesDir, workspaceName, name, env string, updates map[string]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	cfgPath := wspath.ConfigPath(workspacesDir, workspaceName, name)
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	envs, _ := root["environments"].(map[string]any)
+	if envs == nil {
+		return nil
+	}
+	envObj, _ := envs[env].(map[string]any)
+	if envObj == nil {
+		return nil
+	}
+	sec, _ := envObj["secrets"].(map[string]any)
+	if sec == nil {
+		sec = map[string]any{}
+	}
+	for k, v := range updates {
+		sec[k] = v
+	}
+	envObj["secrets"] = sec
+	out, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(cfgPath, append(out, '\n'), 0o644)
+}
+
 func splitLines(s string) []string {
 	var lines []string
 	start := 0

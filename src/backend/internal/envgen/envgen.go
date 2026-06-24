@@ -303,6 +303,16 @@ func imageEnvVar(name string) string {
 	return strings.ReplaceAll(strings.ToUpper(name), "-", "_") + "_IMAGE"
 }
 
+// ManagedSecretKeys are the auto-generated secrets envgen preserves across regen (the
+// getOut keys). Bootstrap pins their resolved values into config.json the first time they
+// appear, so a later regen with a missing/empty .env reads them back instead of rerolling
+// — which would break against an already-initialized DB / data volume.
+var ManagedSecretKeys = []string{
+	"MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD",
+	"APP_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
+	"MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
+}
+
 // Generate produces the .env and .env.example contents for one environment.
 // existing is the parsed current .env (may be nil) used to preserve secrets.
 func Generate(cfg *wsconfig.Config, env string, existing map[string]string, r Rand) (envOut, exampleOut string, err error) {
@@ -346,6 +356,17 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 				if v, ok := existing[k]; ok && v != "" {
 					return v
 				}
+			}
+		}
+		// Durable fallback: a secret pinned in config.json's `secrets` map survives even
+		// when the live .env was lost or regenerated empty — without this, a regen rerolls
+		// the password and breaks against an already-initialized DB/data volume ("Access
+		// denied"). This is a SEPARATE channel from env_vars on purpose: a repo's
+		// .env.example values (env_vars) must NOT override Rigger-managed secrets. Bootstrap
+		// pins these on first generation (pinManagedSecrets).
+		for _, k := range keys {
+			if s, ok := e.Secrets[k]; ok && s != "" {
+				return s
 			}
 		}
 		return def
