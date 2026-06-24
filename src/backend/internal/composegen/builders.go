@@ -367,7 +367,9 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 
 // emitServicePorts handles web routing and port publishing, emitting at most ONE
 // `ports:` block (duplicate keys are invalid YAML). A web-routed apex service under
-// Traefik gets labels (no host port); without Traefik it binds a single host port —
+// Traefik gets labels AND, if an EXPLICIT host_port is set, publishes it too (so a
+// user-run proxy can hit the host:port directly even while Traefik also routes it);
+// with no host_port it's Traefik-only. Without Traefik it binds a single host port —
 // the service's own host_port if set, else the env HTTP port (so editing the
 // service port just changes the published port, not adds a second one). Non-web
 // services publish host_port/extra_ports, or expose the container port.
@@ -378,8 +380,12 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 	var publishes []string
 	switch {
 	case svc.WebRouted && mode == "cloudflare_tunnel":
-		// No public router and no host port — the cloudflared connector reaches the app
-		// in-network. Falls through to `expose` below so it's reachable by service name.
+		// No public router — the cloudflared connector reaches the app in-network. Honor an
+		// EXPLICIT host-port mapping on an APP service if set (not admin sidecars); else no
+		// host port (falls through to `expose` below so it's reachable by service name).
+		if hp := string(svc.HostPort); hp != "" && !svc.AuthProtect {
+			publishes = append(publishes, hp+":"+portOr(port, "80"))
+		}
 	case svc.WebRouted && mode == "none":
 		// Internal-only: publish an explicit host_port if the user set one; otherwise
 		// just expose the container port (no auto env-HTTP-port publish, no router).
@@ -414,6 +420,16 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		// web services keep just their primary route.
 		if svc.Subdomain == "" {
 			g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
+		}
+		// An EXPLICIT host-port mapping on an APP service is honored even under Traefik
+		// routing — publish it so a user-run reverse proxy / DNS can target this host:port
+		// directly (e.g. when this Rigger isn't public-facing / port 80 isn't routed to it),
+		// IN ADDITION to Traefik's in-network routing. Skipped for synthesized admin
+		// sidecars (Adminer / MinIO console, AuthProtect=true), whose host_port is an
+		// internal default and which are meant to be Traefik-routed only. No host_port ⇒
+		// Traefik-only (today's default).
+		if hp := string(svc.HostPort); hp != "" && !svc.AuthProtect {
+			publishes = append(publishes, hp+":"+portOr(port, "80"))
 		}
 	case svc.WebRouted && svc.Subdomain == "":
 		// Apex web service without Traefik: publish one host port. host_port wins

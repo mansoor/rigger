@@ -605,6 +605,29 @@ func TestExposeAttachNetwork(t *testing.T) {
 	}
 }
 
+// A Traefik-routed web service with an EXPLICIT host_port publishes that host port AND
+// keeps its Traefik router — so a user-run reverse proxy can target host:port directly
+// (e.g. when Rigger isn't public-facing) while Traefik still routes the domain.
+func TestWebRoutedHostPortPublishedUnderTraefik(t *testing.T) {
+	cfg := `{
+		"project":{"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services":[{"name":"frontend","image":"nginx","tag":"alpine","port":"3000","web_routed":true,"host_port":"3456"}],
+		"environments":{"dev":{"deployment":"compose","traefik_enabled":true}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	web := svcBlock(t, s, "frontend")
+	if !strings.Contains(web, `- "3456:3000"`) {
+		t.Errorf("explicit host_port must be published under Traefik\n---\n%s", web)
+	}
+	if !strings.Contains(web, "traefik.http.routers.") {
+		t.Errorf("Traefik router must still be emitted alongside the host port\n---\n%s", web)
+	}
+}
+
 // A verified custom domain emits an extra HTTPS router (per-host Let's Encrypt) on the
 // apex web service, plus a shared http→https redirect middleware. Empty list ⇒ no extra
 // routers (golden parity, covered by every other test).
