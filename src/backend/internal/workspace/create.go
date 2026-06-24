@@ -531,7 +531,7 @@ func seedServices(req CreateRequest) []map[string]any {
 		"healthcheck": health,
 		"volumes":     []string{"uploads:/app/storage/uploads"},
 	}
-	if req.Database == "postgres" || req.Database == "mysql" || req.Database == "mariadb" {
+	if req.Database == "postgres" || req.Database == "mysql" || req.Database == "mariadb" || req.Database == "mongodb" {
 		backend["depends_on"] = []string{req.Database}
 	}
 	nginx := map[string]any{

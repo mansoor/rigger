@@ -137,12 +137,17 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	scheme := "postgresql"
-	if eng.Driver == "mysql" {
+	scheme, suffix := "postgresql", ""
+	switch eng.Driver {
+	case "mysql":
 		scheme = "mysql"
+	case "mongodb":
+		// The connection user is the root user, which authenticates against the
+		// admin database — clients need authSource=admin.
+		scheme, suffix = "mongodb", "?authSource=admin"
 	}
 	uri := func(host string, p int) string {
-		return fmt.Sprintf("%s://%s:%s@%s:%d/%s", scheme, user, shownPass, host, p, dbName)
+		return fmt.Sprintf("%s://%s:%s@%s:%d/%s%s", scheme, user, shownPass, host, p, dbName, suffix)
 	}
 	resp.Connections = []connString{{Label: "Internal URI", Value: uri(internalHost, port)}}
 

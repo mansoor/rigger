@@ -196,6 +196,40 @@ func TestManagedDBMariaDBVersionExternal(t *testing.T) {
 	}
 }
 
+// Managed MongoDB (minimal): emits a mongo service with the MONGO_INITDB_* init
+// contract mapped from the .env MONGO_* keys, its own data volume + healthcheck,
+// and — even with web_sql requested — NO Adminer (a SQL client can't talk Mongo).
+func TestManagedDBMongo(t *testing.T) {
+	cfg := `{
+		"project": {"name":"docs","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"mongodb","web_sql":true},
+		"services": [{"name":"app","role":"app","build":{},"port":"3000","env_file":true,"depends_on":["mongodb"]}],
+		"environments": {"dev": {"deployment":"compose","http_port":"8080"}}
+	}`
+	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"  mongodb:",
+		"image: mongo:7",
+		"container_name: docs_dev_mongodb",
+		"MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}",
+		"MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}",
+		"MONGO_INITDB_DATABASE: ${MONGO_DB}",
+		"      - docs_dev_mongodb_data:/data/db",
+		"  docs_dev_mongodb_data:",
+		"          - docs_dev_mongodb",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("mongo output missing %q\n---\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "  adminer:") || strings.Contains(s, "image: adminer") {
+		t.Errorf("Adminer must NOT be synthesized for a non-SQL (mongo) engine\n%s", s)
+	}
+}
+
 // Managed deps moved from per-env to project-level (consistent across envs); only
 // DBExternal stays per-env. The generator reads an effective value (project-level
 // else legacy per-env), so a project-level engine/version/redis must produce the

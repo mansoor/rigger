@@ -16,6 +16,7 @@ const (
 	dashMySQL    = 54
 	dashRedis    = 54
 	dashStorage  = 38
+	dashMongo    = 51
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
@@ -77,6 +78,11 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 	engine := g.dbEngine()
 	if engine == "" || engine == "none" {
 		return // Adminer needs a database to connect to
+	}
+	// Adminer is a SQL client — it can't talk to a document store like MongoDB. Skip
+	// it for non-SQL engines (a future mongo-express sidecar covers Mongo separately).
+	if eng, ok := databases.Get(engine); ok && eng.Driver != "postgres" && eng.Driver != "mysql" {
+		return
 	}
 	svc := Service{
 		Name:      "adminer",
@@ -195,6 +201,9 @@ func (g *gen) emitVolumes(prefix string) {
 	}
 	if engine == "mariadb" {
 		add(prefix + "_mariadb_data")
+	}
+	if engine == "mongodb" {
+		add(prefix + "_mongodb_data")
 	}
 	if g.redisOn() {
 		add(prefix + "_redis_data")
@@ -512,7 +521,7 @@ func (g *gen) depHasHealthcheck(name string) bool {
 		}
 	}
 	switch name {
-	case "postgres", "mysql", "mariadb", "redis":
+	case "postgres", "mysql", "mariadb", "mongodb", "redis":
 		return true // these managed deps carry a healthcheck (see buildManagedDeps)
 	}
 	// minio (and its mc-init) intentionally have NO healthcheck — see buildManagedDeps.
@@ -757,6 +766,33 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
+	// MongoDB — document store. Init env keys (MONGO_INITDB_ROOT_*) differ from the
+	// .env connection keys (MONGO_USER/PASSWORD/DB), so they're mapped explicitly
+	// rather than via dbEnvLine. The root user IS the app connection identity
+	// (no separate app-user provisioning in this first cut); it authenticates
+	// against the admin database (authSource=admin in the URI envgen writes).
+	if engine == "mongodb" {
+		eng, _ := databases.Get("mongodb")
+		ver := g.dbVersion(eng)
+		g.line(sectionComment("MongoDB "+ver, dashMongo))
+		g.line("  mongodb:")
+		g.line("    image: mongo:" + ver)
+		g.line("    container_name: " + prefix + "_mongodb")
+		g.dbExternalPorts(eng)
+		g.line("    environment:")
+		g.line("      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}")
+		g.line("      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}")
+		g.line("      MONGO_INITDB_DATABASE: ${MONGO_DB}")
+		g.line("    volumes:")
+		g.line("      - " + prefix + "_mongodb_data:/data/db")
+		g.managedNet(prefix, "mongodb")
+		// mongosh ships in 6+, the legacy `mongo` shell in 5 — try both so the probe
+		// works across selectable versions.
+		g.healthcheck("mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1 || mongo --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1", "10s", "5s", "5", "40s", "")
+		g.deployBlock(isSwarm, "mongodb", "1", "unless-stopped")
+		g.line("")
+	}
+
 	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  redis:")
@@ -881,6 +917,8 @@ func managedDepPort(name string) string {
 		return "5432"
 	case "mysql", "mariadb":
 		return "3306"
+	case "mongodb":
+		return "27017"
 	case "redis":
 		return "6379"
 	case "minio":

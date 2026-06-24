@@ -133,6 +133,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			"DATABASE", "DATABASE_URL", "DB_EXTERNAL_PORT",
 			"MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
 			"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
+			"MONGO_HOST", "MONGO_PORT", "MONGO_DB", "MONGO_USER", "MONGO_PASSWORD", "MONGO_URI",
 		} {
 			out[k] = true
 		}
@@ -308,7 +309,7 @@ func imageEnvVar(name string) string {
 // appear, so a later regen with a missing/empty .env reads them back instead of rerolling
 // — which would break against an already-initialized DB / data volume.
 var ManagedSecretKeys = []string{
-	"MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD",
+	"MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "MONGO_PASSWORD", "DB_PASSWORD",
 	"APP_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
 	"MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
 }
@@ -371,7 +372,7 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		}
 		return def
 	}
-	dbPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_PASSWORD", "POSTGRES_PASSWORD", "DB_PASSWORD")
+	dbPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_PASSWORD", "POSTGRES_PASSWORD", "MONGO_PASSWORD", "DB_PASSWORD")
 	dbRootPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_ROOT_PASSWORD")
 	appKey := getOut("base64:"+base64N(r, 32), "APP_KEY")
 	// MinIO root credentials double as the app's S3 access key/secret (AWS_*). They
@@ -444,6 +445,19 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("MYSQL_USER=%s_user\n", dbBase)
 		p("MYSQL_PASSWORD=%s\n", dbPassword)
 		p("MYSQL_ROOT_PASSWORD=%s\n", dbRootPassword)
+	case "mongodb":
+		// The root user IS the app connection identity in this first cut (no separate
+		// app-user provisioning); it authenticates against the admin database, so the
+		// ready-to-use URI carries authSource=admin.
+		host := prefix + "_mongodb"
+		mongoUser := dbBase + "_user"
+		mongoDB := dbBase + "_" + env
+		p("MONGO_HOST=%s\n", host)
+		p("MONGO_PORT=27017\n")
+		p("MONGO_DB=%s\n", mongoDB)
+		p("MONGO_USER=%s\n", mongoUser)
+		p("MONGO_PASSWORD=%s\n", dbPassword)
+		p("MONGO_URI=mongodb://%s:%s@%s:27017/%s?authSource=admin\n", mongoUser, dbPassword, host, mongoDB)
 	}
 	// When the DB is published externally, expose the host port (overridable) so the
 	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.

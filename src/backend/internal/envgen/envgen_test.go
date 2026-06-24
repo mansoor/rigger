@@ -157,6 +157,47 @@ func TestCustomPostgresEnv(t *testing.T) {
 	}
 }
 
+// Managed MongoDB writes the MONGO_* connection family + a ready-to-use URI with
+// authSource=admin (the root user authenticates against the admin database). The
+// password is preserved across regen via the same getOut chain as the SQL engines.
+func TestMongoEnv(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "docs", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "database": "mongodb" },
+      "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
+      "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	checks := map[string]string{
+		"DATABASE":   "mongodb",
+		"MONGO_HOST": "docs_dev_mongodb",
+		"MONGO_PORT": "27017",
+		"MONGO_DB":   "docs_dev",
+		"MONGO_USER": "docs_user",
+	}
+	for k, want := range checks {
+		if m[k] != want {
+			t.Errorf("%s = %q, want %q", k, m[k], want)
+		}
+	}
+	if !strings.HasPrefix(m["MONGO_PASSWORD"], "changeme_") {
+		t.Errorf("MONGO_PASSWORD = %q, want changeme_ prefix", m["MONGO_PASSWORD"])
+	}
+	wantURI := "mongodb://docs_user:" + m["MONGO_PASSWORD"] + "@docs_dev_mongodb:27017/docs_dev?authSource=admin"
+	if m["MONGO_URI"] != wantURI {
+		t.Errorf("MONGO_URI = %q, want %q", m["MONGO_URI"], wantURI)
+	}
+	// A regen with a lost .env preserves the password from config secrets / existing.
+	existing := map[string]string{"MONGO_PASSWORD": "keepme123"}
+	env2, _, _ := Generate(c, "dev", existing, fixedRand)
+	if ParseEnv([]byte(env2))["MONGO_PASSWORD"] != "keepme123" {
+		t.Error("MONGO_PASSWORD not preserved across regen")
+	}
+}
+
 // TestAppURLNoDomain guards the empty-domain case: APP_URL must stay a valid
 // absolute URI (not the malformed "http://", which crashes Laravel artisan with
 // "Invalid URI"). With no domain it falls back to localhost + the HTTP port.

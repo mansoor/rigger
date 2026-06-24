@@ -1078,7 +1078,7 @@ func buildArgKeyOK(s string) bool {
 // source per service; image_from/depends_on must reference a real service (or, for
 // depends_on, an enabled managed dependency).
 func validateConfigServices(content []byte) string {
-	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "redis": true, "minio": true, "minio_init": true, "storage_console": true, "mailpit": true}
+	reserved := map[string]bool{"postgres": true, "mysql": true, "mariadb": true, "mongodb": true, "redis": true, "minio": true, "minio_init": true, "storage_console": true, "mailpit": true}
 	var doc struct {
 		Services []struct {
 			Name  string `json:"name"`
@@ -1115,7 +1115,7 @@ func validateConfigServices(content []byte) string {
 	// Deps are project-level; the per-env fields are also consulted for back-compat.
 	managedActive := func(name string) bool {
 		switch name {
-		case "postgres", "mysql", "mariadb":
+		case "postgres", "mysql", "mariadb", "mongodb":
 			if doc.Project.Database == name {
 				return true
 			}
@@ -1130,7 +1130,7 @@ func validateConfigServices(content []byte) string {
 		}
 		for _, ec := range doc.Environments {
 			switch name {
-			case "postgres", "mysql", "mariadb":
+			case "postgres", "mysql", "mariadb", "mongodb":
 				if ec.Database == name {
 					return true
 				}

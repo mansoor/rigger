@@ -48,6 +48,17 @@ var catalog = []Engine{
 		Port:           3306, VolumePath: "/var/lib/mysql",
 		Driver: "mysql", EnvPrefix: "MYSQL", Schemas: true, Users: true,
 	},
+	{
+		// MongoDB — document store (NOT SQL). The SQL management surface (Adminer
+		// auto-login, schema/database + user administration via psql/mysql) does not
+		// apply, so Schemas/Users are false: the console shows connection info only.
+		// A web admin UI (mongo-express) is a planned second iteration.
+		ID: "mongodb", Label: "MongoDB", Image: "mongo",
+		Versions:       []string{"7", "6", "5"},
+		DefaultVersion: "7",
+		Port:           27017, VolumePath: "/data/db",
+		Driver: "mongodb", EnvPrefix: "MONGO", Schemas: false, Users: false,
+	},
 }
 
 // Catalog returns the ordered list of hostable engines.
