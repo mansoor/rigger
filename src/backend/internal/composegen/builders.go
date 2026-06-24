@@ -86,6 +86,14 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 		WebRouted: true,
 		HostPort:  "8978", // host publish for the no-Traefik case (8080 would clash with Rigger)
 		EnvFile:   true,   // inject DB creds + ADMINER_LOGIN_SECRET from .env
+		// Also pin the auto-login secret as an explicit (interpolated) environment entry,
+		// not just via env_file. compose's config-hash is computed from the YAML, so an
+		// interpolated ${ADMINER_LOGIN_SECRET} value is part of it — meaning a changed or
+		// newly-added secret forces `compose up -d` to RECREATE this container. env_file
+		// content alone is NOT hashed, so a refresh that added/rotated the secret would
+		// otherwise leave a stale Adminer running with no secret → auto-login silently
+		// no-ops (the plugin reads an empty getenv and shows the normal login page).
+		EnvVars:   map[string]flexStr{"ADMINER_LOGIN_SECRET": flexStr("${ADMINER_LOGIN_SECRET}")},
 		Volumes:   []string{"${RIGGER_BIND_ROOT:-.}/adminer-login.php:/var/www/html/plugins-enabled/01-rigger-autologin.php:ro"},
 		DependsOn: []string{engine},
 		// Admin UI → eligible for the per-env basic-auth middleware (gated on ProtectAdminUIs).
