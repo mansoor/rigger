@@ -18,6 +18,7 @@ const SERVICE_META = {
   postgres:        { label: 'PostgreSQL',    port: '5432',      vars: ['POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD'], creds: true },
   mysql:           { label: 'MySQL',         port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
   mariadb:         { label: 'MariaDB',       port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
+  mongodb:         { label: 'MongoDB',       port: '27017',     vars: ['MONGO_HOST', 'MONGO_PORT', 'MONGO_DB', 'MONGO_USER', 'MONGO_PASSWORD', 'MONGO_URI'], creds: true, note: 'Document store. The connection user is the root user (authSource=admin); a ready-to-use MONGO_URI is set in each environment’s .env. No web SQL client (Adminer is SQL-only) — view connection details on the Database tab.' },
   redis:           { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
   minio:           { label: 'MinIO (S3)',    port: '9000',      vars: ['AWS_ENDPOINT', 'AWS_BUCKET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_USE_PATH_STYLE_ENDPOINT'], note: 'S3-compatible object store. The bucket is auto-created on first deploy; AWS_* credentials are the MinIO root user/password (revealable on the Database/Storage tab).' },
   storage_console: { label: 'MinIO Console', port: '9090',      vars: [], note: 'Browser admin UI for MinIO (opens3/console) — routed at the storage subdomain. Log in with the MinIO root credentials. Not used directly by your app.' },
@@ -50,6 +51,22 @@ export function enabledDependsOnTargets({ database, redis, storageMinio } = {}) 
   if (redis) out.push('redis')
   if (storageMinio) out.push('minio')
   return out
+}
+
+// SQL_ENGINES are the relational engines that the Adminer web SQL client + the
+// SQL management surface (schemas/users) apply to. Document stores (MongoDB) are
+// excluded — they get connection info only (a mongo-express console is planned).
+const SQL_ENGINES = ['postgres', 'mysql', 'mariadb']
+
+// Group is a labelled subsection inside the Managed Services card, so related
+// controls (Database/Redis/Adminer, Storage, Mail) read as one block.
+function Group({ title, children }) {
+  return (
+    <div className="rounded-lg border border-border-strong/50 bg-surface-raised/30 p-3 space-y-3">
+      <p className="text-[11px] font-semibold text-content-muted uppercase tracking-wider">{title}</p>
+      {children}
+    </div>
+  )
 }
 
 function MiniToggle({ label, hint, checked, onChange }) {
@@ -111,6 +128,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
   const set = (patch) => onChange({ ...v, ...patch })
   const localOn = !!v.storageLocal
   const minioOn = !!v.storageMinio
+  const isSql = SQL_ENGINES.includes(v.database)
   return (
     <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-4">
       <div>
@@ -124,71 +142,24 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 items-end">
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-            Database{requireDatabase && <span className="text-danger-fg ml-0.5">*</span>}
-          </label>
-          <DatabaseSelect
-            engine={requireDatabase && (v.database || 'none') === 'none' ? '' : (v.database || 'none')}
-            version={v.dbVersion}
-            onChange={(eng, ver) => set({ database: eng, dbVersion: ver })}
-            caption={false}
-          />
-          {error && <p className="text-danger-fg text-xs mt-1">{error}</p>}
-        </div>
-        <MiniToggle label="Redis" hint="redis:7-alpine" checked={!!v.redis} onChange={x => set({ redis: x })} />
-        <div>
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Object storage</label>
-          <div className="space-y-1.5">
-            <MiniToggle label="Local volume" hint="persistent disk" checked={localOn} onChange={x => set({ storageLocal: x })} />
-            <MiniToggle label="MinIO (S3)" hint="S3-compatible" checked={minioOn} onChange={x => set({ storageMinio: x })} />
-          </div>
-        </div>
-      </div>
-
-      {localOn && minioOn && (
-        <p className="text-xs text-content-subtle -mt-1">Both backends are on — the local volume is mounted <em>and</em> MinIO runs; <code className="font-mono">FILESYSTEM_DISK</code> defaults to <code className="font-mono">s3</code> (override in the app’s env if you want local primary).</p>
-      )}
-
-      {localOn && (
-        <div className="pt-1 border-t border-border">
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Storage path (in container)</label>
-          <input
-            type="text"
-            value={v.storagePath || ''}
-            placeholder="/var/www/html/storage"
-            onChange={e => set({ storagePath: e.target.value })}
-            className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
-          />
-          <p className="text-xs text-content-subtle mt-1">A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</p>
-        </div>
-      )}
-
-      {minioOn && (
-        <div className="pt-1 border-t border-border space-y-3">
+      {/* ── Database group: engine + Redis cache + the web SQL client ── */}
+      <Group title="Database">
+        <div className="grid grid-cols-2 gap-3 items-end">
           <div>
-            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Bucket name</label>
-            <input
-              type="text"
-              value={v.storageBucket || ''}
-              placeholder={`${resourcePrefix || '<project>'}-<env>  (auto)`}
-              onChange={e => set({ storageBucket: e.target.value })}
-              className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
+              Engine{requireDatabase && <span className="text-danger-fg ml-0.5">*</span>}
+            </label>
+            <DatabaseSelect
+              engine={requireDatabase && (v.database || 'none') === 'none' ? '' : (v.database || 'none')}
+              version={v.dbVersion}
+              onChange={(eng, ver) => set({ database: eng, dbVersion: ver })}
+              caption={false}
             />
-            <p className="text-xs text-content-subtle mt-1">Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</p>
+            {error && <p className="text-danger-fg text-xs mt-1">{error}</p>}
           </div>
-          <MiniToggle
-            label="MinIO admin console"
-            hint="Optional browser admin UI (opens3/console) at the storage subdomain. Leave off for S3 only. Protect the route (internal/VPN, or the per-env basic-auth) in production."
-            checked={!!v.storageUi}
-            onChange={x => set({ storageUi: x })}
-          />
+          <MiniToggle label="Redis" hint="redis:7-alpine — in-network cache / queue" checked={!!v.redis} onChange={x => set({ redis: x })} />
         </div>
-      )}
-
-      {(showWebSql || (v.database && v.database !== 'none')) && (
-        <div className="pt-1 border-t border-border">
+        {(showWebSql || isSql) && (
           <MiniToggle
             label="Adminer (web SQL client)"
             hint={showWebSql
@@ -197,17 +168,69 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
             checked={!!v.webSql}
             onChange={x => set({ webSql: x })}
           />
-        </div>
-      )}
+        )}
+        {!isSql && (v.database && v.database !== 'none') && (
+          <p className="text-xs text-content-faint">{SERVICE_META[v.database]?.label || v.database} is not SQL — Adminer doesn’t apply. Connection details are on the Database tab.</p>
+        )}
+      </Group>
 
-      <div className="pt-1 border-t border-border">
+      {/* ── Storage group: local volume and/or MinIO (S3) + its admin console ── */}
+      <Group title="Storage">
+        <div className="grid grid-cols-2 gap-3">
+          <MiniToggle label="Local volume" hint="persistent disk" checked={localOn} onChange={x => set({ storageLocal: x })} />
+          <MiniToggle label="MinIO (S3)" hint="S3-compatible object store" checked={minioOn} onChange={x => set({ storageMinio: x })} />
+        </div>
+
+        {localOn && minioOn && (
+          <p className="text-xs text-content-subtle">Both backends are on — the local volume is mounted <em>and</em> MinIO runs; <code className="font-mono">FILESYSTEM_DISK</code> defaults to <code className="font-mono">s3</code> (override in the app’s env if you want local primary).</p>
+        )}
+
+        {localOn && (
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Storage path (in container)</label>
+            <input
+              type="text"
+              value={v.storagePath || ''}
+              placeholder="/var/www/html/storage"
+              onChange={e => set({ storagePath: e.target.value })}
+              className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+            />
+            <p className="text-xs text-content-subtle mt-1">A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</p>
+          </div>
+        )}
+
+        {minioOn && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Bucket name</label>
+              <input
+                type="text"
+                value={v.storageBucket || ''}
+                placeholder={`${resourcePrefix || '<project>'}-<env>  (auto)`}
+                onChange={e => set({ storageBucket: e.target.value })}
+                className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+              />
+              <p className="text-xs text-content-subtle mt-1">Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</p>
+            </div>
+            <MiniToggle
+              label="MinIO admin console"
+              hint="Optional browser admin UI (opens3/console) at the storage subdomain. Leave off for S3 only. Protect the route (internal/VPN, or the per-env basic-auth) in production."
+              checked={!!v.storageUi}
+              onChange={x => set({ storageUi: x })}
+            />
+          </div>
+        )}
+      </Group>
+
+      {/* ── Mail group ── */}
+      <Group title="Mail">
         <MiniToggle
           label="Mailpit (test SMTP)"
           hint="Catch-all SMTP + web inbox (axllent/mailpit) for testing outbound mail — routed at the mail subdomain. Default for new envs; each environment can override it (typically on in dev/stage, off in prod). Protect the route in production."
           checked={!!v.mailpit}
           onChange={x => set({ mailpit: x })}
         />
-      </div>
+      </Group>
 
       {rows.length > 0 && (
         <div className="space-y-2 pt-1">

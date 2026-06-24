@@ -88,7 +88,7 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
 
   return (
     <>
-      {has && (
+      {has && (info.schemas || info.users) && (
         <div className="-mt-2 mb-4 -mx-5 px-3 border-b border-border flex items-center gap-1">
           <button className={tabCls('connection')} onClick={() => setTab('connection')}>Connection</button>
           <button className={tabCls('manage')} onClick={() => setTab('manage')}>Manage</button>
