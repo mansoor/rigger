@@ -67,39 +67,86 @@ func (h *Handler) dbExecContext(workspace, project, env string) (*dbExecCtx, err
 	}
 	dotenv := readEnvMap(wspath.DotEnv(h.workspacesDir, workspace, project, env))
 	pfx := eng.EnvPrefix
-	container := dotenv[pfx+"_HOST"] // == composegen container_name / service key
-	if container == "" {
-		container = cfg.Project.Prefix() + "_" + engine
+	// Network host / docker container name. Prefer the managed key, then the
+	// framework's own DB_HOST mapping (Laravel et al.), and finally the
+	// deterministic composegen container name {prefix}_{env}_{engine}. The ENV
+	// segment matters: the old fallback {prefix}_{engine} omitted it, so it never
+	// matched a real container whenever the .env lacked the raw MYSQL_*/POSTGRES_*
+	// keys (e.g. an upload-source app whose .env carries only DB_*) — which is why
+	// the console failed for such projects. 127.0.0.1/localhost is an app-internal
+	// value (bundled all-in-one images) and is never the managed container.
+	host := firstNonEmpty(dotenv[pfx+"_HOST"], dotenv["DB_HOST"])
+	if host == "" || host == "127.0.0.1" || host == "localhost" {
+		host = cfg.Project.Prefix() + "_" + env + "_" + engine
 	}
 	dbName := dotenv[pfx+"_DB"]
 	if pfx == "MYSQL" {
 		dbName = dotenv["MYSQL_DATABASE"]
 	}
+	if dbName == "" {
+		dbName = dotenv["DB_DATABASE"] // framework convention (Laravel etc.)
+	}
 	ex, err := h.bridge.ExecForEnv(workspace, project, env)
 	if err != nil {
 		return nil, fmt.Errorf("reach environment host: %w", err)
 	}
-	ref, err := h.resolveContainerRef(ex, workspace, project, env, container)
+	ref, err := h.resolveContainerRef(ex, workspace, project, env, host)
 	if err != nil {
 		return nil, err
 	}
 	return &dbExecCtx{
-		engine: engine, eng: eng, exec: ex, container: ref, host: container, dbName: dbName,
-		user: dotenv[pfx+"_USER"], rootPass: dotenv["MYSQL_ROOT_PASSWORD"], password: dotenv[pfx+"_PASSWORD"],
+		engine: engine, eng: eng, exec: ex, container: ref, host: host, dbName: dbName,
+		user:     firstNonEmpty(dotenv[pfx+"_USER"], dotenv["DB_USERNAME"]),
+		rootPass: dotenv["MYSQL_ROOT_PASSWORD"],
+		password: firstNonEmpty(dotenv[pfx+"_PASSWORD"], dotenv["DB_PASSWORD"]),
 	}, nil
 }
 
+// firstNonEmpty returns the first non-empty argument, or "" if all are empty.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// mysqlCreds picks the mysql/mariadb identity for an operation. Reads and
+// connecting to the app's OWN database use the application user — it always has
+// full rights there, so the console keeps working even when the managed root
+// password is unknown or stale (e.g. an env that carries only framework DB_*
+// credentials, or whose root password was lost/rerolled against an already-
+// initialized volume). Server-level DDL (priv) needs root; if root isn't known it
+// falls back to the app user, which is denied for true DDL → a clear error rather
+// than a silent wrong-container/empty-password failure.
+func (c *dbExecCtx) mysqlCreds(priv bool) (user, pass string) {
+	if priv {
+		if c.rootPass != "" {
+			return "root", c.rootPass
+		}
+		return c.user, c.password
+	}
+	if c.user != "" {
+		return c.user, c.password
+	}
+	return "root", c.rootPass
+}
+
 // run executes the engine client in the container with the given SQL, capturing
-// stdout. For postgres it connects as the app user over the local socket; for
-// mysql/mariadb as root (MYSQL_PWD passed via the container env, not the cmdline).
-func (c *dbExecCtx) run(sql string) ([]byte, error) {
+// stdout. postgres connects as the app user over the local socket; mysql/mariadb
+// picks its identity via mysqlCreds(priv) — priv=true for server-level DDL (root),
+// priv=false for reads/connecting to the app's own database (app user). MYSQL_PWD
+// is passed via the container env, not the cmdline.
+func (c *dbExecCtx) run(sql string, priv bool) ([]byte, error) {
 	var args []string
 	if c.engine == "postgres" {
 		args = []string{"exec", "-e", "PGPASSWORD=" + c.password, c.container,
 			"psql", "-U", c.user, "-d", c.dbName, "-t", "-A", "-F", "|", "-c", sql}
 	} else {
-		args = []string{"exec", "-e", "MYSQL_PWD=" + c.rootPass, c.container,
-			"mysql", "-uroot", "-N", "-B", "-e", sql}
+		user, pass := c.mysqlCreds(priv)
+		args = []string{"exec", "-e", "MYSQL_PWD=" + pass, c.container,
+			"mysql", "-u" + user, "-N", "-B", "-e", sql}
 	}
 	return c.exec.DockerOutput(executor.Spec{Args: args})
 }
@@ -117,7 +164,7 @@ func (c *dbExecCtx) countTables() (int, error) {
 	} else {
 		sql = fmt.Sprintf("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='%s'", c.dbName)
 	}
-	out, err := c.run(sql)
+	out, err := c.run(sql, false)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -130,16 +177,17 @@ func (c *dbExecCtx) countTables() (int, error) {
 
 // importSQL streams a SQL dump into the engine client over stdin (no temp file in the
 // container), running it against the application database. progress (stdout+stderr) is
-// streamed to out. mysql/mariadb connect as root; postgres as the app user with
-// ON_ERROR_STOP so a broken dump fails loudly instead of half-importing.
+// streamed to out. Both connect as the app user (full rights on its own database);
+// postgres adds ON_ERROR_STOP so a broken dump fails loudly instead of half-importing.
 func (c *dbExecCtx) importSQL(r io.Reader, out io.Writer) error {
 	var args []string
 	if c.engine == "postgres" {
 		args = []string{"exec", "-i", "-e", "PGPASSWORD=" + c.password, c.container,
 			"psql", "-U", c.user, "-d", c.dbName, "-v", "ON_ERROR_STOP=1"}
 	} else {
-		args = []string{"exec", "-i", "-e", "MYSQL_PWD=" + c.rootPass, c.container,
-			"mysql", "-uroot", c.dbName}
+		user, pass := c.mysqlCreds(false)
+		args = []string{"exec", "-i", "-e", "MYSQL_PWD=" + pass, c.container,
+			"mysql", "-u" + user, c.dbName}
 	}
 	return c.exec.Docker(executor.Spec{Args: args, Stdin: r, Stdout: out, Stderr: out})
 }
@@ -192,7 +240,7 @@ func (h *Handler) ListDatabaseSchemas(w http.ResponseWriter, r *http.Request) {
 			`WHERE s.schema_name NOT IN ('mysql','information_schema','performance_schema','sys') ` +
 			`GROUP BY s.schema_name ORDER BY s.schema_name`
 	}
-	out, err := c.run(sql)
+	out, err := c.run(sql, false)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "query failed (is the database running?): " + strings.TrimSpace(string(out)+" "+err.Error())})
 		return
@@ -245,7 +293,7 @@ func (h *Handler) CreateDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sql = fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name)
 	}
-	if out, err := c.run(sql); err != nil {
+	if out, err := c.run(sql, true); err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "create failed: " + strings.TrimSpace(string(out)+" "+err.Error())})
 		return
 	}
@@ -293,7 +341,7 @@ func (h *Handler) DeleteDatabaseSchema(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sql = fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name)
 	}
-	if out, derr := c.run(sql); derr != nil {
+	if out, derr := c.run(sql, true); derr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "delete failed: " + strings.TrimSpace(string(out)+" "+derr.Error())})
 		return
 	}

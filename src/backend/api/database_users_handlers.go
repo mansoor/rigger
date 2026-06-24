@@ -197,7 +197,7 @@ func (h *Handler) CreateDatabaseUser(w http.ResponseWriter, r *http.Request) {
 		sql = fmt.Sprintf("CREATE USER '%s'@'%%' IDENTIFIED BY '%s'; GRANT ALL ON `%s`.* TO '%s'@'%%'; FLUSH PRIVILEGES;",
 			name, password, scope, name)
 	}
-	if out, rerr := c.run(sql); rerr != nil {
+	if out, rerr := c.run(sql, true); rerr != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "create user failed: " + strings.TrimSpace(string(out)+" "+rerr.Error())})
 		return
 	}
@@ -246,7 +246,7 @@ func (h *Handler) AdminerLogin(w http.ResponseWriter, r *http.Request) {
 		if c.engine == "postgres" {
 			username, password = c.user, c.password
 		} else {
-			username, password = "root", c.rootPass
+			username, password = c.mysqlCreds(false) // connect to the app's own DB as the app user
 		}
 	} else {
 		u, gerr := h.getManagedDBUser(workspace, project, env, as)
