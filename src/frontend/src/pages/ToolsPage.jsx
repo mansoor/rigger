@@ -1334,7 +1334,7 @@ function WorkspaceBackup() {
           className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
         >
           <option value="">— select project —</option>
-          {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.name}</option>)}
+          {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.config?.project?.name || ws.name} ({ws.name})</option>)}
         </select>
         <p className="text-xs text-content-faint mt-2">Applies to both <strong className="text-content-subtle">Take snapshot</strong> and <strong className="text-content-subtle">Start backup</strong> below.</p>
       </div>
