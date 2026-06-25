@@ -2199,7 +2199,6 @@ function UpdatesTab() {
 // Rules) so the two settings surfaces feel consistent.
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
-  { id: 'domains',        label: 'Domains & TLS',    icon: '🌐' },
   { id: 'preferences',    label: 'Preferences',      icon: '🎨' },
   { id: 'users',          label: 'Users',            icon: '👤' },
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
@@ -2207,6 +2206,7 @@ const TABS = [
   { id: 'api-keys',       label: 'API Keys',         icon: '🔑' },
   { id: 'updates',        label: 'Updates',          icon: '⬆' },
   { group: 'Shared resources' },
+  { id: 'domains',        label: 'Domains & TLS',    icon: '🌐' },
   { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
   { id: 'registries',     label: 'Docker Registries', icon: '📦' },
   { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
