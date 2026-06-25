@@ -435,6 +435,27 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "git-providers":
+			// Workspace-scoped Git provider connections (Phase 12 — private repos).
+			// /api/workspaces/{ws}/git-providers[/{id}[/test]]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("gpid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			sub := pathSegment(r.URL.Path, 5)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceGitProviders(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceGitProvider(w, r)
+			case r.Method == "POST" && sub == "test":
+				handler.TestWorkspaceGitProvider(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceGitProvider(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceGitProvider(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "api-key-scopes":
 			// Scope catalog for the workspace API-key create form (static metadata).
 			handler.GetApiKeyScopes(w, r)

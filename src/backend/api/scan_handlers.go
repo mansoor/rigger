@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/detect"
+	"github.com/mansoor/rigger/ui/internal/gitproviders"
 	"github.com/mansoor/rigger/ui/internal/gitsync"
 )
 
@@ -17,12 +18,31 @@ import (
 // POST /api/scan-repo  { "repo": "...", "branch": "..." }
 func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Repo   string `json:"repo"`
-		Branch string `json:"branch"`
+		Repo       string `json:"repo"`
+		Branch     string `json:"branch"`
+		ProviderID int64  `json:"provider_id"` // optional git provider for private repos
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Repo) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo is required"})
 		return
+	}
+
+	// Optional private-repo credentials (Phase 12): resolve the chosen git provider
+	// into a per-clone auth (token/SSH key) used only for this scan.
+	var auth *gitsync.Auth
+	if body.ProviderID != 0 {
+		p, perr := gitproviders.Get(h.db, h.cryptoKey, body.ProviderID)
+		if perr != nil || p == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git provider not found"})
+			return
+		}
+		if auth, perr = p.BuildAuth(); perr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": perr.Error()})
+			return
+		}
+		if auth.Cleanup != nil {
+			defer auth.Cleanup()
+		}
 	}
 
 	tmp, err := os.MkdirTemp("", "rigger-scan-*")
@@ -33,11 +53,11 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 	defer os.RemoveAll(tmp)
 
 	var log bytes.Buffer
-	src, err := gitsync.Sync(tmp, strings.TrimSpace(body.Repo), strings.TrimSpace(body.Branch), &log)
+	src, err := gitsync.Sync(tmp, strings.TrimSpace(body.Repo), strings.TrimSpace(body.Branch), auth, &log)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error": "couldn't clone repository: " + err.Error() +
-				" — check the URL/branch (private repos need a token in the HTTPS URL; SSH keys aren't supported yet)",
+				" — check the URL/branch, or select a Git provider for a private repo",
 		})
 		return
 	}

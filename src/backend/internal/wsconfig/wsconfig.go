@@ -160,6 +160,9 @@ type Project struct {
 	// envs/{env}/_src before build. Empty ⇒ build services use scaffolded Dockerfiles.
 	GitRepo   string `json:"git_repo,omitempty"`
 	GitBranch string `json:"git_branch,omitempty"`
+	// GitProviderID references a stored git_providers row (Phase 12) supplying
+	// credentials to clone a PRIVATE GitRepo. 0 ⇒ public repo (no credentials).
+	GitProviderID int64 `json:"git_provider_id,omitempty"`
 	// SourceKind selects where build services get their source. "" / "git" → the
 	// GitRepo above (cloned into _src). "upload" → an uploaded archive stored under
 	// the project (_source/), extracted into _src at build time (see internal/srcarchive).

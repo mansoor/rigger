@@ -99,6 +99,31 @@ func (d *DB) migrate() error {
 			PRIMARY KEY (registry_id, workspace)
 		);
 
+		-- Git provider connections (Phase 12): private-repo credentials. Mirrors
+		-- docker_registries scoping (owner_scope + global_git_provider_grants). The
+		-- secret (PAT, SSH private key PEM, or GitHub App private key+ids) is stored
+		-- ENCRYPTED (internal/crypto, AES-256-GCM) in secret_enc — never plaintext.
+		-- public_key (ssh) and meta (github_app json: app id/slug/installation id) are
+		-- non-secret. host scopes token/known-hosts matching ('' = the provider default).
+		CREATE TABLE IF NOT EXISTS git_providers (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			name        TEXT    NOT NULL,
+			kind        TEXT    NOT NULL,            -- token | ssh_key | github_app
+			host        TEXT    NOT NULL DEFAULT '',
+			username    TEXT    NOT NULL DEFAULT '', -- token auth user (optional)
+			secret_enc  TEXT    NOT NULL DEFAULT '', -- crypto.Encrypt(secret material)
+			public_key  TEXT    NOT NULL DEFAULT '', -- ssh deploy public key (non-secret)
+			meta        TEXT    NOT NULL DEFAULT '', -- json, kind-specific non-secret fields
+			owner_scope TEXT    NOT NULL DEFAULT 'global',
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS global_git_provider_grants (
+			provider_id INTEGER NOT NULL REFERENCES git_providers(id) ON DELETE CASCADE,
+			workspace   TEXT    NOT NULL,
+			PRIMARY KEY (provider_id, workspace)
+		);
+
 		-- Per-workspace general settings (Phase 3): scalar key/value scoped to one
 		-- workspace (e.g. acme_email, domain). Mirrors app_settings but workspace-keyed.
 		CREATE TABLE IF NOT EXISTS workspace_settings (

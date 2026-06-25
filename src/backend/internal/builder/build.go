@@ -60,7 +60,7 @@ func (o Options) build() error {
 	envDir := wspath.EnvDir(o.WorkspacesDir, o.Workspace, o.Project, o.Env)
 	if repo := cfg.SourceRepo(); repo != "" {
 		var serr error
-		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.Stdout); serr != nil {
+		if srcDir, serr = gitsync.Sync(envDir, repo, cfg.Branch(o.Env), o.GitAuth, o.Stdout); serr != nil {
 			return serr
 		}
 	} else if cfg.SourceKind() == "upload" {

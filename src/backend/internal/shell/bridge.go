@@ -27,6 +27,8 @@ import (
 	"github.com/mansoor/rigger/ui/internal/stats"
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/gitproviders"
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -1029,6 +1031,27 @@ func (b *Bridge) effectiveRegistry(workspaceName, project string) string {
 	return settings.EffectiveRegistry(b.db, workspaceName, projReg)
 }
 
+// resolveGitAuth loads the project's configured git provider (git_provider_id) and
+// builds a per-clone gitsync.Auth for private-repo access. Returns (nil, nil) when no
+// provider is set (public repo) or the DB is unavailable. The caller owns Cleanup.
+func (b *Bridge) resolveGitAuth(workspaceName, project string) (*gitsync.Auth, error) {
+	if b.db == nil {
+		return nil, nil
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil || cfg.Project.GitProviderID == 0 {
+		return nil, nil //nolint:nilerr — no provider configured ⇒ public clone
+	}
+	p, err := gitproviders.Get(b.db, b.cryptoKey, cfg.Project.GitProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("load git provider: %w", err)
+	}
+	if p == nil {
+		return nil, nil // provider was deleted — fall back to a public clone attempt
+	}
+	return p.BuildAuth()
+}
+
 // deployRegistryGate blocks a deploy whose built image would have nowhere to be
 // pulled from (image-distribution Phase 1). A project that builds its own images
 // needs a registry when the target is a Swarm (every node pulls) or a remote host
@@ -1506,6 +1529,14 @@ func (b *Bridge) Run(opts RunOptions) error {
 					return b.Run(RunOptions{Workspace: opts.Workspace, Project: opts.Project, Command: "start", Env: env, Stdout: opts.Stdout, Stderr: opts.Stderr})
 				})
 			}
+		}
+		// Private-repo credentials (Phase 12): resolve the project's git provider into a
+		// per-clone auth and hand it to the builder; clean up the temp key/config after.
+		if ga, gerr := b.resolveGitAuth(opts.Workspace, opts.Project); gerr != nil {
+			return gerr
+		} else if ga != nil {
+			bopts.GitAuth = ga
+			defer ga.Cleanup()
 		}
 		_, err := builder.Run(bopts)
 		return err

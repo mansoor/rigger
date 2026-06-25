@@ -10,6 +10,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/dockerops"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -45,6 +46,10 @@ type Options struct {
 	// CustomDomains are the env's VERIFIED external domains (Render-style), carried so
 	// the post-build compose has the same custom-domain routers as deploy/refresh.
 	CustomDomains []string
+	// GitAuth (may be nil) supplies private-repo credentials for the source clone,
+	// resolved by the bridge from the project's git_provider_id. The bridge owns its
+	// Cleanup (called after Build returns). nil ⇒ public-repo clone (unchanged).
+	GitAuth *gitsync.Auth
 	// Registry is the EFFECTIVE registry (settings.EffectiveRegistry: project →
 	// workspace-system → global-system), resolved by the bridge. When non-empty it
 	// overrides config.json's `registry` so images are tagged/pushed/advanced against
