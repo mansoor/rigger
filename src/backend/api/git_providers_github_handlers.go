@@ -128,13 +128,18 @@ func (h *Handler) GitHubAppCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid or expired GitHub app-creation state", http.StatusBadRequest)
 		return
 	}
-	privPEM, meta, err := gitproviders.ConvertManifestCode(st.host, code)
+	privPEM, name, meta, err := gitproviders.ConvertManifestCode(st.host, code)
 	if err != nil {
 		http.Error(w, "GitHub app creation failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
+	// Prefer the actual name the user gave the app on GitHub (it may differ from the
+	// manifest prefill); fall back to the requested name.
+	if name == "" {
+		name = st.name
+	}
 	created, err := gitproviders.Create(h.db, h.cryptoKey, gitproviders.Provider{
-		Name: st.name, Kind: gitproviders.KindGitHubApp, Host: st.host,
+		Name: name, Kind: gitproviders.KindGitHubApp, Host: st.host,
 		Secret: privPEM, Meta: meta.JSON(), OwnerScope: gitproviders.WorkspaceScope(st.workspace),
 	})
 	if err != nil {

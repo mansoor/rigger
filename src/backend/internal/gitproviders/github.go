@@ -158,6 +158,7 @@ func AppCreateURL(host, state string) string {
 // conversionResult is GitHub's response to the manifest code conversion.
 type conversionResult struct {
 	ID            int64  `json:"id"`
+	Name          string `json:"name"` // the (possibly user-edited) display name
 	Slug          string `json:"slug"`
 	ClientID      string `json:"client_id"`
 	ClientSecret  string `json:"client_secret"`
@@ -168,8 +169,9 @@ type conversionResult struct {
 
 // ConvertManifestCode exchanges the temporary manifest code for the new app's
 // credentials (POST /app-manifests/{code}/conversions). Returns the provider fields
-// to persist: the private key (→ secret) and the non-secret meta.
-func ConvertManifestCode(host, code string) (privPEM string, meta GitHubAppMeta, err error) {
+// to persist: the private key (→ secret), the ACTUAL app name the user gave it on
+// GitHub (which may differ from the manifest prefill), and the non-secret meta.
+func ConvertManifestCode(host, code string) (privPEM, name string, meta GitHubAppMeta, err error) {
 	url := apiBase(host) + "/app-manifests/" + code + "/conversions"
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -178,19 +180,23 @@ func ConvertManifestCode(host, code string) (privPEM string, meta GitHubAppMeta,
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", meta, fmt.Errorf("convert manifest: %w", err)
+		return "", "", meta, fmt.Errorf("convert manifest: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusCreated {
-		return "", meta, fmt.Errorf("GitHub manifest conversion failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", "", meta, fmt.Errorf("GitHub manifest conversion failed (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var c conversionResult
 	if err := json.Unmarshal(body, &c); err != nil {
-		return "", meta, fmt.Errorf("parse manifest conversion: %w", err)
+		return "", "", meta, fmt.Errorf("parse manifest conversion: %w", err)
 	}
 	meta = GitHubAppMeta{
 		AppID: fmt.Sprintf("%d", c.ID), Slug: c.Slug, ClientID: c.ClientID, HTMLURL: c.HTMLURL,
 	}
-	return c.PEM, meta, nil
+	name = c.Name
+	if name == "" {
+		name = c.Slug
+	}
+	return c.PEM, name, meta, nil
 }
