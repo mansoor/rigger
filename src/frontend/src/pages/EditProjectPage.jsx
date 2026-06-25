@@ -283,6 +283,21 @@ const RESTART_OPTIONS = [
 // ServiceCard keeps local row state so empty rows added by + buttons survive
 // until the user types into them. Without local state, portRowsToFields() would
 // immediately filter out the empty new row and Add would appear broken.
+// graphHasOwnPredeploy reports whether the stored service graph already implements its
+// own pre-deploy / migrate gate (an imported compose): a service waited on with
+// service_completed_successfully, or a run-once migrate-like container. When true, Rigger
+// won't synthesize its own — so we hide the pre-deploy field and explain why.
+function graphHasOwnPredeploy(services) {
+  for (const s of services || []) {
+    const conds = s.depends_on_conditions || {}
+    if (Object.values(conds).includes('service_completed_successfully')) return true
+  }
+  for (const s of services || []) {
+    if (String(s.restart || '').toLowerCase() === 'no' && /migrat|liquibase|flyway|alembic/i.test(s.command || '')) return true
+  }
+  return false
+}
+
 function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = [] }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(idx === 0) // collapsible — first service open
@@ -483,6 +498,25 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
       <p className="text-xs text-content-subtle">
         <strong className="text-content-muted">Override command</strong> replaces the image/build default. <strong className="text-content-muted">Mount .env as a file</strong> also writes the env to disk for apps that read a physical <code className="font-mono text-xs">.env</code> (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>).
       </p>
+
+      {/* Pre-deploy (release / migrate) command — build services only. Rigger runs it
+          once, before the app starts, in this service's image; a non-zero exit aborts
+          the deploy. Hidden when the stack already brings its own migrate gate. */}
+      {serviceSource(img) === 'build' && (
+        graphHasOwnPredeploy(allImages) && !((img.pre_deploy || '').trim())
+          ? <div className="rounded-lg border border-border bg-surface-raised/40 p-3 text-xs text-content-subtle">
+              ℹ This stack already runs a one-shot migrate/release step before startup, so Rigger won't add its own pre-deploy command (it would duplicate it).
+            </div>
+          : <div>
+              <Label>Pre-deploy command</Label>
+              <Input value={img.pre_deploy || ''} onChange={v => upd('pre_deploy', v)}
+                placeholder="php artisan migrate --force" />
+              <p className="text-xs text-content-subtle mt-1">
+                Runs once before the app starts, in this service's image (e.g. database migrations); a non-zero exit aborts the deploy and the previous version keeps serving. Make it idempotent — it runs on every deploy.
+                <span className="block text-content-faint mt-0.5">Applies to Compose environments. Swarm environments skip it (Docker Swarm can't gate startup on a one-shot job).</span>
+              </p>
+            </div>
+      )}
 
       {/* Port mappings */}
       <div>

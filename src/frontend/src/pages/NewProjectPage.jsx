@@ -287,6 +287,12 @@ function ScanReview({ data, onChange }) {
     })
   }
   const envCount = s => Object.keys(s.env_vars || {}).length
+  // Set a build service's pre-deploy (release/migrate) command, persisted on the draft
+  // service so it round-trips verbatim into config.json (composegen synthesizes the gate).
+  function setPreDeploy(idx, val) {
+    if (!draft) return
+    onChange('scanDraft', { ...draft, services: svcs.map((s, i) => i === idx ? { ...s, pre_deploy: val } : s) })
+  }
 
   // ── Managed-dependency offer ──
   // The default draft already chose "managed" (the container is dropped, host refs
@@ -389,6 +395,25 @@ function ScanReview({ data, onChange }) {
             })}
             {svcs.length === 0 && <p className="text-xs text-content-subtle">No services detected — you can add them in Edit Project after creating.</p>}
           </div>
+          {/* Pre-deploy (release / migrate) command — build services only. Hidden when
+              the imported compose already runs its own one-shot migrate gate. */}
+          {svcs.some(s => s.build) && (
+            draft.has_predeploy
+              ? <div className="rounded-lg border border-border bg-surface-raised/40 p-3 text-xs text-content-subtle">
+                  ℹ This compose already runs <span className="font-mono">{draft.predeploy_service}</span> as a one-shot migrate/release step before the app starts, so Rigger won&apos;t add its own pre-deploy command.
+                </div>
+              : <div className="space-y-2 border-t border-border pt-3">
+                  <p className="text-[11px] text-content-faint uppercase tracking-wide">Pre-deploy command (optional) — runs once, in the service&apos;s image, before the app starts:</p>
+                  {svcs.map((s, i) => s.build ? (
+                    <div key={i}>
+                      <label className="block text-xs text-content-subtle mb-1 font-mono">{s.name}</label>
+                      <input type="text" value={s.pre_deploy || ''} placeholder="php artisan migrate --force"
+                        onChange={e => setPreDeploy(i, e.target.value)} className={`w-full ${monoInput}`} />
+                    </div>
+                  ) : null)}
+                  <p className="text-xs text-content-faint">A non-zero exit aborts the deploy (the previous version keeps serving). Make it idempotent — it runs on every deploy. Compose only; Swarm environments skip it.</p>
+                </div>
+          )}
           {(data.database !== 'none' || data.redis || (draft.object_storage && draft.object_storage !== 'none')) && (
             <p className="text-xs text-content-muted">Managed dependencies: {[data.database !== 'none' && data.database, data.redis && 'redis', draft.object_storage && draft.object_storage !== 'none' && draft.object_storage].filter(Boolean).join(', ') || 'none'}</p>
           )}

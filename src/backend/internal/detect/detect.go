@@ -40,11 +40,15 @@ type Service struct {
 	HealthcheckConfig *HealthcheckConfig `json:"healthcheck_config,omitempty"`
 	EnvFile           bool               `json:"env_file,omitempty"`
 	DependsOn         []string           `json:"depends_on,omitempty"`
-	Volumes           []string           `json:"volumes,omitempty"`
-	Restart           string             `json:"restart,omitempty"`
-	ConfigTemplate    string             `json:"config_template,omitempty"`
-	EnvVars           map[string]string  `json:"env_vars,omitempty"`
-	Links             []ServiceLink      `json:"links,omitempty"`
+	// DependsOnConditions preserves an imported compose's per-dependency `condition:`
+	// (long form). Without this the condition is silently downgraded to service_started
+	// on regeneration — breaking apps that gate on service_healthy / a one-shot migrate.
+	DependsOnConditions map[string]string `json:"depends_on_conditions,omitempty"`
+	Volumes             []string          `json:"volumes,omitempty"`
+	Restart             string            `json:"restart,omitempty"`
+	ConfigTemplate      string            `json:"config_template,omitempty"`
+	EnvVars             map[string]string `json:"env_vars,omitempty"`
+	Links               []ServiceLink     `json:"links,omitempty"`
 }
 
 // ServiceLink mirrors composegen's ServiceLink — a declared dependency on another
@@ -117,6 +121,14 @@ type Draft struct {
 	// into the managed database on first deploy (see the v3 DB-seed hook). Advisory:
 	// detection only finds them; the choice + auto-import toggle live in the UI.
 	SeedCandidates []SeedCandidate `json:"seed_candidates,omitempty"`
+	// HasPreDeploy is set when the imported compose ALREADY runs a one-shot
+	// release/migrate service before the app starts (a service gated on via
+	// service_completed_successfully, or a run-once container with a migrate-like
+	// command). PreDeployService names it. The UI uses this to advise the user not to
+	// also set a Rigger pre-deploy command — composegen likewise won't synthesize a
+	// duplicate (see composegen.applyPreDeploy).
+	HasPreDeploy     bool   `json:"has_predeploy,omitempty"`
+	PreDeployService string `json:"predeploy_service,omitempty"`
 }
 
 // SeedCandidate is a bundled SQL dump offered for import into the managed database.
@@ -310,6 +322,7 @@ type composeSvc struct {
 	Environment yaml.Node `yaml:"environment"`
 	Healthcheck yaml.Node `yaml:"healthcheck"`
 	Profiles    []string  `yaml:"profiles"`
+	Restart     string    `yaml:"restart"`
 }
 
 // DetectComposeBytes parses pasted docker-compose.yml content (no repo on disk) into a
@@ -409,6 +422,45 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool
 		d.Notes = append(d.Notes, fmt.Sprintf("Repointed %d host reference(s) onto managed service name(s): %s.", n, strings.Join(pairs, ", ")))
 	}
 	pickWebEntry(d)
+	detectPreDeploy(d)
+}
+
+// detectPreDeploy flags an imported compose that ALREADY implements a pre-deploy /
+// migrate gate, so the UI can advise against a duplicate and composegen skips synthesis.
+// Two signals: a service another service waits on with service_completed_successfully
+// (an explicit gate), or a run-once container whose command looks like a migration.
+func detectPreDeploy(d *Draft) {
+	gated := map[string]bool{}
+	for _, s := range d.Services {
+		for dep, cond := range s.DependsOnConditions {
+			if cond == "service_completed_successfully" {
+				gated[dep] = true
+			}
+		}
+	}
+	for _, s := range d.Services {
+		if gated[s.Name] {
+			d.HasPreDeploy, d.PreDeployService = true, s.Name
+			return
+		}
+	}
+	for _, s := range d.Services {
+		if strings.EqualFold(s.Restart, "no") && looksLikeMigrate(s.Command) {
+			d.HasPreDeploy, d.PreDeployService = true, s.Name
+			return
+		}
+	}
+}
+
+// looksLikeMigrate reports whether a command resembles a DB migration / release step.
+func looksLikeMigrate(cmd string) bool {
+	c := strings.ToLower(cmd)
+	for _, kw := range []string{"migrate", "migration", "db:push", "liquibase", "flyway", "alembic"} {
+		if strings.Contains(c, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // composeToService maps one compose service to the unified Service model. Shared by
@@ -461,6 +513,12 @@ func composeToService(repoDir, name string, cs composeSvc, all map[string]compos
 	}
 	s.Volumes = cs.Volumes
 	s.DependsOn = filterDeps(nodeToStrings(cs.DependsOn), all)
+	s.DependsOnConditions = filterConditions(nodeToConditions(cs.DependsOn), all)
+	// Preserve an explicit restart policy (e.g. a one-shot migrate's "no"); default to
+	// the long-running policy when unset, as before.
+	if cs.Restart != "" {
+		s.Restart = cs.Restart
+	}
 	normalizeUploadedBuild(&s, repoDir)
 	return s
 }
@@ -1127,6 +1185,47 @@ func filterDeps(deps []string, all map[string]composeSvc) []string {
 			continue // managed dep — referenced via env, not depends_on here
 		}
 		out = append(out, dnsName(dep))
+	}
+	return out
+}
+
+// nodeToConditions parses the long-form depends_on map
+// (`{ dep: { condition: service_healthy } }`) into dep→condition. The short list form
+// has no conditions and decodes to nil here.
+func nodeToConditions(n yaml.Node) map[string]string {
+	var m map[string]struct {
+		Condition string `yaml:"condition"`
+	}
+	if n.Decode(&m) != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range m {
+		if v.Condition != "" {
+			out[k] = v.Condition
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// filterConditions mirrors filterDeps for the condition map: drop managed deps (which
+// leave depends_on entirely) and dns-name the surviving keys.
+func filterConditions(conds map[string]string, all map[string]composeSvc) map[string]string {
+	if len(conds) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for dep, cond := range conds {
+		if cs, ok := all[dep]; ok && dbRole(cs.Image) != "" {
+			continue
+		}
+		out[dnsName(dep)] = cond
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

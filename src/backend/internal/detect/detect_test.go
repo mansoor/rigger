@@ -280,9 +280,9 @@ services:
 
 func TestDetectDockerfileMonorepo(t *testing.T) {
 	dir := repo(t, map[string]string{
-		"apps/api/Dockerfile": "FROM golang:1.25\nEXPOSE 9090\n",
-		"apps/api/go.mod":     "module api\n",
-		"apps/web/Dockerfile": "FROM node:20\nEXPOSE 3000\n",
+		"apps/api/Dockerfile":   "FROM golang:1.25\nEXPOSE 9090\n",
+		"apps/api/go.mod":       "module api\n",
+		"apps/web/Dockerfile":   "FROM node:20\nEXPOSE 3000\n",
 		"apps/web/package.json": `{"dependencies":{"next":"14"}}`,
 	})
 	d := Detect(dir)
@@ -318,9 +318,9 @@ func TestDetectManifestGo(t *testing.T) {
 // separate nginx front — see templates/dockerfiles/laravel + the blueprint rework).
 func TestDetectLaravelSelfContained(t *testing.T) {
 	dir := repo(t, map[string]string{
-		"artisan":      "#!/usr/bin/env php\n",
+		"artisan":       "#!/usr/bin/env php\n",
 		"composer.json": `{"require":{"laravel/framework":"^11","doctrine/dbal":"*"},"name":"app"}`,
-		".env.example": "DB_CONNECTION=pgsql\nDATABASE_URL=postgres://...\n",
+		".env.example":  "DB_CONNECTION=pgsql\nDATABASE_URL=postgres://...\n",
 	})
 	d := Detect(dir)
 	app := svcByName(d, "app")
@@ -360,9 +360,9 @@ func TestDetectNextjsHostnameEnv(t *testing.T) {
 	}
 
 	compose := repo(t, map[string]string{
-		"docker-compose.yml":      "services:\n  web:\n    build: ./web\n    ports:\n      - \"3000:3000\"\n",
-		"web/Dockerfile":          "FROM node:20\n",
-		"web/package.json":        `{"dependencies":{"next":"14.2.5"}}`,
+		"docker-compose.yml": "services:\n  web:\n    build: ./web\n    ports:\n      - \"3000:3000\"\n",
+		"web/Dockerfile":     "FROM node:20\n",
+		"web/package.json":   `{"dependencies":{"next":"14.2.5"}}`,
 	})
 	cweb := svcByName(Detect(compose), "web")
 	if cweb == nil || cweb.Build == nil || cweb.Build.Template != "nextjs" {
@@ -394,6 +394,56 @@ func TestDetectProcfileWorkers(t *testing.T) {
 	}
 }
 
+// An imported compose that already gates its app on a one-shot migrate (via
+// service_completed_successfully) must (a) round-trip the depends_on condition rather
+// than silently downgrade it, and (b) flag HasPreDeploy so the UI can advise against a
+// duplicate and composegen skips synthesis.
+func TestDetectPreDeployGate(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"package.json": `{"dependencies":{"express":"4"}}`,
+		"docker-compose.yml": `
+services:
+  db:
+    image: postgres:16-alpine
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+  migrate:
+    build: .
+    command: npm run migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+  app:
+    build: .
+    command: npm start
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+`,
+	})
+	d := Detect(dir)
+	app := svcByName(d, "app")
+	if app == nil {
+		t.Fatalf("app service not detected: %+v", d.Services)
+	}
+	// The app→migrate completed_successfully condition must survive (not downgraded).
+	if got := app.DependsOnConditions["migrate"]; got != "service_completed_successfully" {
+		t.Errorf("app depends_on migrate condition = %q; want service_completed_successfully (conditions: %+v)", got, app.DependsOnConditions)
+	}
+	mig := svcByName(d, "migrate")
+	if mig == nil || mig.Restart != "no" {
+		t.Errorf("migrate service should be a run-once container (restart no), got %+v", mig)
+	}
+	if !d.HasPreDeploy || d.PreDeployService != "migrate" {
+		t.Errorf("expected HasPreDeploy with PreDeployService=migrate, got has=%v svc=%q", d.HasPreDeploy, d.PreDeployService)
+	}
+}
+
 func TestDetectUnknown(t *testing.T) {
 	dir := repo(t, map[string]string{"README.md": "# nothing to see"})
 	d := Detect(dir)
@@ -412,14 +462,14 @@ func TestDetectSeedDumps(t *testing.T) {
 	big := strings.Repeat("INSERT INTO x VALUES (1);\n", 1000)    // ~26 KiB > floor
 	bigger := strings.Repeat("INSERT INTO x VALUES (1);\n", 2000) // ~52 KiB
 	d := Detect(repo(t, map[string]string{
-		"composer.json":                        `{"require":{"php":"^8.2"}}`,
-		"database.sql":                          big,
-		"database-home2.sql":                    bigger,
-		"install/seed.sql":                      big,
-		"database/migrations/0001_create.sql":   big, // excluded: migration code
-		"database/migrations/0001_create.php":   "<?php",
-		"stub.sql":                              "SELECT 1;", // excluded: below size floor
-		"app/Models/User.php":                   "<?php",
+		"composer.json":                       `{"require":{"php":"^8.2"}}`,
+		"database.sql":                        big,
+		"database-home2.sql":                  bigger,
+		"install/seed.sql":                    big,
+		"database/migrations/0001_create.sql": big, // excluded: migration code
+		"database/migrations/0001_create.php": "<?php",
+		"stub.sql":                            "SELECT 1;", // excluded: below size floor
+		"app/Models/User.php":                 "<?php",
 	}))
 	got := map[string]bool{}
 	for _, c := range d.SeedCandidates {
@@ -448,10 +498,10 @@ func TestRebaseHost(t *testing.T) {
 	cases := []struct{ in, old, neu, want string }{
 		{"postgresql+asyncpg://u:p@db:5432/app", "db", "postgres", "postgresql+asyncpg://u:p@postgres:5432/app"},
 		{"mysql://u:p@db/app", "db", "mysql", "mysql://u:p@mysql/app"},
-		{"db", "db", "postgres", "postgres"},                                  // bare host value
-		{"redis://cache:6379", "cache", "redis", "redis://redis:6379"},        // //host: form
+		{"db", "db", "postgres", "postgres"},                                                       // bare host value
+		{"redis://cache:6379", "cache", "redis", "redis://redis:6379"},                             // //host: form
 		{"postgresql://u:p@database:5432/x", "db", "postgres", "postgresql://u:p@database:5432/x"}, // substring untouched
-		{"keep@me", "db", "postgres", "keep@me"},                              // unrelated @ untouched
+		{"keep@me", "db", "postgres", "keep@me"},                                                   // unrelated @ untouched
 	}
 	for _, c := range cases {
 		if got := rebaseHost(c.in, c.old, c.neu); got != c.want {

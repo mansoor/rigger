@@ -111,25 +111,25 @@ type Env struct {
 	// the dev/admin sidecars (Adminer / MinIO console): nil = inherit the project value,
 	// &true / &false = force on/off for this env. Lets tooling run in dev/stage but not
 	// prod. See gen.webSQLOn / storageUIOn.
-	WebSQL          *bool `json:"web_sql,omitempty"`
-	StorageUI       *bool `json:"storage_ui,omitempty"`
-	Mailpit         *bool `json:"mailpit,omitempty"` // per-env tri-state override of Project.Mailpit
+	WebSQL    *bool `json:"web_sql,omitempty"`
+	StorageUI *bool `json:"storage_ui,omitempty"`
+	Mailpit   *bool `json:"mailpit,omitempty"` // per-env tri-state override of Project.Mailpit
 	// ExposeMode / AuthGate are per-env overrides of the project exposure defaults
 	// ("" = inherit project, then the traefik/none baseline). See gen.exposeMode.
-	ExposeMode      string `json:"expose_mode,omitempty"`
-	AuthGate        string `json:"auth_gate,omitempty"`
+	ExposeMode string `json:"expose_mode,omitempty"`
+	AuthGate   string `json:"auth_gate,omitempty"`
 	// AttachNetwork joins web service(s) to an existing external Docker network so a
 	// user-run proxy / another stack can reach the app in-network. Must already exist.
-	AttachNetwork   string `json:"attach_network,omitempty"`
+	AttachNetwork string `json:"attach_network,omitempty"`
 	// CustomDomains are VERIFIED external domains routed to this env's apex web service
 	// in addition to its auto subdomain (Render-style). Not persisted in config.json —
 	// the bridge injects them from the DB onto RouteOpts at generation time.
-	CustomDomains   []string `json:"-"`
-	RedisEnabled    bool  `json:"redis_enabled"`
-	GarageEnabled   bool   `json:"garage_enabled"`
-	TraefikEnabled  bool   `json:"traefik_enabled"`
-	TraefikNetwork  string `json:"traefik_network"`
-	SSLEnabled      bool   `json:"ssl_enabled"`
+	CustomDomains  []string `json:"-"`
+	RedisEnabled   bool     `json:"redis_enabled"`
+	GarageEnabled  bool     `json:"garage_enabled"`
+	TraefikEnabled bool     `json:"traefik_enabled"`
+	TraefikNetwork string   `json:"traefik_network"`
+	SSLEnabled     bool     `json:"ssl_enabled"`
 	// AcmeEmail is the per-env Let's Encrypt account email override (blank ⇒ inherit
 	// the workspace, then global ACME email). Consumed by the Phase-2 out-of-band
 	// issuer; carried here so it round-trips through generation.
@@ -175,25 +175,40 @@ type Env struct {
 // Language-specific opinions (port, healthcheck, whether an nginx fronting
 // service is needed) live in the seed blueprint, NOT the generator.
 type Service struct {
-	Name              string             `json:"name"`           // dns-safe, unique
-	Role              string             `json:"role,omitempty"` // app | worker | static (informational)
-	Build             *BuildSpec         `json:"build,omitempty"`
-	Image             string             `json:"image,omitempty"`
-	ImageFrom         string             `json:"image_from,omitempty"`
-	Tag               string             `json:"tag,omitempty"` // Image source only; build tag derives from version
-	Command           string             `json:"command,omitempty"`
-	Port              flexStr            `json:"port,omitempty"`      // container port it listens on
-	HostPort          flexStr            `json:"host_port,omitempty"` // publish host:container (compose, non-traefik)
-	ExtraPorts        []flexStr          `json:"extra_ports,omitempty"`
-	WebRouted         bool               `json:"web_routed,omitempty"` // primary HTTP entry (Traefik / host port)
-	Subdomain         string             `json:"subdomain,omitempty"`  // "" = {domain}, "app" = app.{domain}
-	Healthcheck       string             `json:"healthcheck,omitempty"`
-	HealthcheckConfig HealthcheckConfig  `json:"healthcheck_config,omitempty"`
-	Volumes           []string           `json:"volumes,omitempty"`
-	DependsOn         []string           `json:"depends_on,omitempty"` // short service / managed-dep names
-	Restart           string             `json:"restart,omitempty"`
-	EnvFile           bool               `json:"env_file,omitempty"`       // inject the env's .env as process env (env_file:)
-	EnvFileMount      string             `json:"env_file_mount,omitempty"` // also bind the env's .env as a physical file at this container path
+	Name      string     `json:"name"`           // dns-safe, unique
+	Role      string     `json:"role,omitempty"` // app | worker | static | predeploy (informational; "predeploy" marks a synthesized one-shot migrate service)
+	Build     *BuildSpec `json:"build,omitempty"`
+	Image     string     `json:"image,omitempty"`
+	ImageFrom string     `json:"image_from,omitempty"`
+	Tag       string     `json:"tag,omitempty"` // Image source only; build tag derives from version
+	Command   string     `json:"command,omitempty"`
+	// PreDeploy is a Render-style release/migrate command set on a BUILD service. When
+	// non-empty, composegen synthesizes a one-shot "{name}-migrate" service (reusing this
+	// service's image) that runs the command and exits, and gates this service (and any
+	// sibling reusing its image) on it via depends_on service_completed_successfully — so
+	// migrations run, once, before the app starts; a non-zero exit aborts the deploy. The
+	// previously-running app keeps serving on failure (it's not recreated). Compose only —
+	// docker stack deploy ignores depends_on conditions, so synthesis is skipped on Swarm.
+	PreDeploy         string            `json:"pre_deploy,omitempty"`
+	Port              flexStr           `json:"port,omitempty"`      // container port it listens on
+	HostPort          flexStr           `json:"host_port,omitempty"` // publish host:container (compose, non-traefik)
+	ExtraPorts        []flexStr         `json:"extra_ports,omitempty"`
+	WebRouted         bool              `json:"web_routed,omitempty"` // primary HTTP entry (Traefik / host port)
+	Subdomain         string            `json:"subdomain,omitempty"`  // "" = {domain}, "app" = app.{domain}
+	Healthcheck       string            `json:"healthcheck,omitempty"`
+	HealthcheckConfig HealthcheckConfig `json:"healthcheck_config,omitempty"`
+	Volumes           []string          `json:"volumes,omitempty"`
+	DependsOn         []string          `json:"depends_on,omitempty"` // short service / managed-dep names
+	// DependsOnConditions overrides the per-dependency compose `condition:` keyed by the
+	// dependency's short name. Used to (a) emit service_completed_successfully for the
+	// synthesized pre-deploy gate and (b) round-trip an imported compose's own conditions
+	// faithfully (the detector captures the long form). When a dep has no entry here,
+	// composegen derives the condition (one-shot predeploy ⇒ completed_successfully; has a
+	// healthcheck ⇒ service_healthy; else service_started). Compose only (swarm ignores it).
+	DependsOnConditions map[string]string `json:"depends_on_conditions,omitempty"`
+	Restart             string            `json:"restart,omitempty"`
+	EnvFile             bool              `json:"env_file,omitempty"`       // inject the env's .env as process env (env_file:)
+	EnvFileMount        string            `json:"env_file_mount,omitempty"` // also bind the env's .env as a physical file at this container path
 	// EnvFileWritable changes env_file_mount delivery from a read-only inline config
 	// to a WRITABLE bind of the env's real .env (rooted at ${RIGGER_BIND_ROOT}), and
 	// suppresses process-env (env_file:) injection for this service. For apps that own
@@ -203,9 +218,9 @@ type Service struct {
 	// migrate with the env on a host move (a named volume would not). Requires
 	// EnvFileMount. Rigger re-asserts managed-infra keys on regen but preserves the
 	// app's own keys (see envgen merge mode).
-	EnvFileWritable   bool               `json:"env_file_writable,omitempty"`
-	EnvVars           map[string]flexStr `json:"env_vars,omitempty"`
-	Links             []ServiceLink      `json:"links,omitempty"` // service→service URL wiring, emitted into environment:
+	EnvFileWritable bool               `json:"env_file_writable,omitempty"`
+	EnvVars         map[string]flexStr `json:"env_vars,omitempty"`
+	Links           []ServiceLink      `json:"links,omitempty"` // service→service URL wiring, emitted into environment:
 	// AuthProtect marks a synthesized admin sidecar (Adminer / Garage UI) as eligible
 	// for the per-env basic-auth middleware. Not persisted on real services — set only
 	// by buildAdminer/buildGarageWebUI; gated further on Env.ProtectAdminUIs + Traefik.

@@ -295,7 +295,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 		g.line("      " + e.AttachNetwork + ": {}")
 	}
 
-	g.emitDependsOn(prefix, svc.DependsOn, isSwarm)
+	g.emitDependsOn(prefix, svc.DependsOn, svc.DependsOnConditions, isSwarm)
 
 	// Volumes (named volumes get the prefix; bind/env-var mounts pass through).
 	// volumes: is opened lazily so the writable-.env bind below can share the block.
@@ -485,9 +485,10 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 
 // emitDependsOn emits the depends_on block keyed by the bare service name (service
 // keys are short now — the project/stack namespaces them). Compose uses the
-// condition form (service_healthy when the target has a healthcheck, else
-// service_started); swarm uses the bare list form.
-func (g *gen) emitDependsOn(prefix string, deps []string, isSwarm bool) {
+// condition form (per depCondition); swarm uses the bare list form (conditions are
+// ignored by docker stack deploy). conds is an optional per-dependency override map
+// (nil for the conditionless synthesized callers like the minio init).
+func (g *gen) emitDependsOn(prefix string, deps []string, conds map[string]string, isSwarm bool) {
 	var names []string
 	for _, d := range deps {
 		if d != "" {
@@ -504,12 +505,29 @@ func (g *gen) emitDependsOn(prefix string, deps []string, isSwarm bool) {
 			continue
 		}
 		g.line("      " + dep + ":")
-		if g.depHasHealthcheck(dep) {
-			g.line("        condition: service_healthy")
-		} else {
-			g.line("        condition: service_started")
+		g.line("        condition: " + g.depCondition(dep, conds))
+	}
+}
+
+// depCondition resolves the compose depends_on `condition:` for one dependency:
+// an explicit override (imported app's own condition, or the synthesized pre-deploy
+// gate) wins; else a one-shot pre-deploy target ⇒ service_completed_successfully; else
+// a target with a healthcheck ⇒ service_healthy; else service_started. With no override
+// and no predeploy target this reproduces the historical healthcheck-or-started output,
+// keeping existing goldens byte-identical.
+func (g *gen) depCondition(dep string, conds map[string]string) string {
+	if c := conds[dep]; c != "" {
+		return c
+	}
+	for _, s := range g.cfg.Services {
+		if s.Name == dep && s.Role == "predeploy" {
+			return "service_completed_successfully"
 		}
 	}
+	if g.depHasHealthcheck(dep) {
+		return "service_healthy"
+	}
+	return "service_started"
 }
 
 // depHasHealthcheck reports whether a dependency (an app service or a managed dep)
@@ -836,7 +854,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("  minio_init:")
 		g.line("    image: minio/mc:" + verMC)
 		g.line("    container_name: " + prefix + "_minio_init")
-		g.emitDependsOn(prefix, []string{"minio"}, isSwarm)
+		g.emitDependsOn(prefix, []string{"minio"}, nil, isSwarm)
 		g.managedNet(prefix, "minio_init")
 		g.line("    env_file: .env")
 		// Use the BARE service name "minio" (a valid hostname) — NOT {prefix}_minio:
@@ -853,15 +871,54 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 // serviceEnv merges a service's static EnvVars with its resolved service-link URLs
 // into one string map. A link wins over an env_vars key of the same name, so the
 // caller emits a single sorted environment: block with no duplicate (invalid) keys.
+//
+// A service's inline env_vars must NOT shadow a key Rigger MANAGES for an active managed
+// dependency (DATABASE_URL, the POSTGRES_*/MYSQL_*/MONGO_*/REDIS_*/MINIO_* families, …):
+// compose's environment: overrides env_file:, so a value an imported compose hardcoded
+// (e.g. a repo's dev-default DATABASE_URL=postgres://qrhub:qrhub@db/qrhub) would otherwise
+// shadow the correct managed credentials Rigger writes to .env, breaking DB auth. Such keys
+// are dropped here so the authoritative .env value (via env_file) wins. Explicit service
+// LINKS are intentional wiring and still apply.
 func (g *gen) serviceEnv(prefix string, svc Service) map[string]string {
+	managed := g.managedEnvKeys()
 	out := make(map[string]string, len(svc.EnvVars)+len(svc.Links))
 	for k, v := range svc.EnvVars {
+		if managed[k] {
+			continue // Rigger owns this key for an active managed dep — let .env win
+		}
 		out[k] = string(v)
 	}
 	for k, v := range g.resolveLinks(prefix, svc) {
 		out[k] = v
 	}
 	return out
+}
+
+// managedEnvKeys is the set of connection/credential env keys Rigger writes
+// authoritatively into .env for the active managed dependencies, so a service's inline
+// env_vars can't shadow them (see serviceEnv). Mirrors the relevant families of
+// envgen.managedContractKeys, gated on the dependency being active.
+func (g *gen) managedEnvKeys() map[string]bool {
+	keys := map[string]bool{}
+	add := func(ks ...string) {
+		for _, k := range ks {
+			keys[k] = true
+		}
+	}
+	if eng := g.dbEngine(); eng != "" && eng != "none" {
+		add("DATABASE", "DATABASE_URL", "DB_EXTERNAL_PORT",
+			"MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
+			"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
+			"MONGO_HOST", "MONGO_PORT", "MONGO_DB", "MONGO_USER", "MONGO_PASSWORD", "MONGO_URI")
+	}
+	if g.redisOn() {
+		add("REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_URL")
+	}
+	if g.minioOn() {
+		add("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "MINIO_BUCKET", "MINIO_ENDPOINT", "MINIO_REGION",
+			"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_BUCKET", "AWS_ENDPOINT", "AWS_USE_PATH_STYLE_ENDPOINT")
+	}
+	return keys
 }
 
 // resolveLinks builds the env-var → URL map a service's links emit. The host is the

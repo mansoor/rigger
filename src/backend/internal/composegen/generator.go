@@ -124,6 +124,7 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	}
 	e.CustomDomains = ro.CustomDomains
 	applyWebEntryFallback(cfg, e)
+	applyPreDeploy(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
 	return []byte(g.b.String()), nil
@@ -162,12 +163,132 @@ func applyWebEntryFallback(cfg *Config, e Env) {
 	}
 }
 
+// applyPreDeploy synthesizes a one-shot "{svc}-migrate" service for each BUILD service
+// that declares a PreDeploy command, and gates the app (plus any sibling reusing its
+// image) on it via depends_on service_completed_successfully — so the release/migrate
+// command runs once, before the app starts, in the app's own image + env. The migrate
+// service waits for the same dependencies the app does (the managed DB, etc.), so a
+// migration only runs once the database is healthy.
+//
+// Compose only: docker stack deploy ignores depends_on conditions, so the gate can't be
+// enforced under Swarm — we skip synthesis there (the UI surfaces this). Synthesis is
+// also skipped when the app already ships its own release/migrate gate (an imported
+// compose), so Rigger never emits a duplicate or conflicting one-shot service.
+func applyPreDeploy(cfg *Config, e Env) {
+	if e.Deployment == "swarm" {
+		return
+	}
+	existing := map[string]bool{}
+	for _, s := range cfg.Services {
+		existing[s.Name] = true
+	}
+	managed := managedDBName(cfg, e)
+	var synthesized []Service
+	for i := range cfg.Services {
+		s := &cfg.Services[i]
+		if s.Build == nil || strings.TrimSpace(s.PreDeploy) == "" {
+			continue
+		}
+		if appAlreadyGated(cfg, *s) {
+			continue // the app brings its own migrate/release gate — don't duplicate
+		}
+		migrateName := s.Name + "-migrate"
+		if existing[migrateName] {
+			continue // a service of that name already exists (mirrors buildAdminer)
+		}
+		// The migrate waits for whatever the app waits for (its DB/redis, managed or
+		// app-owned), snapshotted BEFORE we add the migrate to the app's own deps.
+		deps := append([]string{}, s.DependsOn...)
+		if managed != "" {
+			deps = appendUnique(deps, managed)
+		}
+		synthesized = append(synthesized, Service{
+			Name:      migrateName,
+			Role:      "predeploy",
+			ImageFrom: s.Name,
+			Command:   s.PreDeploy,
+			EnvFile:   true,
+			Restart:   "no",
+			DependsOn: deps,
+			// Run with the SAME environment as the app it precedes: the flat .env
+			// (env_file) PLUS the app's per-service env_vars and service links (e.g. a
+			// DATABASE_URL link to postgres). Without these the migrate could see a
+			// different DB config than the app — a release command must not.
+			EnvVars: s.EnvVars,
+			Links:   s.Links,
+		})
+		existing[migrateName] = true
+		// Gate the build service and any sibling that reuses its image (e.g. a `web`).
+		gate := func(svc *Service) {
+			svc.DependsOn = appendUnique(svc.DependsOn, migrateName)
+			if svc.DependsOnConditions == nil {
+				svc.DependsOnConditions = map[string]string{}
+			}
+			svc.DependsOnConditions[migrateName] = "service_completed_successfully"
+		}
+		gate(s)
+		for j := range cfg.Services {
+			if cfg.Services[j].ImageFrom == s.Name {
+				gate(&cfg.Services[j])
+			}
+		}
+	}
+	cfg.Services = append(cfg.Services, synthesized...)
+}
+
+// appAlreadyGated reports whether service s already depends on a one-shot
+// release/migrate service — either via an explicit service_completed_successfully
+// condition (captured by the detector from an imported compose) or a dependency that
+// is itself a predeploy/run-once service. Used to suppress duplicate synthesis.
+func appAlreadyGated(cfg *Config, s Service) bool {
+	for _, cond := range s.DependsOnConditions {
+		if cond == "service_completed_successfully" {
+			return true
+		}
+	}
+	for _, dep := range s.DependsOn {
+		for _, o := range cfg.Services {
+			if o.Name == dep && (o.Role == "predeploy" || strings.EqualFold(o.Restart, "no")) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// managedDBName returns the synthesized managed-database service name for this project
+// (postgres/mysql/mariadb/mongodb), or "" when there's no managed DB. Reads the
+// effective engine (project-level, else the legacy per-env field). A pre-deploy migrate
+// service depends on it so migrations run only once the DB is healthy.
+func managedDBName(cfg *Config, e Env) string {
+	eng := cfg.Project.Database
+	if eng == "" {
+		eng = e.Database
+	}
+	switch eng {
+	case "postgres", "mysql", "mariadb", "mongodb":
+		return eng
+	}
+	return ""
+}
+
+// appendUnique appends v to s if not already present.
+func appendUnique(s []string, v string) []string {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
+}
+
 // resolveRoute derives an env's domain + TLS mode when the user enabled Traefik
 // routing but left the domain blank (the Render-style "just give it a URL" case).
 // Activation is the existing traefik_enabled toggle, so envs that host-bind
 // (Traefik off) and envs with an explicit domain are untouched. Derived host:
 //   - base domain set → {prefix}-{env}.{base}, HTTPS via Let's Encrypt
 //   - no base domain  → {prefix}-{env}.localhost, HTTP (or self-signed if LocalTLS)
+//
 // Underscores in the prefix become hyphens (valid DNS label).
 func resolveRoute(e *Env, rp, env string, ro RouteOpts) {
 	if !e.TraefikEnabled || e.Domain != "" {
@@ -323,6 +444,11 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 		restart = "unless-stopped"
 	}
 	if !isSwarm {
+		// Quote the one-shot value: bare `no` is parsed as a YAML boolean (false) and
+		// docker rejects it; "no" is the documented run-once restart policy.
+		if restart == "no" {
+			restart = "\"no\""
+		}
 		g.line("    restart: " + restart)
 		g.emitServiceSecrets()
 		return
@@ -409,6 +535,7 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 //     resolver, plus a companion `web` router that redirects http→https.
 //   - HTTPS + self-signed   → same as above but no certresolver (Traefik serves
 //     its default cert) — for local *.localhost envs that need HTTPS.
+//
 // The per-router redirect replaces Traefik's old global web→websecure redirect,
 // so HTTP-only (local) envs are no longer forced onto a cert-less HTTPS.
 func (g *gen) traefikLabels(router, host, port string, usersVar, certResolver, wildcard string) {
