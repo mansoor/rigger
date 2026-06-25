@@ -87,8 +87,8 @@ func TestBuildBackendWithPushAndBump(t *testing.T) {
 	}
 	build := joined(rec.calls[0])
 	wantTag := "reg/app-backend:1.3.0-build.0-prod"
-	if !strings.HasPrefix(build, "build ") {
-		t.Errorf("first call not a build: %s", build)
+	if !strings.HasPrefix(build, "buildx build ") {
+		t.Errorf("first call not a buildx build: %s", build)
 	}
 	if !strings.Contains(build, "-t "+wantTag) {
 		t.Errorf("build missing tag %q: %s", wantTag, build)

@@ -54,6 +54,9 @@ FROM alpine:3.19
 # Runtime tools the Go binary shells out to:
 #   docker-cli         — docker ps / pull / inspect / stack / service
 #   docker-cli-compose — 'docker compose' v2 plugin (lifecycle, exec, backup dumps)
+#   docker-cli-buildx  — 'docker buildx build' (BuildKit) so app Dockerfiles using
+#                        RUN --mount=type=cache/secret/bind, heredocs, etc. build
+#                        (the legacy builder rejects --mount). See internal/builder.
 #   coreutils          — du (per-workspace disk stats)
 #   ca-certificates    — TLS to the Docker Hub registry API (image-update checks)
 #   tzdata             — local timestamps
@@ -67,7 +70,8 @@ RUN apk add --no-cache \
     git \
     openssh-client \
     docker-cli \
-    docker-cli-compose
+    docker-cli-compose \
+    docker-cli-buildx
 
 COPY --from=go-builder /rigger /usr/local/bin/rigger
 

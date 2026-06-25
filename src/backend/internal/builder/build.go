@@ -225,7 +225,15 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	// Run with the build context as the working dir and relative paths, so the
 	// remote executor can translate the dir to the host and build against the
 	// pushed context on the remote daemon (local behaviour is identical).
-	args := []string{"build"}
+	//
+	// Use BuildKit via `docker buildx build` (not the legacy builder) so modern
+	// Dockerfiles work — RUN --mount=type=cache/secret/bind, heredocs, etc. The
+	// legacy builder rejects `--mount` ("requires BuildKit"). buildx is an argv change
+	// (no env var), so it applies identically to local and remote build hosts (the
+	// remote executor only forwards args, not env). --load puts the result in the
+	// target daemon's image store so `compose up` finds it — matching the classic
+	// builder's behaviour, including the no-registry pull_policy:never local fallback.
+	args := []string{"buildx", "build", "--load"}
 	if noCache {
 		args = append(args, "--no-cache") // force mode: rebuild every layer
 	}
