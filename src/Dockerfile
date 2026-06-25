@@ -65,6 +65,7 @@ RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     git \
+    openssh-client \
     docker-cli \
     docker-cli-compose
 
