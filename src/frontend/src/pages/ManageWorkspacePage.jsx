@@ -34,6 +34,7 @@ const TABS = [
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
   { id: 'api-keys',       label: 'API Keys',         icon: '🔑' },
   { group: 'Shared resources' },
+  { id: 'domains',        label: 'Domains & TLS',    icon: '🌐' },
   { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
   { id: 'registries',     label: 'Docker Registries', icon: '📦' },
   { id: 'git',            label: 'Git', icon: '🔑' },
@@ -79,10 +80,11 @@ export default function ManageWorkspacePage() {
           {tab === 'general' && (
             <div className="space-y-8">
               <GeneralSection workspace={workspace} ws={ws} qc={qc} setCurrent={setCurrent} />
-              <WorkspaceGeneralSettings workspace={workspace} qc={qc} />
+              <WorkspaceTierOrder workspace={workspace} qc={qc} />
               <WorkspaceDefaults workspace={workspace} qc={qc} />
             </div>
           )}
+          {tab === 'domains'        && <WorkspaceDomainsSettings workspace={workspace} qc={qc} />}
           {tab === 'preferences'    && (
             <div className="space-y-8">
               <WorkspaceAppearanceDefault workspace={workspace} qc={qc} />
@@ -105,25 +107,24 @@ export default function ManageWorkspacePage() {
   )
 }
 
-// WorkspaceGeneralSettings — workspace-scoped general settings (ACME email, base
-// domain). Like the global General tab, these are stored values used for SSL/URL
-// config; full per-workspace Traefik wiring lands with later automation.
-function WorkspaceGeneralSettings({ workspace, qc }) {
+// WorkspaceDomainsSettings — workspace-scoped domain/SSL overrides (ACME email, base
+// domain, wildcard DNS-01 provider + Cloudflare token, auto-URL fallback). Resolved
+// workspace → global. Lives on its own "Domains & TLS" tab, mirroring Admin.
+function WorkspaceDomainsSettings({ workspace, qc }) {
   const settingsKey = ['ws-settings', workspace]
   const { data: saved } = useQuery({
     queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
   })
   const [acme, setAcme] = useState('')
   const [domain, setDomain] = useState('')
-  const [tiers, setTiers] = useState('')
-  // Domain/TLS override parity with the admin General tab (resolved workspace → global).
+  // Domain/TLS override parity with the admin Domains & TLS tab (resolved workspace → global).
   const [autoMode, setAutoMode] = useState('')   // "" = inherit global
   const [autoHost, setAutoHost] = useState('')
   const [dnsProvider, setDnsProvider] = useState('') // "" = inherit global
   const [dnsToken, setDnsToken] = useState('') // masked sentinel when already set
   const [seeded, setSeeded] = useState(false)
   if (!seeded && saved) {
-    setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setTiers(saved.env_tier_names || '')
+    setAcme(saved.acme_email || ''); setDomain(saved.domain || '')
     setAutoMode(saved.auto_url_mode || ''); setAutoHost(saved.auto_url_host || ''); setDnsProvider(saved.apps_dns_provider || '')
     setDnsToken(saved.apps_dns_token || '')
     setSeeded(true)
@@ -131,13 +132,13 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
 
   const mut = useMutation({
     mutationFn: () => updateWorkspaceSettings(workspace, {
-      acme_email: acme.trim(), domain: domain.trim(), env_tier_names: tiers.trim(),
+      acme_email: acme.trim(), domain: domain.trim(),
       auto_url_mode: autoMode, auto_url_host: autoHost.trim(), apps_dns_provider: dnsProvider,
       apps_dns_token: dnsToken, // backend keeps current on blank/masked, encrypts a new value
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
-  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '') || tiers.trim() !== (saved.env_tier_names || '')
+  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '')
     || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || '')
     || dnsToken !== (saved.apps_dns_token || ''))
 
@@ -207,8 +208,40 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
           </div>
         )}
         <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
-        <div className="pt-2 border-t border-border">
-          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1 mt-2">Environment tier order</label>
+        <div className="flex items-center gap-3">
+          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            {mut.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// WorkspaceTierOrder — the release-pipeline env tier order (env_tier_names). Stays on the
+// General tab (it's a pipeline default, not a domain setting). Saves only its own key.
+function WorkspaceTierOrder({ workspace, qc }) {
+  const settingsKey = ['ws-settings', workspace]
+  const { data: saved } = useQuery({
+    queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
+  })
+  const [tiers, setTiers] = useState('')
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && saved) { setTiers(saved.env_tier_names || ''); setSeeded(true) }
+
+  const mut = useMutation({
+    mutationFn: () => updateWorkspaceSettings(workspace, { env_tier_names: tiers.trim() }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
+  })
+  const dirty = saved && tiers.trim() !== (saved.env_tier_names || '')
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold text-content mb-3">Environment tier order</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+        <div>
           <textarea value={tiers} onChange={e => setTiers(e.target.value)} rows={2}
             placeholder="dev, staging, qa, uat, preprod, prod"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
