@@ -120,10 +120,12 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   const [autoMode, setAutoMode] = useState('')   // "" = inherit global
   const [autoHost, setAutoHost] = useState('')
   const [dnsProvider, setDnsProvider] = useState('') // "" = inherit global
+  const [dnsToken, setDnsToken] = useState('') // masked sentinel when already set
   const [seeded, setSeeded] = useState(false)
   if (!seeded && saved) {
     setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setTiers(saved.env_tier_names || '')
     setAutoMode(saved.auto_url_mode || ''); setAutoHost(saved.auto_url_host || ''); setDnsProvider(saved.apps_dns_provider || '')
+    setDnsToken(saved.apps_dns_token || '')
     setSeeded(true)
   }
 
@@ -131,11 +133,13 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
     mutationFn: () => updateWorkspaceSettings(workspace, {
       acme_email: acme.trim(), domain: domain.trim(), env_tier_names: tiers.trim(),
       auto_url_mode: autoMode, auto_url_host: autoHost.trim(), apps_dns_provider: dnsProvider,
+      apps_dns_token: dnsToken, // backend keeps current on blank/masked, encrypts a new value
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
   const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '') || tiers.trim() !== (saved.env_tier_names || '')
-    || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || ''))
+    || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || '')
+    || dnsToken !== (saved.apps_dns_token || ''))
 
   return (
     <section>
@@ -154,9 +158,9 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
           <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</p>
         </div>
         {/* Wildcard cert provider — shown when this workspace overrides the base domain
-            (mirrors Admin → General). For a workspace on the GLOBAL base domain it inherits
-            the global provider; for its OWN domain a per-workspace Cloudflare token (own
-            zone) lands in the next iteration — today it uses the global token. */}
+            (mirrors Admin → General). Cloudflare + a per-workspace token issues a
+            *.{domain} cert under the workspace's OWN zone, out-of-band (no clash with the
+            shared global resolver). Blank inherits the global provider. */}
         {domain.trim() && (
           <div>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Wildcard cert (DNS-01)</label>
@@ -165,7 +169,17 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
               <option value="">Inherit global (Settings → General — per-host HTTP-01 unless the global picks Cloudflare)</option>
               <option value="cloudflare">Cloudflare — one wildcard cert for *.{domain.trim()}</option>
             </select>
-            <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide DNS-01 provider for this workspace. <strong>Cloudflare</strong> issues a single <code className="font-mono">*.{domain.trim()}</code> cert (no port-80 challenge, no per-app rate limits) — today via the global Cloudflare token (Settings → General); a per-workspace token for a different zone is coming.</p>
+            {dnsProvider === 'cloudflare' ? (
+              <div className="mt-3">
+                <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Cloudflare API token</label>
+                <input type="password" value={dnsToken} onChange={e => setDnsToken(e.target.value)}
+                  placeholder="paste a Zone:DNS:Edit + Zone:Read token"
+                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+                <p className="text-xs text-content-subtle mt-1">Scoped to <code className="font-mono">{domain.trim()}</code> (Cloudflare → My Profile → API Tokens, <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>). Rigger issues a single <code className="font-mono">*.{domain.trim()}</code> cert under this workspace&apos;s own zone, out-of-band (no Traefik restart, no clash with the global token). Stored <strong>encrypted at rest</strong> and never shown again — leave the masked value to keep the current token. Leave blank to fall back to the global Cloudflare token.</p>
+              </div>
+            ) : (
+              <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide DNS-01 provider for this workspace. <strong>Cloudflare</strong> issues a single <code className="font-mono">*.{domain.trim()}</code> cert (no port-80 challenge, no per-app rate limits).</p>
+            )}
           </div>
         )}
         {/* Auto-URL fallback (when no base domain) — mirrors Admin → General. */}

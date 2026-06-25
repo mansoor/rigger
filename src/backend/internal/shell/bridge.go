@@ -151,7 +151,19 @@ func (b *Bridge) usesOverrideCert(workspaceName, project, env string) bool {
 		return false
 	}
 	ec, ok := cfg.Environments[env]
-	if !ok || !ec.SSLEnabled {
+	if !ok {
+		return false
+	}
+	// Workspace-wildcard: a base-domain auto-routed env (no explicit per-env domain) in a
+	// workspace that overrides the base domain AND opts into Cloudflare DNS-01 with its OWN
+	// token → its SSL is served by the out-of-band file-provider wildcard (*.{wsBase})
+	// issued under the workspace token, NOT the shared global Traefik resolver (whose one
+	// token is on the global zone). SSL is derived for base-domain routing, so don't gate
+	// on the stored ec.SSLEnabled here.
+	if ec.TraefikEnabled && strings.TrimSpace(ec.Domain) == "" && b.usesWorkspaceWildcard(workspaceName) {
+		return true
+	}
+	if !ec.SSLEnabled {
 		return false
 	}
 	domain := strings.ToLower(strings.TrimSpace(ec.Domain))
@@ -161,6 +173,23 @@ func (b *Bridge) usesOverrideCert(workspaceName, project, env string) bool {
 	global := strings.TrimSpace(settings.AppSetting(b.db, "acme_email"))
 	eff := settings.EffectiveAcmeEmail(b.db, workspaceName, ec.AcmeEmail)
 	return eff != "" && !strings.EqualFold(eff, global)
+}
+
+// usesWorkspaceWildcard reports whether a workspace serves its base-domain envs via an
+// out-of-band Cloudflare wildcard cert under its OWN token: it overrides the base domain,
+// its effective DNS provider is cloudflare, and a per-workspace token is set. (The global
+// Traefik dns resolver is single-token/shared, so a workspace on its own zone can't use it.)
+func (b *Bridge) usesWorkspaceWildcard(ws string) bool {
+	if b.db == nil {
+		return false
+	}
+	if settings.WorkspaceBaseDomain(b.db, ws) == "" {
+		return false // not the workspace's OWN domain → global resolver handles it
+	}
+	if !strings.EqualFold(settings.EffectiveDNSProvider(b.db, ws), "cloudflare") {
+		return false
+	}
+	return settings.WorkspaceDNSToken(b.db, b.cryptoKey, ws) != ""
 }
 
 func (b *Bridge) resolveRemote(workspaceName, project, env string) (*remoteTarget, error) {

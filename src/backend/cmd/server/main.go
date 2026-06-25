@@ -193,7 +193,11 @@ func main() {
 	// Renew out-of-band override certs (per-env/workspace ACME email, Phase 2): every
 	// 12h, re-issue any tracked cert within 30 days of expiry via lego (DNS-01). Idle
 	// when no Cloudflare token is set. Traefik auto-renews its own resolver certs.
-	acme.NewRenewer(database, acme.New(nil)).Run()
+	acmeRenewer := acme.NewRenewer(database, acme.New(nil))
+	// Per-workspace wildcard certs are issued under a workspace's OWN Cloudflare token
+	// (its own zone); resolve it (decrypted) so the renewer renews them too.
+	acmeRenewer.TokenFor = func(ws string) string { return settings.WorkspaceDNSToken(database, cryptoKey, ws) }
+	acmeRenewer.Run()
 
 	// Seed the shared "loading" errors middleware into the Traefik file-provider dir
 	// (/dynamic, hot-reloaded). App routers reference rigger-loading@file so a backend

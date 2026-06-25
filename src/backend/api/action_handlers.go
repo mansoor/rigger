@@ -111,6 +111,10 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 			// Issue/refresh a per-email override cert (out-of-band, file provider) when
 			// the env's effective ACME email differs from the global. Best-effort.
 			h.maybeIssueOverrideCert(wsName, name, env, out)
+			// Issue/refresh the workspace's own Cloudflare wildcard (*.{wsBase}) when it
+			// overrides the base domain with its own DNS token. Shared across the
+			// workspace's base-domain envs; idempotent (skipped while valid). Best-effort.
+			h.maybeIssueWorkspaceWildcard(wsName, out)
 		}
 		if body.Command == "update" && env != "" {
 			h.imgCache.Invalidate(wsName, name, env)

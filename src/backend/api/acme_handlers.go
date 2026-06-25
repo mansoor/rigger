@@ -74,3 +74,49 @@ func (h *Handler) maybeIssueOverrideCert(workspace, project, env string, out io.
 	})
 	fmt.Fprintf(out, "\033[32m✓ cert published for %s — expires %s. Traefik's file provider serves it (no restart).\033[0m\n", domain, notAfter.Format("2006-01-02"))
 }
+
+// maybeIssueWorkspaceWildcard issues a single Cloudflare DNS-01 wildcard cert
+// (*.{wsBase}) for a workspace that overrides the base domain AND opts into Cloudflare
+// with its OWN token — served out-of-band via Traefik's file provider, so it doesn't
+// clash with the shared global `dns` resolver (one token, global zone). Issued under the
+// per-workspace token (decrypted); the cert is shared by every base-domain env in the
+// workspace, so it's issued once and skipped while still valid. Best-effort, streamed to
+// out; called after a successful deploy alongside maybeIssueOverrideCert.
+func (h *Handler) maybeIssueWorkspaceWildcard(workspace string, out io.Writer) {
+	base := strings.ToLower(strings.TrimSpace(settings.WorkspaceBaseDomain(h.db, workspace)))
+	if base == "" || domainLooksLocal(base) {
+		return // no workspace-own domain ⇒ global resolver handles routing
+	}
+	if !strings.EqualFold(settings.EffectiveDNSProvider(h.db, workspace), "cloudflare") {
+		return
+	}
+	tok := settings.WorkspaceDNSToken(h.db, h.cryptoKey, workspace)
+	if tok == "" {
+		return // no per-workspace token ⇒ falls back to the global resolver/token
+	}
+	wildcard := "*." + base
+	email := settings.EffectiveAcmeEmail(h.db, workspace, "")
+	if email == "" {
+		fmt.Fprintf(out, "\n\033[33m⚠ %s needs an ACME email — set one in Manage Workspace → SSL & domain.\033[0m\n", wildcard)
+		return
+	}
+	// Shared across the workspace: skip while a published cert has >30d of life.
+	if rec, found, _ := h.acmeCerts.Get(wildcard); found && rec.NotAfter != 0 &&
+		time.Until(time.Unix(rec.NotAfter, 0)) > 30*24*time.Hour {
+		return
+	}
+	iss := *h.acmeIssuer // copy the issuer with the per-workspace token
+	iss.Token = tok
+	fmt.Fprintf(out, "\n\033[36m▶ issuing Cloudflare wildcard cert for %s (account %s, workspace token) via DNS-01...\033[0m\n", wildcard, email)
+	notAfter, ierr := iss.Issue(wildcard, email, out)
+	if ierr != nil {
+		fmt.Fprintf(out, "\033[33m⚠ wildcard cert issuance failed (deploy unaffected): %s\033[0m\n", ierr.Error())
+		h.acmeCerts.RecordError(wildcard, email, workspace, "", "", ierr.Error()) //nolint:errcheck
+		return
+	}
+	h.acmeCerts.Upsert(acme.Record{ //nolint:errcheck
+		Domain: wildcard, Email: email, Workspace: workspace,
+		NotAfter: notAfter.Unix(), IssuedAt: time.Now().Unix(),
+	})
+	fmt.Fprintf(out, "\033[32m✓ wildcard cert published for %s — expires %s (Traefik file provider, no restart).\033[0m\n", wildcard, notAfter.Format("2006-01-02"))
+}

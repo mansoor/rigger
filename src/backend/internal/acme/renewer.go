@@ -18,6 +18,11 @@ type Renewer struct {
 	store    *Store
 	issuer   *Issuer
 	interval time.Duration
+	// TokenFor returns the per-WORKSPACE Cloudflare token for a cert's workspace (the
+	// workspace-wildcard certs issued under a workspace's own zone), or "" to fall back
+	// to the issuer's global token. Set by main.go (it has the crypto key + db). nil ⇒
+	// global token only (today's behavior).
+	TokenFor func(workspace string) string
 }
 
 // NewRenewer wires a renewer to the cert registry + issuer. Interval defaults to 12h.
@@ -25,10 +30,14 @@ func NewRenewer(d *db.DB, issuer *Issuer) *Renewer {
 	return &Renewer{store: NewStore(d), issuer: issuer, interval: 12 * time.Hour}
 }
 
-// Run starts the renewal loop in a background goroutine. No-op (logs once) when DNS-01
-// isn't configured, since out-of-band certs can't be issued/renewed without the token.
+// Run starts the renewal loop in a background goroutine. No-op when there's no issuer.
+// Renewal proceeds even without a global token when a TokenFor resolver can supply a
+// per-workspace token; certs with no resolvable token are recorded as errors + skipped.
 func (r *Renewer) Run() {
-	if r.issuer == nil || !r.issuer.Enabled() {
+	if r.issuer == nil {
+		return
+	}
+	if !r.issuer.Enabled() && r.TokenFor == nil {
 		log.Printf("acme: renewer idle — no Cloudflare DNS token (override certs disabled)")
 		return
 	}
@@ -55,7 +64,22 @@ func (r *Renewer) runOnce() {
 		if c.NotAfter != 0 && time.Unix(c.NotAfter, 0).Sub(now) > renewWindow {
 			continue // plenty of life left
 		}
-		notAfter, err := r.issuer.Issue(c.Domain, c.Email, nil) // existing cert ⇒ lego renew
+		// Use the cert's workspace token when one exists (workspace-wildcard certs on a
+		// workspace's own zone); else the global issuer token.
+		iss := r.issuer
+		if r.TokenFor != nil {
+			if tok := r.TokenFor(c.Workspace); tok != "" {
+				cp := *r.issuer
+				cp.Token = tok
+				iss = &cp
+			}
+		}
+		if !iss.Enabled() {
+			log.Printf("acme: renew %s skipped — no token for workspace %q", c.Domain, c.Workspace)
+			r.store.RecordError(c.Domain, c.Email, c.Workspace, c.Project, c.Env, "no Cloudflare token") //nolint:errcheck
+			continue
+		}
+		notAfter, err := iss.Issue(c.Domain, c.Email, nil) // existing cert ⇒ lego renew
 		if err != nil {
 			log.Printf("acme: renew %s failed: %v", c.Domain, err)
 			r.store.RecordError(c.Domain, c.Email, c.Workspace, c.Project, c.Env, err.Error()) //nolint:errcheck
