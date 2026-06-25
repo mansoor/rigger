@@ -777,7 +777,11 @@ function looksDockerInternal(ip) {
   return /^192\.168\.65\./.test(ip) || /^172\.1[78]\./.test(ip)
 }
 
-function GeneralTab() {
+// ── Domains & TLS Tab ─────────────────────────────────────────────────────────
+// All app-domain / SSL / auto-URL settings, split out of General so each surface stays
+// focused. Saves the same global app_settings keys — the PUT updates only the keys it
+// sends, so DomainsTab and GeneralTab can each own a subset.
+function DomainsTab() {
   const qc = useQueryClient()
   const { data: cfg = {}, isLoading } = useQuery({
     queryKey: ['general-settings'],
@@ -790,15 +794,6 @@ function GeneralTab() {
   const [autoUrlMode, setAutoUrlMode] = useState('localhost')
   const [dnsProvider, setDnsProvider] = useState('')
   const [dnsToken, setDnsToken] = useState('')
-  const [keyMin, setKeyMin] = useState(3)
-  const [keyMax, setKeyMax] = useState(4)
-  // Password policy (auth Group A)
-  const [pwMin, setPwMin] = useState(8)
-  const [pwUpper, setPwUpper] = useState(false)
-  const [pwLower, setPwLower] = useState(false)
-  const [pwNumber, setPwNumber] = useState(false)
-  const [pwSymbol, setPwSymbol] = useState(false)
-  const [pwMaxAge, setPwMaxAge] = useState(0)
 
   const saveMut = useMutation({
     mutationFn: () => updateGeneralSettings({
@@ -809,14 +804,6 @@ function GeneralTab() {
       auto_url_mode: autoUrlMode,
       apps_dns_provider: dnsProvider,
       apps_dns_token: dnsToken,
-      key_min_length: String(keyMin),
-      key_max_length: String(Math.max(keyMin, keyMax)),
-      pw_min_length: String(pwMin),
-      pw_require_upper: pwUpper ? 'true' : 'false',
-      pw_require_lower: pwLower ? 'true' : 'false',
-      pw_require_number: pwNumber ? 'true' : 'false',
-      pw_require_symbol: pwSymbol ? 'true' : 'false',
-      pw_max_age_days: String(pwMaxAge),
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
   })
@@ -828,9 +815,6 @@ function GeneralTab() {
     onSuccess: (d) => {
       if (d?.ip) {
         setAppHost(d.ip)
-        // On Docker Desktop / non-Linux the host-networked lookup returns the
-        // Docker VM/bridge IP, not the machine's LAN IP — flag it so the admin
-        // corrects it rather than trusting a wrong value.
         setDetectErr(looksDockerInternal(d.ip)
           ? `Detected ${d.ip}, but that looks like a Docker-internal address (common on Docker Desktop / non-Linux hosts). Enter your host's real LAN/public IP manually.`
           : '')
@@ -841,7 +825,6 @@ function GeneralTab() {
     onError: (e) => setDetectErr(e?.response?.data?.error || 'Detection failed'),
   })
 
-  // Sync from loaded data when it arrives
   const [synced, setSynced] = useState(false)
   if (!isLoading && !synced && cfg.acme_email !== undefined) {
     setAcmeEmail(cfg.acme_email || '')
@@ -851,14 +834,6 @@ function GeneralTab() {
     setAutoUrlMode(cfg.auto_url_mode || 'localhost')
     setDnsProvider(cfg.apps_dns_provider || '')
     setDnsToken(cfg.apps_dns_token || '')
-    setKeyMin(Number(cfg.key_min_length) || 3)
-    setKeyMax(Number(cfg.key_max_length) || 4)
-    setPwMin(Number(cfg.pw_min_length) || 8)
-    setPwUpper(cfg.pw_require_upper === 'true')
-    setPwLower(cfg.pw_require_lower === 'true')
-    setPwNumber(cfg.pw_require_number === 'true')
-    setPwSymbol(cfg.pw_require_symbol === 'true')
-    setPwMaxAge(Number(cfg.pw_max_age_days) || 0)
     setSynced(true)
   }
 
@@ -873,23 +848,16 @@ function GeneralTab() {
           Traefik automatically issues and renews certificates via Let's Encrypt. Set your email
           below — it is sent to Let's Encrypt for cert expiry notifications and account recovery.
         </p>
-
         <div className="space-y-4 p-4 bg-surface border border-border rounded-xl">
           <div>
             <Label required>ACME email address</Label>
-            <Input
-              value={acmeEmail}
-              onChange={setAcmeEmail}
-              placeholder="admin@example.com"
-              type="email"
-            />
+            <Input value={acmeEmail} onChange={setAcmeEmail} placeholder="admin@example.com" type="email" />
             <p className="text-xs text-content-subtle mt-1">
               Must match the <code className="font-mono text-xs">ACME_EMAIL</code> value in{' '}
               <code className="font-mono text-xs">src/.env</code>. Traefik reads it from there;
               this field stores it for reference and future automation.
             </p>
           </div>
-
           <div className="px-4 py-3 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
             <p className="text-xs text-warning-fg font-semibold mb-1">Requirements for SSL to work</p>
             <ul className="text-xs text-warning-fg space-y-0.5 list-disc pl-4">
@@ -908,16 +876,11 @@ function GeneralTab() {
           Optionally expose the Rigger UI itself through Traefik with an SSL cert at the
           domain below. Leave blank to keep reaching Rigger on its port only.
         </p>
-
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Rigger UI domain</Label>
-          <Input
-            value={riggerDomain}
-            onChange={setRiggerDomain}
-            placeholder="rigger.example.com"
-          />
+          <Input value={riggerDomain} onChange={setRiggerDomain} placeholder="rigger.example.com" />
           <p className="text-xs text-content-subtle mt-1">
-            Leave blank to access Rigger UI on port {' '}
+            Leave blank to access Rigger UI on port{' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
           </p>
         </div>
@@ -937,28 +900,18 @@ function GeneralTab() {
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Host address</Label>
           <div className="flex gap-2">
-            <Input
-              value={appHost}
-              onChange={v => { setAppHost(v); setDetectErr('') }}
-              placeholder="192.168.1.50 or host.example.com"
-            />
-            <button
-              type="button"
-              onClick={() => detectMut.mutate()}
-              disabled={detectMut.isPending}
+            <Input value={appHost} onChange={v => { setAppHost(v); setDetectErr('') }}
+              placeholder="192.168.1.50 or host.example.com" />
+            <button type="button" onClick={() => detectMut.mutate()} disabled={detectMut.isPending}
               className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover disabled:opacity-50"
-              title="Query the Docker host for its real outbound IP"
-            >
+              title="Query the Docker host for its real outbound IP">
               {detectMut.isPending ? 'Detecting…' : 'Detect'}
             </button>
             {typeof window !== 'undefined' && window.location?.hostname &&
              window.location.hostname !== appHost.trim() && (
-              <button
-                type="button"
-                onClick={() => { setAppHost(window.location.hostname); setDetectErr('') }}
+              <button type="button" onClick={() => { setAppHost(window.location.hostname); setDetectErr('') }}
                 className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover"
-                title="Use the address your browser reached Rigger at"
-              >
+                title="Use the address your browser reached Rigger at">
                 Use {window.location.hostname}
               </button>
             )}
@@ -981,7 +934,7 @@ function GeneralTab() {
         <p className="text-sm text-content-subtle mb-4">
           The base domain every deployed app gets a URL under —
           <code className="font-mono text-xs"> {'{workspace}-{app}-{env}'}.{appsBaseDomain || 'onrigger.com'}</code>.
-          Workspaces can override this in <strong>Manage Workspace → General</strong>; an env can set
+          Workspaces can override this in <strong>Manage Workspace → SSL &amp; domain</strong>; an env can set
           its own custom domain. When no base domain is set, apps fall back to the auto-URL below so
           they're still reachable across machines.
         </p>
@@ -1010,12 +963,8 @@ function GeneralTab() {
                   </p>
                   <div>
                     <Label>Cloudflare API token</Label>
-                    <Input
-                      type="password"
-                      value={dnsToken}
-                      onChange={setDnsToken}
-                      placeholder="paste a Zone:DNS:Edit + Zone:Read token"
-                    />
+                    <Input type="password" value={dnsToken} onChange={setDnsToken}
+                      placeholder="paste a Zone:DNS:Edit + Zone:Read token" />
                     <p className="text-xs text-content-subtle mt-1">
                       Create at Cloudflare → My Profile → API Tokens with <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>,
                       scoped to <code className="font-mono text-xs">{appsBaseDomain.trim()}</code>. Stored encrypted-at-rest and
@@ -1060,7 +1009,7 @@ function GeneralTab() {
               </p>
             )}
             {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && appHost.trim() &&
-             !/^\d{1,3}(\.\d{1,3}){3}$/.test(appHost.trim()) && (
+             !IPV4_RE.test(appHost.trim()) && (
               <p className="text-xs text-warning-fg mt-1">
                 <code className="font-mono text-xs">{appHost.trim()}</code> isn't an IP address — sslip/nip/traefik.me
                 only echo back an <em>embedded IP</em>, so a hostname won't resolve. Click <strong>Detect</strong> above
@@ -1072,6 +1021,65 @@ function GeneralTab() {
         </div>
       </div>
 
+      {/* Save */}
+      <div className="flex items-center gap-3">
+        <Btn onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+          {saveMut.isPending ? 'Saving…' : 'Save settings'}
+        </Btn>
+        {saveMut.isSuccess && <span className="text-xs text-success-fg">✓ Saved</span>}
+      </div>
+    </div>
+  )
+}
+
+function GeneralTab() {
+  const qc = useQueryClient()
+  const { data: cfg = {}, isLoading } = useQuery({
+    queryKey: ['general-settings'],
+    queryFn: fetchGeneralSettings,
+  })
+  const [keyMin, setKeyMin] = useState(3)
+  const [keyMax, setKeyMax] = useState(4)
+  // Password policy (auth Group A)
+  const [pwMin, setPwMin] = useState(8)
+  const [pwUpper, setPwUpper] = useState(false)
+  const [pwLower, setPwLower] = useState(false)
+  const [pwNumber, setPwNumber] = useState(false)
+  const [pwSymbol, setPwSymbol] = useState(false)
+  const [pwMaxAge, setPwMaxAge] = useState(0)
+
+  const saveMut = useMutation({
+    mutationFn: () => updateGeneralSettings({
+      key_min_length: String(keyMin),
+      key_max_length: String(Math.max(keyMin, keyMax)),
+      pw_min_length: String(pwMin),
+      pw_require_upper: pwUpper ? 'true' : 'false',
+      pw_require_lower: pwLower ? 'true' : 'false',
+      pw_require_number: pwNumber ? 'true' : 'false',
+      pw_require_symbol: pwSymbol ? 'true' : 'false',
+      pw_max_age_days: String(pwMaxAge),
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
+  })
+
+  // Sync from loaded data when it arrives
+  const [synced, setSynced] = useState(false)
+  if (!isLoading && !synced && cfg.key_min_length !== undefined) {
+    setKeyMin(Number(cfg.key_min_length) || 3)
+    setKeyMax(Number(cfg.key_max_length) || 4)
+    setPwMin(Number(cfg.pw_min_length) || 8)
+    setPwUpper(cfg.pw_require_upper === 'true')
+    setPwLower(cfg.pw_require_lower === 'true')
+    setPwNumber(cfg.pw_require_number === 'true')
+    setPwSymbol(cfg.pw_require_symbol === 'true')
+    setPwMaxAge(Number(cfg.pw_max_age_days) || 0)
+    setSynced(true)
+  }
+
+  if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
+
+  return (
+    <div className="space-y-8 max-w-2xl">
       {/* Naming — key length */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Naming — resource keys</h2>
@@ -2191,6 +2199,7 @@ function UpdatesTab() {
 // Rules) so the two settings surfaces feel consistent.
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
+  { id: 'domains',        label: 'Domains & TLS',    icon: '🌐' },
   { id: 'preferences',    label: 'Preferences',      icon: '🎨' },
   { id: 'users',          label: 'Users',            icon: '👤' },
   { id: 'access-requests', label: 'Access Requests', icon: '🔑' },
@@ -2219,6 +2228,7 @@ export default function SettingsPage() {
 
         <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
           {tab === 'general'        && <GeneralTab />}
+          {tab === 'domains'        && <DomainsTab />}
           {tab === 'preferences'    && <PreferencesTab />}
           {tab === 'users'          && <UsersTab />}
           {tab === 'access-requests' && <AccessRequestsInbox />}
