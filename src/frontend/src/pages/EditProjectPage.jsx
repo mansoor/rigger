@@ -936,7 +936,7 @@ function diffServices(current, detected) {
 // service graph. It is ADVISORY: nothing is applied until the user picks items
 // and confirms. New services default to checked; changed services default to
 // UNCHECKED so a re-scan never silently overwrites a service the user has tuned.
-function ScanRepoModal({ gitRepo, gitBranch, images, onApply, onClose }) {
+function ScanRepoModal({ gitRepo, gitBranch, gitProviderId = 0, images, onApply, onClose }) {
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState('')
   const [draft, setDraft] = useState(null)
@@ -946,7 +946,7 @@ function ScanRepoModal({ gitRepo, gitBranch, images, onApply, onClose }) {
     let alive = true
     ;(async () => {
       try {
-        const d = await scanRepo((gitRepo || '').trim(), (gitBranch || '').trim())
+        const d = await scanRepo((gitRepo || '').trim(), (gitBranch || '').trim(), gitProviderId || 0)
         if (!alive) return
         setDraft(d)
         // Pre-check the additive (safe) proposals only.
@@ -1064,7 +1064,7 @@ function svcKindLabel(s) {
   return `image ${s.image || ''}${s.tag ? `:${s.tag}` : ''}`
 }
 
-function ImagesEditor({ images, onChange, gitRepo, gitBranch, managedDeps = [] }) {
+function ImagesEditor({ images, onChange, gitRepo, gitBranch, gitProviderId = 0, managedDeps = [] }) {
   const [scanning, setScanning] = useState(false)
   const addService = () => onChange([...images, {
     name: '', image: '', tag: 'latest', port: 0, host_port: '',
@@ -1089,7 +1089,7 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch, managedDeps = [] }
         </div>
       </div>
       {scanning && (
-        <ScanRepoModal gitRepo={gitRepo} gitBranch={gitBranch} images={images}
+        <ScanRepoModal gitRepo={gitRepo} gitBranch={gitBranch} gitProviderId={gitProviderId} images={images}
           onApply={onChange} onClose={() => setScanning(false)} />
       )}
       {images.map((img, i) => (
@@ -2566,6 +2566,7 @@ export default function EditProjectPage() {
             <h2 className="text-sm font-semibold text-content mb-3">Services</h2>
             <ImagesEditor images={images || []} onChange={setImages}
               gitRepo={project?.git_repo} gitBranch={project?.git_branch}
+              gitProviderId={project?.git_provider_id || 0}
               managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, storageMinio: !!project?.storage_minio || project?.object_storage === 'minio' })} />
             <PortWarnings warnings={hostWarnings} />
             <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
