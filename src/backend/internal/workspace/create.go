@@ -25,8 +25,9 @@ type CreateRequest struct {
 	Name         string            `json:"name"`      // free-form display name
 	Key          string            `json:"key"`       // project key (folder/URL/Docker identity); derived if empty
 	Registry     string            `json:"registry"`
-	SourceRepo   string            `json:"source_repo"`   // project-level git repo (one per project)
-	SourceBranch string            `json:"source_branch"` // default branch (per-env override via env.git.branch)
+	SourceRepo    string           `json:"source_repo"`       // project-level git repo (one per project)
+	SourceBranch  string           `json:"source_branch"`     // default branch (per-env override via env.git.branch)
+	GitProviderID int64            `json:"git_provider_id"`   // optional git provider for a private source repo (Phase 12)
 	SourceKind   string            `json:"source_kind"`   // "upload" → build source came from an uploaded archive (see SourceToken)
 	SourceToken  string            `json:"source_token"`  // staging token from POST /api/upload-source; archive moved into the project on create
 	DBSeedFile   string            `json:"db_seed_file"`  // chosen bundled SQL dump (path relative to source); copied to _source/seed.sql on create
@@ -386,6 +387,9 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			srcBranch = "main"
 		}
 		project["git_branch"] = srcBranch
+		if req.GitProviderID != 0 {
+			project["git_provider_id"] = req.GitProviderID
+		}
 	}
 	// Uploaded-source projects record source_kind; the archive itself is moved into
 	// the project's _source/ by the create handler (using SourceToken) before bootstrap.

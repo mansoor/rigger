@@ -9,6 +9,7 @@ import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import PreviewEnvironmentsTab from '../components/PreviewEnvironmentsTab'
 import RegistryPicker from '../components/RegistryPicker'
+import GitProviderPicker from '../components/GitProviderPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
 import ManagedServices, { enabledDependsOnTargets } from '../components/ManagedServices'
 import EnvReorderModal from '../components/EnvReorderModal'
@@ -2456,6 +2457,14 @@ export default function EditProjectPage() {
                 <Label>Default branch</Label>
                 <Input value={project?.git_branch} onChange={v => setProject(p => ({ ...p, git_branch: v }))} placeholder="main" />
               </div>
+            </div>
+
+            {/* Git provider — credentials to clone a PRIVATE source repo (Phase 12). */}
+            <div>
+              <Label>Git provider <span className="font-normal normal-case text-content-faint">(private repos)</span></Label>
+              <GitProviderPicker workspace={workspace}
+                value={project?.git_provider_id || 0}
+                onChange={(id) => setProject(p => ({ ...p, git_provider_id: id }))} />
             </div>
 
             {/* Local HTTPS moved to a per-env control (the "Enable local HTTPS" toggle on

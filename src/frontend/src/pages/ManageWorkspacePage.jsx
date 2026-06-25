@@ -17,6 +17,7 @@ import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
+  fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
@@ -35,6 +36,7 @@ const TABS = [
   { group: 'Shared resources' },
   { id: 'hosts',          label: 'Remote Hosts',     icon: '🖥' },
   { id: 'registries',     label: 'Docker Registries', icon: '📦' },
+  { id: 'git',            label: 'Git', icon: '🔑' },
   { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
   { id: 'notifications',  label: 'Notifications',    icon: '📣' },
   { id: 'alerts',         label: 'Alert Rules',      icon: '🚨' },
@@ -88,6 +90,7 @@ export default function ManageWorkspacePage() {
           {tab === 'access-requests' && <AccessRequestsInbox wsKey={workspace} />}
           {tab === 'hosts'          && <HostsSection workspace={workspace} qc={qc} />}
           {tab === 'registries'     && <RegistriesSection workspace={workspace} qc={qc} />}
+          {tab === 'git'            && <GitSection workspace={workspace} qc={qc} />}
           {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
           {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
           {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
@@ -751,6 +754,230 @@ function RegistriesSection({ workspace, qc }) {
         </div>
       )}
     </section>
+  )
+}
+
+// GitSection — workspace Git provider connections (Phase 12). Credentials Rigger
+// uses to clone PRIVATE repos: an HTTPS token, or an SSH deploy key Rigger generates
+// (you paste the shown public key into your provider as a read-only deploy key).
+function GitSection({ workspace, qc }) {
+  const gpKey = ['ws-git-providers', workspace]
+  const { data: providers = [], isLoading } = useQuery({
+    queryKey: gpKey, queryFn: () => fetchWorkspaceGitProviders(workspace), enabled: !!workspace,
+  })
+  const [modal, setModal]       = useState(null) // null | 'new' | { editing }
+  const [deleting, setDeleting] = useState(null)
+  const [createdKey, setCreatedKey] = useState(null) // { name, public_key } after generating an SSH provider
+  const [testStatus, setTestStatus] = useState({})   // id -> { loading, ok, error }
+
+  const saveMut = useMutation({
+    mutationFn: ({ id, body }) => id ? updateWorkspaceGitProvider(workspace, id, body) : createWorkspaceGitProvider(workspace, body),
+    onSuccess: (saved) => {
+      qc.invalidateQueries({ queryKey: gpKey })
+      setModal(null)
+      if (saved?.kind === 'ssh_key' && saved?.public_key) setCreatedKey({ name: saved.name, public_key: saved.public_key })
+    },
+  })
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceGitProvider(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: gpKey }); setDeleting(null) },
+  })
+
+  async function handleTest(id) {
+    const repo = window.prompt('Repository URL to test access against (HTTPS for a token, SSH for a deploy key):')
+    if (!repo) return
+    setTestStatus(s => ({ ...s, [id]: { loading: true } }))
+    try {
+      await testWorkspaceGitProvider(workspace, id, repo.trim())
+      setTestStatus(s => ({ ...s, [id]: { ok: true } }))
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Access failed' } }))
+    }
+    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+  }
+
+  const isOwned = (p) => p.owner_scope === `ws:${workspace}`
+  const kindLabel = (k) => k === 'ssh_key' ? 'SSH deploy key' : k === 'github_app' ? 'GitHub App' : 'HTTPS token'
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Git providers</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Credentials this workspace's projects use to clone <span className="text-content-muted font-medium">private</span> repositories — an HTTPS token, or an SSH deploy key Rigger generates for you. Select one on a project's source in New / Edit Project. Secrets are encrypted at rest and never shown again.</p>
+        </div>
+        <button onClick={() => setModal('new')}
+          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          ＋ Add provider
+        </button>
+      </div>
+
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? (
+          <p className="p-5 text-sm text-content-subtle">Loading…</p>
+        ) : providers.length === 0 ? (
+          <p className="p-5 text-sm text-content-subtle">No Git providers yet. Add a token or an SSH deploy key to deploy from a private repository.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {providers.map(p => {
+              const owned = isOwned(p)
+              const ts = testStatus[p.id]
+              return (
+                <div key={p.id} className="flex items-center gap-3 p-4">
+                  <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-surface-raised flex items-center justify-center text-sm">{p.kind === 'ssh_key' ? '🔑' : '🔒'}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-content-strong">{p.name}</p>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">{kindLabel(p.kind)}</span>
+                      {!owned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator">shared</span>}
+                    </div>
+                    <p className="text-xs text-content-subtle mt-0.5">{p.host || 'any host'}{p.username ? ` · ${p.username}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
+                    {ts?.ok && <span className="text-xs text-success-fg">✓ Access OK</span>}
+                    {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
+                    {p.kind === 'ssh_key' && p.public_key && (
+                      <button onClick={() => setCreatedKey({ name: p.name, public_key: p.public_key })}
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Show key</button>
+                    )}
+                    <button onClick={() => handleTest(p.id)} disabled={ts?.loading}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    {owned ? (
+                      <>
+                        <button onClick={() => setModal({ editing: p })}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
+                        <button onClick={() => setDeleting(p)}
+                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                      </>
+                    ) : <span className="text-[11px] text-content-faint px-2">read-only</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {modal && (
+        <GitProviderModal
+          initial={modal === 'new' ? null : modal.editing}
+          saving={saveMut.isPending}
+          error={saveMut.error?.response?.data?.error}
+          onSave={(body) => saveMut.mutate({ id: modal?.editing?.id, body })}
+          onClose={() => setModal(null)}
+        />
+      )}
+
+      {createdKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setCreatedKey(null)}>
+          <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg p-6 space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Deploy public key — “{createdKey.name}”</h3>
+            <p className="text-sm text-content-muted">Add this as a <strong>read-only deploy key</strong> on your repository or provider (GitHub: Settings → Deploy keys; GitLab: Settings → Repository → Deploy keys). The private key stays encrypted in Rigger.</p>
+            <textarea readOnly value={createdKey.public_key} rows={3}
+              className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-xs font-mono text-content break-all" onFocus={e => e.target.select()} />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { navigator.clipboard?.writeText(createdKey.public_key) }}
+                className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Copy</button>
+              <button onClick={() => setCreatedKey(null)}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white">Done</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Projects using this provider will fail to clone their private repo until pointed at another. This cannot be undone.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+                {delMut.isPending ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+// GitProviderModal — add/edit a Git provider. Token vs SSH-deploy-key; editing keeps
+// the stored secret if the secret field is left blank.
+function GitProviderModal({ initial, onSave, onClose, saving, error }) {
+  const editing = !!initial
+  const [kind, setKind]   = useState(initial?.kind || 'token')
+  const [name, setName]   = useState(initial?.name || '')
+  const [host, setHost]   = useState(initial?.host || '')
+  const [username, setUsername] = useState(initial?.username || '')
+  const [secret, setSecret] = useState('')
+  const canSave = name.trim() && (editing || kind === 'ssh_key' || secret.trim())
+  const submit = () => {
+    if (!canSave) return
+    onSave({ name: name.trim(), kind, host: host.trim(), username: username.trim(), secret })
+  }
+  const inp = 'w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500'
+  const lbl = 'block text-xs font-medium text-content-muted mb-1'
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={onClose}>
+      <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-content-strong">{editing ? `Edit “${initial.name}”` : 'Add Git provider'}</h3>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+        </div>
+
+        {!editing && (
+          <div>
+            <label className={lbl}>Type</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setKind('token')}
+                className={`px-3 py-2 text-sm rounded-lg border ${kind === 'token' ? 'border-brand-500 text-content-strong bg-surface-raised' : 'border-border text-content-muted'}`}>🔒 HTTPS token</button>
+              <button type="button" onClick={() => setKind('ssh_key')}
+                className={`px-3 py-2 text-sm rounded-lg border ${kind === 'ssh_key' ? 'border-brand-500 text-content-strong bg-surface-raised' : 'border-border text-content-muted'}`}>🔑 SSH deploy key</button>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className={lbl}>Name</label>
+          <input className={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. GitHub (acme org)" />
+        </div>
+        <div>
+          <label className={lbl}>Host <span className="text-content-faint font-normal">(optional)</span></label>
+          <input className={inp} value={host} onChange={e => setHost(e.target.value)} placeholder="github.com — or your self-hosted host" />
+        </div>
+
+        {kind === 'token' ? (
+          <>
+            <div>
+              <label className={lbl}>Username <span className="text-content-faint font-normal">(optional)</span></label>
+              <input className={inp} value={username} onChange={e => setUsername(e.target.value)} placeholder="x-access-token (GitHub) / oauth2 (GitLab)" />
+            </div>
+            <div>
+              <label className={lbl}>Token{!editing && <span className="text-danger-fg ml-0.5">*</span>}</label>
+              <input className={inp} type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder={editing ? 'leave blank to keep current' : 'personal access / deploy token'} />
+              <p className="text-[11px] text-content-faint mt-1">Stored encrypted; sent only via the git config header at clone time. Use a fine-grained token with read access to the repo(s).</p>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-content-subtle bg-surface-raised border border-border rounded-lg p-3">
+            Rigger generates an <strong>ed25519 deploy keypair</strong>. After saving, copy the <strong>public key</strong> and add it to your repository/provider as a read-only deploy key. Use an <code className="font-mono">ssh://</code> / <code className="font-mono">git@…</code> repo URL on the project.
+          </p>
+        )}
+
+        {error && <p className="text-xs text-danger-fg">{error}</p>}
+        <div className="flex gap-2 justify-end pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+          <button onClick={submit} disabled={!canSave || saving}
+            className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+            {saving ? 'Saving…' : editing ? 'Save' : kind === 'ssh_key' ? 'Generate & save' : 'Add provider'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

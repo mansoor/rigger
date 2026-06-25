@@ -8,6 +8,7 @@ import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fet
 import TemplateBrowserModal, { TemplateCard } from '../components/TemplateBrowserModal'
 import { resolveEnvRoute } from '../lib/envRoute'
 import RegistryPicker from '../components/RegistryPicker'
+import GitProviderPicker from '../components/GitProviderPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
 import ManagedServices from '../components/ManagedServices'
 import { useWorkspaceStore } from '../store/workspace'
@@ -214,13 +215,13 @@ function BlueprintStack({ data, onChange }) {
 
 // ScanStack: enter a repo, scan it, review the detected service graph. The user
 // fine-tunes each service in Edit Project after creation.
-function ScanStack({ data, onChange }) {
+function ScanStack({ data, onChange, workspace }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   async function scan() {
     setErr(''); setBusy(true)
     try {
-      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim())
+      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim(), data.git_provider_id || 0)
       applyDraft(onChange, d)
     } catch (e) {
       onChange('scanDraft', null)
@@ -243,7 +244,13 @@ function ScanStack({ data, onChange }) {
           {busy ? 'Scanning…' : 'Scan'}
         </button>
       </div>
-      <p className="text-xs text-content-subtle">Public HTTPS or token URL — Rigger clones it read-only and detects the stack. SSH keys aren't supported yet.</p>
+      <p className="text-xs text-content-subtle">Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</p>
+      <div>
+        <Label>Git provider <span className="font-normal normal-case text-content-faint">(private repos)</span></Label>
+        <GitProviderPicker workspace={workspace}
+          value={data.git_provider_id || 0}
+          onChange={(id) => onChange('git_provider_id', id)} />
+      </div>
       {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
       <ScanReview data={data} onChange={onChange} />
     </div>
@@ -921,7 +928,7 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       )}
 
       {/* Repo scan */}
-      {data.stackType === 'scan' && <ScanStack data={data} onChange={onChange} />}
+      {data.stackType === 'scan' && <ScanStack data={data} onChange={onChange} workspace={workspace} />}
 
       {/* No-repo stack template picker */}
       {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
@@ -2253,6 +2260,7 @@ export default function NewProjectPage() {
       services: detected ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
       source_repo: isScan ? (data.source_repo || '').trim() : '',
       source_branch: isScan ? (data.source_branch || '').trim() : '',
+      git_provider_id: isScan ? (Number(data.git_provider_id) || 0) : 0,
       source_kind: isUpload ? 'upload' : '',
       source_token: isUpload ? (data.sourceUploadToken || '') : '',
       // Bundled SQL dump chosen in the scan review (only with a managed DB).

@@ -228,8 +228,8 @@ export const fetchTemplateDraft = (ws, name, env) =>
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
-export const scanRepo          = (repo, branch) =>
-  api.post('/scan-repo', { repo, branch }).then(r => r.data)
+export const scanRepo          = (repo, branch, providerId = 0) =>
+  api.post('/scan-repo', { repo, branch, provider_id: Number(providerId) || 0 }).then(r => r.data)
 // Parse pasted docker-compose.yml content into a draft service graph (no clone).
 export const parseCompose      = (content) =>
   api.post('/parse-compose', { content }).then(r => r.data)
@@ -443,6 +443,13 @@ export const testWorkspaceRegistry    = (ws, id)     => api.post(`/workspaces/${
 export const testRegistryCredentials  = (ws, body)   => api.post(`/workspaces/${ws}/registries/test-credentials`, body).then(r => r.data)
 // Designate (or clear) this workspace's system registry (must be a ws-owned registry).
 export const markWorkspaceRegistrySystem = (ws, id, system) => api.post(`/workspaces/${ws}/registries/${id}/system`, { system }).then(r => r.data)
+
+// Workspace-scoped Git providers (Phase 12) — private-repo credentials.
+export const fetchWorkspaceGitProviders = (ws)          => api.get(`/workspaces/${ws}/git-providers`).then(r => r.data)
+export const createWorkspaceGitProvider = (ws, body)    => api.post(`/workspaces/${ws}/git-providers`, body).then(r => r.data)
+export const updateWorkspaceGitProvider = (ws, id, body) => api.put(`/workspaces/${ws}/git-providers/${id}`, body).then(r => r.data)
+export const deleteWorkspaceGitProvider = (ws, id)      => api.delete(`/workspaces/${ws}/git-providers/${id}`)
+export const testWorkspaceGitProvider   = (ws, id, repo) => api.post(`/workspaces/${ws}/git-providers/${id}/test`, { repo }).then(r => r.data)
 
 // Workspace membership + per-project overrides (Phase 5.2).
 export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)
