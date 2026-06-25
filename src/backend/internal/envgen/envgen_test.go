@@ -157,6 +157,43 @@ func TestCustomPostgresEnv(t *testing.T) {
 	}
 }
 
+// Rigger claims DATABASE_URL as a managed key (stripping a repo's own value), so it must
+// emit a composed baseline from the managed-DB creds — else Prisma/Rails/etc. fail with
+// "Environment variable not found: DATABASE_URL". A build service with no blueprint (so the
+// framework contract doesn't supply its own) exercises the baseline path deterministically.
+func TestBaselineDatabaseURL(t *testing.T) {
+	mk := func(engine string) map[string]string {
+		c := cfg(t, `{
+		  "project": { "name": "qrh", "registry": "reg",
+		    "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+		  "services": [ {"name":"api","build":{}} ],
+		  "environments": { "dev": { "deployment": "compose", "database": "`+engine+`" } }
+		}`)
+		env, _, err := Generate(c, "dev", nil, fixedRand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ParseEnv([]byte(env))
+	}
+
+	pg := mk("postgres")
+	pw := pg["POSTGRES_PASSWORD"]
+	if want := "postgresql://qrh_user:" + pw + "@qrh_dev_postgres:5432/qrh_dev"; pg["DATABASE_URL"] != want {
+		t.Errorf("postgres DATABASE_URL = %q, want %q", pg["DATABASE_URL"], want)
+	}
+
+	my := mk("mysql")
+	if got := my["DATABASE_URL"]; !strings.HasPrefix(got, "mysql://qrh_user:") || !strings.Contains(got, "@qrh_dev_mysql:3306/qrh_dev") {
+		t.Errorf("mysql DATABASE_URL = %q, want mysql://qrh_user:…@qrh_dev_mysql:3306/qrh_dev", got)
+	}
+
+	// No managed DB → no baseline DATABASE_URL.
+	none := mk("none")
+	if _, ok := none["DATABASE_URL"]; ok {
+		t.Errorf("DATABASE_URL should be absent without a managed DB, got %q", none["DATABASE_URL"])
+	}
+}
+
 // Managed MongoDB writes the MONGO_* connection family + a ready-to-use URI with
 // authSource=admin (the root user authenticates against the admin database). The
 // password is preserved across regen via the same getOut chain as the SQL engines.

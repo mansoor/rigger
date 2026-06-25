@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -177,6 +178,39 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 		}
 	}
 	return out
+}
+
+// databaseURL composes the standard connection URL Rigger emits as the baseline
+// DATABASE_URL, from the managed-DB facts envgen already wrote (host/user/db/password).
+// Mirrors the POSTGRES_*/MYSQL_*/MONGO_* values produced in Generate's DB block: user
+// "{dbBase}_user", db "{dbBase}_{env}", host "{prefix}_{engine}". The password is encoded
+// via url.UserPassword so a special character can't break the URL. "" for engines without
+// a URL form (none).
+func databaseURL(engine, prefix, dbBase, env, password string) string {
+	user := dbBase + "_user"
+	dbName := dbBase + "_" + env
+	mk := func(scheme, host, port, query string) string {
+		u := url.URL{
+			Scheme: scheme,
+			User:   url.UserPassword(user, password),
+			Host:   host + ":" + port,
+			Path:   "/" + dbName,
+		}
+		if query != "" {
+			u.RawQuery = query
+		}
+		return u.String()
+	}
+	switch engine {
+	case "postgres":
+		return mk("postgresql", prefix+"_postgres", "5432", "")
+	case "mysql", "mariadb":
+		return mk("mysql", prefix+"_"+engine, "3306", "")
+	case "mongodb":
+		// Mongo's root user authenticates against the admin DB (matches MONGO_URI).
+		return mk("mongodb", prefix+"_mongodb", "27017", "authSource=admin")
+	}
+	return ""
 }
 
 // frameworkEnv unions the blueprint-declared env contracts of every build
@@ -606,6 +640,21 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 			p("%s=%s\n", k, envQuote(fe[k]))
 		}
 		p("\n")
+	}
+
+	// Baseline DATABASE_URL — a near-universal convention (Prisma, Rails, SQLAlchemy,
+	// many Node/Go ORMs). Rigger claims DATABASE_URL as a managed key (so a repo's own
+	// value is stripped), so it MUST also provide one or the key goes missing — e.g.
+	// `prisma migrate deploy` then fails with "Environment variable not found:
+	// DATABASE_URL". Compose it from the managed-DB creds, UNLESS a blueprint framework
+	// already emitted its own (fe wins — its scheme/format may be framework-specific).
+	if engine != "" && engine != "none" {
+		if _, ok := fe["DATABASE_URL"]; !ok {
+			if url := databaseURL(engine, prefix, dbBase, env, dbPassword); url != "" {
+				p("# ── Database URL (baseline; %s) ─────────────────────────────\n", engine)
+				p("DATABASE_URL=%s\n\n", envQuote(url))
+			}
+		}
 	}
 
 	// Mail. When the Mailpit test-SMTP sidecar is on for THIS env, point the app at it
