@@ -116,14 +116,26 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
   const [acme, setAcme] = useState('')
   const [domain, setDomain] = useState('')
   const [tiers, setTiers] = useState('')
+  // Domain/TLS override parity with the admin General tab (resolved workspace → global).
+  const [autoMode, setAutoMode] = useState('')   // "" = inherit global
+  const [autoHost, setAutoHost] = useState('')
+  const [dnsProvider, setDnsProvider] = useState('') // "" = inherit global
   const [seeded, setSeeded] = useState(false)
-  if (!seeded && saved) { setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setTiers(saved.env_tier_names || ''); setSeeded(true) }
+  if (!seeded && saved) {
+    setAcme(saved.acme_email || ''); setDomain(saved.domain || ''); setTiers(saved.env_tier_names || '')
+    setAutoMode(saved.auto_url_mode || ''); setAutoHost(saved.auto_url_host || ''); setDnsProvider(saved.apps_dns_provider || '')
+    setSeeded(true)
+  }
 
   const mut = useMutation({
-    mutationFn: () => updateWorkspaceSettings(workspace, { acme_email: acme.trim(), domain: domain.trim(), env_tier_names: tiers.trim() }),
+    mutationFn: () => updateWorkspaceSettings(workspace, {
+      acme_email: acme.trim(), domain: domain.trim(), env_tier_names: tiers.trim(),
+      auto_url_mode: autoMode, auto_url_host: autoHost.trim(), apps_dns_provider: dnsProvider,
+    }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
-  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '') || tiers.trim() !== (saved.env_tier_names || ''))
+  const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '') || tiers.trim() !== (saved.env_tier_names || '')
+    || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || ''))
 
   return (
     <section>
@@ -141,6 +153,45 @@ function WorkspaceGeneralSettings({ workspace, qc }) {
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
           <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</p>
         </div>
+        {/* Wildcard cert provider — shown when this workspace overrides the base domain
+            (mirrors Admin → General). For a workspace on the GLOBAL base domain it inherits
+            the global provider; for its OWN domain a per-workspace Cloudflare token (own
+            zone) lands in the next iteration — today it uses the global token. */}
+        {domain.trim() && (
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Wildcard cert (DNS-01)</label>
+            <select value={dnsProvider} onChange={e => setDnsProvider(e.target.value)}
+              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+              <option value="">Inherit global (Settings → General — per-host HTTP-01 unless the global picks Cloudflare)</option>
+              <option value="cloudflare">Cloudflare — one wildcard cert for *.{domain.trim()}</option>
+            </select>
+            <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide DNS-01 provider for this workspace. <strong>Cloudflare</strong> issues a single <code className="font-mono">*.{domain.trim()}</code> cert (no port-80 challenge, no per-app rate limits) — today via the global Cloudflare token (Settings → General); a per-workspace token for a different zone is coming.</p>
+          </div>
+        )}
+        {/* Auto-URL fallback (when no base domain) — mirrors Admin → General. */}
+        {!domain.trim() && (
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Auto-URL fallback (when no base domain)</label>
+            <select value={autoMode} onChange={e => setAutoMode(e.target.value)}
+              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+              <option value="">Inherit global (Settings → General)</option>
+              <option value="localhost">localhost (host-only — not reachable from other machines)</option>
+              <option value="sslip">sslip.io (recommended — {'{label}'}.&lt;ip&gt;.sslip.io)</option>
+              <option value="nip">nip.io</option>
+              <option value="traefikme">traefik.me</option>
+              <option value="off">off</option>
+            </select>
+            {autoMode && autoMode !== 'localhost' && autoMode !== 'off' && (
+              <div className="mt-2">
+                <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Auto-URL host / IP</label>
+                <input value={autoHost} onChange={e => setAutoHost(e.target.value)} placeholder="inherits global App host (Settings → General)"
+                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+                <p className="text-xs text-content-subtle mt-1">The IP embedded in the magic-DNS name for this workspace&apos;s LOCAL envs — e.g. <code className="font-mono">myws-myapp-dev.{(autoHost.trim() || '10.10.10.111')}.{autoMode === 'nip' ? 'nip.io' : autoMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>. Blank inherits the global App host. (Remote-host envs always use their own host&apos;s address.)</p>
+              </div>
+            )}
+            <p className="text-xs text-content-subtle mt-1">How env URLs are built when no base domain is set. Blank inherits the instance default.</p>
+          </div>
+        )}
         <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
         <div className="pt-2 border-t border-border">
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1 mt-2">Environment tier order</label>

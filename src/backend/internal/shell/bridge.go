@@ -133,7 +133,7 @@ func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
 	if host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env); err == nil && host != nil {
 		return host.Address
 	}
-	return settings.AppHost(b.db)
+	return settings.EffectiveAutoURLHost(b.db, workspaceName)
 }
 
 // usesOverrideCert reports whether an env's TLS should be served by Traefik's
@@ -251,7 +251,7 @@ func (b *Bridge) Migrate(workspaceName, project string, targetHostID int64, out 
 	if b.db == nil || b.pool == nil {
 		return fmt.Errorf("migration requires multi-host support")
 	}
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.AutoURLMode(b.db), settings.AutoURLHost(b.db))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.EffectiveAutoURLMode(b.db, workspaceName), settings.EffectiveAutoURLHost(b.db, workspaceName))
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
@@ -911,7 +911,7 @@ func (b *Bridge) ExecForEnv(workspaceName, project, env string) (executor.Execut
 // encrypted at rest in its Raft store. Idempotent (a no-op if it already
 // exists, since Swarm secrets are immutable).
 func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value string, version int) (string, error) {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.AutoURLMode(b.db), settings.AutoURLHost(b.db))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.EffectiveAutoURLMode(b.db, workspaceName), settings.EffectiveAutoURLHost(b.db, workspaceName))
 	if err != nil {
 		return "", err
 	}
@@ -929,7 +929,7 @@ func (b *Bridge) EnsureSwarmSecret(workspaceName, project, env, key, value strin
 // RemoveSwarmSecret deletes a versioned Swarm secret for one key (best-effort;
 // fails if the secret is still referenced by a running service).
 func (b *Bridge) RemoveSwarmSecret(workspaceName, project, env, key string, version int) error {
-	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.AutoURLMode(b.db), settings.AutoURLHost(b.db))
+	ws, err := workspace.Get(b.workspacesDir, workspaceName, project, settings.EffectiveBaseDomain(b.db, workspaceName), settings.EffectiveAutoURLMode(b.db, workspaceName), settings.EffectiveAutoURLHost(b.db, workspaceName))
 	if err != nil {
 		return err
 	}
@@ -1015,7 +1015,7 @@ func (b *Bridge) bootstrap(workspaceName, project, env string, regenEnv bool, ou
 	// domain env is created with a `.localhost` route and only flips to the configured
 	// sslip/nip URL after a manual Refresh. magicDNSHost mirrors the deploy/refresh path.
 	return workspace.Bootstrap(b.workspacesDir, templatesDir, workspaceName, project, env, regenEnv,
-		baseDomain, registry, settings.AutoURLMode(b.db), b.magicDNSHost(workspaceName, project, env), out)
+		baseDomain, registry, settings.EffectiveAutoURLMode(b.db, workspaceName), b.magicDNSHost(workspaceName, project, env), out)
 }
 
 // effectiveRegistry resolves the registry an env's images live in for a project:
@@ -1447,9 +1447,9 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
-			AutoURLMode:   settings.AutoURLMode(b.db),
+			AutoURLMode:   settings.EffectiveAutoURLMode(b.db, opts.Workspace),
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
-			DNSProvider:   settings.AppsDNSProvider(b.db),
+			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
@@ -1568,9 +1568,9 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Stdout:        opts.Stdout,
 			Stderr:        opts.Stderr,
 			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
-			AutoURLMode:   settings.AutoURLMode(b.db),
+			AutoURLMode:   settings.EffectiveAutoURLMode(b.db, opts.Workspace),
 			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
-			DNSProvider:   settings.AppsDNSProvider(b.db),
+			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),

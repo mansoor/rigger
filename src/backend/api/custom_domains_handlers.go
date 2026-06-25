@@ -39,7 +39,7 @@ func (h *Handler) autoSubdomain(ws, name, env string) string {
 		return ""
 	}
 	base := settings.EffectiveBaseDomain(h.db, ws)
-	url, ok := composegen.EnvRouteURL(cfgBytes, env, base, settings.AutoURLMode(h.db), settings.AutoURLHost(h.db))
+	url, ok := composegen.EnvRouteURL(cfgBytes, env, base, settings.EffectiveAutoURLMode(h.db, ws), settings.EffectiveAutoURLHost(h.db, ws))
 	if !ok {
 		return ""
 	}
@@ -260,9 +260,9 @@ func (h *Handler) regenEnvCompose(ws, name, env string) {
 	}
 	ro := composegen.RouteOpts{
 		BaseDomain:    settings.EffectiveBaseDomain(h.db, ws),
-		AutoURLMode:   settings.AutoURLMode(h.db),
-		AutoURLHost:   settings.AutoURLHost(h.db),
-		DNSProvider:   settings.AppsDNSProvider(h.db),
+		AutoURLMode:   settings.EffectiveAutoURLMode(h.db, ws),
+		AutoURLHost:   settings.EffectiveAutoURLHost(h.db, ws),
+		DNSProvider:   settings.EffectiveDNSProvider(h.db, ws),
 		CustomDomains: customdomains.VerifiedDomains(h.db, ws, name, env),
 		Registry:      reg,
 		EnvFile:       string(envContent),

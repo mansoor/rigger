@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
 )
 
@@ -521,6 +522,66 @@ func EffectiveBaseDomain(d *db.DB, wsKey string) string {
 		return ws
 	}
 	return AppSetting(d, "apps_base_domain")
+}
+
+// wsSetting reads one workspace-scoped setting value, or "" when unset / db nil.
+func wsSetting(d *db.DB, wsKey, key string) string {
+	if d == nil {
+		return ""
+	}
+	if vals, err := GetWorkspaceSettings(d, wsKey); err == nil {
+		return strings.TrimSpace(vals[key])
+	}
+	return ""
+}
+
+// EffectiveAutoURLMode resolves the auto-URL fallback mode for a workspace: the
+// workspace's own `auto_url_mode` override wins, else the global default (AutoURLMode).
+// Mirrors EffectiveBaseDomain so a workspace can pick sslip/nip/etc. independent of the
+// instance default.
+func EffectiveAutoURLMode(d *db.DB, wsKey string) string {
+	if m := wsSetting(d, wsKey, "auto_url_mode"); m != "" {
+		return m
+	}
+	return AutoURLMode(d)
+}
+
+// EffectiveAutoURLHost resolves the magic-DNS host for a workspace: the workspace's own
+// `auto_url_host` override wins, else the global AppHost. Used to embed the reachable
+// address in {label}.{host}.sslip.io for LOCAL envs.
+func EffectiveAutoURLHost(d *db.DB, wsKey string) string {
+	if h := wsSetting(d, wsKey, "auto_url_host"); h != "" {
+		return h
+	}
+	return AppHost(d)
+}
+
+// EffectiveDNSProvider resolves the DNS-01 wildcard-cert provider for a workspace: the
+// workspace's own `apps_dns_provider` override wins, else the global AppsDNSProvider.
+// "" ⇒ per-host HTTP-01 (no wildcard). A workspace overriding this to "cloudflare" with
+// its OWN base domain + token issues its wildcard OUT-OF-BAND (see WorkspaceDNSToken),
+// not via the shared global Traefik resolver.
+func EffectiveDNSProvider(d *db.DB, wsKey string) string {
+	if p := wsSetting(d, wsKey, "apps_dns_provider"); p != "" {
+		return p
+	}
+	return AppsDNSProvider(d)
+}
+
+// WorkspaceDNSToken returns the workspace's OWN Cloudflare DNS token (decrypted), or ""
+// when unset / undecryptable / db nil. Stored encrypted at rest in workspace_settings
+// (see PutWorkspaceSettings); consumed only by out-of-band lego issuance for this
+// workspace's own base domain — it never touches the shared global Traefik token.
+func WorkspaceDNSToken(d *db.DB, cryptoKey []byte, wsKey string) string {
+	enc := wsSetting(d, wsKey, "apps_dns_token")
+	if enc == "" {
+		return ""
+	}
+	pt, err := crypto.Decrypt(cryptoKey, enc)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(pt))
 }
 
 // EffectiveRegistry resolves the registry an environment's images live in:

@@ -917,7 +917,7 @@ func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
 			continue
 		}
 		baseDomain := settings.EffectiveBaseDomain(h.db, wss[i].WorkspaceName)
-		autoMode := settings.AutoURLMode(h.db)
+		autoMode := settings.EffectiveAutoURLMode(h.db, wss[i].WorkspaceName)
 		for env, hostRef := range wss[i].EnvHosts {
 			if hostRef.Address == "" {
 				continue
@@ -1364,7 +1364,7 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: settings.AutoURLMode(h.db), AutoURLHost: settings.AutoURLHost(h.db), Registry: registry, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: settings.EffectiveAutoURLMode(h.db, workspaceName), AutoURLHost: settings.EffectiveAutoURLHost(h.db, workspaceName), Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
@@ -1708,7 +1708,7 @@ func (h *Handler) resourcePrefix(wsName, name string) string {
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.EffectiveBaseDomain(h.db, wsName), settings.AutoURLMode(h.db), settings.AutoURLHost(h.db))
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.EffectiveBaseDomain(h.db, wsName), settings.EffectiveAutoURLMode(h.db, wsName), settings.EffectiveAutoURLHost(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
@@ -1742,7 +1742,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	// hostname is the proxy, not the Docker host).
 	out.AppHost = h.appSetting("app_host")
 	// Auto-URL context so Edit Project's route preview matches the deploy.
-	out.AutoURLMode = settings.AutoURLMode(h.db)
+	out.AutoURLMode = settings.EffectiveAutoURLMode(h.db, wsName)
 	out.AppsBaseDomain = settings.AppSetting(h.db, "apps_base_domain")
 	out.AppsAcmeEmail = settings.AppSetting(h.db, "acme_email")
 	writeJSON(w, http.StatusOK, out)
@@ -1796,7 +1796,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		body.Updates = map[string]string{}
 	}
 
-	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.EffectiveBaseDomain(h.db, wsName), settings.AutoURLMode(h.db), settings.AutoURLHost(h.db))
+	ws, err := workspace.Get(h.workspacesDir, wsName, name, settings.EffectiveBaseDomain(h.db, wsName), settings.EffectiveAutoURLMode(h.db, wsName), settings.EffectiveAutoURLHost(h.db, wsName))
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -1901,7 +1901,7 @@ func (h *Handler) UpdateEnvVars(w http.ResponseWriter, r *http.Request) {
 		if cfg, perr := wsconfig.Parse(cfgData); perr == nil {
 			reg = settings.EffectiveRegistry(h.db, wsName, cfg.Project.Registry)
 		}
-		ro := composegen.RouteOpts{BaseDomain: settings.WorkspaceBaseDomain(h.db, wsName), AutoURLMode: settings.AutoURLMode(h.db), AutoURLHost: settings.AutoURLHost(h.db), Registry: reg, EnvFile: string(envContent)}
+		ro := composegen.RouteOpts{BaseDomain: settings.EffectiveBaseDomain(h.db, wsName), AutoURLMode: settings.EffectiveAutoURLMode(h.db, wsName), AutoURLHost: settings.EffectiveAutoURLHost(h.db, wsName), Registry: reg, EnvFile: string(envContent)}
 		if content, gerr := composegen.GenerateRouted(cfgData, env, ro); gerr == nil {
 			outPath := filepath.Join(envDir, "docker-compose.yml")
 			os.WriteFile(outPath, content, 0o644) //nolint:errcheck
