@@ -386,22 +386,27 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// init; a new .env password then gets "Access denied"). At create time existing is
 	// nil, so the generated default is used (unchanged behavior).
 	getOut := func(def string, keys ...string) string {
+		// A secret pinned in config.json's `secrets` map is AUTHORITATIVE — it matches the
+		// password the managed DB / data volume was initialized with on first deploy, and is
+		// never user-editable. It MUST win even over the live .env: if the .env ever drifts
+		// (a rerolled or hand-edited value), preserving the .env would lock the app out of an
+		// already-initialized volume forever, with no self-healing. Checking the pin first
+		// makes a regen heal a drifted .env back to the value the volume actually uses.
+		// (A SEPARATE channel from env_vars on purpose: a repo's .env.example values must NOT
+		// override Rigger-managed secrets. Bootstrap pins these on first generation via
+		// pinManagedSecrets.)
+		for _, k := range keys {
+			if s, ok := e.Secrets[k]; ok && s != "" {
+				return s
+			}
+		}
+		// Not pinned (e.g. a project predating the pinning mechanism): preserve the live .env
+		// value across regen so an already-initialized volume keeps working.
 		if existing != nil {
 			for _, k := range keys {
 				if v, ok := existing[k]; ok && v != "" {
 					return v
 				}
-			}
-		}
-		// Durable fallback: a secret pinned in config.json's `secrets` map survives even
-		// when the live .env was lost or regenerated empty — without this, a regen rerolls
-		// the password and breaks against an already-initialized DB/data volume ("Access
-		// denied"). This is a SEPARATE channel from env_vars on purpose: a repo's
-		// .env.example values (env_vars) must NOT override Rigger-managed secrets. Bootstrap
-		// pins these on first generation (pinManagedSecrets).
-		for _, k := range keys {
-			if s, ok := e.Secrets[k]; ok && s != "" {
-				return s
 			}
 		}
 		return def

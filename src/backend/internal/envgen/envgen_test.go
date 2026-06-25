@@ -534,10 +534,29 @@ func TestPinnedSecretsSurviveLostEnv(t *testing.T) {
 	if m["MYSQL_ROOT_PASSWORD"] != "pinnedroot456" {
 		t.Errorf("MYSQL_ROOT_PASSWORD=%q, want pinned pinnedroot456", m["MYSQL_ROOT_PASSWORD"])
 	}
-	// A live .env value still wins over the pinned secret (authoritative when present).
-	env2, _, _ := Generate(c, "dev", map[string]string{"MYSQL_PASSWORD": "livepw"}, fixedRand)
-	if got := ParseEnv([]byte(env2))["MYSQL_PASSWORD"]; got != "livepw" {
-		t.Errorf("live .env value should win over pinned secret, got %q", got)
+	// A pinned secret is AUTHORITATIVE: it must win even over a drifted live .env value,
+	// because the pin matches the password the data volume was initialized with. Preserving
+	// a drifted .env (e.g. a rerolled or hand-edited password) would lock the app out of the
+	// already-initialized volume with no self-healing — the exact qrhub Postgres auth bug.
+	env2, _, _ := Generate(c, "dev", map[string]string{"MYSQL_PASSWORD": "driftedpw"}, fixedRand)
+	m2 := ParseEnv([]byte(env2))
+	if m2["MYSQL_PASSWORD"] != "pinnedpw123" {
+		t.Errorf("pinned secret should override a drifted .env value, got %q", m2["MYSQL_PASSWORD"])
+	}
+	// The composed DATABASE_URL must carry the pinned password too (not the drifted one).
+	if du := m2["DATABASE_URL"]; du != "" && !strings.Contains(du, "pinnedpw123") {
+		t.Errorf("DATABASE_URL should use the pinned password, got %q", du)
+	}
+	// A NON-pinned managed secret still falls back to the live .env (covers projects that
+	// predate the pinning mechanism).
+	c2 := cfg(t, `{
+      "project": { "name": "myapp", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 } },
+      "services": [{"name":"backend","build":{"template":"laravel"}}],
+      "environments": { "dev": { "database": "mysql", "deployment": "compose" } }
+    }`)
+	env3, _, _ := Generate(c2, "dev", map[string]string{"MYSQL_PASSWORD": "livepw"}, fixedRand)
+	if got := ParseEnv([]byte(env3))["MYSQL_PASSWORD"]; got != "livepw" {
+		t.Errorf("unpinned secret should preserve the live .env value, got %q", got)
 	}
 }
 
