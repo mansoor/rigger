@@ -202,5 +202,5 @@ func (h *Handler) GitHubAppInstallURL(w http.ResponseWriter, r *http.Request) {
 
 // manageGitURL is the SPA Manage-Workspace Git tab the callbacks return the user to.
 func manageGitURL(ws string) string {
-	return "/" + ws + "/manage?tab=git"
+	return "/workspaces/" + ws + "/manage?tab=git"
 }
