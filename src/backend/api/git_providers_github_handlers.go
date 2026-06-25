@@ -107,7 +107,9 @@ func (h *Handler) StartGitHubAppManifest(w http.ResponseWriter, r *http.Request)
 		name, host,
 		origin+"/api/git-providers/github/callback",
 		origin+"/api/git-providers/github/setup",
-		"", // webhook URL omitted — set when the host is public (auto-deploy is phase 2)
+		// GitHub requires a non-blank webhook URL; supply Rigger's origin (marked
+		// inactive in the manifest — webhook consumption is phase 2).
+		origin+"/api/git-providers/github/webhook",
 	)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"create_url": gitproviders.AppCreateURL(host, state),

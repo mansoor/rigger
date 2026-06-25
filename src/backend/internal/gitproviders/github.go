@@ -139,11 +139,12 @@ func Manifest(name, host, redirectURL, setupURL, webhookURL string) string {
 		},
 		"default_events": []string{"push", "pull_request"},
 	}
-	// Only include hook_attributes when we have a webhook URL: GitHub's manifest
-	// validator rejects a hook_attributes block without a "url" ("url wasn't
-	// supplied"). With no public host we omit it entirely (auto-deploy is phase 2).
+	// GitHub's manifest flow ALWAYS creates a webhook and requires a non-blank url
+	// ("Hook url cannot be blank"). We always supply one (Rigger's own origin) but
+	// mark it inactive — we don't consume webhooks yet (auto-deploy is phase 2), and
+	// the host may not be publicly reachable, so no deliveries are attempted.
 	if webhookURL != "" {
-		m["hook_attributes"] = map[string]any{"url": webhookURL, "active": true}
+		m["hook_attributes"] = map[string]any{"url": webhookURL, "active": false}
 	}
 	b, _ := json.Marshal(m)
 	return string(b)
