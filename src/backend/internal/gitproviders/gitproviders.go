@@ -187,6 +187,13 @@ func Delete(d *db.DB, id int64) error {
 	return err
 }
 
+// UpdateMeta replaces the non-secret meta json (e.g. recording a GitHub App's
+// installation_id after the user installs it).
+func UpdateMeta(d *db.DB, id int64, meta string) error {
+	_, err := d.Exec(`UPDATE git_providers SET meta=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, meta, id)
+	return err
+}
+
 // Grants returns the workspaces a global provider is shared with.
 func Grants(d *db.DB, id int64) ([]string, error) {
 	rows, err := d.Query(`SELECT workspace FROM global_git_provider_grants WHERE provider_id=? ORDER BY workspace`, id)
@@ -244,6 +251,31 @@ func GenerateSSHKey(comment string) (privPEM, pubAuthorized string, err error) {
 
 // ── per-clone auth ───────────────────────────────────────────────────────────
 
+// httpsTokenAuth builds a gitsync.Auth that injects an HTTPS Basic credential via a
+// temp gitconfig http.extraheader (referenced by GIT_CONFIG_GLOBAL) — keeping the
+// token out of argv, the URL, and logs. Shared by token + github_app providers.
+func httpsTokenAuth(user, token, host string) (*gitsync.Auth, error) {
+	dir, err := os.MkdirTemp("", "rigger-gitcfg-")
+	if err != nil {
+		return nil, err
+	}
+	basic := base64.StdEncoding.EncodeToString([]byte(user + ":" + token))
+	section := "[http]"
+	if host != "" {
+		section = fmt.Sprintf("[http %q]", "https://"+host+"/")
+	}
+	cfg := section + "\n\textraheader = Authorization: Basic " + basic + "\n"
+	cfgPath := filepath.Join(dir, "config")
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		_ = os.RemoveAll(dir)
+		return nil, err
+	}
+	return &gitsync.Auth{
+		Env:     []string{"GIT_CONFIG_GLOBAL=" + cfgPath, "GIT_CONFIG_NOSYSTEM=1"},
+		Cleanup: func() { _ = os.RemoveAll(dir) },
+	}, nil
+}
+
 // BuildAuth materializes the provider's credential into a gitsync.Auth, writing any
 // secret to a 0600 temp file referenced only via the git child's environment (never
 // argv/URL/logs). The caller MUST invoke the returned Cleanup after the git ops.
@@ -253,29 +285,20 @@ func (p *Provider) BuildAuth() (*gitsync.Auth, error) {
 		if p.Secret == "" {
 			return nil, fmt.Errorf("git provider %q has no token", p.Name)
 		}
-		dir, err := os.MkdirTemp("", "rigger-gitcfg-")
-		if err != nil {
-			return nil, err
-		}
 		user := p.Username
 		if user == "" {
 			user = "x-access-token" // works for GitHub; GitLab/Bitbucket accept any user with a PAT
 		}
-		basic := base64.StdEncoding.EncodeToString([]byte(user + ":" + p.Secret))
-		section := "[http]"
-		if p.Host != "" {
-			section = fmt.Sprintf("[http %q]", "https://"+p.Host+"/")
-		}
-		cfg := section + "\n\textraheader = Authorization: Basic " + basic + "\n"
-		cfgPath := filepath.Join(dir, "config")
-		if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
-			_ = os.RemoveAll(dir)
+		return httpsTokenAuth(user, p.Secret, p.Host)
+	case KindGitHubApp:
+		// Mint a fresh 1-hour installation token and use it as the HTTPS clone
+		// credential (x-access-token). Never persisted.
+		m := ParseGitHubMeta(p.Meta)
+		token, err := mintInstallationToken(p.Host, m.AppID, p.Secret, m.InstallationID)
+		if err != nil {
 			return nil, err
 		}
-		return &gitsync.Auth{
-			Env:     []string{"GIT_CONFIG_GLOBAL=" + cfgPath, "GIT_CONFIG_NOSYSTEM=1"},
-			Cleanup: func() { _ = os.RemoveAll(dir) },
-		}, nil
+		return httpsTokenAuth("x-access-token", token, p.Host)
 	case KindSSHKey:
 		if p.Secret == "" {
 			return nil, fmt.Errorf("git provider %q has no SSH key", p.Name)
@@ -300,8 +323,6 @@ func (p *Provider) BuildAuth() (*gitsync.Auth, error) {
 			Env:     []string{"GIT_SSH_COMMAND=" + sshCmd},
 			Cleanup: func() { _ = os.RemoveAll(dir) },
 		}, nil
-	case KindGitHubApp:
-		return nil, fmt.Errorf("github_app credentials are not yet supported (phase 2)")
 	default:
 		return nil, fmt.Errorf("unknown git provider kind %q", p.Kind)
 	}

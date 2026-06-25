@@ -445,10 +445,14 @@ func main() {
 			switch {
 			case r.Method == "GET" && id == "":
 				handler.ListWorkspaceGitProviders(w, r)
+			case r.Method == "POST" && id == "github" && sub == "manifest":
+				handler.StartGitHubAppManifest(w, r)
 			case r.Method == "POST" && id == "":
 				handler.CreateWorkspaceGitProvider(w, r)
 			case r.Method == "POST" && sub == "test":
 				handler.TestWorkspaceGitProvider(w, r)
+			case r.Method == "POST" && sub == "github":
+				handler.GitHubAppInstallURL(w, r)
 			case r.Method == "PUT" && id != "":
 				handler.UpdateWorkspaceGitProvider(w, r)
 			case r.Method == "DELETE" && id != "":
@@ -1041,6 +1045,11 @@ func main() {
 	mux.HandleFunc("POST /api/previews/hooks/{token}", func(w http.ResponseWriter, r *http.Request) {
 		handler.InboundPreviewWebhook(w, r)
 	})
+
+	// PUBLIC GitHub App manifest-flow callbacks (Phase 12) — top-level browser
+	// redirects from github.com, so no JWT; bound to a one-time random `state`.
+	mux.HandleFunc("GET /api/git-providers/github/callback", handler.GitHubAppCallback)
+	mux.HandleFunc("GET /api/git-providers/github/setup", handler.GitHubAppSetup)
 
 	// Phase 9e: per-env deploy history + rollback (authed; per-project RBAC inside).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/deploy-history", authSvc.Middleware(http.HandlerFunc(handler.ListDeployHistory)))

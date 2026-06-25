@@ -17,7 +17,7 @@ import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
   fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
-  fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider,
+  fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider, startGitHubAppManifest, gitHubAppInstallURL,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
@@ -58,7 +58,10 @@ export default function ManageWorkspacePage() {
   })
   const ws = workspaces.find(w => w.key === workspace)
   const others = workspaces.filter(w => w.key !== workspace)
-  const [tab, setTab] = useState('general')
+  const [tab, setTab] = useState(() => {
+    const t = new URLSearchParams(window.location.search).get('tab')
+    return TABS.some(x => x.id === t) ? t : 'general'
+  })
 
   return (
     <Layout>
@@ -798,6 +801,33 @@ function GitSection({ workspace, qc }) {
 
   const isOwned = (p) => p.owner_scope === `ws:${workspace}`
   const kindLabel = (k) => k === 'ssh_key' ? 'SSH deploy key' : k === 'github_app' ? 'GitHub App' : 'HTTPS token'
+  const ghMeta = (p) => { try { return JSON.parse(p.meta || '{}') } catch { return {} } }
+
+  // Connect GitHub: ask the backend for the app manifest, then POST it to GitHub
+  // (a top-level form submit) so GitHub creates the app and redirects back.
+  const [connecting, setConnecting] = useState(false)
+  async function connectGitHub() {
+    setConnecting(true)
+    try {
+      const { create_url, manifest } = await startGitHubAppManifest(workspace, {})
+      const f = document.createElement('form')
+      f.method = 'POST'; f.action = create_url
+      const i = document.createElement('input')
+      i.type = 'hidden'; i.name = 'manifest'; i.value = manifest
+      f.appendChild(i); document.body.appendChild(f); f.submit()
+    } catch (err) {
+      alert(err.response?.data?.error || 'Could not start GitHub App creation')
+      setConnecting(false)
+    }
+  }
+  async function finishInstall(id) {
+    try {
+      const { install_url } = await gitHubAppInstallURL(workspace, id)
+      window.location.href = install_url
+    } catch (err) {
+      alert(err.response?.data?.error || 'Could not start GitHub install')
+    }
+  }
 
   return (
     <section>
@@ -806,10 +836,16 @@ function GitSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Git providers</h2>
           <p className="text-xs text-content-subtle mt-0.5">Credentials this workspace's projects use to clone <span className="text-content-muted font-medium">private</span> repositories — an HTTPS token, or an SSH deploy key Rigger generates for you. Select one on a project's source in New / Edit Project. Secrets are encrypted at rest and never shown again.</p>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
-          ＋ Add provider
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={connectGitHub} disabled={connecting}
+            className="px-3 py-2 text-sm font-medium rounded-lg bg-[#24292f] hover:bg-black text-white disabled:opacity-50 transition-colors">
+            {connecting ? 'Connecting…' : ' Connect GitHub'}
+          </button>
+          <button onClick={() => setModal('new')}
+            className="px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+            ＋ Add provider
+          </button>
+        </div>
       </div>
 
       <div className="bg-surface border border-border rounded-xl">
@@ -829,6 +865,9 @@ function GitSection({ workspace, qc }) {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-semibold text-content-strong">{p.name}</p>
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">{kindLabel(p.kind)}</span>
+                      {p.kind === 'github_app' && (ghMeta(p).installation_id
+                        ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">✓ installed</span>
+                        : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100/70 text-amber-700 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40">not installed</span>)}
                       {!owned && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint" title="Shared by an administrator">shared</span>}
                     </div>
                     <p className="text-xs text-content-subtle mt-0.5">{p.host || 'any host'}{p.username ? ` · ${p.username}` : ''}</p>
@@ -840,6 +879,10 @@ function GitSection({ workspace, qc }) {
                     {p.kind === 'ssh_key' && p.public_key && (
                       <button onClick={() => setCreatedKey({ name: p.name, public_key: p.public_key })}
                         className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Show key</button>
+                    )}
+                    {p.kind === 'github_app' && owned && !ghMeta(p).installation_id && (
+                      <button onClick={() => finishInstall(p.id)}
+                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-brand-600 hover:bg-surface-raised">Finish install</button>
                     )}
                     <button onClick={() => handleTest(p.id)} disabled={ts?.loading}
                       className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>

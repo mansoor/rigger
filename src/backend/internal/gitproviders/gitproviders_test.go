@@ -1,9 +1,14 @@
 package gitproviders
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"strings"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/mansoor/rigger/ui/internal/db"
 )
 
@@ -83,6 +88,28 @@ func TestSSHKeyGenerateAndAuth(t *testing.T) {
 	joined := strings.Join(auth.Env, " ")
 	if !strings.Contains(joined, "GIT_SSH_COMMAND=ssh -i ") || !strings.Contains(joined, "IdentitiesOnly=yes") {
 		t.Fatalf("ssh auth must set GIT_SSH_COMMAND with -i, got %v", auth.Env)
+	}
+}
+
+// appJWT signs a valid RS256 token with the app id as issuer (the GitHub App-auth
+// contract). Verifiable offline against the public key.
+func TestAppJWT(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	tokStr, err := appJWT("123456", privPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := jwt.Parse(tokStr, func(*jwt.Token) (any, error) { return &key.PublicKey, nil }, jwt.WithValidMethods([]string{"RS256"}))
+	if err != nil || !parsed.Valid {
+		t.Fatalf("token not valid: %v", err)
+	}
+	iss, _ := parsed.Claims.GetIssuer()
+	if iss != "123456" {
+		t.Errorf("issuer = %q, want 123456", iss)
 	}
 }
 

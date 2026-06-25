@@ -450,6 +450,9 @@ export const createWorkspaceGitProvider = (ws, body)    => api.post(`/workspaces
 export const updateWorkspaceGitProvider = (ws, id, body) => api.put(`/workspaces/${ws}/git-providers/${id}`, body).then(r => r.data)
 export const deleteWorkspaceGitProvider = (ws, id)      => api.delete(`/workspaces/${ws}/git-providers/${id}`)
 export const testWorkspaceGitProvider   = (ws, id, repo) => api.post(`/workspaces/${ws}/git-providers/${id}/test`, { repo }).then(r => r.data)
+// GitHub App one-click: returns { create_url, manifest, state } to POST to GitHub.
+export const startGitHubAppManifest      = (ws, body)    => api.post(`/workspaces/${ws}/git-providers/github/manifest`, body).then(r => r.data)
+export const gitHubAppInstallURL         = (ws, id)      => api.post(`/workspaces/${ws}/git-providers/${id}/github/install`, {}).then(r => r.data)
 
 // Workspace membership + per-project overrides (Phase 5.2).
 export const fetchWorkspaceMembers = (ws)              => api.get(`/workspaces/${ws}/members`).then(r => r.data)
