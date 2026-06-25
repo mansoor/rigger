@@ -390,6 +390,35 @@ Apply the retention count from `config.backup.retention` automatically after eac
 
 ---
 
+## Phase 12 — Git Provider Integration (private repos)
+
+**Goal:** First-class private-repo access — connect a Git provider once, store the
+credential securely (workspace-scoped, like Docker Registries), and clone/build/auto-deploy
+without pasting tokens into URLs. Full design:
+[docs/design/git-provider-integration.md](docs/design/git-provider-integration.md).
+
+Today `internal/gitsync` clones with NO credentials → private repos only work via a
+plaintext token in the URL (stored in config.json). This closes that gap.
+
+- **Primary: GitHub App** via the App Manifest flow — one-click "Connect GitHub → create &
+  install the app → stored", auto-webhooks/previews/status, clones with short-lived (1h)
+  installation tokens that are never persisted. Plus **SSH deploy key** (Rigger-generated,
+  any provider/self-hosted) and **HTTPS PAT** as universal fallbacks. (Coolify/Dokploy model.)
+- Storage: `git_providers` table + `internal/gitproviders` package, encrypted at rest via
+  `internal/crypto` (same primitive as host SSH keys); workspace-scoped + global grants pool
+  (mirrors Docker Registries / P3b). Project references a provider by id — the secret never
+  enters config.json or logs.
+- `gitsync.Sync` injects creds per-clone (GIT_ASKPASS/http.extraheader for tokens,
+  GIT_SSH_COMMAND for keys) — nothing long-lived on disk.
+- UI: Manage Workspace → **Git** tab (Connect GitHub / add SSH key / add token) + a
+  GitProviderPicker on New/Edit Project with **inline-create that persists to the same
+  workspace store**; GitHub App connections give a searchable repo dropdown.
+- Services: Phase 1 = GitHub App + SSH deploy key + PAT (covers ~everything). Phase 2 =
+  GitLab/Bitbucket/Gitea OAuth apps + App-driven auto-webhooks into pipelines/previews.
+- Keep in **CE** (basic functionality, not gated); managed central App = Cloud/EE upsell.
+
+---
+
 ## Priority Order Summary
 
 | Phase | Feature | Complexity | Impact |
@@ -401,6 +430,7 @@ Apply the retention count from `config.backup.retention` automatically after eac
 | 9 | Deployment Pipelines | High | High — removes last manual step |
 | 10 | User Management & RBAC | Low-Medium | Medium — required for team use |
 | 11 | Backup Verification & Scheduling | Low | Medium — completes the backup loop |
+| 12 | Git Provider Integration (private repos) | Medium | High — private-repo deploys, auto-deploy/previews |
 
 Phases 10 and 11 are low-complexity and could be implemented in parallel with any higher phase as filler work between larger efforts.
 
