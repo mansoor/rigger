@@ -313,7 +313,18 @@ func (o Options) serviceBuildArgs(svc wsconfig.Service, ver string) []string {
 
 	out := make([]string, 0, len(keys))
 	for _, k := range keys {
-		out = append(out, k+"="+expand(svc.Build.Args[k]))
+		val := expand(svc.Build.Args[k])
+		// Warn on a leftover ${...} after substitution: Rigger only expands ${ENV},
+		// ${VERSION}, ${ROUTE_URL}. Shell-style defaults (${VAR:-default}) and arbitrary
+		// ${OTHER} are NOT interpreted — docker build receives the literal string, which then
+		// gets baked into the image (e.g. Next.js NEXT_PUBLIC_* in the browser bundle). This
+		// silently ships a broken value, so surface it loudly in the build log.
+		if o.Stdout != nil && strings.Contains(val, "${") {
+			fmt.Fprintf(o.Stdout, "\033[33m⚠ build-arg %s contains an unresolved token and is passed to docker build literally: %q\n"+
+				"   Rigger expands only ${ENV}, ${VERSION}, ${ROUTE_URL}; shell-style ${VAR:-default} is not supported. "+
+				"Note ${ROUTE_URL} already includes the scheme (http[s]://), so don't prefix it.\033[0m\n", k, val)
+		}
+		out = append(out, k+"="+val)
 	}
 	return out
 }
