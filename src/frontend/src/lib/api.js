@@ -159,6 +159,8 @@ export const rollbackEnv        = (ws, name, env, toId)  => api.post(`${projBase
 export const fetchImageStatus   = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/image-status`).then(r => r.data)
 export const trackLatest        = (ws, name, env)        => api.post(`${projBase(ws, name)}/envs/${env}/track-latest`).then(r => r.data)
 export const fetchCustomDomains = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/domains`).then(r => r.data)
+export const fetchMaintenance   = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/maintenance`).then(r => r.data)
+export const setMaintenance     = (ws, name, env, body)  => api.put(`${projBase(ws, name)}/envs/${env}/maintenance`, body).then(r => r.data)
 export const addCustomDomain    = (ws, name, env, domain) => api.post(`${projBase(ws, name)}/envs/${env}/domains`, { domain }).then(r => r.data)
 export const verifyCustomDomain = (ws, name, env, id)    => api.post(`${projBase(ws, name)}/envs/${env}/domains/${id}/verify`).then(r => r.data)
 export const deleteCustomDomain = (ws, name, env, id)    => api.delete(`${projBase(ws, name)}/envs/${env}/domains/${id}`).then(r => r.data)

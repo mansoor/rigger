@@ -475,6 +475,27 @@ func (d *DB) migrate() error {
 			last_error TEXT NOT NULL DEFAULT ''
 		);
 
+		-- Per-environment maintenance mode: when ON, Rigger writes a Traefik file-provider
+		-- fragment that routes the env's host(s) to a "under maintenance" page served by the
+		-- always-on rigger container (so it works even while the env's stack is stopped).
+		-- Effective ON = enabled OR (now within [window_start, window_end]); window expiry (or an
+		-- explicit disable) clears the window. Keyed by (workspace, project=KEY, env) so the
+		-- scheduler can read config.json + custom domains directly.
+		CREATE TABLE IF NOT EXISTS env_maintenance (
+			workspace    TEXT NOT NULL,
+			project      TEXT NOT NULL,
+			env          TEXT NOT NULL,
+			enabled      INTEGER NOT NULL DEFAULT 0,
+			window_start INTEGER NOT NULL DEFAULT 0,
+			window_end   INTEGER NOT NULL DEFAULT 0,
+			title        TEXT NOT NULL DEFAULT '',
+			message      TEXT NOT NULL DEFAULT '',
+			retry_after  INTEGER NOT NULL DEFAULT 0,
+			updated_at   INTEGER NOT NULL DEFAULT 0,
+			updated_by   TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (workspace, project, env)
+		);
+
 		-- DB Hosting: users Rigger created on a managed database (one per schema it
 		-- provisions), so the Manage Database UI can show the user/password and build
 		-- a per-user Adminer auto-login link on reload. The password is AES-256-GCM

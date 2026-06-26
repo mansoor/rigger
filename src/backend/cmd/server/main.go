@@ -20,6 +20,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
+	"github.com/mansoor/rigger/ui/internal/maintenance"
 	"github.com/mansoor/rigger/ui/internal/metrics"
 	"github.com/mansoor/rigger/ui/internal/notify"
 	"github.com/mansoor/rigger/ui/internal/pipelines"
@@ -73,6 +74,20 @@ http:
 `
 	if err := os.WriteFile(dir+"/rigger-loading.yml", []byte(cfg), 0o644); err != nil {
 		log.Printf("loading-middleware: write failed: %v (skipping)", err)
+	}
+}
+
+// seedMaintenanceService writes the shared Traefik file-provider service that per-env
+// maintenance routers point at (rigger-maint@file → the always-on rigger UI, which
+// renders the "under maintenance" page). Best-effort, like seedLoadingMiddleware.
+func seedMaintenanceService() {
+	dir := maintenance.DynDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("maintenance-service: cannot ensure %s: %v (skipping)", dir, err)
+		return
+	}
+	if err := os.WriteFile(dir+"/rigger-maint.yml", []byte(maintenance.SeedServiceYAML), 0o644); err != nil {
+		log.Printf("maintenance-service: write failed: %v (skipping)", err)
 	}
 }
 
@@ -208,6 +223,7 @@ func main() {
 	// doesn't recreate. Best-effort: a write failure (e.g. dev box w/o the volume)
 	// just means no loading page — never fatal.
 	seedLoadingMiddleware()
+	seedMaintenanceService() // shared rigger-maint@file service for per-env maintenance routers
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
 
@@ -215,8 +231,9 @@ func main() {
 	handler.StartHousekeepingScheduler(3)
 	handler.MigrateBackupConfig()   // one-time: legacy config.backup → per-env schedules
 	handler.MigrateLegacyDomains()  // one-time: legacy per-env domain → verified primary custom domain
-	handler.StartBackupScheduler() // Phase 11 — per-env interval-based backup schedules
-	handler.StartPreviewReaper()   // tear down preview envs past their TTL (missed-close safety net)
+	handler.StartBackupScheduler()      // Phase 11 — per-env interval-based backup schedules
+	handler.StartPreviewReaper()        // tear down preview envs past their TTL (missed-close safety net)
+	handler.StartMaintenanceScheduler() // reconcile per-env maintenance windows → Traefik fragments
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
@@ -1080,6 +1097,8 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.ListDatabaseUsers)))
 	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/users", authSvc.Middleware(http.HandlerFunc(handler.CreateDatabaseUser)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/database/adminer-login", authSvc.Middleware(http.HandlerFunc(handler.AdminerLogin)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/maintenance", authSvc.Middleware(http.HandlerFunc(handler.GetMaintenance)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/envs/{env}/maintenance", authSvc.Middleware(http.HandlerFunc(handler.PutMaintenance)))
 	// Managed Service Console (P4) — non-DB sidecars (redis/object-storage/mailpit) + MinIO buckets.
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/services", authSvc.Middleware(http.HandlerFunc(handler.GetServiceConsole)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/envs/{env}/storage/buckets", authSvc.Middleware(http.HandlerFunc(handler.ListStorageBuckets)))
@@ -1109,6 +1128,11 @@ func main() {
 	mux.HandleFunc("/api/workspaces/{workspace}/projects/{name}/envs/{env}/terminal", func(w http.ResponseWriter, r *http.Request) {
 		handler.Terminal(w, r)
 	})
+
+	// Public maintenance page: per-env Traefik routers rewrite an env's host to this
+	// path when maintenance is on. Unauthenticated by design; returns 503. Registered
+	// before the SPA catch-all so it isn't swallowed by index.html.
+	mux.HandleFunc("GET /maintenance/{workspace}/{name}/{env}", handler.MaintenancePage)
 
 	// ── Static frontend (SPA) ────────────────────────────────────────────────
 	distFS, err := fs.Sub(frontendFS, "dist")

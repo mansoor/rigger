@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo } from '../lib/api'
+import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo, fetchMaintenance } from '../lib/api'
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
 import { useAuthStore } from '../store/auth'
@@ -14,6 +14,7 @@ import ContainerInfoModal from '../components/ContainerInfoModal'
 import FileBrowserModal from '../components/FileBrowserModal'
 import RollbackModal from '../components/RollbackModal'
 import ServiceConsoleModal from '../components/ServiceConsoleModal'
+import MaintenanceModal from '../components/MaintenanceModal'
 import Sparkline from '../components/Sparkline'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
@@ -519,6 +520,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const [backupModal, setBackupModal] = useState(false) // manual-backup service picker
   const [rollbackOpen, setRollbackOpen] = useState(false) // Phase 9e rollback dialog
   const [dbInfoOpen, setDbInfoOpen] = useState(false) // Managed Service Console (P4)
+  const [maintOpen, setMaintOpen] = useState(false) // maintenance-mode dialog
+  // Maintenance state drives the pill + button highlight (refresh on close / 60s).
+  const { data: maint } = useQuery({
+    queryKey: ['maintenance', workspace, name, envName],
+    queryFn: () => fetchMaintenance(workspace, name, envName),
+    refetchInterval: 60_000,
+    retry: false,
+  })
   // Managed DB engine is project-level now (falls back to the legacy per-env value).
   const proj = ws?.config?.project || {}
   const dbEngine = proj.database || cfg?.database || ''
@@ -596,6 +605,11 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           <StatusBadge
             label={busyAction ? (ACTION_VERB[busyAction] || 'working…') : containerStatus}
             color={busyAction ? 'working' : containerStatus} />
+          {maint?.active ? (
+            <span title="Visitors see the maintenance page" className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/40">🛠️ Maintenance</span>
+          ) : maint?.scheduled ? (
+            <span title="A maintenance window is scheduled" className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised text-content-muted border border-border">🛠️ Scheduled</span>
+          ) : null}
           {cfg?.expose_mode === 'cloudflare_tunnel' && (
             <span title="Reachable via a Cloudflare Tunnel (no public ports on this server); the public hostname + access policy live in Cloudflare."
               className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-300 border border-orange-500/40">☁ Cloudflare Tunnel</span>
@@ -686,6 +700,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                 onClick={() => setBackupModal(true)} className="text-content-subtle hover:text-indigo-400" />
               <ToolBtn icon="rollback" title="Roll back to a previous deploy"
                 onClick={() => setRollbackOpen(true)} className="text-content-subtle hover:text-amber-400" />
+              <button type="button" title="Maintenance mode" onClick={() => setMaintOpen(true)}
+                className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-colors hover:bg-surface text-[14px] leading-none ${maint?.active ? 'text-amber-400' : 'text-content-subtle hover:text-amber-400'}`}>🛠️</button>
             </>
           )}
         </div>
@@ -864,6 +880,12 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
       {/* Managed Service Console (P4) — tabbed per-env console over DB / Redis / object
           storage / Mailpit. Reveal-secret, create-schema and create-bucket are
           operator+; viewers see structure + connection info only. */}
+      {maintOpen && (
+        <MaintenanceModal workspace={workspace} name={name} envName={envName} canOp={canOp}
+          onClose={() => setMaintOpen(false)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['maintenance', workspace, name, envName] })} />
+      )}
+
       {dbInfoOpen && (
         <ServiceConsoleModal workspace={workspace} name={name} env={envName}
           hasManagedDB={hasManagedDB} canReveal={canManageDB} canManage={canManageDB}
