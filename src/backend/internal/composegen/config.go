@@ -20,6 +20,37 @@ type Config struct {
 	Versions     map[string]flexStr `json:"versions"`
 	NamedVolumes []NamedVolume      `json:"named_volumes"`
 	Environments map[string]Env     `json:"environments"`
+	// Routes is the project-level public-ingress table: each row maps a path prefix or a
+	// subdomain on the env's domain to a target service. EMPTY ⇒ legacy behavior (the single
+	// web_routed service catches all traffic via Host(domain) — see emitServicePorts); the
+	// presence of rows (NOT the service count) switches composegen to route-driven Traefik
+	// labels (emitRouteLabels). Host comes from each environment's domain, so one table
+	// applies across all envs. The schema leaves room for future per-row weight / rewrite /
+	// rate-limit / IP columns (traffic split, canary, version aliasing) — not built yet.
+	Routes []Route `json:"routes,omitempty"`
+}
+
+// Route is one public-ingress rule: it sends a path prefix or a subdomain (on the env's
+// domain) to a target service. See Config.Routes.
+type Route struct {
+	Service string `json:"service"` // target service short name (must exist in Services)
+	Type    string `json:"type"`    // "path" | "subdomain"
+	// Match is the path prefix ("/api"; "" or "/" = catch-all, type=path) OR the subdomain
+	// label ("app" → app.{domain}; "" = apex, type=subdomain).
+	Match string `json:"match"`
+	// StripPrefix (path routes only): strip the matched prefix before forwarding (/api/x → /x).
+	StripPrefix bool `json:"strip_prefix,omitempty"`
+}
+
+// routesFor returns the routes targeting service name (nil when none / Routes empty).
+func (c *Config) routesFor(name string) []Route {
+	var out []Route
+	for _, r := range c.Routes {
+		if r.Service == name {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type Project struct {

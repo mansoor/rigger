@@ -395,6 +395,16 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 	port := string(svc.Port)
 	mode := g.exposeMode()
 	var publishes []string
+	// Route-driven ingress: when the project defines any routes (Config.Routes), a service's
+	// Traefik labels come from the routes targeting it (emitRouteLabels), and "is this service
+	// publicly routed" is decided by having ≥1 route — NOT the legacy web_routed flag. With no
+	// routes, isRouted == svc.WebRouted, so the generated YAML is byte-identical to before.
+	routes := g.cfg.routesFor(svc.Name)
+	useRoutes := len(g.cfg.Routes) > 0
+	isRouted := svc.WebRouted
+	if useRoutes {
+		isRouted = len(routes) > 0
+	}
 	switch {
 	case svc.WebRouted && mode == "cloudflare_tunnel":
 		// No public router — the cloudflared connector reaches the app in-network. Honor an
@@ -409,34 +419,41 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		if hp := string(svc.HostPort); hp != "" {
 			publishes = append(publishes, hp+":"+portOr(port, "80"))
 		}
-	case svc.WebRouted && e.TraefikEnabled:
-		host := e.Domain
-		if svc.Subdomain != "" && e.Domain != "" {
-			host = svc.Subdomain + "." + e.Domain
-		}
-		// Basic-auth middleware: admin sidecars when the env protects them (uses
-		// ${ADMIN_UI_USERS}); real app web services when the env's auth_gate is "basic"
-		// (uses ${APP_AUTH_USERS}). Empty usersVar ⇒ no auth middleware (today's default).
-		usersVar := ""
-		switch {
-		case svc.AuthProtect && e.ProtectAdminUIs:
-			usersVar = "ADMIN_UI_USERS"
-		case !svc.AuthProtect && g.authGate() == "basic":
-			usersVar = "APP_AUTH_USERS"
-		}
-		// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
-		// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
-		wildcard := ""
-		if e.wildcardBase != "" && svc.Subdomain == "" {
-			wildcard = e.wildcardBase
-		}
-		g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
-		// Verified custom domains (Render-style): the apex web service also answers on
-		// each external domain via its own HTTPS router with a per-host Let's Encrypt
-		// (HTTP-01) cert — the wildcard/DNS cert only covers the base domain. Subdomain
-		// web services keep just their primary route.
-		if svc.Subdomain == "" {
-			g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
+	case isRouted && e.TraefikEnabled:
+		if useRoutes {
+			// Labels come from the project routing table — one path-group router (Host &&
+			// PathPrefix||…) plus a router per subdomain route. The legacy single-host path is
+			// bypassed; web_routed/subdomain on the service are ignored in route mode.
+			g.emitRouteLabels(router, svc, routes)
+		} else {
+			host := e.Domain
+			if svc.Subdomain != "" && e.Domain != "" {
+				host = svc.Subdomain + "." + e.Domain
+			}
+			// Basic-auth middleware: admin sidecars when the env protects them (uses
+			// ${ADMIN_UI_USERS}); real app web services when the env's auth_gate is "basic"
+			// (uses ${APP_AUTH_USERS}). Empty usersVar ⇒ no auth middleware (today's default).
+			usersVar := ""
+			switch {
+			case svc.AuthProtect && e.ProtectAdminUIs:
+				usersVar = "ADMIN_UI_USERS"
+			case !svc.AuthProtect && g.authGate() == "basic":
+				usersVar = "APP_AUTH_USERS"
+			}
+			// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
+			// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
+			wildcard := ""
+			if e.wildcardBase != "" && svc.Subdomain == "" {
+				wildcard = e.wildcardBase
+			}
+			g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
+			// Verified custom domains (Render-style): the apex web service also answers on
+			// each external domain via its own HTTPS router with a per-host Let's Encrypt
+			// (HTTP-01) cert — the wildcard/DNS cert only covers the base domain. Subdomain
+			// web services keep just their primary route.
+			if svc.Subdomain == "" {
+				g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
+			}
 		}
 		// An EXPLICIT host-port mapping on an APP service is honored even under Traefik
 		// routing — publish it so a user-run reverse proxy / DNS can target this host:port
@@ -477,7 +494,7 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 	// Expose the container port for in-network reach: non-web services always; a web
 	// service under cloudflare_tunnel/none with no published port (so the connector or
 	// a linked service can still reach it by name).
-	if port != "" && (!svc.WebRouted || mode == "cloudflare_tunnel" || mode == "none") {
+	if port != "" && (!isRouted || mode == "cloudflare_tunnel" || mode == "none") {
 		g.line("    expose:")
 		g.line("      - \"" + port + "\"")
 	}

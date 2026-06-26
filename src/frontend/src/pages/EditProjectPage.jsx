@@ -2200,7 +2200,7 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
 // Save mutation AND the unsaved-changes check go through this single builder so
 // they can never drift — a past bug wrote `services` in the dirty-check but not
 // in the actual save, so service edits (ports, etc.) silently reverted on reload.
-function buildConfigObject(project, envs, images, rawConfig) {
+function buildConfigObject(project, envs, images, routes, rawConfig) {
   const cleanEnvs = {}
   for (const [k, v] of Object.entries(envs || {})) {
     const { _initial_vars, _id, ...rest } = v // eslint-disable-line no-unused-vars
@@ -2208,12 +2208,140 @@ function buildConfigObject(project, envs, images, rawConfig) {
   }
   const updated = { ...rawConfig, project, environments: cleanEnvs, services: images }
   delete updated.images // legacy field, fully replaced by services[]
+  // Project-level routing table (config.routes). Only write it when non-empty so projects that
+  // never touch routing keep a clean config (and an empty table stays byte-identical for the
+  // dirty-check). Empty ⇒ legacy "all traffic → web entry" behavior in composegen.
+  if (routes && routes.length) updated.routes = routes
+  else delete updated.routes
   return updated
 }
 
 // serializeConfig stringifies the built config (compact) for baseline comparison.
-function serializeConfig(project, envs, images, rawConfig) {
-  return JSON.stringify(buildConfigObject(project, envs, images, rawConfig))
+function serializeConfig(project, envs, images, routes, rawConfig) {
+  return JSON.stringify(buildConfigObject(project, envs, images, routes, rawConfig))
+}
+
+// materializeRoutes derives the implicit default routing table from the current services, so the
+// Routing tab opens showing today's behavior made EXPLICIT — the web entry as the "/" catch-all
+// (plus any subdomain web service) — and adding a "/api" rule later can't silently drop "/".
+function materializeRoutes(images) {
+  const rows = []
+  for (const s of images || []) {
+    if (!s.web_routed) continue
+    const sub = (s.subdomain || '').trim()
+    rows.push(sub ? { service: s.name, type: 'subdomain', match: sub } : { service: s.name, type: 'path', match: '/' })
+  }
+  return rows
+}
+
+// RoutesTab edits the project-level public-ingress table (config.routes). An empty config.routes
+// means "all traffic → the web entry" (today's behavior); the table seeds from that implicit
+// default on first open and only commits to the saved config once the user actually edits it, so
+// merely viewing the tab doesn't mark the project dirty.
+function RoutesTab({ routes, images, onChange }) {
+  const services = (images || []).map(s => s.name).filter(Boolean)
+  const webEntry = (images || []).find(s => s.web_routed && !(s.subdomain || '').trim())?.name || services[0] || 'the web service'
+  const [rows, setRows] = useState(() => (routes && routes.length) ? routes : materializeRoutes(images))
+  const commit = (next) => { setRows(next); onChange(next) }
+  const upd = (i, patch) => commit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  const add = () => commit([...rows, { service: services[0] || '', type: 'path', match: '/api', strip_prefix: false }])
+  const del = (i) => commit(rows.filter((_, j) => j !== i))
+
+  // Inline validation mirroring the backend (validateConfigRoutes).
+  const seen = {}
+  let catchAlls = 0
+  const rowErr = rows.map(r => {
+    const t = r.type || 'path'
+    let m = (r.match || '').trim()
+    if (!r.service) return 'pick a service'
+    if (t === 'path') {
+      if (m === '' || m === '/') { catchAlls++; m = '/' }
+      else if (!m.startsWith('/')) return 'path must start with /'
+    }
+    const key = t + ' ' + m
+    if (seen[key]) return `duplicate ${t} "${m}"`
+    seen[key] = true
+    return ''
+  })
+
+  const sel = 'px-2 py-1.5 rounded-lg bg-surface border border-border-strong text-sm text-content'
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-content">Routing</h2>
+        <p className="text-xs text-content-subtle mt-1 max-w-2xl">
+          Maps public paths and subdomains on each environment's domain to a service. A path rule like
+          <code className="font-mono mx-1">/api</code> sends that prefix (and everything under it) to the
+          chosen service; the <code className="font-mono mx-1">/</code> catch-all takes everything else.
+          Leave this empty to send all traffic to <span className="font-mono">{webEntry}</span>.
+        </p>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="text-sm text-content-muted border border-border rounded-lg p-4">
+          All traffic goes to <span className="font-mono">{webEntry}</span>. Add routes to split by path or subdomain.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-content-subtle">
+                <th className="py-1 pr-3 font-medium">Type</th>
+                <th className="py-1 pr-3 font-medium">Match</th>
+                <th className="py-1 pr-3 font-medium">Service</th>
+                <th className="py-1 pr-3 font-medium">Strip prefix</th>
+                <th className="py-1"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const isPath = (r.type || 'path') === 'path'
+                return (
+                  <tr key={i} className="border-t border-border align-top">
+                    <td className="py-2 pr-3">
+                      <select className={sel} value={r.type || 'path'} onChange={e => upd(i, { type: e.target.value })}>
+                        <option value="path">path</option>
+                        <option value="subdomain">subdomain</option>
+                      </select>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <input className={sel + ' font-mono w-40'} value={r.match || ''}
+                        onChange={e => upd(i, { match: e.target.value })}
+                        placeholder={isPath ? '/api  (/ = catch-all)' : 'app  (→ app.domain)'} />
+                      {rowErr[i] && <div className="text-xs text-danger-fg mt-0.5">{rowErr[i]}</div>}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <select className={sel} value={r.service || ''} onChange={e => upd(i, { service: e.target.value })}>
+                        <option value="" disabled>select…</option>
+                        {services.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-2 pr-3">
+                      {isPath
+                        ? <input type="checkbox" className="w-4 h-4 accent-brand-500" checked={!!r.strip_prefix}
+                            onChange={e => upd(i, { strip_prefix: e.target.checked })} />
+                        : <span className="text-content-subtle text-xs">—</span>}
+                    </td>
+                    <td className="py-2 text-right">
+                      <button type="button" onClick={() => del(i)}
+                        className="text-xs text-danger-fg hover:underline">Remove</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {catchAlls > 1 && <div className="text-xs text-danger-fg">Only one catch-all route (path “/”) is allowed.</div>}
+
+      <button type="button" onClick={add}
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+        + Add route
+      </button>
+    </div>
+  )
 }
 
 export default function EditProjectPage() {
@@ -2242,6 +2370,7 @@ export default function EditProjectPage() {
   const [envs, setEnvs]       = useState(null)
   const [project, setProject] = useState(null)
   const [images, setImages]   = useState(null)
+  const [routes, setRoutes]   = useState(null)   // project-level routing table (config.routes)
   const [newEnvCounter, setNewEnvCounter] = useState(0)
   const [saveError, setSaveError] = useState('')
   const [reorderOpen, setReorderOpen] = useState(false)
@@ -2260,7 +2389,8 @@ export default function EditProjectPage() {
       setEnvs(withIds)
       setProject(rawConfig.project || {})
       setImages(rawConfig.services || [])
-      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.services || [], rawConfig))
+      setRoutes(rawConfig.routes || [])
+      setBaseline(serializeConfig(rawConfig.project || {}, withIds, rawConfig.services || [], rawConfig.routes || [], rawConfig))
       // Pre-load vars from first env for use when adding new environments
       const firstEnvName = Object.keys(rawConfig.environments || {})[0]
       if (firstEnvName) {
@@ -2277,7 +2407,7 @@ export default function EditProjectPage() {
       // unsaved-changes check — including the edited services[] (ports, env,
       // sources). Previously this wrote `images` only for image-type projects,
       // dropping every service edit on custom projects.
-      const updated = buildConfigObject(project, envs, images, rawConfig)
+      const updated = buildConfigObject(project, envs, images, routes, rawConfig)
       await putConfig(workspace, name, JSON.stringify(updated, null, 2))
 
       // Write initial env vars for new environments.
@@ -2362,7 +2492,7 @@ export default function EditProjectPage() {
   // Unsaved-changes detection: compare the current editable config to the load
   // baseline. Save is enabled only when something changed; Cancel confirms first.
   const dirty = baseline !== null && envs !== null && project !== null &&
-    serializeConfig(project, envs, images, rawConfig) !== baseline
+    serializeConfig(project, envs, images, routes, rawConfig) !== baseline
 
   function leave() { navigate(`/workspaces/${workspace}/projects/${name}`) }
   function handleCancel() { if (dirty) setConfirmCancel(true); else leave() }
@@ -2430,6 +2560,7 @@ export default function EditProjectPage() {
             { id: 'project', label: 'Project', icon: '📋' },
             { id: 'services', label: 'Services', icon: '🧱', count: (images || []).length },
             { id: 'envs', label: 'Environments', icon: '🌱', count: currentEnvNames.length },
+            { id: 'routing', label: 'Routing', icon: '🛣', count: (routes || []).length || undefined },
             { id: 'host', label: 'Host', icon: '🖥' },
             { id: 'backup', label: 'Backup', icon: '💾' },
             { id: 'pipelines', label: 'Pipelines', icon: '🚀' },
@@ -2653,6 +2784,10 @@ export default function EditProjectPage() {
         </>)}
 
         {/* Host — per-environment binding + whole-project migrate (Phase 7) */}
+        {tab === 'routing' && (
+          <RoutesTab routes={routes || []} images={images || []} onChange={setRoutes} />
+        )}
+
         {tab === 'host' && (<>
           <EnvHostsSection name={name} />
           <BuildHostSection name={name} />

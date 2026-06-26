@@ -1217,6 +1217,70 @@ func validateConfigServices(content []byte) string {
 	return ""
 }
 
+// validateConfigRoutes checks the project-level routing table (Config.Routes). An empty table
+// is always valid (legacy single-web-entry behavior). Each route must target a declared
+// service; path matches must be absolute; no two routes may claim the same (type, match) tuple;
+// and at most one catch-all path is allowed. Returns "" when OK, else a user-facing message.
+func validateConfigRoutes(content []byte) string {
+	var doc struct {
+		Services []struct {
+			Name string `json:"name"`
+		} `json:"services"`
+		Routes []struct {
+			Service string `json:"service"`
+			Type    string `json:"type"`
+			Match   string `json:"match"`
+		} `json:"routes"`
+	}
+	if err := json.Unmarshal(content, &doc); err != nil {
+		return "" // malformed JSON is reported by the caller's own parse check
+	}
+	if len(doc.Routes) == 0 {
+		return ""
+	}
+	names := map[string]bool{}
+	for _, s := range doc.Services {
+		names[s.Name] = true
+	}
+	seen := map[string]string{} // "type\x00match" → first service that claimed it
+	catchAlls := 0
+	for _, r := range doc.Routes {
+		svc := strings.TrimSpace(r.Service)
+		if svc == "" || !names[svc] {
+			return fmt.Sprintf("routing rule points at unknown service %q", r.Service)
+		}
+		typ := strings.TrimSpace(r.Type)
+		if typ == "" {
+			typ = "path"
+		}
+		if typ != "path" && typ != "subdomain" {
+			return fmt.Sprintf("routing rule type %q must be \"path\" or \"subdomain\"", r.Type)
+		}
+		match := strings.TrimSpace(r.Match)
+		if typ == "path" {
+			if match == "" || match == "/" {
+				catchAlls++
+				match = "/" // normalize for duplicate detection
+			} else if !strings.HasPrefix(match, "/") {
+				return fmt.Sprintf("routing path %q must start with \"/\" (e.g. /api)", r.Match)
+			}
+		}
+		key := typ + "\x00" + match
+		if prev, ok := seen[key]; ok {
+			where := fmt.Sprintf("subdomain %q", match)
+			if typ == "path" {
+				where = fmt.Sprintf("path %q", match)
+			}
+			return fmt.Sprintf("services %q and %q both claim %s — each path/subdomain can map to only one service", prev, svc, where)
+		}
+		seen[key] = svc
+	}
+	if catchAlls > 1 {
+		return "only one catch-all route (path \"/\") is allowed"
+	}
+	return ""
+}
+
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
@@ -1235,6 +1299,10 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := validateConfigServices([]byte(body.Content)); msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	if msg := validateConfigRoutes([]byte(body.Content)); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
