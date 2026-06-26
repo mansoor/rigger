@@ -33,21 +33,22 @@ func genDev(t *testing.T, cfg []byte) string {
 	return string(out)
 }
 
-// With routes, the api service gets ONE router whose rule ORs both path prefixes, plus a
-// priority so it outranks the web catch-all; the web service keeps a plain Host() rule.
-func TestRoutesPathGrouping(t *testing.T) {
+const host = "mcl-qrh-dev.10.10.10.111.nip.io"
+
+// Each route becomes its own router; path routes carry a PathPrefix + priority; the catch-all is
+// a plain Host(); all of a service's routers share ONE loadbalancer service.
+func TestRoutesPerRoute(t *testing.T) {
 	s := genDev(t, twoSvcConfig(`[
 	  {"service":"web","type":"path","match":"/"},
 	  {"service":"api","type":"path","match":"/api"},
 	  {"service":"api","type":"path","match":"/r"}
 	]`))
-	host := "mcl-qrh-dev.10.10.10.111.nip.io"
-	apiRule := "traefik.http.routers.mcl_qrh_dev_api.rule=Host(" + bt + host + bt + ") && (PathPrefix(" + bt + "/api" + bt + ") || PathPrefix(" + bt + "/r" + bt + "))"
-	webRule := "traefik.http.routers.mcl_qrh_dev_web.rule=Host(" + bt + host + bt + ")\""
 	for _, want := range []string{
-		apiRule,
-		webRule,
-		"traefik.http.routers.mcl_qrh_dev_api.priority=",
+		"traefik.http.routers.mcl_qrh_dev_api_r0.rule=Host(" + bt + host + bt + ") && PathPrefix(" + bt + "/api" + bt + ")",
+		"traefik.http.routers.mcl_qrh_dev_api_r1.rule=Host(" + bt + host + bt + ") && PathPrefix(" + bt + "/r" + bt + ")",
+		"traefik.http.routers.mcl_qrh_dev_web_r0.rule=Host(" + bt + host + bt + ")\"",
+		"traefik.http.routers.mcl_qrh_dev_api_r0.priority=",
+		"traefik.http.routers.mcl_qrh_dev_api_r0.service=mcl_qrh_dev_api",
 		"traefik.http.services.mcl_qrh_dev_api.loadbalancer.server.port=4000",
 		"traefik.http.services.mcl_qrh_dev_web.loadbalancer.server.port=3000",
 	} {
@@ -55,35 +56,63 @@ func TestRoutesPathGrouping(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, s)
 		}
 	}
-	// The web catch-all must NOT carry a PathPrefix (it's the default route).
+	// The web catch-all must NOT carry a PathPrefix.
 	for _, line := range strings.Split(s, "\n") {
-		if strings.Contains(line, "routers.mcl_qrh_dev_web.rule=") && strings.Contains(line, "PathPrefix") {
+		if strings.Contains(line, "routers.mcl_qrh_dev_web_r0.rule=") && strings.Contains(line, "PathPrefix") {
 			t.Errorf("web catch-all router unexpectedly has a PathPrefix: %s", line)
 		}
 	}
 }
 
-// strip_prefix on a path route emits a stripprefix middleware with the matched prefix(es).
-func TestRoutesStripPrefix(t *testing.T) {
+// Target == "/" strips the prefix (stripprefix, no addprefix).
+func TestRoutesTargetStrip(t *testing.T) {
 	s := genDev(t, twoSvcConfig(`[
 	  {"service":"web","type":"path","match":"/"},
-	  {"service":"api","type":"path","match":"/api","strip_prefix":true}
+	  {"service":"api","type":"path","match":"/api","target":"/"}
 	]`))
-	if !strings.Contains(s, "traefik.http.middlewares.mcl_qrh_dev_api_strip.stripprefix.prefixes=/api") {
+	if !strings.Contains(s, "traefik.http.middlewares.mcl_qrh_dev_api_r0_strip.stripprefix.prefixes=/api") {
 		t.Errorf("missing stripprefix middleware in:\n%s", s)
 	}
-	if !strings.Contains(s, "_strip,rigger-loading@file") {
-		t.Errorf("strip middleware not wired into the router chain in:\n%s", s)
+	if strings.Contains(s, "mcl_qrh_dev_api_r0_addprefix") {
+		t.Errorf("strip-only route should not emit an addprefix middleware:\n%s", s)
 	}
 }
 
-// A subdomain route gets its own Host(sub.domain) router, named {cname}_sd{i}.
+// Target == "/api/v1" rewrites: strip /api then add /api/v1.
+func TestRoutesTargetRewrite(t *testing.T) {
+	s := genDev(t, twoSvcConfig(`[
+	  {"service":"web","type":"path","match":"/"},
+	  {"service":"api","type":"path","match":"/api","target":"/api/v1"}
+	]`))
+	for _, want := range []string{
+		"traefik.http.middlewares.mcl_qrh_dev_api_r0_strip.stripprefix.prefixes=/api",
+		"traefik.http.middlewares.mcl_qrh_dev_api_r0_addprefix.addprefix.prefix=/api/v1",
+		"_strip,mcl_qrh_dev_api_r0_addprefix,rigger-loading@file",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+// Blank target (default) = passthrough: no strip / addprefix middlewares.
+func TestRoutesPassthrough(t *testing.T) {
+	s := genDev(t, twoSvcConfig(`[
+	  {"service":"web","type":"path","match":"/"},
+	  {"service":"api","type":"path","match":"/api"}
+	]`))
+	if strings.Contains(s, "mcl_qrh_dev_api_r0_strip") || strings.Contains(s, "mcl_qrh_dev_api_r0_addprefix") {
+		t.Errorf("passthrough route should emit no rewrite middleware:\n%s", s)
+	}
+}
+
+// A subdomain route gets its own Host(sub.domain) router.
 func TestRoutesSubdomain(t *testing.T) {
 	s := genDev(t, twoSvcConfig(`[
 	  {"service":"web","type":"path","match":"/"},
 	  {"service":"api","type":"subdomain","match":"admin"}
 	]`))
-	want := "traefik.http.routers.mcl_qrh_dev_api_sd0.rule=Host(" + bt + "admin.mcl-qrh-dev.10.10.10.111.nip.io" + bt + ")"
+	want := "traefik.http.routers.mcl_qrh_dev_api_r0.rule=Host(" + bt + "admin." + host + bt + ")"
 	if !strings.Contains(s, want) {
 		t.Errorf("missing subdomain router %q in:\n%s", want, s)
 	}
@@ -93,15 +122,13 @@ func TestRoutesSubdomain(t *testing.T) {
 // Host() rule, the api stays unrouted (in-network expose), and no route-mode extras appear.
 func TestRoutesEmptyLegacyParity(t *testing.T) {
 	s := genDev(t, twoSvcConfig(""))
-	host := "mcl-qrh-dev.10.10.10.111.nip.io"
 	if !strings.Contains(s, "traefik.http.routers.mcl_qrh_dev_web.rule=Host("+bt+host+bt+")") {
 		t.Errorf("legacy web Host rule missing in:\n%s", s)
 	}
-	if strings.Contains(s, ".priority=") || strings.Contains(s, ".stripprefix.") {
+	if strings.Contains(s, ".priority=") || strings.Contains(s, ".stripprefix.") || strings.Contains(s, ".addprefix.") {
 		t.Errorf("route-mode extras leaked into a no-routes config:\n%s", s)
 	}
-	// api is not web_routed and has no routes → it must NOT get a Traefik router.
-	if strings.Contains(s, "routers.mcl_qrh_dev_api.rule=") {
+	if strings.Contains(s, "routers.mcl_qrh_dev_api.rule=") || strings.Contains(s, "routers.mcl_qrh_dev_api_r0.rule=") {
 		t.Errorf("api unexpectedly routed without any route:\n%s", s)
 	}
 }

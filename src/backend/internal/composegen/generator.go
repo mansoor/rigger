@@ -544,45 +544,78 @@ func (g *gen) traefikLabels(router, host, port string, usersVar, certResolver, w
 	}
 	g.line("    labels:")
 	g.line("      - \"traefik.enable=true\"")
-	g.emitTraefikRouter(router, "Host(`"+host+"`)", port, usersVar, certResolver, wildcard, nil, 0)
+	g.emitTraefikRouter(routerSpec{name: router, rule: "Host(`" + host + "`)", port: port, usersVar: usersVar, certResolver: certResolver, wildcard: wildcard})
 }
 
-// emitTraefikRouter emits the per-router labels (basic-auth/strip middlewares, the router
-// rule/entrypoints/tls/middlewares/loadbalancer, and the SSL http→https companion) for ONE
-// Traefik router. It does NOT emit the `labels:` header or `traefik.enable` — the caller does
-// that once per service, so a single service can carry multiple routers (route-driven mode).
-// strip (path prefixes to remove) and priority (0 = omit) are the route-mode extras; legacy
-// callers pass nil/0, which produces byte-identical output to the pre-routes generator.
-func (g *gen) emitTraefikRouter(router, rule, port, usersVar, certResolver, wildcard string, strip []string, priority int) {
+// routerSpec describes one Traefik router for emitTraefikRouter. The zero value matches the
+// pre-routes generator (no strip/addPrefix/priority, an own loadbalancer service), so legacy
+// callers produce byte-identical output.
+type routerSpec struct {
+	name         string
+	rule         string
+	port         string
+	usersVar     string
+	certResolver string
+	wildcard     string   // request a *.{wildcard} cert (catch-all/apex only)
+	strip        []string // stripprefix.prefixes (path rewrite: remove these)
+	addPrefix    string   // addprefix.prefix (path rewrite: prepend, after strip)
+	priority     int      // explicit router priority (0 = omit)
+	serviceRef   string   // reference an already-defined service; "" = define our own {name}
+}
+
+// emitTraefikRouter emits the per-router labels (basic-auth / strip / addprefix middlewares, the
+// router rule/entrypoints/tls/middlewares + loadbalancer-or-service-ref, and the SSL http→https
+// companion) for ONE router. It does NOT emit the `labels:` header or `traefik.enable` — the
+// caller does that once per service, so a service can carry multiple routers (route-driven mode).
+func (g *gen) emitTraefikRouter(s routerSpec) {
+	router := s.name
+	port := s.port
 	if port == "" {
 		port = "80"
 	}
+	certResolver := s.certResolver
 	if certResolver == "" {
 		certResolver = "letsencrypt" // per-host HTTP-01 (default; DNS-01 sets "dns")
 	}
-	auth := usersVar != ""
+	auth := s.usersVar != ""
 	// Optional HTTP basic-auth middleware: admin sidecars (${ADMIN_UI_USERS}) when the
 	// env protects them, or an app web service (${APP_AUTH_USERS}) when auth_gate=basic.
 	// The htpasswd line comes from .env so the bcrypt '$' chars are inserted literally
 	// rather than written inline (which would need '$$' doubling).
 	if auth {
-		g.line("      - \"traefik.http.middlewares." + router + "_auth.basicauth.users=${" + usersVar + "}\"")
+		g.line("      - \"traefik.http.middlewares." + router + "_auth.basicauth.users=${" + s.usersVar + "}\"")
 	}
-	// Strip the matched path prefix(es) before forwarding (route-mode opt-in; default off).
-	if len(strip) > 0 {
-		g.line("      - \"traefik.http.middlewares." + router + "_strip.stripprefix.prefixes=" + strings.Join(strip, ",") + "\"")
+	// Path rewrite (route mode): stripprefix removes the matched prefix, then addprefix prepends
+	// the Target. Sub-path remainder and query string are preserved by Traefik. Default Target =
+	// Match ⇒ neither middleware is emitted (passthrough); Target "/" ⇒ strip only.
+	if len(s.strip) > 0 {
+		g.line("      - \"traefik.http.middlewares." + router + "_strip.stripprefix.prefixes=" + strings.Join(s.strip, ",") + "\"")
 	}
-	// Middleware chain (applied left→right): basic-auth, then strip, then the shared "loading"
-	// errors page so a starting/crash-looping backend shows a friendly retry on 502/503/504.
+	if s.addPrefix != "" {
+		g.line("      - \"traefik.http.middlewares." + router + "_addprefix.addprefix.prefix=" + s.addPrefix + "\"")
+	}
+	// Middleware chain (applied left→right): basic-auth, strip, addprefix, then the shared
+	// "loading" errors page so a starting/crash-looping backend shows a friendly 502/503/504 retry.
 	mws := "rigger-loading@file"
-	if len(strip) > 0 {
+	if s.addPrefix != "" {
+		mws = router + "_addprefix," + mws
+	}
+	if len(s.strip) > 0 {
 		mws = router + "_strip," + mws
 	}
 	if auth {
 		mws = router + "_auth," + mws
 	}
+	// service line: define our own loadbalancer, or reference a shared one (route mode).
+	emitService := func() {
+		if s.serviceRef != "" {
+			g.line("      - \"traefik.http.routers." + router + ".service=" + s.serviceRef + "\"")
+		} else {
+			g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
+		}
+	}
 	if g.e.SSLEnabled {
-		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + router + ".rule=" + s.rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=websecure\"")
 		g.line("      - \"traefik.http.routers." + router + ".tls=true\"")
 		// useFileCert ⇒ Traefik serves the out-of-band file-provider cert (matched by
@@ -590,44 +623,49 @@ func (g *gen) emitTraefikRouter(router, rule, port, usersVar, certResolver, wild
 		if !g.e.SSLSelfSigned && !g.e.useFileCert {
 			g.line("      - \"traefik.http.routers." + router + ".tls.certresolver=" + certResolver + "\"")
 			// Request a single wildcard cert for the apex base-domain router (DNS-01).
-			if wildcard != "" {
-				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].main=" + wildcard + "\"")
-				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].sans=*." + wildcard + "\"")
+			if s.wildcard != "" {
+				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].main=" + s.wildcard + "\"")
+				g.line("      - \"traefik.http.routers." + router + ".tls.domains[0].sans=*." + s.wildcard + "\"")
 			}
 		}
-		if priority > 0 {
-			g.line("      - \"traefik.http.routers." + router + ".priority=" + strconv.Itoa(priority) + "\"")
+		if s.priority > 0 {
+			g.line("      - \"traefik.http.routers." + router + ".priority=" + strconv.Itoa(s.priority) + "\"")
 		}
 		g.line("      - \"traefik.http.routers." + router + ".middlewares=" + mws + "\"")
-		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
+		emitService()
 		// Companion HTTP router → redirect to HTTPS (per-router, not global).
-		g.line("      - \"traefik.http.routers." + router + "_web.rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + router + "_web.rule=" + s.rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + "_web.entrypoints=web\"")
 		g.line("      - \"traefik.http.routers." + router + "_web.middlewares=" + router + "_redirect\"")
 		g.line("      - \"traefik.http.middlewares." + router + "_redirect.redirectscheme.scheme=https\"")
 	} else {
-		g.line("      - \"traefik.http.routers." + router + ".rule=" + rule + "\"")
+		g.line("      - \"traefik.http.routers." + router + ".rule=" + s.rule + "\"")
 		g.line("      - \"traefik.http.routers." + router + ".entrypoints=web\"")
-		if priority > 0 {
-			g.line("      - \"traefik.http.routers." + router + ".priority=" + strconv.Itoa(priority) + "\"")
+		if s.priority > 0 {
+			g.line("      - \"traefik.http.routers." + router + ".priority=" + strconv.Itoa(s.priority) + "\"")
 		}
 		g.line("      - \"traefik.http.routers." + router + ".middlewares=" + mws + "\"")
-		g.line("      - \"traefik.http.services." + router + ".loadbalancer.server.port=" + port + "\"")
+		emitService()
 	}
 }
 
 // emitRouteLabels emits Traefik labels for a service from the project-level routing table
 // (Config.Routes), used instead of the single host-based traefikLabels when any routes exist.
-// Path routes targeting the service collapse into ONE router with a
-// `Host(domain) && (PathPrefix(/api) || PathPrefix(/r))` rule (plain `Host(domain)` for the
-// catch-all); each subdomain route gets its own `Host(sub.domain)` router. The wildcard cert
-// request and verified custom-domain routers attach only to the catch-all router so they're
-// emitted once. No-op when Traefik is disabled.
-func (g *gen) emitRouteLabels(router string, svc Service, routes []Route) {
+// Every route becomes its OWN router (so each can rewrite its path independently): a path route
+// is `Host(domain) && PathPrefix(/api)` (plain `Host(domain)` for the catch-all "/"/""), a
+// subdomain route is `Host(sub.domain)`. All routers share ONE loadbalancer service ({cname}).
+// A route's Target rewrites the matched prefix: backend receives Target + (path − Match), with
+// the remainder sub-path and query string preserved (Target "" or == Match ⇒ passthrough; "/"
+// ⇒ strip). The catch-all owns the wildcard cert + verified custom domains (emitted once).
+// No-op when Traefik is disabled.
+func (g *gen) emitRouteLabels(cname string, svc Service, routes []Route) {
 	if !g.e.TraefikEnabled || len(routes) == 0 {
 		return
 	}
 	port := string(svc.Port)
+	if port == "" {
+		port = "80"
+	}
 	// Basic-auth middleware selection mirrors the legacy web branch.
 	usersVar := ""
 	switch {
@@ -636,62 +674,51 @@ func (g *gen) emitRouteLabels(router string, svc Service, routes []Route) {
 	case !svc.AuthProtect && g.authGate() == "basic":
 		usersVar = "APP_AUTH_USERS"
 	}
-	var paths, subs []Route
-	for _, r := range routes {
-		if r.Type == "subdomain" {
-			subs = append(subs, r)
-		} else {
-			paths = append(paths, r)
-		}
-	}
 	g.line("    labels:")
 	g.line("      - \"traefik.enable=true\"")
-	// Path group → one router. Catch-all ("/" or "") ⇒ plain Host(); prefixes ⇒ Host && (PathPrefix||…).
-	if len(paths) > 0 {
-		var prefixes, strip []string
-		catchAll := false
-		for _, r := range paths {
-			if m := strings.TrimSpace(r.Match); m == "" || m == "/" {
-				catchAll = true
-				continue
+	// One shared backend service for all of this service's routers.
+	g.line("      - \"traefik.http.services." + cname + ".loadbalancer.server.port=" + port + "\"")
+	for i, r := range routes {
+		name := cname + "_r" + strconv.Itoa(i)
+		if r.Type == "subdomain" {
+			host := g.e.Domain
+			if m := strings.TrimSpace(r.Match); m != "" {
+				host = m + "." + g.e.Domain
 			}
-			prefixes = append(prefixes, strings.TrimSpace(r.Match))
-			if r.StripPrefix {
-				strip = append(strip, strings.TrimSpace(r.Match))
-			}
+			g.emitTraefikRouter(routerSpec{name: name, rule: "Host(`" + host + "`)", port: port, usersVar: usersVar, certResolver: g.e.certResolver, serviceRef: cname})
+			continue
 		}
+		// path route
+		m := strings.TrimSpace(r.Match)
+		catchAll := m == "" || m == "/"
 		rule := "Host(`" + g.e.Domain + "`)"
 		priority := 0
-		if len(prefixes) > 0 {
-			pp := make([]string, len(prefixes))
-			for i, p := range prefixes {
-				pp[i] = "PathPrefix(`" + p + "`)"
-			}
-			rule += " && (" + strings.Join(pp, " || ") + ")"
-			// Outrank the bare-Host catch-all (Traefik's default priority = rule length, but be
-			// explicit/deterministic): base + total prefix length.
-			priority = 100
-			for _, p := range prefixes {
-				priority += len(p)
+		var strip []string
+		addPrefix := ""
+		if !catchAll {
+			rule += " && PathPrefix(`" + m + "`)"
+			priority = 100 + len(m) // outrank the bare-Host catch-all, deterministically
+			// Target rewrite: backend sees Target + (path − Match). Default Target = Match ⇒ pass
+			// through (no middleware); Target "/" ⇒ strip only; else strip then addprefix(Target).
+			target := strings.TrimSpace(r.Target)
+			if target != "" && target != m {
+				strip = []string{m}
+				if target != "/" {
+					addPrefix = target
+				}
 			}
 		}
-		// Only the catch-all owns the apex base-domain wildcard cert + custom domains.
 		wildcard := ""
 		if catchAll && g.e.wildcardBase != "" {
 			wildcard = g.e.wildcardBase
 		}
-		g.emitTraefikRouter(router, rule, port, usersVar, g.e.certResolver, wildcard, strip, priority)
+		g.emitTraefikRouter(routerSpec{
+			name: name, rule: rule, port: port, usersVar: usersVar, certResolver: g.e.certResolver,
+			wildcard: wildcard, strip: strip, addPrefix: addPrefix, priority: priority, serviceRef: cname,
+		})
 		if catchAll {
-			g.traefikCustomDomains(router, port, usersVar, g.e.CustomDomains)
+			g.traefikCustomDomains(cname, port, usersVar, g.e.CustomDomains)
 		}
-	}
-	// Each subdomain route → its own Host(sub.domain) router.
-	for i, r := range subs {
-		host := g.e.Domain
-		if m := strings.TrimSpace(r.Match); m != "" {
-			host = m + "." + g.e.Domain
-		}
-		g.emitTraefikRouter(router+"_sd"+strconv.Itoa(i), "Host(`"+host+"`)", port, usersVar, g.e.certResolver, "", nil, 0)
 	}
 }
 

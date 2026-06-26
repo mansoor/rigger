@@ -1230,6 +1230,7 @@ func validateConfigRoutes(content []byte) string {
 			Service string `json:"service"`
 			Type    string `json:"type"`
 			Match   string `json:"match"`
+			Target  string `json:"target"`
 		} `json:"routes"`
 	}
 	if err := json.Unmarshal(content, &doc); err != nil {
@@ -1263,6 +1264,9 @@ func validateConfigRoutes(content []byte) string {
 				match = "/" // normalize for duplicate detection
 			} else if !strings.HasPrefix(match, "/") {
 				return fmt.Sprintf("routing path %q must start with \"/\" (e.g. /api)", r.Match)
+			}
+			if t := strings.TrimSpace(r.Target); t != "" && !strings.HasPrefix(t, "/") {
+				return fmt.Sprintf("routing target %q must start with \"/\" (e.g. /api/v1)", r.Target)
 			}
 		}
 		key := typ + "\x00" + match

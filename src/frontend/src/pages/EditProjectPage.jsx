@@ -2238,13 +2238,14 @@ function materializeRoutes(images) {
 // means "all traffic → the web entry" (today's behavior); the table seeds from that implicit
 // default on first open and only commits to the saved config once the user actually edits it, so
 // merely viewing the tab doesn't mark the project dirty.
-function RoutesTab({ routes, images, onChange }) {
+function RoutesTab({ routes, images, baseDomain = '', onChange }) {
   const services = (images || []).map(s => s.name).filter(Boolean)
   const webEntry = (images || []).find(s => s.web_routed && !(s.subdomain || '').trim())?.name || services[0] || 'the web service'
+  const domainHint = baseDomain ? `…${baseDomain}` : 'your-env-domain'
   const [rows, setRows] = useState(() => (routes && routes.length) ? routes : materializeRoutes(images))
   const commit = (next) => { setRows(next); onChange(next) }
   const upd = (i, patch) => commit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  const add = () => commit([...rows, { service: services[0] || '', type: 'path', match: '/api', strip_prefix: false }])
+  const add = () => commit([...rows, { service: services[0] || '', type: 'path', match: '/api', target: '' }])
   const del = (i) => commit(rows.filter((_, j) => j !== i))
 
   // Inline validation mirroring the backend (validateConfigRoutes).
@@ -2257,6 +2258,7 @@ function RoutesTab({ routes, images, onChange }) {
     if (t === 'path') {
       if (m === '' || m === '/') { catchAlls++; m = '/' }
       else if (!m.startsWith('/')) return 'path must start with /'
+      else { const tg = (r.target || '').trim(); if (tg && !tg.startsWith('/')) return 'target must start with /' }
     }
     const key = t + ' ' + m
     if (seen[key]) return `duplicate ${t} "${m}"`
@@ -2289,13 +2291,14 @@ function RoutesTab({ routes, images, onChange }) {
                 <th className="py-1 pr-3 font-medium">Type</th>
                 <th className="py-1 pr-3 font-medium">Match</th>
                 <th className="py-1 pr-3 font-medium">Service</th>
-                <th className="py-1 pr-3 font-medium">Strip prefix</th>
+                <th className="py-1 pr-3 font-medium">Target path</th>
                 <th className="py-1"></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => {
                 const isPath = (r.type || 'path') === 'path'
+                const isCatchAll = isPath && (!(r.match || '').trim() || (r.match || '').trim() === '/')
                 return (
                   <tr key={i} className="border-t border-border align-top">
                     <td className="py-2 pr-3">
@@ -2307,7 +2310,12 @@ function RoutesTab({ routes, images, onChange }) {
                     <td className="py-2 pr-3">
                       <input className={sel + ' font-mono w-40'} value={r.match || ''}
                         onChange={e => upd(i, { match: e.target.value })}
-                        placeholder={isPath ? '/api  (/ = catch-all)' : 'app  (→ app.domain)'} />
+                        placeholder={isPath ? '/api  (/ = catch-all)' : 'app'} />
+                      {!isPath && (
+                        <div className="text-xs text-content-subtle mt-0.5 font-mono truncate">
+                          host: {((r.match || 'app').trim())}.{domainHint}
+                        </div>
+                      )}
                       {rowErr[i] && <div className="text-xs text-danger-fg mt-0.5">{rowErr[i]}</div>}
                     </td>
                     <td className="py-2 pr-3">
@@ -2317,9 +2325,10 @@ function RoutesTab({ routes, images, onChange }) {
                       </select>
                     </td>
                     <td className="py-2 pr-3">
-                      {isPath
-                        ? <input type="checkbox" className="w-4 h-4 accent-brand-500" checked={!!r.strip_prefix}
-                            onChange={e => upd(i, { strip_prefix: e.target.checked })} />
+                      {isPath && !isCatchAll
+                        ? <input className={sel + ' font-mono w-40'} value={r.target || ''}
+                            onChange={e => upd(i, { target: e.target.value })}
+                            placeholder={(r.match || '/api') + '  (blank = same)'} />
                         : <span className="text-content-subtle text-xs">—</span>}
                     </td>
                     <td className="py-2 text-right">
@@ -2332,6 +2341,16 @@ function RoutesTab({ routes, images, onChange }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {rows.some(r => (r.type || 'path') === 'path' && !(!(r.match || '').trim() || (r.match || '').trim() === '/')) && (
+        <p className="text-xs text-content-subtle max-w-2xl">
+          <span className="font-medium">Target path</span> rewrites the matched prefix before the request reaches the
+          service; the rest of the path and the query string are kept. Blank (or same as Match) forwards unchanged,
+          <code className="font-mono mx-1">/</code> strips the prefix, and <code className="font-mono mx-1">/api/v1</code>{' '}
+          sends <code className="font-mono mx-1">/api/x</code> as <code className="font-mono mx-1">/api/v1/x</code> (handy
+          for version aliasing).
+        </p>
       )}
 
       {catchAlls > 1 && <div className="text-xs text-danger-fg">Only one catch-all route (path “/”) is allowed.</div>}
@@ -2785,7 +2804,7 @@ export default function EditProjectPage() {
 
         {/* Host — per-environment binding + whole-project migrate (Phase 7) */}
         {tab === 'routing' && (
-          <RoutesTab routes={routes || []} images={images || []} onChange={setRoutes} />
+          <RoutesTab routes={routes || []} images={images || []} baseDomain={baseDomain} onChange={setRoutes} />
         )}
 
         {tab === 'host' && (<>

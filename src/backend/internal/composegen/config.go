@@ -38,8 +38,11 @@ type Route struct {
 	// Match is the path prefix ("/api"; "" or "/" = catch-all, type=path) OR the subdomain
 	// label ("app" → app.{domain}; "" = apex, type=subdomain).
 	Match string `json:"match"`
-	// StripPrefix (path routes only): strip the matched prefix before forwarding (/api/x → /x).
-	StripPrefix bool `json:"strip_prefix,omitempty"`
+	// Target (path routes only) rewrites the matched prefix the backend sees: it receives
+	// Target + (incoming path − Match), with the remainder sub-path and query string preserved.
+	// "" or == Match ⇒ passthrough (no rewrite); "/" ⇒ strip the prefix (/api/x → /x); "/api/v1"
+	// ⇒ strip then re-prefix (/api/x → /api/v1/x). Enables version aliasing by editing one field.
+	Target string `json:"target,omitempty"`
 }
 
 // routesFor returns the routes targeting service name (nil when none / Routes empty).
