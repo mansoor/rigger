@@ -22,8 +22,9 @@ import (
 // (list + create) so the "first bucket" can be made from the console.
 
 type consoleRow struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Secret bool   `json:"secret,omitempty"` // sensitive → frontend masks it (with its own reveal + copy-real)
 }
 
 // consoleService is one tab in the console: a managed service enabled for this env,
@@ -31,13 +32,14 @@ type consoleRow struct {
 // frontend builds the full URL from the env's apex), and whether bucket management
 // applies (S3+MinIO only).
 type consoleService struct {
-	Kind      string            `json:"kind"`                // redis | s3 | storage_local | mailpit
-	Label     string            `json:"label"`               //
-	Subdomain string            `json:"subdomain,omitempty"` // web-UI subdomain ("storage"/"mail"); "" = no UI
-	Note      string            `json:"note,omitempty"`      //
-	Rows      []consoleRow      `json:"rows"`                //
-	EnvKeys   map[string]string `json:"env_keys"`            // connection env-var names → values (secrets masked unless revealed)
-	Buckets   bool              `json:"buckets,omitempty"`   // S3+MinIO → bucket list/create available
+	Kind       string            `json:"kind"`                  // redis | s3 | storage_local | mailpit
+	Label      string            `json:"label"`                 //
+	Subdomain  string            `json:"subdomain,omitempty"`   // web-UI subdomain ("storage"/"mail"); "" = no UI
+	Note       string            `json:"note,omitempty"`        //
+	Rows       []consoleRow      `json:"rows"`                  //
+	EnvKeys    map[string]string `json:"env_keys"`              // connection env-var names → values (secrets masked unless revealed)
+	SecretKeys []string          `json:"secret_keys,omitempty"` // env_keys names that are sensitive → frontend masks them
+	Buckets    bool              `json:"buckets,omitempty"`     // S3+MinIO → bucket list/create available
 }
 
 type serviceConsoleResponse struct {
@@ -94,8 +96,9 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 			EnvKeys: map[string]string{"REDIS_HOST": host, "REDIS_PORT": port},
 		}
 		if pass != "" {
-			svc.Rows = append(svc.Rows, consoleRow{Label: "Password", Value: mask(pass)})
+			svc.Rows = append(svc.Rows, consoleRow{Label: "Password", Value: mask(pass), Secret: true})
 			svc.EnvKeys["REDIS_PASSWORD"] = mask(pass)
+			svc.SecretKeys = append(svc.SecretKeys, "REDIS_PASSWORD")
 		} else {
 			svc.Rows = append(svc.Rows, consoleRow{Label: "Password", Value: "(none)"})
 		}
@@ -124,7 +127,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 			Rows: []consoleRow{
 				{Label: "Endpoint (in-network)", Value: endpoint},
 				{Label: "Access key", Value: ak},
-				{Label: "Secret key", Value: mask(sk)},
+				{Label: "Secret key", Value: mask(sk), Secret: true},
 				{Label: "Default bucket", Value: bucket},
 				{Label: "Region", Value: region},
 			},
@@ -132,12 +135,14 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 				"MINIO_ENDPOINT": endpoint, "MINIO_ROOT_USER": ak,
 				"MINIO_ROOT_PASSWORD": mask(sk), "MINIO_BUCKET": bucket, "MINIO_REGION": region,
 			},
+			SecretKeys: []string{"MINIO_ROOT_PASSWORD"},
 		}
 		// Surface the AWS_* mapping too when the app uses the S3 SDK / Laravel.
 		for _, k := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_BUCKET", "AWS_DEFAULT_REGION", "AWS_ENDPOINT", "AWS_URL", "AWS_USE_PATH_STYLE_ENDPOINT"} {
 			if v, ok := dotenv[k]; ok {
 				if strings.Contains(k, "SECRET") {
 					v = mask(v)
+					svc.SecretKeys = append(svc.SecretKeys, k)
 				}
 				svc.EnvKeys[k] = v
 			}

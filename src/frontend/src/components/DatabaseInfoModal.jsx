@@ -30,6 +30,30 @@ export function CopyBtn({ value }) {
   )
 }
 
+// SecretValue renders a sensitive value masked by default, with its OWN reveal (👁) toggle
+// and a copy button that ALWAYS copies the real value (not the mask). When the caller isn't
+// allowed to reveal (canReveal=false) the server already sent a masked placeholder, so it's
+// shown read-only with no reveal/copy. `showAll` lets a parent flip every value visible at once.
+export function SecretValue({ value, canReveal = false, showAll = false }) {
+  const [show, setShow] = useState(false)
+  const visible = show || showAll
+  if (value === undefined || value === null || value === '') return <span className="text-content-faint">—</span>
+  if (!canReveal) {
+    // value is already a masked placeholder from the server — nothing real to reveal or copy.
+    return <code className="flex-1 break-all font-mono text-content-strong select-all">{value}</code>
+  }
+  return (
+    <>
+      <code className="flex-1 break-all font-mono text-content-strong select-all">{visible ? value : '••••••••'}</code>
+      <button type="button" onClick={() => setShow(s => !s)} title={visible ? 'Hide' : 'Reveal'}
+        className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+        {visible ? '🙈' : '👁'}
+      </button>
+      <CopyBtn value={value} />
+    </>
+  )
+}
+
 export function Row({ label, value, mono = true }) {
   return (
     <div className="flex items-center gap-2 text-xs">

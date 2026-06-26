@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchServiceConsole, fetchStorageBuckets, createStorageBucket } from '../lib/api'
-import { DatabasePanel, CopyBtn } from './DatabaseInfoModal'
+import { DatabasePanel, CopyBtn, SecretValue } from './DatabaseInfoModal'
 
 // ServiceConsoleModal — per-env Managed Service Console (P4). A tabbed view over every
 // managed service enabled for the environment: the database (rich Connection/Manage
@@ -24,9 +24,12 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
   canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', apexUrl = '', onClose }) {
   const [reveal, setReveal] = useState(false)
   const [dbMeta, setDbMeta] = useState(null)
+  // For operator+ (canReveal) we fetch the REAL secret values up front and mask them
+  // client-side per value (so Copy works without first clicking reveal). Viewers fetch
+  // masked. The header toggle (`reveal`) then just flips every value's display at once.
   const { data, isLoading } = useQuery({
-    queryKey: ['svc-console', workspace, name, env, reveal],
-    queryFn: () => fetchServiceConsole(workspace, name, env, reveal),
+    queryKey: ['svc-console', workspace, name, env, canReveal],
+    queryFn: () => fetchServiceConsole(workspace, name, env, canReveal),
   })
   const services = data?.services || []
 
@@ -58,7 +61,7 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
             {canReveal && (
               <button type="button" onClick={() => setReveal(v => !v)}
                 className="px-2 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[11px]">
-                {reveal ? 'Hide secrets' : 'Reveal secrets'}
+                {reveal ? 'Hide all secrets' : 'Reveal all secrets'}
               </button>
             )}
             <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
@@ -84,7 +87,7 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
               canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setDbMeta} />
           ) : activeTab?.svc ? (
             <ServicePanel workspace={workspace} name={name} env={env} svc={activeTab.svc}
-              apexUrl={apexUrl} canManage={canManage} />
+              apexUrl={apexUrl} canManage={canManage} canReveal={canReveal} showAll={reveal} />
           ) : (
             <p className="text-xs text-content-subtle">{isLoading ? 'Loading…' : 'Nothing to show.'}</p>
           )}
@@ -97,8 +100,9 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
 // ServicePanel renders a non-DB managed service: an optional note, an open-UI button
 // (built from the env apex + the service subdomain), the connection rows, the raw env
 // keys, and — for S3+MinIO — a bucket manager.
-function ServicePanel({ workspace, name, env, svc, apexUrl, canManage }) {
+function ServicePanel({ workspace, name, env, svc, apexUrl, canManage, canReveal = false, showAll = false }) {
   const uiUrl = uiURLFor(apexUrl, svc.subdomain)
+  const secretKeys = new Set(svc.secret_keys || [])
   return (
     <div className="space-y-5">
       {svc.note && <p className="text-xs text-content-subtle leading-relaxed">{svc.note}</p>}
@@ -124,8 +128,14 @@ function ServicePanel({ workspace, name, env, svc, apexUrl, canManage }) {
         {(svc.rows || []).map((r, i) => (
           <div key={i} className="flex items-center gap-2 text-xs">
             <span className="w-40 shrink-0 text-content-subtle">{r.label}</span>
-            <code className="flex-1 break-all font-mono text-content-strong select-all">{r.value || <span className="text-content-faint">—</span>}</code>
-            <CopyBtn value={r.value} />
+            {r.secret ? (
+              <SecretValue value={r.value} canReveal={canReveal} showAll={showAll} />
+            ) : (
+              <>
+                <code className="flex-1 break-all font-mono text-content-strong select-all">{r.value || <span className="text-content-faint">—</span>}</code>
+                <CopyBtn value={r.value} />
+              </>
+            )}
           </div>
         ))}
       </section>
@@ -140,7 +150,11 @@ function ServicePanel({ workspace, name, env, svc, apexUrl, canManage }) {
               <div key={k} className="flex items-center gap-2 text-[11px] font-mono">
                 <span className="text-content-subtle">{k}</span>
                 <span className="text-content-faint">=</span>
-                <span className="flex-1 break-all text-content select-all">{v}</span>
+                {secretKeys.has(k) ? (
+                  <SecretValue value={v} canReveal={canReveal} showAll={showAll} />
+                ) : (
+                  <span className="flex-1 break-all text-content select-all">{v}</span>
+                )}
               </div>
             ))}
           </div>
