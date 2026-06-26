@@ -830,6 +830,38 @@ func TestServicesOverrideCert(t *testing.T) {
 	mustContain(t, app, "redirectscheme.scheme=https")
 }
 
+// Managed OpenSearch emits a single-node service with the admin password wired from
+// ${OPENSEARCH_PASSWORD}, a JVM heap floor, a data volume, and a TLS-aware healthcheck.
+// Non-SQL → no Adminer service is synthesized.
+func TestManagedOpenSearch(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"logs","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"opensearch"},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"3000","env_file":true}],
+		"environments": {"prod": {"deployment":"compose","domain":"example.com","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	out, err := GenerateAt(cfg, "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"  opensearch:",
+		"image: opensearchproject/opensearch:2",
+		"discovery.type: single-node",
+		"OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD}",
+		"OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m",
+		"logs_prod_opensearch_data:/usr/share/opensearch/data",
+		"_cluster/health",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "  adminer:") {
+		t.Errorf("unexpected adminer service for a non-SQL engine:\n%s", s)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

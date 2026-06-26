@@ -45,6 +45,7 @@ type databaseInfoResponse struct {
 	Connections  []connString      `json:"connections"`           // ready-to-paste URIs (password masked unless revealed)
 	Schemas      bool              `json:"schemas"`               // engine supports schema/database management (Phase 6)
 	Users        bool              `json:"users"`                 // engine supports user management
+	Note         string            `json:"note,omitempty"`        // engine-specific guidance shown in the console
 }
 
 const dbMask = "••••••••"
@@ -149,6 +150,12 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		// The connection user is the root user, which authenticates against the
 		// admin database — clients need authSource=admin.
 		scheme, suffix = "mongodb", "?authSource=admin"
+	case "opensearch":
+		// Security plugin ON: HTTPS with a self-signed demo cert + the fixed `admin`
+		// user. No "database" path — apps target indices. Clients must disable cert
+		// verification (in-network only).
+		scheme = "https"
+		resp.Note = "OpenSearch serves HTTPS with a self-signed demo certificate — connect over https with certificate verification disabled (in-network only). Needs RAM (JVM) and the host sysctl vm.max_map_count=262144."
 	}
 	uri := func(host string, p int) string {
 		return fmt.Sprintf("%s://%s:%s@%s:%d/%s%s", scheme, user, shownPass, host, p, dbName, suffix)

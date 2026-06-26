@@ -235,6 +235,58 @@ func TestMongoEnv(t *testing.T) {
 	}
 }
 
+// Managed OpenSearch writes the OPENSEARCH_* family with the fixed `admin` user and a
+// complexity-meeting password (its own default — not the shared "changeme_…"), embedded
+// in an https URL. The password is preserved across regen like every managed-DB secret.
+func TestOpenSearchEnv(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "logs", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "database": "opensearch" },
+      "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
+      "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	checks := map[string]string{
+		"DATABASE":        "opensearch",
+		"OPENSEARCH_HOST": "logs_dev_opensearch",
+		"OPENSEARCH_PORT": "9200",
+		"OPENSEARCH_USER": "admin",
+	}
+	for k, want := range checks {
+		if m[k] != want {
+			t.Errorf("%s = %q, want %q", k, m[k], want)
+		}
+	}
+	pw := m["OPENSEARCH_PASSWORD"]
+	// Complexity: upper + lower + digit + the '-' special, length 16. (The shared
+	// "changeme_…" default would NOT satisfy OpenSearch's admin-password rules.)
+	if len(pw) != 16 || strings.HasPrefix(pw, "changeme_") {
+		t.Errorf("OPENSEARCH_PASSWORD = %q, want a 16-char strong password", pw)
+	}
+	hasUpper := strings.ContainsAny(pw, "ABCDEFGHJKLMNPQRSTUVWXYZ")
+	hasLower := strings.ContainsAny(pw, "abcdefghijkmnopqrstuvwxyz")
+	hasDigit := strings.ContainsAny(pw, "23456789")
+	if !hasUpper || !hasLower || !hasDigit || !strings.Contains(pw, "-") {
+		t.Errorf("OPENSEARCH_PASSWORD = %q missing a required character class", pw)
+	}
+	if want := "https://admin:" + pw + "@logs_dev_opensearch:9200"; m["OPENSEARCH_URL"] != want {
+		t.Errorf("OPENSEARCH_URL = %q, want %q", m["OPENSEARCH_URL"], want)
+	}
+	// No "database" path concept — no OPENSEARCH_DB.
+	if _, ok := m["OPENSEARCH_DB"]; ok {
+		t.Errorf("unexpected OPENSEARCH_DB = %q", m["OPENSEARCH_DB"])
+	}
+	// Regen with a lost .env preserves the password from config secrets / existing.
+	existing := map[string]string{"OPENSEARCH_PASSWORD": "Keepme-123abcd"}
+	env2, _, _ := Generate(c, "dev", existing, fixedRand)
+	if ParseEnv([]byte(env2))["OPENSEARCH_PASSWORD"] != "Keepme-123abcd" {
+		t.Error("OPENSEARCH_PASSWORD not preserved across regen")
+	}
+}
+
 // TestAppURLNoDomain guards the empty-domain case: APP_URL must stay a valid
 // absolute URI (not the malformed "http://", which crashes Laravel artisan with
 // "Invalid URI"). With no domain it falls back to localhost + the HTTP port.

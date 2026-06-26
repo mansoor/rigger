@@ -266,7 +266,7 @@ func managedDBName(cfg *Config, e Env) string {
 		eng = e.Database
 	}
 	switch eng {
-	case "postgres", "mysql", "mariadb", "mongodb":
+	case "postgres", "mysql", "mariadb", "mongodb", "opensearch":
 		return eng
 	}
 	return ""

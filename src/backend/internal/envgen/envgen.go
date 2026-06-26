@@ -85,6 +85,28 @@ func envQuote(v string) string {
 func hexN(r Rand, n int) string    { return hex.EncodeToString(r(n)) }
 func base64N(r Rand, n int) string { return base64.StdEncoding.EncodeToString(r(n)) }
 
+// strongPw returns a 16-char password guaranteed to contain an upper, a lower, a
+// digit and a special char (a single '-', which is both URL- and dotenv-safe so it
+// can be embedded verbatim in a connection URL). Required by engines like OpenSearch
+// 2.12+ that reject weak admin passwords. Derived from the injected Rand so tests
+// stay deterministic; ambiguous glyphs (0/O/1/l/I) are excluded.
+func strongPw(r Rand) string {
+	const lower = "abcdefghijkmnopqrstuvwxyz"
+	const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+	const digit = "23456789"
+	const alnum = lower + upper + digit
+	b := r(16)
+	out := make([]byte, 16)
+	out[0] = lower[int(b[0])%len(lower)]
+	out[1] = upper[int(b[1])%len(upper)]
+	out[2] = digit[int(b[2])%len(digit)]
+	out[3] = '-'
+	for i := 4; i < 16; i++ {
+		out[i] = alnum[int(b[i])%len(alnum)]
+	}
+	return string(out)
+}
+
 // ── Secret-key rules (shared with workspace.GenerateSmartDefaults) ──────────────
 
 // IsPlaceholder reports whether a value is a stand-in that was never meant to be
@@ -135,6 +157,7 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			"MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
 			"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
 			"MONGO_HOST", "MONGO_PORT", "MONGO_DB", "MONGO_USER", "MONGO_PASSWORD", "MONGO_URI",
+			"OPENSEARCH_HOST", "OPENSEARCH_PORT", "OPENSEARCH_USER", "OPENSEARCH_PASSWORD", "OPENSEARCH_URL",
 		} {
 			out[k] = true
 		}
@@ -344,6 +367,7 @@ func imageEnvVar(name string) string {
 // — which would break against an already-initialized DB / data volume.
 var ManagedSecretKeys = []string{
 	"MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "MONGO_PASSWORD", "DB_PASSWORD",
+	"OPENSEARCH_PASSWORD",
 	"APP_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
 	"MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
 }
@@ -413,6 +437,9 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	dbPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_PASSWORD", "POSTGRES_PASSWORD", "MONGO_PASSWORD", "DB_PASSWORD")
 	dbRootPassword := getOut("changeme_"+hexN(r, 8), "MYSQL_ROOT_PASSWORD")
+	// OpenSearch needs a complexity-meeting admin password (its own default — the shared
+	// "changeme_…" wouldn't pass), preserved across regen like every managed-DB secret.
+	osPassword := getOut(strongPw(r), "OPENSEARCH_PASSWORD")
 	appKey := getOut("base64:"+base64N(r, 32), "APP_KEY")
 	// MinIO root credentials double as the app's S3 access key/secret (AWS_*). They
 	// must be preserved across regen — the bucket/data volume is provisioned with them.
@@ -497,14 +524,28 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("MONGO_USER=%s\n", mongoUser)
 		p("MONGO_PASSWORD=%s\n", dbPassword)
 		p("MONGO_URI=mongodb://%s:%s@%s:27017/%s?authSource=admin\n", mongoUser, dbPassword, host, mongoDB)
+	case "opensearch":
+		// Security plugin ON → HTTPS + the fixed bootstrap `admin` user (OpenSearch
+		// doesn't provision a custom user in this cut). Apps connect over https with
+		// cert verification disabled (self-signed demo cert, in-network only). No
+		// "database" concept — OpenSearch uses indices, so there's no OPENSEARCH_DB.
+		host := prefix + "_opensearch"
+		p("OPENSEARCH_HOST=%s\n", host)
+		p("OPENSEARCH_PORT=9200\n")
+		p("OPENSEARCH_USER=admin\n")
+		p("OPENSEARCH_PASSWORD=%s\n", osPassword)
+		p("OPENSEARCH_URL=https://admin:%s@%s:9200\n", osPassword, host)
 	}
 	// When the DB is published externally, expose the host port (overridable) so the
 	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.
 	// DBExternal is per-environment (expose on dev, keep prod private).
 	if engine != "" && engine != "none" && e.DBExternal {
-		port := "5432"
-		if engine != "postgres" {
-			port = "3306"
+		port := "3306"
+		switch engine {
+		case "postgres":
+			port = "5432"
+		case "opensearch":
+			port = "9200"
 		}
 		p("DB_EXTERNAL_PORT=%s\n", port)
 	}

@@ -132,8 +132,26 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		if !c.sqlDump("mysql", "mariadb", "mysql", dateDir, backupDir) {
 			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
 		}
+	case "mongodb", "opensearch":
+		// Non-SQL engines have no logical-dump path here — capture the data volume
+		// instead (restore is volume-level, not logical). Volume name = {prefix}_{engine}_data.
+		c.archiveManagedDBVolume(database, dateDir, backupDir)
 	default:
 		c.info("No database configured (database=%s) — skipping DB backup", database)
+	}
+}
+
+// archiveManagedDBVolume tars a non-SQL managed engine's named data volume
+// ({prefix}_{engine}_data) into the backup dir. Used for engines without a logical
+// dump (mongodb, opensearch); their recovery path is volume-restore.
+func (c *ctx) archiveManagedDBVolume(engine, dateDir, backupDir string) {
+	vol := c.prefix + "_" + engine + "_data"
+	out := filepath.Join(backupDir, fmt.Sprintf("%s_%s_%s_%s.tar.gz", c.project, c.env, engine, dateDir))
+	c.info("Archiving %s data volume (non-SQL — volume-level backup)...", engine)
+	if c.archiveNamedVolumes(out, "/data", map[string]string{vol: "/data"}, ".") {
+		c.success("%s archive: %s", engine, filepath.Base(out))
+	} else {
+		c.warn("Could not archive %s volume %s", engine, vol)
 	}
 }
 

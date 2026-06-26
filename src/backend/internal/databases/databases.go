@@ -59,6 +59,19 @@ var catalog = []Engine{
 		Port:           27017, VolumePath: "/data/db",
 		Driver: "mongodb", EnvPrefix: "MONGO", Schemas: false, Users: false,
 	},
+	{
+		// OpenSearch — search/analytics engine (Apache-2.0 fork of ElasticSearch, ES
+		// 7.10 API-compatible). NOT SQL: no Adminer/schema/user management (Schemas/
+		// Users false → connection info only). Runs single-node with the security
+		// plugin ON, so it speaks HTTPS on 9200 with a self-signed demo cert and a
+		// fixed `admin` user (password = OPENSEARCH_INITIAL_ADMIN_PASSWORD). Needs RAM
+		// (JVM) and the host sysctl vm.max_map_count=262144 — surfaced in the console.
+		ID: "opensearch", Label: "OpenSearch", Image: "opensearchproject/opensearch",
+		Versions:       []string{"2", "1"},
+		DefaultVersion: "2",
+		Port:           9200, VolumePath: "/usr/share/opensearch/data",
+		Driver: "opensearch", EnvPrefix: "OPENSEARCH", Schemas: false, Users: false,
+	},
 }
 
 // Catalog returns the ordered list of hostable engines.

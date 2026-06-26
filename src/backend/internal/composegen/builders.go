@@ -17,6 +17,7 @@ const (
 	dashRedis    = 54
 	dashStorage  = 38
 	dashMongo    = 51
+	dashSearch   = 49
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
@@ -204,6 +205,9 @@ func (g *gen) emitVolumes(prefix string) {
 	}
 	if engine == "mongodb" {
 		add(prefix + "_mongodb_data")
+	}
+	if engine == "opensearch" {
+		add(prefix + "_opensearch_data")
 	}
 	if g.redisOn() {
 		add(prefix + "_redis_data")
@@ -561,7 +565,7 @@ func (g *gen) depHasHealthcheck(name string) bool {
 		}
 	}
 	switch name {
-	case "postgres", "mysql", "mariadb", "mongodb", "redis":
+	case "postgres", "mysql", "mariadb", "mongodb", "opensearch", "redis":
 		return true // these managed deps carry a healthcheck (see buildManagedDeps)
 	}
 	// minio (and its mc-init) intentionally have NO healthcheck — see buildManagedDeps.
@@ -833,6 +837,33 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
+	// OpenSearch — search engine. Single-node with the security plugin ON: it serves
+	// HTTPS on 9200 with a self-signed demo cert; the bootstrap admin user is `admin`
+	// with OPENSEARCH_INITIAL_ADMIN_PASSWORD. A JVM heap floor is set; the host must
+	// also have vm.max_map_count=262144 (documented in the console — not settable here).
+	if engine == "opensearch" {
+		eng, _ := databases.Get("opensearch")
+		ver := g.dbVersion(eng)
+		g.line(sectionComment("OpenSearch "+ver, dashSearch))
+		g.line("  opensearch:")
+		g.line("    image: opensearchproject/opensearch:" + ver)
+		g.line("    container_name: " + prefix + "_opensearch")
+		g.dbExternalPorts(eng)
+		g.line("    environment:")
+		g.line("      discovery.type: single-node")
+		g.line("      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD}")
+		g.line("      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m")
+		g.line("    ulimits:")
+		g.line("      memlock: { soft: -1, hard: -1 }")
+		g.line("      nofile: { soft: 65536, hard: 65536 }")
+		g.line("    volumes:")
+		g.line("      - " + prefix + "_opensearch_data:/usr/share/opensearch/data")
+		g.managedNet(prefix, "opensearch")
+		g.healthcheck("curl -ksf -u admin:${OPENSEARCH_PASSWORD} https://localhost:9200/_cluster/health || exit 1", "15s", "10s", "10", "60s", "")
+		g.deployBlock(isSwarm, "opensearch", "1", "unless-stopped")
+		g.line("")
+	}
+
 	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  redis:")
@@ -998,6 +1029,8 @@ func managedDepPort(name string) string {
 		return "3306"
 	case "mongodb":
 		return "27017"
+	case "opensearch":
+		return "9200"
 	case "redis":
 		return "6379"
 	case "minio":

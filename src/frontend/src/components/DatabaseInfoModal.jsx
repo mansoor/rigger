@@ -133,6 +133,7 @@ export function DatabasePanel({ workspace, name, env, canReveal = false, showAll
           openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} />
       ) : (
         <div className="space-y-5">
+          {info.note && <p className="text-xs text-content-subtle leading-relaxed">{info.note}</p>}
           {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
           {canManage && (
             <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
