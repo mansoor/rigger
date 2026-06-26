@@ -613,7 +613,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
             value={img.healthcheck || ''}
             onChange={e => upd('healthcheck', e.target.value)}
             placeholder="curl -sf http://localhost/health || exit 1"
-            className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono placeholder-content-faint focus:outline-none focus:border-brand-500"
+            className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono placeholder-content-subtle focus:outline-none focus:border-brand-500"
           />
         </div>
         {/* Time parameters — only shown when a command is set */}
@@ -797,7 +797,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
             rows={4}
             placeholder={"mem_limit: 512m\ncpus: '0.5'\nlogging:\n  driver: json-file"}
             spellCheck={false}
-            className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-success-fg text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y"
+            className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-success-fg text-xs font-mono placeholder-content-subtle focus:outline-none focus:border-brand-500 resize-y"
           />
         </div>
       </details>
@@ -1791,7 +1791,7 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
                   rows={yaml.trim().split('\n').length + 2}
                   placeholder={`mem_limit: 2g\ncpus: "1.5"\nlogging:\n  driver: "none"`}
                   spellCheck={false}
-                  className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-content text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
+                  className="w-full px-3 py-2 bg-canvas border border-border-strong rounded-lg text-content text-xs font-mono placeholder-content-subtle focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
                 />
               </div>
             )

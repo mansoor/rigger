@@ -107,7 +107,7 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
           <textarea
             value={cfg.urls} onChange={e => setField('urls', e.target.value)}
             placeholder={APPRISE_EXAMPLES} rows={4}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-faint text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
           />
           <p className="text-xs text-content-subtle">
             One Apprise URL per line. Delivered via the Apprise sidecar — see the{' '}

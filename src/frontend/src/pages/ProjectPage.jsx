@@ -1513,7 +1513,7 @@ function ContainerSelector({ containers, workspace, wsName, activeEnv, activeCon
             {/* Status dot — colour reflects health, not just state */}
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${containerDotClass(c)}`} />
             {/* Service name is rendered in its log colour, so no separate swatch is needed */}
-            <span className="text-xs" style={{ color: checked ? color : '#4b5563' }}>{short}</span>
+            <span className={`text-xs ${checked ? '' : 'text-content-muted'}`} style={{ color: checked ? color : undefined }}>{short}</span>
           </label>
         )
       })}
@@ -1560,7 +1560,7 @@ function LogOutput({ lines, filter, wrap, autoScroll, rowLimit = 0, showRowNumbe
               <span
                 className="shrink-0 mr-1 select-none"
                 style={{ color, opacity: 0.85 }}
-              >{svc} <span style={{ color: '#4b5563' }}>|</span> </span>
+              >{svc} <span className="text-content-faint">|</span> </span>
             )}
             <span dangerouslySetInnerHTML={{ __html: ansiToHtml(content) }} />
           </div>
@@ -1770,7 +1770,7 @@ function LogViewer({ wsName, envs }) {
             <div className="relative">
               <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
                 placeholder="filter…"
-                className="w-28 px-2 py-0.5 text-xs bg-surface-raised border border-border-strong rounded text-content-strong placeholder-content-faint focus:outline-none focus:border-brand-500 font-mono" />
+                className="w-28 px-2 py-0.5 text-xs bg-surface-raised border border-border-strong rounded text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 font-mono" />
               {filter && <button onClick={() => setFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content text-xs">×</button>}
             </div>
 

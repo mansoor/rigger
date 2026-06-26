@@ -79,8 +79,8 @@
    * are re-tuned (text-700 on a -50 tint) to meet WCAG AA on white.
    */
 
-  /* Surfaces — white cards on a grey canvas. */
-  --canvas:           248 250 252;   /* slate-50 */
+  /* Surfaces — white cards on a soft-grey canvas. */
+  --canvas:           241 245 249;   /* slate-100 — soft grey so white cards lift off the page */
   --surface:          255 255 255;   /* white */
   --surface-raised:   241 245 249;   /* slate-100 — inputs, hover */
   --surface-overlay:  226 232 240;   /* slate-200 — active/elevated */
@@ -128,4 +128,16 @@
   --shadow-card:      0 1px 2px 0 rgb(15 23 42 / 0.04), 0 2px 8px -2px rgb(15 23 42 / 0.08);
   --scrollbar-thumb:  203 213 225;   /* slate-300 */
   --scrollbar-thumb-hover: 148 163 184; /* slate-400 */
+}
+
+/*
+ * Consistent placeholders everywhere. Without this, inputs that don't set a
+ * `placeholder-*` utility fall back to the browser default (too dark — the filler
+ * reads like real data). Tokenized to --content-subtle so it's uniform and legible
+ * in both themes; per-input `placeholder-*` utilities still override where needed.
+ */
+input::placeholder,
+textarea::placeholder {
+  color: rgb(var(--content-subtle));
+  opacity: 1;
 }

@@ -1112,7 +1112,7 @@ function GeneralTab() {
           reset, self-service change, and the forgot-password flow. Applies to <em>new</em> passwords;
           existing ones aren't re-checked until next change (or rotation, below).
         </p>
-        <div className="space-y-4 p-4 bg-surface border border-border rounded-xl max-w-lg">
+        <div className="space-y-4 p-4 bg-surface border border-border rounded-xl max-w-2xl">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Minimum length</Label>
@@ -2024,7 +2024,7 @@ function SystemEmailTab() {
   if (isLoading || !f) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
-    <div className="max-w-xl">
+    <div className="max-w-2xl">
       <div className="mb-6">
         <h2 className="text-base font-semibold text-content-strong">System email</h2>
         <p className="text-sm text-content-subtle mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</p>

@@ -551,7 +551,7 @@ function ComposeModal({ onLoad, onClose }) {
           onChange={e => { setInput(e.target.value); setError('') }}
           placeholder={PLACEHOLDER}
           spellCheck={false}
-          className="w-full px-3 py-3 bg-canvas border border-border-strong rounded-xl text-content text-xs font-mono placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
+          className="w-full px-3 py-3 bg-canvas border border-border-strong rounded-xl text-content text-xs font-mono placeholder-content-subtle focus:outline-none focus:border-brand-500 resize-y leading-relaxed"
           style={{ minHeight: '24rem' }}
         />
 
@@ -845,7 +845,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => patchField('name', e.target.value)}
                   placeholder="Name (id / filename — lowercase, digits, hyphens)"
-                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50 font-mono"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 disabled:opacity-50 font-mono"
                 />
                 <input
                   type="text"
@@ -853,7 +853,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => patchField('label', e.target.value)}
                   placeholder="Label (e.g. Ghost CMS)"
-                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
                 <textarea
                   value={parsed?.description ?? ''}
@@ -861,7 +861,7 @@ function ComposeToTemplate() {
                   onChange={e => patchField('description', e.target.value)}
                   rows={2}
                   placeholder="Description — a short blurb about what this stack is for"
-                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 resize-y disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 resize-y disabled:opacity-50"
                 />
                 <input
                   type="text"
@@ -869,7 +869,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => { setTagsText(e.target.value); patchField('tags', e.target.value.split(',').map(t => t.trim()).filter(Boolean)) }}
                   placeholder="Tags (comma-separated, e.g. cms, blog, mysql)"
-                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
                 {/* Categories — comma-separated; the datalist suggests existing ones.
                     Drives the category filter on the New Project template picker. */}
@@ -880,7 +880,7 @@ function ComposeToTemplate() {
                   disabled={!parsed}
                   onChange={e => { setCatsText(e.target.value); patchField('categories', e.target.value.split(',').map(c => c.trim()).filter(Boolean)) }}
                   placeholder="Categories (comma-separated, e.g. Productivity, Databases) — blank = Uncategorized"
-                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  className="w-full px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 disabled:opacity-50"
                 />
                 <datalist id="rigger-template-categories">
                   {knownCategories.map(c => <option key={c} value={c} />)}
@@ -893,7 +893,7 @@ function ComposeToTemplate() {
                     disabled={!parsed}
                     onChange={e => patchField('website', e.target.value)}
                     placeholder="Website / git repo URL (e.g. https://github.com/owner/app)"
-                    className="flex-1 px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                    className="flex-1 px-2.5 py-1.5 bg-canvas border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 disabled:opacity-50"
                   />
                   {parsed?.website && (
                     <a
@@ -1360,7 +1360,7 @@ function WorkspaceBackup() {
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
                 placeholder={selectedWs ? `${currentWs}_${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<project>_<timestamp>.rws'}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
               />
             </div>
             <button onClick={takeSnapshot} disabled={!selectedWs || snapBusy} className={createBtnClass(!!selectedWs && !snapBusy)}>
@@ -1426,7 +1426,7 @@ function WorkspaceBackup() {
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
                 placeholder={selectedWs ? `${currentWs}_${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>_<project>-<timestamp>.rwb'}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-faint focus:outline-none focus:border-brand-500"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
               />
             </div>
             <button onClick={startBackup} disabled={!selectedWs || isRunning} className={createBtnClass(!!selectedWs && !isRunning)}>
