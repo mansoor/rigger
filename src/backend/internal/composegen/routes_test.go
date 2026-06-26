@@ -118,6 +118,36 @@ func TestRoutesSubdomain(t *testing.T) {
 	}
 }
 
+// Regression: when a project defines a routing table (web/api), synthesized admin sidecars
+// (Adminer / MinIO console / Mailpit) route on their OWN subdomain and are never listed in the
+// path-routing table. They must keep their subdomain router instead of being dropped — otherwise
+// adminer.{host} / storage.{host} fall through to the "not ready" fallback. (See qrhub.)
+func TestRoutesSubdomainSidecarKeepsRouter(t *testing.T) {
+	cfg := []byte(`{
+	  "project":{"name":"qrh","resource_prefix":"mcl_qrh","type":"custom"},
+	  "services":[
+	    {"name":"web","image":"web","tag":"latest","port":3000,"web_routed":true,"env_file":true},
+	    {"name":"api","image":"api","tag":"latest","port":4000,"env_file":true},
+	    {"name":"adminer","image":"adminer","tag":"latest","port":8080,"web_routed":true,"subdomain":"adminer","auth_protect":true}
+	  ],
+	  "routes":[
+	    {"service":"web","type":"path","match":"/"},
+	    {"service":"api","type":"path","match":"/api"}
+	  ],
+	  "environments":{"dev":{"deployment":"compose","traefik_enabled":true,"traefik_network":"traefik_net","domain":""}}
+	}`)
+	s := genDev(t, cfg)
+	// The sidecar (not in the route table) still gets a legacy subdomain router.
+	want := "traefik.http.routers.mcl_qrh_dev_adminer.rule=Host(" + bt + "adminer." + host + bt + ")"
+	if !strings.Contains(s, want) {
+		t.Errorf("subdomain sidecar lost its router in route mode; missing %q in:\n%s", want, s)
+	}
+	// The route-table services still route by path.
+	if !strings.Contains(s, "traefik.http.routers.mcl_qrh_dev_api_r0.rule=Host("+bt+host+bt+") && PathPrefix("+bt+"/api"+bt+")") {
+		t.Errorf("api path route missing in:\n%s", s)
+	}
+}
+
 // With NO routes the generator is unchanged: the web_routed service gets the plain legacy
 // Host() rule, the api stays unrouted (in-network expose), and no route-mode extras appear.
 func TestRoutesEmptyLegacyParity(t *testing.T) {

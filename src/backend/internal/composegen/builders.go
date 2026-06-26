@@ -401,9 +401,14 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 	// routes, isRouted == svc.WebRouted, so the generated YAML is byte-identical to before.
 	routes := g.cfg.routesFor(svc.Name)
 	useRoutes := len(g.cfg.Routes) > 0
+	// viaRouteTable: this service's ingress is governed by the project routing table.
+	// Synthesized admin sidecars (Adminer / MinIO console / Mailpit) route on their own
+	// subdomain and are NEVER in the user-facing path-routing table, so in route mode they
+	// keep their legacy subdomain router instead of being dropped (len(routes)==0).
+	viaRouteTable := useRoutes && len(routes) > 0
 	isRouted := svc.WebRouted
 	if useRoutes {
-		isRouted = len(routes) > 0
+		isRouted = viaRouteTable || (svc.WebRouted && svc.Subdomain != "")
 	}
 	switch {
 	case svc.WebRouted && mode == "cloudflare_tunnel":
@@ -420,7 +425,7 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 			publishes = append(publishes, hp+":"+portOr(port, "80"))
 		}
 	case isRouted && e.TraefikEnabled:
-		if useRoutes {
+		if viaRouteTable {
 			// Labels come from the project routing table — one path-group router (Host &&
 			// PathPrefix||…) plus a router per subdomain route. The legacy single-host path is
 			// bypassed; web_routed/subdomain on the service are ignored in route mode.
