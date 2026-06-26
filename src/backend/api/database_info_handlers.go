@@ -21,8 +21,9 @@ import (
 // connection env keys). The password is only included with ?reveal=true AND an
 // operator+ role; otherwise it's masked everywhere it appears.
 type connString struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
+	Label  string `json:"label"`
+	Value  string `json:"value"`
+	Secret bool   `json:"secret,omitempty"` // embeds the password → frontend masks it (own reveal + copy-real)
 }
 
 type databaseInfoResponse struct {
@@ -39,10 +40,11 @@ type databaseInfoResponse struct {
 	Password     string            `json:"password,omitempty"` // present only when revealed
 	ExternalHost string            `json:"external_host,omitempty"`
 	ExternalPort int               `json:"external_port,omitempty"`
-	EnvKeys      map[string]string `json:"env_keys"`    // connection env-var names → values (password masked unless revealed)
-	Connections  []connString      `json:"connections"` // ready-to-paste URIs (password masked unless revealed)
-	Schemas      bool              `json:"schemas"`     // engine supports schema/database management (Phase 6)
-	Users        bool              `json:"users"`       // engine supports user management
+	EnvKeys      map[string]string `json:"env_keys"`              // connection env-var names → values (password masked unless revealed)
+	SecretKeys   []string          `json:"secret_keys,omitempty"` // env_keys names that are sensitive → frontend masks them
+	Connections  []connString      `json:"connections"`           // ready-to-paste URIs (password masked unless revealed)
+	Schemas      bool              `json:"schemas"`               // engine supports schema/database management (Phase 6)
+	Users        bool              `json:"users"`                 // engine supports user management
 }
 
 const dbMask = "••••••••"
@@ -125,6 +127,7 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 	resp.EnvKeys[userKey] = user
 	if pass != "" {
 		resp.EnvKeys[passKey] = shownPass
+		resp.SecretKeys = append(resp.SecretKeys, passKey)
 	}
 	if pfx == "MYSQL" {
 		if rp := dotenv["MYSQL_ROOT_PASSWORD"]; rp != "" {
@@ -134,6 +137,7 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 				}
 				return dbMask
 			}()
+			resp.SecretKeys = append(resp.SecretKeys, "MYSQL_ROOT_PASSWORD")
 		}
 	}
 
@@ -149,7 +153,7 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 	uri := func(host string, p int) string {
 		return fmt.Sprintf("%s://%s:%s@%s:%d/%s%s", scheme, user, shownPass, host, p, dbName, suffix)
 	}
-	resp.Connections = []connString{{Label: "Internal URI", Value: uri(internalHost, port)}}
+	resp.Connections = []connString{{Label: "Internal URI", Value: uri(internalHost, port), Secret: true}}
 
 	if ec.DBExternal {
 		extPort := port
@@ -160,7 +164,7 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		}
 		extHost := h.envExternalHost(ws, name, env)
 		resp.ExternalHost, resp.ExternalPort = extHost, extPort
-		resp.Connections = append(resp.Connections, connString{Label: "External URI", Value: uri(extHost, extPort)})
+		resp.Connections = append(resp.Connections, connString{Label: "External URI", Value: uri(extHost, extPort), Secret: true})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

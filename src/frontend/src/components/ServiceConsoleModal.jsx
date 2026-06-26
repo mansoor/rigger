@@ -83,7 +83,7 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
             scrolls within) instead of resizing to each tab's content. */}
         <div className="h-[58vh] overflow-y-auto px-5 py-4">
           {activeTab?.kind === 'database' ? (
-            <DatabasePanel workspace={workspace} name={name} env={env} reveal={reveal} setReveal={setReveal}
+            <DatabasePanel workspace={workspace} name={name} env={env} showAll={reveal}
               canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setDbMeta} />
           ) : activeTab?.svc ? (
             <ServicePanel workspace={workspace} name={name} env={env} svc={activeTab.svc}

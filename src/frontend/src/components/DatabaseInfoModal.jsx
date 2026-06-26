@@ -13,10 +13,11 @@ export function humanBytes(n) {
 
 // DatabasePanel — connection details + safe management for an environment's managed
 // database: engine + version, internal address, external address (when published),
-// masked credentials (reveal for operator+), ready-to-paste connection URIs, and the
-// raw connection env keys, plus a Manage subtab (schemas/databases + users). Rendered
-// as one tab inside the Managed Service Console (and standalone via DatabaseInfoModal).
-// reveal/setReveal are lifted so the whole console shares one secret-reveal state.
+// masked credentials (per-value reveal for operator+), ready-to-paste connection URIs,
+// and the raw connection env keys, plus a Manage subtab (schemas/databases + users).
+// Rendered as one tab inside the Managed Service Console (and standalone via
+// DatabaseInfoModal). Secrets use SecretValue (own reveal + copy-real); `showAll` lets
+// the parent's "Reveal all" flip every value at once.
 
 export function CopyBtn({ value }) {
   const [done, setDone] = useState(false)
@@ -84,12 +85,16 @@ function ConnectBtn({ openAdminer, webSqlEnabled, adminerUrl, as = 'admin', labe
 
 // DatabasePanel renders the database tab body. info is fetched here (keyed on reveal);
 // onMeta lets a parent (the console header) show the engine/version badge.
-export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onMeta }) {
+export function DatabasePanel({ workspace, name, env, canReveal = false, showAll = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onMeta }) {
   const [tab, setTab] = useState('connection')
+  // For operator+ (canReveal) fetch the REAL secret values up front and mask them per-value
+  // client-side (SecretValue), so Copy works without first revealing — same model as the
+  // service-console tabs. Viewers fetch masked placeholders.
   const { data: info, isLoading } = useQuery({
-    queryKey: ['db-info', workspace, name, env, reveal],
-    queryFn: () => fetchDatabaseInfo(workspace, name, env, reveal),
+    queryKey: ['db-info', workspace, name, env, canReveal],
+    queryFn: () => fetchDatabaseInfo(workspace, name, env, canReveal),
   })
+  const secretKeys = new Set(info?.secret_keys || [])
   const has = info && info.engine && info.engine !== 'none'
   // Report engine/version to the parent header AFTER render (never call a parent's
   // setState during render — that triggers an infinite update loop and crashes the tree).
@@ -145,16 +150,11 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
             <Row label="Username" value={info.username} />
             <div className="flex items-center gap-2 text-xs">
               <span className="w-32 shrink-0 text-content-subtle">Password</span>
-              <code className="flex-1 break-all font-mono text-content-strong select-all">
-                {info.revealed ? (info.password || <span className="text-content-faint">(none)</span>) : '••••••••'}
-              </code>
-              {canReveal && info.has_password && (
-                <button type="button" onClick={() => setReveal(v => !v)}
-                  className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
-                  {info.revealed ? 'Hide' : 'Reveal'}
-                </button>
+              {info.has_password ? (
+                <SecretValue value={info.password !== undefined ? info.password : '••••••••'} canReveal={canReveal} showAll={showAll} />
+              ) : (
+                <code className="flex-1 break-all font-mono text-content-faint select-all">(none)</code>
               )}
-              {info.revealed && <CopyBtn value={info.password} />}
             </div>
           </section>
 
@@ -177,13 +177,16 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
             {(info.connections || []).map((c, i) => (
               <div key={i} className="flex items-center gap-2 text-xs">
                 <span className="w-32 shrink-0 text-content-subtle">{c.label}</span>
-                <code className="flex-1 break-all font-mono text-content-strong select-all">{c.value}</code>
-                <CopyBtn value={c.value} />
+                {c.secret ? (
+                  <SecretValue value={c.value} canReveal={canReveal} showAll={showAll} />
+                ) : (
+                  <>
+                    <code className="flex-1 break-all font-mono text-content-strong select-all">{c.value}</code>
+                    <CopyBtn value={c.value} />
+                  </>
+                )}
               </div>
             ))}
-            {!info.revealed && (
-              <p className="text-[11px] text-content-faint">Password masked — reveal it above to copy a ready-to-use URI.</p>
-            )}
           </section>
 
           {/* Raw env keys */}
@@ -194,7 +197,11 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
                 <div key={k} className="flex items-center gap-2 text-[11px] font-mono">
                   <span className="text-content-subtle">{k}</span>
                   <span className="text-content-faint">=</span>
-                  <span className="flex-1 break-all text-content select-all">{v}</span>
+                  {secretKeys.has(k) ? (
+                    <SecretValue value={v} canReveal={canReveal} showAll={showAll} />
+                  ) : (
+                    <span className="flex-1 break-all text-content select-all">{v}</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -208,7 +215,7 @@ export function DatabasePanel({ workspace, name, env, reveal, setReveal, canReve
 // DatabaseInfoModal — standalone modal wrapper around DatabasePanel (kept for any
 // direct callers; the env card now opens the tabbed ServiceConsoleModal instead).
 export default function DatabaseInfoModal({ workspace, name, env, canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onClose }) {
-  const [reveal, setReveal] = useState(false)
+  const [showAll, setShowAll] = useState(false)
   const [meta, setMeta] = useState(null)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -220,10 +227,18 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
             {meta && <span className="px-1.5 py-0.5 rounded border border-border-strong bg-surface-raised text-xs text-content">{meta.label} {meta.version}</span>}
             <span className="text-xs text-content-subtle">· {env}</span>
           </div>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+          <div className="flex items-center gap-3">
+            {canReveal && (
+              <button type="button" onClick={() => setShowAll(v => !v)}
+                className="px-2 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[11px]">
+                {showAll ? 'Hide all secrets' : 'Reveal all secrets'}
+              </button>
+            )}
+            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <DatabasePanel workspace={workspace} name={name} env={env} reveal={reveal} setReveal={setReveal}
+          <DatabasePanel workspace={workspace} name={name} env={env} showAll={showAll}
             canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setMeta} />
         </div>
       </div>
