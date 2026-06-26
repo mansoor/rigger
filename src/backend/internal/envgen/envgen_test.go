@@ -287,6 +287,37 @@ func TestOpenSearchEnv(t *testing.T) {
 	}
 }
 
+// Managed VictoriaMetrics writes the VICTORIA_* family with a plain http URL and NO
+// credentials (single-node has no auth) — so no password key and no generic DATABASE_URL.
+func TestVictoriaMetricsEnv(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name": "metrics", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "database": "victoriametrics" },
+      "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
+      "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	checks := map[string]string{
+		"DATABASE":      "victoriametrics",
+		"VICTORIA_HOST": "metrics_dev_victoriametrics",
+		"VICTORIA_PORT": "8428",
+		"VICTORIA_URL":  "http://metrics_dev_victoriametrics:8428",
+	}
+	for k, want := range checks {
+		if m[k] != want {
+			t.Errorf("%s = %q, want %q", k, m[k], want)
+		}
+	}
+	for _, k := range []string{"VICTORIA_PASSWORD", "VICTORIA_USER", "DATABASE_URL"} {
+		if _, ok := m[k]; ok {
+			t.Errorf("unexpected %s = %q (VictoriaMetrics has no auth / no generic URL)", k, m[k])
+		}
+	}
+}
+
 // TestAppURLNoDomain guards the empty-domain case: APP_URL must stay a valid
 // absolute URI (not the malformed "http://", which crashes Laravel artisan with
 // "Invalid URI"). With no domain it falls back to localhost + the HTTP port.

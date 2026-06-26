@@ -18,6 +18,7 @@ const (
 	dashStorage  = 38
 	dashMongo    = 51
 	dashSearch   = 49
+	dashTSDB     = 44
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
@@ -208,6 +209,9 @@ func (g *gen) emitVolumes(prefix string) {
 	}
 	if engine == "opensearch" {
 		add(prefix + "_opensearch_data")
+	}
+	if engine == "victoriametrics" {
+		add(prefix + "_victoriametrics_data")
 	}
 	if g.redisOn() {
 		add(prefix + "_redis_data")
@@ -864,6 +868,26 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
+	// VictoriaMetrics — time-series DB. Single-node, no auth on :8428. The image is
+	// FROM scratch (no shell/curl), so NO healthcheck is emitted (depHasHealthcheck
+	// returns false → dependents use service_started, like MinIO). Data persists in a
+	// named volume via -storageDataPath.
+	if engine == "victoriametrics" {
+		eng, _ := databases.Get("victoriametrics")
+		ver := g.dbVersion(eng)
+		g.line(sectionComment("VictoriaMetrics "+ver, dashTSDB))
+		g.line("  victoriametrics:")
+		g.line("    image: victoriametrics/victoria-metrics:" + ver)
+		g.line("    container_name: " + prefix + "_victoriametrics")
+		g.line("    command: -storageDataPath=/victoria-metrics-data -retentionPeriod=1")
+		g.dbExternalPorts(eng)
+		g.line("    volumes:")
+		g.line("      - " + prefix + "_victoriametrics_data:/victoria-metrics-data")
+		g.managedNet(prefix, "victoriametrics")
+		g.deployBlock(isSwarm, "victoriametrics", "1", "unless-stopped")
+		g.line("")
+	}
+
 	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  redis:")
@@ -1031,6 +1055,8 @@ func managedDepPort(name string) string {
 		return "27017"
 	case "opensearch":
 		return "9200"
+	case "victoriametrics":
+		return "8428"
 	case "redis":
 		return "6379"
 	case "minio":

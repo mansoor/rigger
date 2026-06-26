@@ -862,6 +862,36 @@ func TestManagedOpenSearch(t *testing.T) {
 	}
 }
 
+// Managed VictoriaMetrics emits a single-node service with a storage path + data
+// volume and — because the image is FROM scratch (no shell) — NO healthcheck (so
+// dependents wait for service_started).
+func TestManagedVictoriaMetrics(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"metrics","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0},"database":"victoriametrics"},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"3000","env_file":true}],
+		"environments": {"prod": {"deployment":"compose","domain":"example.com","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	out, err := GenerateAt(cfg, "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"  victoriametrics:",
+		"image: victoriametrics/victoria-metrics:v1.102.0",
+		"command: -storageDataPath=/victoria-metrics-data -retentionPeriod=1",
+		"metrics_prod_victoriametrics_data:/victoria-metrics-data",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+	// No shell in the image → no healthcheck is emitted (app has none either).
+	if strings.Contains(s, "healthcheck:") {
+		t.Errorf("VictoriaMetrics must not carry a healthcheck:\n%s", s)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

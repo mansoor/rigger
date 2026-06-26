@@ -72,6 +72,18 @@ var catalog = []Engine{
 		Port:           9200, VolumePath: "/usr/share/opensearch/data",
 		Driver: "opensearch", EnvPrefix: "OPENSEARCH", Schemas: false, Users: false,
 	},
+	{
+		// VictoriaMetrics — time-series database (Prometheus-compatible: PromQL +
+		// remote-write). NOT SQL (Schemas/Users false → connection info only). Single
+		// node, no auth on :8428 by default, so there's no user/password. The image is
+		// built FROM scratch (no shell) → it carries NO Docker healthcheck (dependents
+		// wait for service_started, like MinIO).
+		ID: "victoriametrics", Label: "VictoriaMetrics", Image: "victoriametrics/victoria-metrics",
+		Versions:       []string{"v1.102.0", "latest"},
+		DefaultVersion: "v1.102.0",
+		Port:           8428, VolumePath: "/victoria-metrics-data",
+		Driver: "victoriametrics", EnvPrefix: "VICTORIA", Schemas: false, Users: false,
+	},
 }
 
 // Catalog returns the ordered list of hostable engines.

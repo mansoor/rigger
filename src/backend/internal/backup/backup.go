@@ -132,7 +132,7 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		if !c.sqlDump("mysql", "mariadb", "mysql", dateDir, backupDir) {
 			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
 		}
-	case "mongodb", "opensearch":
+	case "mongodb", "opensearch", "victoriametrics":
 		// Non-SQL engines have no logical-dump path here — capture the data volume
 		// instead (restore is volume-level, not logical). Volume name = {prefix}_{engine}_data.
 		c.archiveManagedDBVolume(database, dateDir, backupDir)

@@ -156,6 +156,10 @@ func (h *Handler) GetDatabaseInfo(w http.ResponseWriter, r *http.Request) {
 		// verification (in-network only).
 		scheme = "https"
 		resp.Note = "OpenSearch serves HTTPS with a self-signed demo certificate — connect over https with certificate verification disabled (in-network only). Needs RAM (JVM) and the host sysctl vm.max_map_count=262144."
+	case "victoriametrics":
+		// Single-node TSDB, no auth — the URI is just the base address.
+		scheme = "http"
+		resp.Note = "VictoriaMetrics (single-node) has no authentication. Push metrics via Prometheus remote-write to " + internalHost + ":" + strconv.Itoa(port) + "/api/v1/write and query with PromQL at /api/v1/query."
 	}
 	uri := func(host string, p int) string {
 		return fmt.Sprintf("%s://%s:%s@%s:%d/%s%s", scheme, user, shownPass, host, p, dbName, suffix)

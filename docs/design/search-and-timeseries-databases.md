@@ -1,9 +1,22 @@
 # Search & time-series managed databases + Rigger's own metrics store
 
-**Status: DESIGN / EXPLORATION (nothing built).** Captures the options for adding
-ElasticSearch/OpenSearch and a time-series database (TSDB) as managed engines, and a
-separate track for Rigger itself to store container stats in a TSDB instead of SQLite.
-Decide direction before implementing.
+**Status: Parts A + B BUILT (develop, 2026-06-26); Part C + web-UI sidecars deferred.**
+Part A (OpenSearch) and Part B (VictoriaMetrics) ship as managed engines, connection-info
+only — see the per-engine notes below for what was actually built. Part C (Rigger's own
+container-stats store → pluggable Sink + Rigger-managed VictoriaMetrics sidecar) and the
+optional web-UI sidecars (OpenSearch Dashboards / Grafana / VMUI) remain design-only.
+
+**Decisions taken:** OpenSearch (not ElasticSearch — licensing); VictoriaMetrics (not
+InfluxDB/TimescaleDB). Both slot into the `internal/databases` catalog as non-SQL engines
+(`Schemas`/`Users` false → connection info only), exactly like MongoDB.
+
+**Built-engine specifics:** OpenSearch runs single-node with the security plugin ON →
+HTTPS on 9200 (self-signed demo cert), fixed `admin` user, `OPENSEARCH_INITIAL_ADMIN_PASSWORD`
+from a complexity-meeting strong password (OpenSearch 2.12+ enforces a zxcvbn score — random
+generation passes; sequences/words fail); needs RAM + host `vm.max_map_count=262144`.
+VictoriaMetrics runs single-node, no auth on :8428; its image is FROM scratch (no shell) so it
+carries NO Docker healthcheck (dependents use `service_started`, like MinIO). Both back up at
+the volume level (no logical dump; restore is volume-restore).
 
 ## Context
 
