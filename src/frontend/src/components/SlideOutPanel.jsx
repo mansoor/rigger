@@ -63,7 +63,7 @@ function FilterBar({ workspaceFilter, setWorkspaceFilter, typeFilter, setTypeFil
         className="px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content focus:outline-none focus:border-brand-500"
       >
         <option value="all">All types</option>
-        <option value="image">Image stacks</option>
+        <option value="image">Image stacks / Compose</option>
         <option value="custom">Custom apps</option>
       </select>
       {(workspaceFilter || typeFilter !== 'all') && (

@@ -1630,6 +1630,14 @@ func parseStackServicesJSON(out []byte, runErr error) string {
 	}
 }
 
+// isOneShotService reports whether a compose service is a synthesized run-once job
+// (restart:"no") rather than a long-lived service: the MinIO bucket init ("…_init")
+// or a pre-deploy migration gate ("…-migrate"). A clean (exit 0) one-shot is not a
+// stopped service, so it must not drag an env's status to "partial".
+func isOneShotService(name string) bool {
+	return strings.HasSuffix(name, "_init") || strings.HasSuffix(name, "-migrate")
+}
+
 // parseComposePsJSON parses docker compose ps --format json (NDJSON) output.
 // Each line is a JSON object with at least a "State" field.
 func parseComposePsJSON(out []byte, runErr error) string {
@@ -1657,12 +1665,11 @@ func parseComposePsJSON(out []byte, runErr error) string {
 		}
 		state  := strings.ToLower(row.State + " " + row.Status)
 		health := strings.ToLower(row.Health)
-		// One-shot init jobs (service name ends in "_init", e.g. minio_init creating the
-		// S3 bucket) run once and exit 0 — that's success, not a stopped service. Skip
-		// them from the tally so a completed init doesn't drag the env to "partial" and
-		// disable the URL. A still-running or non-zero-exit init is NOT skipped, so a
-		// stuck/failed init correctly surfaces as partial.
-		if strings.HasSuffix(row.Service, "_init") && strings.Contains(state, "exit") && row.ExitCode == 0 {
+		// One-shot synthesized jobs run once and exit 0 — that's success, not a stopped
+		// service. Skip them from the tally so a completed job doesn't drag the env to
+		// "partial" and disable the URL. A still-running or non-zero-exit job is NOT
+		// skipped, so a stuck/failed one correctly surfaces as partial.
+		if isOneShotService(row.Service) && strings.Contains(state, "exit") && row.ExitCode == 0 {
 			continue
 		}
 		total++

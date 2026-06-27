@@ -152,8 +152,8 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
 // repo → blueprint. "Database Hosting" is appended later (roadmap Phase 4).
 const STACK_TYPES = [
   { id: 'prebuilt',  label: 'Pre-built template',  desc: 'Pick from curated stacks — NPM, WordPress, Vaultwarden, Uptime Kuma…' },
-  { id: 'image',     label: 'Image stack',          desc: 'Deploy any Docker images — specify your own image names, tags, and ports.' },
-  { id: 'database',  label: 'Database hosting', desc: 'Run a managed database (PostgreSQL, MySQL, MariaDB) on its own — no app code.' },
+  { id: 'image',     label: 'Image stack / Docker Compose', desc: 'Deploy any Docker images — specify your own image names, tags, and ports, or import a docker-compose file.' },
+  { id: 'database',  label: 'Managed service hosting', desc: 'Run managed services on their own — databases (PostgreSQL, MySQL, MariaDB, MongoDB), Redis, object storage, search, metrics — no app code.' },
   { id: 'scan',      label: 'From a Git repository',  desc: 'Point Rigger at your app repo — it detects the stack and drafts the services.' },
   { id: 'blueprint', label: 'Start from a stack template', desc: 'No repo yet — pick a stack (Laravel, Spring, Django, Go, .NET…); Rigger scaffolds a starter Dockerfile + services.' },
   { id: 'custom',    label: 'Custom application',  desc: 'Your own code — Laravel, Node.js, Next.js, React with a database.' },
@@ -958,13 +958,14 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       {/* No-repo stack template picker */}
       {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
 
-      {/* Database hosting: a managed database on its own (no app code). The engine
-          + CloudBeaver are chosen on the next step (Dependencies). */}
+      {/* Managed service hosting: managed services on their own (no app code). The
+          engines + tooling are chosen on the next step (Managed services). */}
       {data.stackType === 'database' && (
         <p className="text-xs text-content-subtle">
-          A standalone managed database with auto-generated credentials. Pick the engine on the next
-          step (Dependencies). Connect from other projects (shared network), from outside (enable
-          external access per-environment in Edit Project), or browse it via CloudBeaver.
+          Standalone managed services with auto-generated credentials — a database, Redis cache,
+          object storage, search or metrics engine. Pick what to run on the next step (Managed
+          services). Connect from other projects (shared network), from outside (enable external
+          access per-environment in Edit Project), or browse a SQL database via Adminer.
         </p>
       )}
 

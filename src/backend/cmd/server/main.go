@@ -819,6 +819,8 @@ func main() {
 			handler.GetSystemEmail(w, r)
 		case r.Method == "PUT" && path == "/api/settings/system-email":
 			handler.PutSystemEmail(w, r)
+		case r.Method == "POST" && path == "/api/settings/system-email/test":
+			handler.TestSystemEmail(w, r)
 		// Backup targets
 		case r.Method == "GET" && path == "/api/settings/backup-targets":
 			handler.ListBackupTargets(w, r)

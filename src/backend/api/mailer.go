@@ -91,6 +91,32 @@ func (h *Handler) GetSystemEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/settings/system-email/test — admin. Sends a test message using the
+// SAVED SMTP config to verify deliverability. Body: {"to": "..."} (optional; defaults
+// to the From address). Returns 400 when SMTP isn't configured/saved yet.
+func (h *Handler) TestSystemEmail(w http.ResponseWriter, r *http.Request) {
+	cfg, ok := h.systemSMTP()
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "system email is not configured — set the SMTP host and From address, then Save before testing"})
+		return
+	}
+	var b struct {
+		To string `json:"to"`
+	}
+	_ = readJSON(r, &b)
+	to := strings.TrimSpace(b.To)
+	if to == "" {
+		to = cfg.From
+	}
+	cfg.To = to
+	body := "This is a test email from Rigger's System Email settings.\n\nIf you received this, your SMTP configuration is working."
+	if err := notify.SendTransactional(cfg, "Rigger test email", body); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "sent", "to": to})
+}
+
 // PUT /api/settings/system-email — admin. Empty password keeps the existing one.
 func (h *Handler) PutSystemEmail(w http.ResponseWriter, r *http.Request) {
 	var b struct {

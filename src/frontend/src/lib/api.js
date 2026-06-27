@@ -340,6 +340,7 @@ export const updateProfile       = (body)        => api.put('/auth/profile', bod
 // System (transactional) email settings — admin.
 export const fetchSystemEmail  = ()     => api.get('/settings/system-email').then(r => r.data)
 export const updateSystemEmail = (body) => api.put('/settings/system-email', body).then(r => r.data)
+export const testSystemEmail   = (to)   => api.post('/settings/system-email/test', { to }).then(r => r.data)
 
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)

@@ -24,9 +24,8 @@ import {
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
   fetchUsers, inviteUser, updateUser, deleteUser, resendInvite,
-  fetchSystemEmail, updateSystemEmail,
+  fetchSystemEmail, updateSystemEmail, testSystemEmail,
 } from '../lib/api'
-import { useWorkspaceStore } from '../store/workspace'
 import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import {
@@ -1226,7 +1225,8 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
   const [conditionType, setConditionType] = useState(initial?.condition_type || conditions[0]?.value || 'container_down')
   const [threshold, setThreshold]       = useState(initial?.threshold ?? 80)
   const [severity, setSeverity]         = useState(initial?.severity || 'warning')
-  const [workspace, setWorkspace]       = useState(initial?.workspace || '')
+  const [wsKey, setWsKey]               = useState(initial?.workspace_key || '')
+  const [projectKey, setProjectKey]     = useState(initial?.workspace || '')
   const [env, setEnv]                   = useState(initial?.env || '')
   const [cooldown, setCooldown]         = useState(initial?.cooldown_minutes ?? 15)
   const [enabled, setEnabled]           = useState(initial?.enabled ?? true)
@@ -1241,18 +1241,23 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
   const isHost    = cond.scope === 'host'
   const isNumeric = !!cond.numeric
 
-  // Alert targets key by the project's resource prefix ({workspace}_{project}).
-  const wsPrefix = (w) => w.resource_prefix || `${w.workspace}_${w.name}`
-  const wsObj = workspaces.find(w => wsPrefix(w) === workspace)
-  const envOptions = [{ value: '', label: 'All environments' },
-    ...((wsObj?.envs || []).map(e => ({ value: e, label: e })))]
-  const wsOptions = [{ value: '', label: 'All projects' },
-    ...workspaces.map(w => ({ value: wsPrefix(w), label: w.name }))]
+  // Targeting is hierarchical: workspace tier → project → environment, matching the
+  // backend rule fields (workspace_key → workspace [project key] → env). Each level
+  // narrows the next; an empty level means "all" below it. Projects for the selected
+  // workspace are fetched on demand so the dropdowns show friendly names, not keys.
+  const { data: projects = [] } = useQuery({
+    queryKey: ['projects', wsKey], queryFn: () => fetchProjects(wsKey), enabled: !!wsKey,
+  })
+  const wsOptions   = [{ value: '', label: 'All workspaces' },
+    ...workspaces.map(w => ({ value: w.key, label: w.name || w.key }))]
+  const projOptions = [{ value: '', label: 'All projects' },
+    ...projects.map(p => ({ value: p.name, label: p.config?.project?.name || p.name }))]
+  const projObj     = projects.find(p => p.name === projectKey)
+  const envOptions  = [{ value: '', label: 'All environments' },
+    ...((projObj?.envs || []).map(e => ({ value: e, label: e })))]
 
-  function changeWorkspace(v) {
-    setWorkspace(v)
-    if (!v) setEnv('') // "all workspaces" can't target a specific env
-  }
+  function changeWs(v)      { setWsKey(v); setProjectKey(''); setEnv('') }
+  function changeProject(v) { setProjectKey(v); setEnv('') }
 
   async function submit(e) {
     e.preventDefault()
@@ -1263,9 +1268,9 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
       name: name.trim(),
       condition_type: conditionType,
       threshold: isNumeric ? Number(threshold) : 0,
-      workspace_key: initial?.workspace_key || '', // preserve a rule's workspace scope on edit
-      workspace: isHost ? '' : workspace,
-      env: (isHost || !workspace) ? '' : env,
+      workspace_key: isHost ? '' : wsKey,
+      workspace: (isHost || !wsKey) ? '' : projectKey,
+      env: (isHost || !projectKey) ? '' : env,
       severity,
       cooldown_minutes: Number(cooldown) || 15,
       enabled,
@@ -1308,16 +1313,27 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
           <p className="text-xs text-content-muted">This condition is evaluated against the <span className="text-content font-medium">host</span> and applies globally.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label>Workspace</Label>
-            <Select value={workspace} onChange={changeWorkspace} options={wsOptions} />
+        <div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label>Workspace</Label>
+              <Select value={wsKey} onChange={changeWs} options={wsOptions} />
+            </div>
+            <div>
+              <Label>Project</Label>
+              <Select value={projectKey} onChange={changeProject} options={projOptions} disabled={!wsKey} />
+            </div>
+            <div>
+              <Label>Environment</Label>
+              <Select value={env} onChange={setEnv} options={envOptions} disabled={!projectKey} />
+            </div>
           </div>
-          <div>
-            <Label>Environment</Label>
-            <Select value={env} onChange={setEnv} options={envOptions} disabled={!workspace} />
-            {!workspace && <p className="text-xs text-content-faint mt-1">Applies to all environments.</p>}
-          </div>
+          <p className="text-xs text-content-faint mt-1">
+            {!wsKey ? 'Applies to all workspaces.'
+              : !projectKey ? 'Applies to all projects in this workspace.'
+              : !env ? 'Applies to all environments in this project.'
+              : `Targets ${projectKey} / ${env}.`}
+          </p>
         </div>
       )}
 
@@ -1374,10 +1390,7 @@ function RulesTab() {
   const qc = useQueryClient()
   const { data: rules = [], isLoading } = useQuery({ queryKey: ['alert-rules'], queryFn: fetchAlertRules })
   const { data: meta }       = useQuery({ queryKey: ['alert-meta'], queryFn: fetchAlertMeta })
-  const currentWs = useWorkspaceStore(s => s.current)
-  const { data: workspaces = [] } = useQuery({
-    queryKey: ['projects', currentWs], queryFn: () => fetchProjects(currentWs), enabled: !!currentWs,
-  })
+  const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const { data: channels = [] } = useQuery({ queryKey: ['notification-channels'], queryFn: fetchNotificationChannels })
   const [modal, setModal]       = useState(null) // null | 'new' | { editing: rule }
   const [deleting, setDeleting] = useState(null)
@@ -1403,8 +1416,13 @@ function RulesTab() {
   }
 
   function targetLabel(r) {
-    if (!r.workspace) return 'All workspaces'
-    return r.env ? `${r.workspace} / ${r.env}` : `${r.workspace} (all envs)`
+    if (!r.workspace_key) return 'All workspaces'
+    let s = r.workspace_key
+    if (r.workspace) s += ` / ${r.workspace}`
+    if (r.env) s += ` / ${r.env}`
+    else if (r.workspace) s += ' (all envs)'
+    else s += ' (all projects)'
+    return s
   }
 
   if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
@@ -2077,12 +2095,24 @@ function SystemEmailTab() {
   const [f, setF] = useState(null)
   const [pw, setPw] = useState('')
   const [saved, setSaved] = useState(false)
+  const [testTo, setTestTo] = useState('')
+  const [testStatus, setTestStatus] = useState(null) // null | {loading} | {ok, to} | {error}
   if (!f && cfg) setF({ host: cfg.host || '', port: cfg.port || '587', username: cfg.username || '', from: cfg.from || '', tls: cfg.tls !== false, base_url: cfg.base_url || '' })
 
   const mut = useMutation({
     mutationFn: () => updateSystemEmail({ ...f, password: pw }),
     onSuccess: () => { setPw(''); setSaved(true); qc.invalidateQueries({ queryKey: ['system-email'] }) },
   })
+
+  async function sendTest() {
+    setTestStatus({ loading: true })
+    try {
+      const res = await testSystemEmail(testTo.trim())
+      setTestStatus({ ok: true, to: res.to })
+    } catch (err) {
+      setTestStatus({ error: err.response?.data?.error || 'Failed to send' })
+    }
+  }
   const set = (k, v) => { setF(s => ({ ...s, [k]: v })); setSaved(false) }
   if (isLoading || !f) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
@@ -2107,6 +2137,26 @@ function SystemEmailTab() {
           <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save'}</Btn>
           {saved && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
+      </div>
+
+      {/* Send a test email using the saved config to verify deliverability. */}
+      <div className="bg-surface border border-border rounded-xl p-5 mt-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-content-strong">Send a test email</h3>
+          <p className="text-xs text-content-subtle mt-0.5">Uses the saved SMTP settings above. Save any changes first. Leave the recipient blank to send to the From address.</p>
+        </div>
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <Label>Recipient</Label>
+            <Input value={testTo} onChange={v => { setTestTo(v); setTestStatus(null) }} placeholder={f.from || 'you@example.com'} />
+          </div>
+          <Btn variant="secondary" onClick={sendTest} disabled={testStatus?.loading || !cfg.host}>
+            {testStatus?.loading ? 'Sending…' : 'Send test'}
+          </Btn>
+        </div>
+        {testStatus?.ok && <p className="text-xs text-success-fg">✓ Test email sent to {testStatus.to}.</p>}
+        {testStatus?.error && <p className="text-xs text-danger-fg">{testStatus.error}</p>}
+        {!cfg.host && <p className="text-xs text-content-faint">Configure and save the SMTP host first.</p>}
       </div>
     </div>
   )

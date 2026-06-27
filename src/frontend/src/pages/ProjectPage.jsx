@@ -562,12 +562,20 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   // Start from config.services so services not yet started still show; managed
   // dependencies (db/redis/garage) appear once running from compose ps.
   const configImages = ws?.config?.services || []
-  const serviceRows = configImages.length > 0
-    ? configImages.map(img => {
-        const live = containerDetails.find(c => c.short === img.name)
-        return live || { short: img.name, Name: '', Service: `${name}_${envName}_${img.name}`, State: '', Health: '', Status: '' }
-      })
-    : containerDetails
+  let serviceRows
+  if (configImages.length > 0) {
+    serviceRows = configImages.map(img => {
+      const live = containerDetails.find(c => c.short === img.name)
+      return live || { short: img.name, Name: '', Service: `${name}_${envName}_${img.name}`, State: '', Health: '', Status: '' }
+    })
+    // Include actual containers not declared in config.services — managed dependencies
+    // (db/redis/minio/adminer/…) and synthesized one-shots (*_init / *-migrate) — so this
+    // list matches the Logs view (compose ps --all) and the env status tally.
+    const known = new Set(serviceRows.map(r => r.short))
+    containerDetails.forEach(c => { if (!known.has(c.short)) serviceRows.push(c) })
+  } else {
+    serviceRows = containerDetails
+  }
 
   // Per-service update info (image stacks only)
   const updateByService = Object.fromEntries(
@@ -764,10 +772,18 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           {containersOpen && (
             <div className="space-y-1.5">
               {serviceRows.map(c => {
-                const dotCls    = c.State ? containerDotClass(c) : 'bg-surface-overlay'
-                const txtCls    = c.State ? containerTxtClass(c) : 'text-content-faint'
-                const label     = c.State ? containerStatusLabel(c) : 'Not started'
-                const isNeutral = !c.State || (c.State === 'running' && (c.Health === 'healthy' || c.Health === ''))
+                // Completed/failed one-shot jobs (init/migrate) read as a neutral
+                // "Completed" (clean exit) rather than an alarming red "Exited".
+                const oneShot   = isOneShotName(c.short) && (c.State === 'exited' || c.State === 'dead')
+                const oneShotOk = oneShot && isCleanExit(c)
+                const dotCls    = oneShot ? (oneShotOk ? 'bg-green-400/50' : 'bg-red-500')
+                                : c.State ? containerDotClass(c) : 'bg-surface-overlay'
+                const txtCls    = oneShot ? (oneShotOk ? 'text-content-faint' : 'text-danger-fg')
+                                : c.State ? containerTxtClass(c) : 'text-content-faint'
+                const label     = oneShot ? (oneShotOk ? 'Completed' : 'Failed')
+                                : c.State ? containerStatusLabel(c) : 'Not started'
+                const isNeutral = oneShot ? oneShotOk
+                                : (!c.State || (c.State === 'running' && (c.Health === 'healthy' || c.Health === '')))
                 const isRunning = c.State === 'running'
                 const upd       = updateByService[c.short]
                 return (
@@ -812,6 +828,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                         )}
                         {isRunning
                           ? <CtlBtn title="Stop" className="text-content-faint hover:text-danger-fg" onClick={() => handleAction('stop', [c.Service])}>■</CtlBtn>
+                          : oneShot
+                          ? null
                           : <CtlBtn title="Start" className="text-content-faint hover:text-info-fg" onClick={() => handleAction('start', [c.Service])}>
                               <svg viewBox="0 0 10 10" className="w-2.5 h-2.5 inline-block align-middle" fill="currentColor" aria-hidden="true">
                                 <path d="M2 1.5L8.5 5L2 8.5Z" />
@@ -1449,6 +1467,11 @@ function containerTxtClass(c) {
   if (c.State === 'exited' || c.State === 'dead')       return 'text-danger-fg'
   return 'text-content-muted'
 }
+
+// One-shot synthesized jobs (MinIO bucket init "…_init", pre-deploy migrate "…-migrate")
+// run once and exit; a clean exit is success, not a stopped/failed service.
+function isOneShotName(n) { return /(_init|-migrate)$/.test(n || '') }
+function isCleanExit(c)   { return /\(0\)/.test(c.Status || '') }
 
 // Human-readable status label for a container
 function containerStatusLabel(c) {
