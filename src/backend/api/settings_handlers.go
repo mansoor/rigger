@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/managedmetrics"
 	"github.com/mansoor/rigger/ui/internal/managedregistry"
 	"github.com/mansoor/rigger/ui/internal/settings"
 )
@@ -431,6 +432,72 @@ func (h *Handler) ManagedRegistryAction(w http.ResponseWriter, r *http.Request) 
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be up, down, or gc"})
 	}
+}
+
+// managedMetricsStatus is the state of the Rigger-managed VictoriaMetrics sidecar (Part C):
+// Rigger's own container metrics are dual-written here for long retention when enabled.
+type managedMetricsStatus struct {
+	Running   bool   `json:"running"`    // container is up
+	Exists    bool   `json:"exists"`     // container exists (running or stopped)
+	Enabled   bool   `json:"enabled"`    // collector is dual-writing to it (metrics_tsdb_enabled)
+	URL       string `json:"url"`        // in-network write/query base URL
+	Retention string `json:"retention"`  // retention window (months)
+	DiskUsage string `json:"disk_usage"` // data-volume size, e.g. "42M"
+}
+
+// GET /api/settings/metrics/managed — status of the Rigger-managed metrics TSDB.
+func (h *Handler) GetManagedMetrics(w http.ResponseWriter, r *http.Request) {
+	mgr := managedmetrics.New(nil)
+	st := managedMetricsStatus{
+		Running:   mgr.Running(),
+		Exists:    mgr.Exists(),
+		Enabled:   settings.AppSetting(h.db, managedmetrics.SettingKey) == "true",
+		URL:       managedmetrics.WriteURL,
+		Retention: managedmetrics.Retention,
+	}
+	if st.Running {
+		st.DiskUsage = mgr.DiskUsage()
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// POST /api/settings/metrics/managed — run/stop the managed metrics TSDB. Body:
+// {"action": "up"|"down"}. "up" starts the container AND turns on dual-write; "down"
+// stops the container (keeping the data volume) AND turns dual-write off.
+func (h *Handler) ManagedMetricsAction(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action string `json:"action"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	mgr := managedmetrics.New(nil)
+	switch body.Action {
+	case "up":
+		if err := mgr.Up(); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := settings.SetAppSetting(h.db, managedmetrics.SettingKey, "true"); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save setting: " + err.Error()})
+			return
+		}
+	case "down":
+		// Turn dual-write off first so the collector stops targeting a going-away container.
+		if err := settings.SetAppSetting(h.db, managedmetrics.SettingKey, "false"); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "save setting: " + err.Error()})
+			return
+		}
+		if err := mgr.Down(); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			return
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be up or down"})
+		return
+	}
+	h.GetManagedMetrics(w, r)
 }
 
 // managedRegistryUp starts (or restarts) the managed registry, upserts its

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/managedmetrics"
+	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/stats"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -65,8 +67,11 @@ type Collector struct {
 	interval      time.Duration
 	provider      StatsProvider // multi-host stats; nil ⇒ local only
 
-	diskMu    sync.Mutex      // guards diskCache
+	diskMu    sync.Mutex       // guards diskCache
 	diskCache map[string]int64 // last-known dir size per path (so a slow/timed-out du reuses it)
+
+	sqlite *SQLiteSink // default, always-on store (env-card sparklines read it)
+	tsdb   *TSDBSink   // managed VictoriaMetrics; written only when the toggle is on
 }
 
 // NewCollector builds a collector. interval <= 0 defaults to 1 minute. A nil
@@ -75,7 +80,18 @@ func NewCollector(d *db.DB, workspacesDir string, interval time.Duration, provid
 	if interval <= 0 {
 		interval = DefaultIntervalSeconds * time.Second
 	}
-	return &Collector{db: d, workspacesDir: workspacesDir, interval: interval, provider: provider, diskCache: map[string]int64{}}
+	return &Collector{
+		db: d, workspacesDir: workspacesDir, interval: interval, provider: provider,
+		diskCache: map[string]int64{},
+		sqlite:    NewSQLiteSink(d),
+		tsdb:      NewTSDBSink(managedmetrics.WriteURL),
+	}
+}
+
+// tsdbEnabled reports whether dual-write to the managed VictoriaMetrics is on. Read
+// each cycle (cheap) so toggling it in Admin takes effect without restarting Rigger.
+func (c *Collector) tsdbEnabled() bool {
+	return settings.AppSetting(c.db, managedmetrics.SettingKey) == "true"
 }
 
 // Run starts the collector loop in a background goroutine.
@@ -124,7 +140,9 @@ func (c *Collector) gatherStats() map[string]stats.ProjectStats {
 	}
 }
 
-// collect writes one snapshot per workspace/env, then prunes old rows.
+// collect samples every workspace/env once, then fans the batch out to the active
+// sinks: SQLite always (the dashboard source), plus the managed VictoriaMetrics when
+// the toggle is on. A sink error is logged but never aborts the cycle.
 func (c *Collector) collect() {
 	projStats := c.gatherStats()
 
@@ -134,6 +152,8 @@ func (c *Collector) collect() {
 		return
 	}
 
+	now := time.Now()
+	samples := make([]Sample, 0, 16)
 	for _, w := range wss {
 		base := w.Config.Project.Prefix()
 		if base == "" {
@@ -141,17 +161,29 @@ func (c *Collector) collect() {
 		}
 		for _, env := range w.Envs {
 			ps := projStats[base+"_"+env]
-			memBytes := int64(ps.MemMB * 1024 * 1024)
-			diskBytes := c.dirSizeBytes(wspath.EnvDir(c.workspacesDir, w.WorkspaceName, w.Name, env))
 			// Key by the resource prefix (globally unique) so same-named projects in
 			// different workspaces don't collide.
-			if _, err := c.db.Exec(
-				`INSERT INTO metrics_snapshots (project, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
-				 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-				base, env, ps.CPUPct, memBytes, diskBytes, int64(ps.NetRxBytes), int64(ps.NetTxBytes),
-			); err != nil {
-				log.Printf("metrics: insert %s/%s: %v", w.Name, env, err)
-			}
+			samples = append(samples, Sample{
+				Project:     base,
+				Env:         env,
+				CPUPct:      ps.CPUPct,
+				MemoryBytes: int64(ps.MemMB * 1024 * 1024),
+				DiskBytes:   c.dirSizeBytes(wspath.EnvDir(c.workspacesDir, w.WorkspaceName, w.Name, env)),
+				NetRxBytes:  int64(ps.NetRxBytes),
+				NetTxBytes:  int64(ps.NetTxBytes),
+				At:          now,
+			})
+		}
+	}
+	if len(samples) == 0 {
+		return
+	}
+	if err := c.sqlite.Write(samples); err != nil {
+		log.Printf("metrics: sqlite write: %v", err)
+	}
+	if c.tsdbEnabled() {
+		if err := c.tsdb.Write(samples); err != nil {
+			log.Printf("metrics: tsdb write: %v", err)
 		}
 	}
 }

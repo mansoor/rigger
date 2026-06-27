@@ -1,10 +1,16 @@
 # Search & time-series managed databases + Rigger's own metrics store
 
-**Status: Parts A + B BUILT (develop, 2026-06-26); Part C + web-UI sidecars deferred.**
+**Status: Parts A + B + C BUILT (develop, 2026-06-26); web-UI sidecars deferred.**
 Part A (OpenSearch) and Part B (VictoriaMetrics) ship as managed engines, connection-info
-only — see the per-engine notes below for what was actually built. Part C (Rigger's own
-container-stats store → pluggable Sink + Rigger-managed VictoriaMetrics sidecar) and the
-optional web-UI sidecars (OpenSearch Dashboards / Grafana / VMUI) remain design-only.
+only. **Part C (Rigger's own container-stats store) is now BUILT**: a pluggable
+`metrics.Sink` (`SQLiteSink` default + `TSDBSink`) dual-writes to a Rigger-managed
+VictoriaMetrics sidecar (`internal/managedmetrics`, mirrors `internal/managedregistry`) when
+the admin toggle is on — SQLite stays the env-card source; VM adds durable long-retention +
+PromQL/Grafana-ready storage. Internal-only (on traefik_net, reached by container name; no
+host port / Traefik route). Admin card under Settings → General → Metrics storage. The
+optional web-UI sidecars (OpenSearch Dashboards / Grafana / VMUI) remain design-only, as does
+switching the in-app dashboards to read VM (the tiered "after ~15d serve old windows from VM"
+idea) and **VictoriaLogs/Loki for pipeline & action logs** (a possible future "Part D").
 
 **Decisions taken:** OpenSearch (not ElasticSearch — licensing); VictoriaMetrics (not
 InfluxDB/TimescaleDB). Both slot into the `internal/databases` catalog as non-SQL engines

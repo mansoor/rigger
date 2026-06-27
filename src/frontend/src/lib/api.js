@@ -434,6 +434,9 @@ export const markRegistrySystem   = (id, system) => api.post(`/settings/registri
 // Rigger-managed registry (one-click registry:2 sidecar).
 export const fetchManagedRegistry = ()           => api.get('/settings/registries/managed').then(r => r.data)
 export const managedRegistryAction = (action)    => api.post('/settings/registries/managed', { action }).then(r => r.data)
+// Rigger-managed metrics TSDB (one-click VictoriaMetrics sidecar — Part C).
+export const fetchManagedMetrics  = ()           => api.get('/settings/metrics/managed').then(r => r.data)
+export const managedMetricsAction = (action)     => api.post('/settings/metrics/managed', { action }).then(r => r.data)
 
 // Workspace-scoped registry pool (Phase 3): own registries + granted globals.
 export const fetchWorkspaceRegistries = (ws)         => api.get(`/workspaces/${ws}/registries`).then(r => r.data)

@@ -841,6 +841,11 @@ func main() {
 			handler.GetManagedRegistry(w, r)
 		case r.Method == "POST" && path == "/api/settings/registries/managed":
 			handler.ManagedRegistryAction(w, r)
+		// Rigger-managed metrics TSDB (Part C — VictoriaMetrics for Rigger's own metrics).
+		case r.Method == "GET" && path == "/api/settings/metrics/managed":
+			handler.GetManagedMetrics(w, r)
+		case r.Method == "POST" && path == "/api/settings/metrics/managed":
+			handler.ManagedMetricsAction(w, r)
 		case r.Method == "POST" && matchPrefix(path, "/api/settings/registries/") && hasSuffix(path, "/system"):
 			handler.MarkRegistrySystem(w, r)
 		case r.Method == "PUT" && matchPrefix(path, "/api/settings/registries/") && !hasSuffix(path, "/test"):
