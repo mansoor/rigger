@@ -12,6 +12,11 @@ optional web-UI sidecars (OpenSearch Dashboards / Grafana / VMUI) remain design-
 switching the in-app dashboards to read VM (the tiered "after ~15d serve old windows from VM"
 idea) and **VictoriaLogs/Loki for pipeline & action logs** (a possible future "Part D").
 
+> **Planned next:** promote OpenSearch + VictoriaMetrics from single-slot catalog DB
+> engines to opt-in **auxiliary** services that run alongside a primary database, each with
+> its own console tab. Detailed plan: [standalone-search-tsdb-services.md](standalone-search-tsdb-services.md)
+> (deferred — revisit after more testing).
+
 **Decisions taken:** OpenSearch (not ElasticSearch — licensing); VictoriaMetrics (not
 InfluxDB/TimescaleDB). Both slot into the `internal/databases` catalog as non-SQL engines
 (`Schemas`/`Users` false → connection info only), exactly like MongoDB.
