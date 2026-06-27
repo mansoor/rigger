@@ -1,6 +1,13 @@
 # Proxy Service — standalone reverse-proxy manager (top-level page)
 
-**Status: PLANNED — not yet implemented.**
+**Status: BUILT (PX-1–PX-5, develop). PX-6 (WAF/cache plugins) scaffolding shipped;
+the one-time plugin install in docker-compose is a documented opt-in (commented).**
+Backend: `internal/proxyroutes` (store + file-provider renderer, unit-tested),
+`api/proxy_handlers.go` (CRUD + `/test` probe + `/certs` + plugin toggles), migration
+`proxy_routes`, boot re-render, catch-all `/__proxydefault/{mode}` responder. Frontend:
+top-level `Proxy Service` page (`/proxy`, admin-only) with route list, add/edit modal,
+default-route card, plugins card. Live: clean boot, migration applied, `proxy-base.yml`
+rendered. Full interactive E2E pending user testing.
 
 A first-class, top-level **Proxy Service** page (nav peer of Housekeeping / Tools) that
 turns Rigger's baked-in Traefik into a general reverse proxy — an NPM-style "proxy hosts"

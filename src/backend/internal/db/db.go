@@ -677,6 +677,45 @@ func (d *DB) migrate() error {
 	)`) //nolint:errcheck
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
+
+	// Proxy Service (standalone reverse-proxy manager): instance-level routes Rigger
+	// renders into Traefik's file provider (/dynamic/proxy-*.yml). Each row = one host/
+	// path → upstream(s), or a redirect, or the single catch-all default. See
+	// docs/design/proxy-service.md. tls_key_enc is AES-256-GCM (same key as host SSH keys).
+	d.Exec(`CREATE TABLE IF NOT EXISTS proxy_routes (
+		id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+		name                 TEXT    NOT NULL DEFAULT '',
+		enabled              INTEGER NOT NULL DEFAULT 1,
+		type                 TEXT    NOT NULL DEFAULT 'proxy',   -- proxy | redirect
+		is_default           INTEGER NOT NULL DEFAULT 0,         -- catch-all for unmatched hosts
+		default_mode         TEXT    NOT NULL DEFAULT 'page',    -- page|404|403|close|redirect|proxy
+		host                 TEXT    NOT NULL DEFAULT '',
+		path_prefix          TEXT    NOT NULL DEFAULT '',
+		upstreams            TEXT    NOT NULL DEFAULT '[]',      -- JSON [{scheme,host,port,weight}]
+		pass_host_header     INTEGER NOT NULL DEFAULT 1,
+		insecure_skip_verify INTEGER NOT NULL DEFAULT 0,
+		redirect_to          TEXT    NOT NULL DEFAULT '',
+		redirect_code        INTEGER NOT NULL DEFAULT 301,
+		tls_mode             TEXT    NOT NULL DEFAULT 'none',    -- none|le-http|le-dns|existing|custom
+		tls_cert_ref         TEXT    NOT NULL DEFAULT '',
+		tls_cert_pem         TEXT    NOT NULL DEFAULT '',
+		tls_key_enc          TEXT    NOT NULL DEFAULT '',
+		acme_email           TEXT    NOT NULL DEFAULT '',        -- '' = inherit Rigger's ACME email
+		force_https          INTEGER NOT NULL DEFAULT 1,
+		hsts_seconds         INTEGER NOT NULL DEFAULT 0,
+		hsts_subdomains      INTEGER NOT NULL DEFAULT 0,
+		hsts_preload         INTEGER NOT NULL DEFAULT 0,
+		auth_mode            TEXT    NOT NULL DEFAULT 'none',    -- none|basic
+		auth_users           TEXT    NOT NULL DEFAULT '[]',      -- JSON [{user,hash}]
+		ip_allow             TEXT    NOT NULL DEFAULT '',        -- comma CIDRs
+		security_headers     INTEGER NOT NULL DEFAULT 0,
+		strip_prefix         INTEGER NOT NULL DEFAULT 0,
+		waf                  INTEGER NOT NULL DEFAULT 0,
+		cache                INTEGER NOT NULL DEFAULT 0,
+		notes                TEXT    NOT NULL DEFAULT '',
+		created_at           INTEGER NOT NULL DEFAULT 0,
+		updated_at           INTEGER NOT NULL DEFAULT 0
+	)`) //nolint:errcheck
 	// Pipeline alerting: channels to notify on run events + which events fire.
 	d.addColumn("pipelines", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("pipelines", "notify_events TEXT NOT NULL DEFAULT '{}'")

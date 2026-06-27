@@ -231,6 +231,7 @@ func main() {
 	handler.StartHousekeepingScheduler(3)
 	handler.MigrateBackupConfig()   // one-time: legacy config.backup → per-env schedules
 	handler.MigrateLegacyDomains()  // one-time: legacy per-env domain → verified primary custom domain
+	handler.RenderProxyRoutes()     // re-render the Proxy Service file-provider config (drift repair)
 	handler.StartBackupScheduler()      // Phase 11 — per-env interval-based backup schedules
 	handler.StartPreviewReaper()        // tear down preview envs past their TTL (missed-close safety net)
 	handler.StartMaintenanceScheduler() // reconcile per-env maintenance windows → Traefik fragments
@@ -859,6 +860,10 @@ func main() {
 		// Notification channels (6b)
 		case r.Method == "GET" && path == "/api/settings/notification-channels":
 			handler.ListNotificationChannels(w, r)
+		case r.Method == "GET" && path == "/api/settings/proxy/plugins":
+			handler.GetProxyPlugins(w, r)
+		case r.Method == "POST" && path == "/api/settings/proxy/plugins":
+			handler.SetProxyPlugins(w, r)
 		case r.Method == "POST" && path == "/api/settings/notification-channels":
 			handler.CreateNotificationChannel(w, r)
 		case r.Method == "POST" && matchPrefix(path, "/api/settings/notification-channels/") && hasSuffix(path, "/test"):
@@ -975,6 +980,27 @@ func main() {
 			http.NotFound(w, r)
 		}
 	})))
+
+	// Proxy Service — standalone reverse-proxy manager (super-admin only).
+	mux.Handle("/api/proxy/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case r.Method == "GET" && path == "/api/proxy/routes":
+			handler.ListProxyRoutes(w, r)
+		case r.Method == "POST" && path == "/api/proxy/routes":
+			handler.CreateProxyRoute(w, r)
+		case r.Method == "GET" && path == "/api/proxy/certs":
+			handler.ListProxyCerts(w, r)
+		case r.Method == "POST" && matchPrefix(path, "/api/proxy/routes/") && hasSuffix(path, "/test"):
+			handler.TestProxyRoute(w, r)
+		case r.Method == "PUT" && matchPrefix(path, "/api/proxy/routes/"):
+			handler.UpdateProxyRoute(w, r)
+		case r.Method == "DELETE" && matchPrefix(path, "/api/proxy/routes/"):
+			handler.DeleteProxyRoute(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))))
 
 	// Housekeeping — all JWT-protected
 	mux.Handle("/api/housekeeping/", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1140,6 +1166,10 @@ func main() {
 	// path when maintenance is on. Unauthenticated by design; returns 503. Registered
 	// before the SPA catch-all so it isn't swallowed by index.html.
 	mux.HandleFunc("GET /maintenance/{workspace}/{name}/{env}", handler.MaintenancePage)
+
+	// Proxy Service catch-all status responder (default route in 404/403/close mode).
+	// Unauthenticated by design; registered before the SPA catch-all.
+	mux.HandleFunc("/__proxydefault/{mode}", handler.ProxyDefault)
 
 	// ── Static frontend (SPA) ────────────────────────────────────────────────
 	distFS, err := fs.Sub(frontendFS, "dist")

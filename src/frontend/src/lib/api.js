@@ -342,6 +342,16 @@ export const fetchSystemEmail  = ()     => api.get('/settings/system-email').the
 export const updateSystemEmail = (body) => api.put('/settings/system-email', body).then(r => r.data)
 export const testSystemEmail   = (to)   => api.post('/settings/system-email/test', { to }).then(r => r.data)
 
+// Proxy Service (standalone reverse-proxy manager)
+export const fetchProxyRoutes   = ()         => api.get('/proxy/routes').then(r => r.data)
+export const createProxyRoute   = (body)     => api.post('/proxy/routes', body).then(r => r.data)
+export const updateProxyRoute   = (id, body) => api.put(`/proxy/routes/${id}`, body).then(r => r.data)
+export const deleteProxyRoute   = (id)       => api.delete(`/proxy/routes/${id}`).then(r => r.data)
+export const testProxyRoute     = (id, body) => api.post(`/proxy/routes/${id || 'new'}/test`, body || {}).then(r => r.data)
+export const fetchProxyCerts    = ()         => api.get('/proxy/certs').then(r => r.data)
+export const fetchProxyPlugins  = ()         => api.get('/settings/proxy/plugins').then(r => r.data)
+export const updateProxyPlugins = (body)     => api.post('/settings/proxy/plugins', body).then(r => r.data)
+
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
 // Ask the backend to detect the Docker host's IP (runs host-networked). Returns

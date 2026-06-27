@@ -167,6 +167,17 @@ services:
       # empty/absent dir is a no-op, so this is harmless until an override is used.
       - --providers.file.directory=/dynamic
       - --providers.file.watch=true
+      # ── Proxy Service plugins (PX-6) — OPT-IN, one-time ──
+      # The Proxy Service can attach a WAF (Coraza/OWASP CRS) or an HTTP cache (Souin)
+      # to routes/apps. Those are Traefik plugins, declared statically here. They are
+      # commented out so a stock instance never downloads/compiles them. To use them:
+      # uncomment the matching block, pin a current version, rebuild rigger-traefik
+      # ONCE, then toggle WAF/Cache in Proxy Service → Plugins (per-route after that is
+      # instant). Verify the module path/version against the plugin's docs before use.
+      # - --experimental.plugins.coraza.modulename=github.com/jcchavezs/coraza-http-wasm-traefik
+      # - --experimental.plugins.coraza.version=v0.0.0
+      # - --experimental.plugins.souin.modulename=github.com/darkweak/souin/plugins/traefik
+      # - --experimental.plugins.souin.version=v0.0.0
       # ── Logging ──
       - --log.level=INFO
       - --accesslog=false

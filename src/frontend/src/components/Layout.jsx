@@ -492,6 +492,7 @@ export default function Layout({ children }) {
             <NavBtn to="/" label="Dashboard" />
             {isAdmin && <NavBtn to="/housekeeping" label="Housekeeping" />}
             <NavBtn to="/tools" label="Tools" />
+            {isAdmin && <NavBtn to="/proxy" label="Proxy Service" />}
             {isAdmin && <NavBtn to="/settings" label="Admin" />}
             <div className="w-px h-4 bg-surface-overlay mx-1" />
             <ThemeToggle />

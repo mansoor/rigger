@@ -18,6 +18,7 @@ import ManageWorkspacePage from './pages/ManageWorkspacePage'
 import SettingsPage from './pages/SettingsPage'
 import HousekeepingPage from './pages/HousekeepingPage'
 import ToolsPage from './pages/ToolsPage'
+import ProxyServicePage from './pages/ProxyServicePage'
 
 function RequireAuth({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -132,6 +133,7 @@ function AppRoutes() {
         <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
         <Route path="/housekeeping" element={<RequireAuth><HousekeepingPage /></RequireAuth>} />
         <Route path="/tools"        element={<RequireAuth><ToolsPage /></RequireAuth>} />
+        <Route path="/proxy"        element={<RequireAuth><ProxyServicePage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ErrorBoundary>
