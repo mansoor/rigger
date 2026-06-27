@@ -712,10 +712,15 @@ func (d *DB) migrate() error {
 		strip_prefix         INTEGER NOT NULL DEFAULT 0,
 		waf                  INTEGER NOT NULL DEFAULT 0,
 		cache                INTEGER NOT NULL DEFAULT 0,
+		locations            TEXT    NOT NULL DEFAULT '[]',  -- JSON [{path,scheme,host,port,forward_path}]
+		accept_tos           INTEGER NOT NULL DEFAULT 0,     -- Let's Encrypt ToS accepted (UX gate)
 		notes                TEXT    NOT NULL DEFAULT '',
 		created_at           INTEGER NOT NULL DEFAULT 0,
 		updated_at           INTEGER NOT NULL DEFAULT 0
 	)`) //nolint:errcheck
+	// proxy_routes additions (custom locations + LE ToS) for DBs created before they existed.
+	d.addColumn("proxy_routes", "locations TEXT NOT NULL DEFAULT '[]'")
+	d.addColumn("proxy_routes", "accept_tos INTEGER NOT NULL DEFAULT 0")
 	// Pipeline alerting: channels to notify on run events + which events fire.
 	d.addColumn("pipelines", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("pipelines", "notify_events TEXT NOT NULL DEFAULT '{}'")

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -117,6 +118,9 @@ func validateRoute(r proxyroutes.Route) string {
 	if strings.TrimSpace(r.Name) == "" {
 		return "name is required"
 	}
+	if (r.TLSMode == "le-http" || r.TLSMode == "le-dns") && !r.AcceptToS {
+		return "accept the Let's Encrypt Terms of Service to use a Let's Encrypt certificate"
+	}
 	if r.IsDefault {
 		return "" // catch-all: host/upstream rules don't apply
 	}
@@ -138,6 +142,27 @@ func validateRoute(r proxyroutes.Route) string {
 		}
 	}
 	return ""
+}
+
+// issueOverrideCerts obtains a cert for each of the route's domains under a per-route
+// ACME email override, out-of-band via the existing DNS-01 issuer (the same mechanism
+// as per-env override certs). No-op when no override / non-LE mode. Returns an error
+// when an override is requested but DNS-01 issuance isn't available.
+func (h *Handler) issueOverrideCerts(rt proxyroutes.Route) error {
+	if strings.TrimSpace(rt.ACMEEmail) == "" || (rt.TLSMode != "le-http" && rt.TLSMode != "le-dns") {
+		return nil
+	}
+	if h.acmeIssuer == nil || !h.acmeIssuer.Enabled() {
+		return fmt.Errorf("a per-route ACME email override needs a Cloudflare DNS token (Settings → General → DNS provider)")
+	}
+	for _, d := range strings.FieldsFunc(rt.Host, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+		if _, err := h.acmeIssuer.Issue(d, strings.TrimSpace(rt.ACMEEmail), nil); err != nil {
+			return fmt.Errorf("issue cert for %s: %w", d, err)
+		}
+	}
+	// NOTE: proxy override certs are issued once here; auto-renewal via the acme
+	// scheduler is a follow-up (don't record with a zero expiry — that re-issue-loops).
+	return nil
 }
 
 // ListProxyRoutes — GET /api/proxy/routes.
@@ -168,6 +193,10 @@ func (h *Handler) CreateProxyRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := validateRoute(route); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	if err := h.issueOverrideCerts(route); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 	id, err := h.proxyStore().Create(route)
@@ -211,6 +240,10 @@ func (h *Handler) UpdateProxyRoute(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := validateRoute(route); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	if err := h.issueOverrideCerts(route); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := h.proxyStore().Update(route); err != nil {
@@ -366,5 +399,5 @@ func (h *Handler) ListProxyCerts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"certs": out, "acme_email": h.appSetting("acme_email")})
 }

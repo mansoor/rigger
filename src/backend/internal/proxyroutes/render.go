@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -195,6 +196,33 @@ func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled b
 		writeRouter(&routers, id, rule, entry, id, mws, tlsOn, r, priority)
 	}
 
+	// ── custom locations: each path → its own upstream (NPM "Custom locations") ──
+	// More-specific (Host && PathPrefix) so they win over the base host router; they
+	// inherit the route's middlewares + TLS. Only for normal proxy routes.
+	if !isRedirectKind && !isStatusKind && !r.IsDefault {
+		hosts := hostsExpr(r.Host)
+		for n, loc := range r.Locations {
+			if strings.TrimSpace(loc.Path) == "" || strings.TrimSpace(loc.Host) == "" {
+				continue
+			}
+			lid := fmt.Sprintf("%s-loc%d", id, n)
+			lmws := append([]string{}, mws...)
+			if fp := strings.TrimSpace(loc.ForwardPath); fp != "" {
+				// nginx proxy_pass-style: strip the location path, prepend the upstream sub-path.
+				fmt.Fprintf(&middlewares, "    %s-rw:\n      replacePathRegex:\n        regex: %q\n        replacement: %q\n",
+					lid, "^"+regexp.QuoteMeta(loc.Path)+"(/.*)?$", strings.TrimRight(fp, "/")+"$1")
+				lmws = append([]string{lid + "-rw"}, lmws...)
+			}
+			fmt.Fprintf(&services, "    %s:\n      loadBalancer:\n        passHostHeader: %t\n        servers:\n          - url: %q\n",
+				lid, r.PassHostHeader, upstreamURL(Upstream{Scheme: loc.Scheme, Host: loc.Host, Port: loc.Port}))
+			if r.InsecureSkipVerify {
+				fmt.Fprintf(&services, "        serversTransport: %s-transport\n", lid)
+				fmt.Fprintf(&transports, "    %s-transport:\n      insecureSkipVerify: true\n", lid)
+			}
+			writeRouter(&routers, lid, combineRule(hosts, loc.Path), entry, lid, lmws, tlsOn, r, 100)
+		}
+	}
+
 	// ── force-HTTPS: an extra web→websecure redirect router (per-router, not global) ──
 	if tlsOn && r.ForceHTTPS {
 		middlewares.WriteString("    " + id + "-tohttps:\n      redirectScheme:\n        scheme: https\n        permanent: true\n")
@@ -267,10 +295,14 @@ func writeRouter(b *strings.Builder, name, rule, entry, service string, mws []st
 		fmt.Fprintf(b, "      middlewares: [%s]\n", strings.Join(quoted, ", "))
 	}
 	if tlsOn {
-		switch r.TLSMode {
-		case "le-http":
+		switch {
+		case r.ACMEEmail != "":
+			// Per-route ACME email override → cert issued out-of-band under that email
+			// (see issueOverrideCerts); Traefik serves the SNI-matching file cert.
+			b.WriteString("      tls: {}\n")
+		case r.TLSMode == "le-http":
 			b.WriteString("      tls:\n        certResolver: letsencrypt\n")
-		case "le-dns":
+		case r.TLSMode == "le-dns":
 			b.WriteString("      tls:\n        certResolver: dns\n")
 		default: // existing | custom — Traefik serves the SNI-matching stored cert
 			b.WriteString("      tls: {}\n")
@@ -287,14 +319,41 @@ func routeRule(r Route) (string, int) {
 		}
 		return "PathPrefix(`/`)", 2
 	}
+	return combineRule(hostsExpr(r.Host), r.PathPrefix), 0
+}
+
+// splitHosts parses the multi-domain host field (comma/space/newline separated).
+func splitHosts(field string) []string {
+	repl := strings.NewReplacer(",", " ", "\n", " ", "\t", " ")
+	return strings.Fields(repl.Replace(field))
+}
+
+// hostsExpr builds "Host(`a`) || Host(`b`)" from the multi-domain host field.
+func hostsExpr(field string) string {
 	var parts []string
-	if h := strings.TrimSpace(r.Host); h != "" {
+	for _, h := range splitHosts(field) {
 		parts = append(parts, "Host(`"+h+"`)")
 	}
-	if p := strings.TrimSpace(r.PathPrefix); p != "" {
-		parts = append(parts, "PathPrefix(`"+p+"`)")
+	return strings.Join(parts, " || ")
+}
+
+// combineRule joins a host group and an optional path prefix, parenthesizing a
+// multi-host (`||`) group before the `&&`.
+func combineRule(hostGroup, pathPrefix string) string {
+	pathPrefix = strings.TrimSpace(pathPrefix)
+	if hostGroup == "" {
+		if pathPrefix != "" {
+			return "PathPrefix(`" + pathPrefix + "`)"
+		}
+		return ""
 	}
-	return strings.Join(parts, " && "), 0
+	if pathPrefix == "" {
+		return hostGroup
+	}
+	if strings.Contains(hostGroup, "||") {
+		hostGroup = "(" + hostGroup + ")"
+	}
+	return hostGroup + " && PathPrefix(`" + pathPrefix + "`)"
 }
 
 // headersMiddleware builds the optional headers middleware (HSTS + baseline security

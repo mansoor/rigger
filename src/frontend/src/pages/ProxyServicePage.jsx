@@ -74,7 +74,7 @@ function blankRoute() {
     tls_mode: 'le-http', tls_cert_ref: '', acme_email: '',
     force_https: true, hsts_seconds: 0,
     auth_mode: 'none', auth_users: [], ip_allow: '', security_headers: false,
-    strip_prefix: false, waf: false, cache: false, notes: '',
+    strip_prefix: false, waf: false, cache: false, accept_tos: false, locations: [], notes: '',
   }
 }
 
@@ -268,11 +268,13 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
   const isEdit = !!initial
   const [f, setF] = useState(() => {
     if (!initial) return blankRoute()
-    return { ...blankRoute(), ...initial, upstreams: initial.upstreams?.length ? initial.upstreams : [{ scheme: 'http', host: '', port: '' }], auth_users: (initial.auth_users || []).map(u => ({ user: u.user, password: '' })) }
+    return { ...blankRoute(), ...initial, upstreams: initial.upstreams?.length ? initial.upstreams : [{ scheme: 'http', host: '', port: '' }], locations: initial.locations || [], auth_users: (initial.auth_users || []).map(u => ({ user: u.user, password: '' })) }
   })
   const [err, setErr] = useState('')
   const [test, setTest] = useState(null)
-  const { data: certs = [] } = useQuery({ queryKey: ['proxy-certs'], queryFn: fetchProxyCerts })
+  const { data: certData } = useQuery({ queryKey: ['proxy-certs'], queryFn: fetchProxyCerts })
+  const certs = certData?.certs || []
+  const inheritedEmail = certData?.acme_email || '(not set in Settings)'
   const set = (k, v) => setF(s => ({ ...s, [k]: v }))
   const setUp = (i, k, v) => setF(s => ({ ...s, upstreams: s.upstreams.map((u, j) => j === i ? { ...u, [k]: v } : u) }))
 
@@ -284,6 +286,7 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
         hsts_seconds: f.hsts_seconds > 0 ? Number(f.hsts_seconds) : 0,
         upstreams: f.upstreams.filter(u => u.host).map(u => ({ scheme: u.scheme, host: u.host, port: Number(u.port) || 0 })),
         auth_users: f.auth_mode === 'basic' ? f.auth_users.filter(u => u.user) : [],
+        locations: (f.locations || []).filter(l => l.path && l.host).map(l => ({ path: l.path, scheme: l.scheme || 'http', host: l.host, port: Number(l.port) || 0, forward_path: l.forward_path || '' })),
       }
       return isEdit ? updateProxyRoute(initial.id, body) : createProxyRoute(body)
     },
@@ -318,7 +321,11 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Domain (host)</Label><Input value={f.host} onChange={v => set('host', v)} placeholder="media.example.com" /></div>
+            <div>
+              <Label>Domain(s)</Label>
+              <Input value={f.host} onChange={v => set('host', v)} placeholder="media.example.com, www.example.com" />
+              <p className="text-[11px] text-content-faint mt-1">One or more, separated by space or comma.</p>
+            </div>
             <div><Label>Path prefix</Label><Input value={f.path_prefix} onChange={v => set('path_prefix', v)} placeholder="/ (optional)" /></div>
           </div>
 
@@ -351,6 +358,35 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
             </div>
           )}
 
+          {/* Custom locations (NPM parity) — sub-paths each forwarding to their own upstream */}
+          {!isRedirect && (
+            <details className="border-t border-border pt-3">
+              <summary className="text-xs font-semibold text-content-muted cursor-pointer">Custom locations</summary>
+              <p className="text-[11px] text-content-faint mt-2 mb-2">Forward sub-paths on this host to different services. Each inherits this route's TLS, auth and headers.</p>
+              <div className="space-y-2">
+                {(f.locations || []).map((l, i) => (
+                  <div key={i} className="flex items-center gap-1.5 flex-wrap">
+                    <input value={l.path} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, path: e.target.value } : x))} placeholder="/path"
+                      className="w-24 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                    <select value={l.scheme || 'http'} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, scheme: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                      <option value="http">http</option><option value="https">https</option>
+                    </select>
+                    <input value={l.host} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, host: e.target.value } : x))} placeholder="10.0.0.5"
+                      className="flex-1 min-w-[90px] px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                    <span className="text-content-muted">:</span>
+                    <input value={l.port} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, port: e.target.value } : x))} placeholder="80"
+                      className="w-16 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                    <input value={l.forward_path || ''} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, forward_path: e.target.value } : x))} placeholder="/fwd (opt)"
+                      className="w-24 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                    <button onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1">🗑</button>
+                  </div>
+                ))}
+                <button onClick={() => set('locations', [...(f.locations || []), { path: '', scheme: 'http', host: '', port: '', forward_path: '' }])}
+                  className="text-xs text-brand-400 hover:text-brand-300">＋ Add location</button>
+              </div>
+            </details>
+          )}
+
           {/* TLS */}
           <div className="border-t border-border pt-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -375,7 +411,23 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
                 <Toggle checked={f.hsts_seconds > 0} onChange={v => set('hsts_seconds', v ? 31536000 : 0)} label="HSTS" />
               </div>
             )}
-            <p className="text-[11px] text-content-faint">✓ Reuse serves a stored cert matching the host (nothing re-issued). HTTP/2 and WebSocket are automatic. ACME email is inherited from Rigger settings.</p>
+            {(f.tls_mode === 'le-http' || f.tls_mode === 'le-dns') && (
+              <div className="space-y-2 rounded-lg bg-surface-raised/40 border border-border-strong/50 px-3 py-2">
+                <div className="text-xs text-content-subtle">
+                  ACME email: <span className="text-content font-mono">{inheritedEmail}</span> <span className="text-content-faint">· inherited from Rigger settings</span>
+                </div>
+                <div>
+                  <Label>Override (optional)</Label>
+                  <Input value={f.acme_email} onChange={v => set('acme_email', v)} placeholder="leave blank to inherit" />
+                  <p className="text-[11px] text-content-faint mt-1">An override issues the cert under this email via DNS-01 (needs a Cloudflare DNS token).</p>
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer text-xs text-content pt-1">
+                  <input type="checkbox" checked={!!f.accept_tos} onChange={e => set('accept_tos', e.target.checked)} className="mt-0.5" />
+                  <span>I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 underline">Let's Encrypt Terms of Service</a>.</span>
+                </label>
+              </div>
+            )}
+            <p className="text-[11px] text-content-faint">✓ Reuse serves a stored cert matching the host (nothing re-issued). HTTP/2 and WebSocket are automatic.</p>
           </div>
 
           {/* Access */}
@@ -400,12 +452,14 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
                 </div>
               )}
               <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Security headers (block common exploits, lite)" />
-              {(plugins?.waf_enabled || plugins?.cache_enabled) && (
-                <div className="flex gap-6">
-                  {plugins?.waf_enabled && <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="WAF" />}
-                  {plugins?.cache_enabled && <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />}
-                </div>
-              )}
+              <div className="space-y-1.5 pt-1">
+                {plugins?.waf_enabled
+                  ? <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
+                  : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page first to use it here.</p>}
+                {plugins?.cache_enabled
+                  ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
+                  : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page first to use it here.</p>}
+              </div>
             </div>
           )}
 

@@ -28,6 +28,17 @@ type BasicUser struct {
 	Hash string `json:"hash"`
 }
 
+// Location is an NPM-style custom location: a sub-path on the route's host(s) that
+// forwards to its own upstream. It inherits the route's TLS / auth / headers. An
+// optional ForwardPath rewrites the upstream path (sub-folder forwarding).
+type Location struct {
+	Path        string `json:"path"`         // PathPrefix on the route's host(s), e.g. /api
+	Scheme      string `json:"scheme"`       // http | https
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	ForwardPath string `json:"forward_path"` // optional upstream sub-path; "" = forward as-is
+}
+
 // Route is one proxy entry. Secrets (the custom-cert private key) live in tls_key_enc
 // and are never returned to clients (see api masking); the renderer decrypts on write.
 type Route struct {
@@ -61,6 +72,8 @@ type Route struct {
 	StripPrefix        bool       `json:"strip_prefix"`
 	WAF                bool       `json:"waf"`
 	Cache              bool       `json:"cache"`
+	Locations          []Location `json:"locations"`
+	AcceptToS          bool       `json:"accept_tos"`
 	Notes              string     `json:"notes"`
 	CreatedAt          int64      `json:"created_at"`
 	UpdatedAt          int64      `json:"updated_at"`
@@ -75,7 +88,7 @@ const cols = `id, name, enabled, type, is_default, default_mode, host, path_pref
 	upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 	tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 	hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-	security_headers, strip_prefix, waf, cache, notes, created_at, updated_at`
+	security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at`
 
 func b2i(b bool) int {
 	if b {
@@ -86,14 +99,14 @@ func b2i(b bool) int {
 
 func scan(s interface{ Scan(...any) error }) (Route, error) {
 	var r Route
-	var enabled, isDefault, passHost, insecure, forceHTTPS, hstsSub, hstsPre, secHdr, strip, waf, cache int
-	var upstreamsJSON, authUsersJSON string
+	var enabled, isDefault, passHost, insecure, forceHTTPS, hstsSub, hstsPre, secHdr, strip, waf, cache, acceptToS int
+	var upstreamsJSON, authUsersJSON, locationsJSON string
 	err := s.Scan(
 		&r.ID, &r.Name, &enabled, &r.Type, &isDefault, &r.DefaultMode, &r.Host, &r.PathPrefix,
 		&upstreamsJSON, &passHost, &insecure, &r.RedirectTo, &r.RedirectCode,
 		&r.TLSMode, &r.TLSCertRef, &r.TLSCertPEM, &r.TLSKeyEnc, &r.ACMEEmail, &forceHTTPS,
 		&r.HSTSSeconds, &hstsSub, &hstsPre, &r.AuthMode, &authUsersJSON, &r.IPAllow,
-		&secHdr, &strip, &waf, &cache, &r.Notes, &r.CreatedAt, &r.UpdatedAt,
+		&secHdr, &strip, &waf, &cache, &locationsJSON, &acceptToS, &r.Notes, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
 		return Route{}, err
@@ -102,14 +115,19 @@ func scan(s interface{ Scan(...any) error }) (Route, error) {
 	r.InsecureSkipVerify, r.ForceHTTPS = insecure != 0, forceHTTPS != 0
 	r.HSTSSubdomains, r.HSTSPreload = hstsSub != 0, hstsPre != 0
 	r.SecurityHeaders, r.StripPrefix, r.WAF, r.Cache = secHdr != 0, strip != 0, waf != 0, cache != 0
+	r.AcceptToS = acceptToS != 0
 	r.HasKey = r.TLSKeyEnc != ""
 	_ = json.Unmarshal([]byte(upstreamsJSON), &r.Upstreams)
 	_ = json.Unmarshal([]byte(authUsersJSON), &r.AuthUsers)
+	_ = json.Unmarshal([]byte(locationsJSON), &r.Locations)
 	if r.Upstreams == nil {
 		r.Upstreams = []Upstream{}
 	}
 	if r.AuthUsers == nil {
 		r.AuthUsers = []BasicUser{}
+	}
+	if r.Locations == nil {
+		r.Locations = []Location{}
 	}
 	return r, nil
 }
@@ -148,12 +166,13 @@ func (s *Store) Get(id int64) (Route, bool, error) {
 func argsFor(r Route) []any {
 	up, _ := json.Marshal(r.Upstreams)
 	au, _ := json.Marshal(r.AuthUsers)
+	loc, _ := json.Marshal(r.Locations)
 	return []any{
 		r.Name, b2i(r.Enabled), r.Type, b2i(r.IsDefault), r.DefaultMode, r.Host, r.PathPrefix,
 		string(up), b2i(r.PassHostHeader), b2i(r.InsecureSkipVerify), r.RedirectTo, r.RedirectCode,
 		r.TLSMode, r.TLSCertRef, r.TLSCertPEM, r.TLSKeyEnc, r.ACMEEmail, b2i(r.ForceHTTPS),
 		r.HSTSSeconds, b2i(r.HSTSSubdomains), b2i(r.HSTSPreload), r.AuthMode, string(au), r.IPAllow,
-		b2i(r.SecurityHeaders), b2i(r.StripPrefix), b2i(r.WAF), b2i(r.Cache), r.Notes,
+		b2i(r.SecurityHeaders), b2i(r.StripPrefix), b2i(r.WAF), b2i(r.Cache), string(loc), b2i(r.AcceptToS), r.Notes,
 		r.CreatedAt, r.UpdatedAt,
 	}
 }
@@ -165,8 +184,8 @@ func (s *Store) Create(r Route) (int64, error) {
 		upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 		tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 		hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-		security_headers, strip_prefix, waf, cache, notes, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
+		security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
 	if err != nil {
 		return 0, err
 	}
@@ -181,7 +200,7 @@ func (s *Store) Update(r Route) error {
 		upstreams=?, pass_host_header=?, insecure_skip_verify=?, redirect_to=?, redirect_code=?,
 		tls_mode=?, tls_cert_ref=?, tls_cert_pem=?, tls_key_enc=?, acme_email=?, force_https=?,
 		hsts_seconds=?, hsts_subdomains=?, hsts_preload=?, auth_mode=?, auth_users=?, ip_allow=?,
-		security_headers=?, strip_prefix=?, waf=?, cache=?, notes=?, created_at=?, updated_at=?
+		security_headers=?, strip_prefix=?, waf=?, cache=?, locations=?, accept_tos=?, notes=?, created_at=?, updated_at=?
 		WHERE id=?`, args...)
 	return err
 }
