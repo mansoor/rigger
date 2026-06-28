@@ -1,6 +1,6 @@
 # Proxy Service — standalone reverse-proxy manager (top-level page)
 
-**Status: BUILT (PX-1–PX-5, develop). PX-6 (WAF/cache plugins) scaffolding shipped;
+**Status: BUILT (PX-1–PX-5, develop). PX-6 (WAF/cache/GeoIP plugins) scaffolding shipped;
 the one-time plugin install in docker-compose is a documented opt-in (commented).**
 Backend: `internal/proxyroutes` (store + file-provider renderer, unit-tested),
 `api/proxy_handlers.go` (CRUD + `/test` probe + `/certs` + plugin toggles), migration
@@ -8,6 +8,31 @@ Backend: `internal/proxyroutes` (store + file-provider renderer, unit-tested),
 top-level `Proxy Service` page (`/proxy`, admin-only) with route list, add/edit modal,
 default-route card, plugins card. Live: clean boot, migration applied, `proxy-base.yml`
 rendered. Full interactive E2E pending user testing.
+
+**Enhancements since PX (develop):**
+- **Tabbed route form** — Basics & Security / Locations / Certs & SSL / Advanced (redirect
+  routes show only Basics + Certs). Page widened to `max-w-7xl` (parity with Admin/Tools).
+- **Custom locations** are load-balanced — each location has its own upstream **list**
+  (legacy single host/port folded in via `Location.Servers()`).
+- **Multi-domain** host field (`Host(a)||Host(b)`), **ACME email override** (per-route, via
+  the DNS-01 issuer) + **LE ToS** gate, default cert **None**.
+- **WAF/Cache** per-route toggles moved to the **Advanced** tab.
+- **Error UX**: save failures render in a collapsible details box (real server message via
+  `errMsg`), clear on edit; **Test upstream** result is a toaster next to the button that
+  auto-dismisses (~12s). Create/Update handlers wrapped in `recoverProxy` (panic → logged
+  JSON 500 instead of a silent connection reset).
+- **Access Lists** (`proxy_access_lists` table + `internal/proxyroutes/accesslist.go`):
+  reusable, named bundles of basic-auth users + IP allow/deny rules + a **pass-auth** flag,
+  referenced by a route via `access_list_id` (replaces inline auth/IP when set). CRUD under
+  `/api/proxy/access-lists`. Card sits between the route list and Plugins. `effectiveAccess()`
+  resolves auth/IP/Geo from the list when set, else inline.
+- **GeoIP country blocking** (per access list): `geo_mode` (off|allow|block) + `countries`
+  (ISO 3166-1 alpha-2). Renders an `nscuro/traefik-plugin-geoblock` middleware per route when
+  the instance-wide **GeoIP** plugin toggle is on. Offline IP2Location LITE BIN DB mounted at
+  `/geoip`; docker-compose carries commented opt-in for the plugin + DB mount + a
+  `forwardedHeaders.trustedIPs` note (needed for the real client IP behind a fronting proxy).
+  Traefik `ipAllowList`/geoblock are allow-oriented — deny-only IP lists aren't enforceable
+  (documented in the UI).
 
 A first-class, top-level **Proxy Service** page (nav peer of Housekeeping / Tools) that
 turns Rigger's baked-in Traefik into a general reverse proxy — an NPM-style "proxy hosts"

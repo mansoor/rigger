@@ -721,6 +721,25 @@ func (d *DB) migrate() error {
 	// proxy_routes additions (custom locations + LE ToS) for DBs created before they existed.
 	d.addColumn("proxy_routes", "locations TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("proxy_routes", "accept_tos INTEGER NOT NULL DEFAULT 0")
+
+	// Reusable Access Lists (NPM-style): named sets of basic-auth users + IP allow/deny
+	// rules, selectable on a proxy route instead of re-entering the same values.
+	d.Exec(`CREATE TABLE IF NOT EXISTS proxy_access_lists (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		name        TEXT    NOT NULL DEFAULT '',
+		pass_auth   INTEGER NOT NULL DEFAULT 1,   -- forward the Authorization header to the upstream
+		users       TEXT    NOT NULL DEFAULT '[]', -- JSON [{user,hash}]
+		rules       TEXT    NOT NULL DEFAULT '[]', -- JSON [{action,address}] action=allow|deny
+		geo_mode    TEXT    NOT NULL DEFAULT 'off', -- off|allow|block (GeoIP country policy)
+		countries   TEXT    NOT NULL DEFAULT '[]',  -- JSON ["US","DE"] ISO 3166-1 alpha-2
+		created_at  INTEGER NOT NULL DEFAULT 0,
+		updated_at  INTEGER NOT NULL DEFAULT 0
+	)`) //nolint:errcheck
+	// GeoIP country policy columns for access lists created before they existed.
+	d.addColumn("proxy_access_lists", "geo_mode TEXT NOT NULL DEFAULT 'off'")
+	d.addColumn("proxy_access_lists", "countries TEXT NOT NULL DEFAULT '[]'")
+	// proxy_routes references an access list (0 = none; inline auth/IP used instead).
+	d.addColumn("proxy_routes", "access_list_id INTEGER NOT NULL DEFAULT 0")
 	// Pipeline alerting: channels to notify on run events + which events fire.
 	d.addColumn("pipelines", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("pipelines", "notify_events TEXT NOT NULL DEFAULT '{}'")

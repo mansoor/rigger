@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins,
+  fetchProxyAccessLists, createProxyAccessList, updateProxyAccessList, deleteProxyAccessList,
 } from '../lib/api'
 
 // Proxy Service — standalone reverse-proxy manager (docs/design/proxy-service.md).
@@ -50,11 +51,11 @@ function Btn({ onClick, disabled, variant = 'primary', children, type = 'button'
 }
 
 const TLS_OPTIONS = [
+  { value: 'none', label: 'None (HTTP only)' },
   { value: 'le-http', label: "Let's Encrypt (HTTP-01)" },
   { value: 'le-dns', label: "Let's Encrypt (DNS wildcard) — reuse" },
   { value: 'existing', label: 'Existing certificate — reuse' },
   { value: 'custom', label: 'Custom upload' },
-  { value: 'none', label: 'None (HTTP only)' },
 ]
 const DEFAULT_MODES = [
   { value: 'page', label: 'Friendly “not reachable” page' },
@@ -65,17 +66,40 @@ const DEFAULT_MODES = [
   { value: 'proxy', label: 'Proxy to a default site' },
 ]
 
+// errMsg pulls the most useful detail out of an axios error: the server's JSON
+// {error} first, then a string body, then HTTP status, then the network message.
+function errMsg(e, fallback = 'Request failed') {
+  const r = e?.response
+  if (r?.data?.error) return r.data.error
+  if (typeof r?.data === 'string' && r.data.trim()) return r.data.trim()
+  if (r?.status) return `HTTP ${r.status}${r.statusText ? ' ' + r.statusText : ''}`
+  if (e?.message) return e.message
+  return fallback
+}
+
 function blankRoute() {
   return {
-    name: '', type: 'proxy', host: '', path_prefix: '',
+    name: '', enabled: true, type: 'proxy', host: '', path_prefix: '',
     upstreams: [{ scheme: 'http', host: '', port: '' }],
     pass_host_header: true, insecure_skip_verify: false,
     redirect_to: '', redirect_code: 301,
-    tls_mode: 'le-http', tls_cert_ref: '', acme_email: '',
+    tls_mode: 'none', tls_cert_ref: '', acme_email: '',
     force_https: true, hsts_seconds: 0,
-    auth_mode: 'none', auth_users: [], ip_allow: '', security_headers: false,
+    auth_mode: 'none', auth_users: [], ip_allow: '', access_list_id: 0, security_headers: false,
     strip_prefix: false, waf: false, cache: false, accept_tos: false, locations: [], notes: '',
   }
+}
+
+function blankUpstream() { return { scheme: 'http', host: '', port: '' } }
+function blankLocation() { return { path: '', forward_path: '', upstreams: [blankUpstream()] } }
+
+// normLocation folds a stored location (which may be the legacy single host/port shape)
+// into the editor's { path, forward_path, upstreams[] } shape.
+function normLocation(l) {
+  const upstreams = l.upstreams?.length
+    ? l.upstreams
+    : (l.host ? [{ scheme: l.scheme || 'http', host: l.host, port: l.port || '' }] : [blankUpstream()])
+  return { path: l.path || '', forward_path: l.forward_path || '', upstreams }
 }
 
 function tlsBadge(m) {
@@ -95,6 +119,7 @@ export default function ProxyServicePage() {
   const qc = useQueryClient()
   const { data: routes = [], isLoading } = useQuery({ queryKey: ['proxy-routes'], queryFn: fetchProxyRoutes })
   const { data: plugins } = useQuery({ queryKey: ['proxy-plugins'], queryFn: fetchProxyPlugins })
+  const { data: accessLists = [] } = useQuery({ queryKey: ['proxy-access-lists'], queryFn: fetchProxyAccessLists })
   const [modal, setModal] = useState(null) // null | 'new' | {editing: route}
   const [deleting, setDeleting] = useState(null)
 
@@ -112,7 +137,7 @@ export default function ProxyServicePage() {
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-7xl mx-auto px-6 py-8 space-y-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-content-strong">Proxy service</h1>
@@ -126,8 +151,6 @@ export default function ProxyServicePage() {
           <span>Requests reach these routes only when Rigger’s Traefik receives them on ports 80/443 — either as your edge, or forwarded from your existing proxy.</span>
         </div>
 
-        <PluginsCard plugins={plugins} />
-
         {isLoading ? (
           <p className="text-sm text-content-subtle py-8 text-center">Loading…</p>
         ) : realRoutes.length === 0 ? (
@@ -139,7 +162,7 @@ export default function ProxyServicePage() {
         ) : (
           <div className="bg-surface border border-border rounded-xl divide-y divide-border">
             {realRoutes.map(r => (
-              <RouteRow key={r.id} r={r} plugins={plugins}
+              <RouteRow key={r.id} r={r} plugins={plugins} accessLists={accessLists}
                 onToggle={() => toggleMut.mutate(r)}
                 onEdit={() => setModal({ editing: r })}
                 onDelete={() => setDeleting(r)} />
@@ -147,11 +170,15 @@ export default function ProxyServicePage() {
           </div>
         )}
 
+        <AccessListsCard accessLists={accessLists} plugins={plugins} />
+
+        <PluginsCard plugins={plugins} />
+
         <DefaultRouteCard route={defaultRoute} />
       </div>
 
       {modal && (
-        <RouteModal plugins={plugins}
+        <RouteModal plugins={plugins} accessLists={accessLists}
           initial={modal === 'new' ? null : modal.editing}
           onClose={() => setModal(null)}
           onSaved={() => { qc.invalidateQueries({ queryKey: ['proxy-routes'] }); setModal(null) }} />
@@ -172,9 +199,10 @@ export default function ProxyServicePage() {
   )
 }
 
-function RouteRow({ r, plugins, onToggle, onEdit, onDelete }) {
+function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) {
   const dot = !r.enabled ? 'bg-content-faint' : 'bg-success-fg'
   const tls = tlsBadge(r.tls_mode)
+  const acl = r.access_list_id ? accessLists.find(a => a.id === r.access_list_id) : null
   const upstream = r.type === 'redirect' ? r.redirect_to
     : (r.upstreams || []).map(u => `${u.scheme}://${u.host}${u.port ? ':' + u.port : ''}`).join(', ')
   return (
@@ -185,9 +213,13 @@ function RouteRow({ r, plugins, onToggle, onEdit, onDelete }) {
           <span className="text-sm font-semibold text-content-strong">{r.name}</span>
           {r.type === 'redirect' && <Badge>Redirect</Badge>}
           {r.tls_mode !== 'none' && <Badge cls={tls.cls}>{tls.label}</Badge>}
-          {r.auth_mode === 'basic' && <Badge cls="bg-brand-600/15 text-brand-300">Basic auth</Badge>}
+          {acl
+            ? <Badge cls="bg-brand-600/15 text-brand-300">🔒 {acl.name}</Badge>
+            : <>
+                {r.auth_mode === 'basic' && <Badge cls="bg-brand-600/15 text-brand-300">Basic auth</Badge>}
+                {r.ip_allow && <Badge>IP allow</Badge>}
+              </>}
           {r.hsts_seconds > 0 && <Badge>HSTS</Badge>}
-          {r.ip_allow && <Badge>IP allow</Badge>}
           {r.waf && plugins?.waf_enabled && <Badge cls="bg-brand-600/15 text-brand-300">WAF</Badge>}
           {r.cache && plugins?.cache_enabled && <Badge cls="bg-warning-subtle/50 text-warning-fg">Cache</Badge>}
         </div>
@@ -219,11 +251,13 @@ function PluginsCard({ plugins }) {
         <span title="Enabling installs the plugin into Traefik (a one-time declaration in docker-compose + rebuild) and may restart the proxy once. Per-route toggling afterwards is instant."
           className="text-content-faint cursor-help text-xs">ⓘ</span>
       </div>
-      <p className="text-xs text-content-subtle mb-3">Optional WAF and asset cache, attachable per route once enabled. Requires the matching Traefik plugin to be declared in docker-compose (see proxy-service docs).</p>
-      <div className="flex gap-6">
+      <p className="text-xs text-content-subtle mb-3">Optional WAF, asset cache, and GeoIP country blocking — attachable per route/access-list once enabled. Each requires the matching Traefik plugin to be declared in docker-compose (see proxy-service docs).</p>
+      <div className="flex gap-6 flex-wrap">
         <Toggle checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
         <Toggle checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
+        <Toggle checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
       </div>
+      {plugins.geoip_enabled && <p className="text-[11px] text-content-faint mt-2">GeoIP uses an offline IP2Location LITE DB mounted into Traefik at /geoip, and the real client IP (set forwardedHeaders trust if Rigger sits behind another proxy). Set country policies per access list.</p>}
     </div>
   )
 }
@@ -264,46 +298,289 @@ function DefaultRouteCard({ route }) {
   )
 }
 
-function RouteModal({ initial, plugins, onClose, onSaved }) {
+function TabBtn({ active, onClick, children }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors whitespace-nowrap ${active ? 'border-brand-500 text-content-strong' : 'border-transparent text-content-muted hover:text-content'}`}>
+      {children}
+    </button>
+  )
+}
+
+function blankAccessList() { return { name: '', pass_auth: true, users: [], rules: [], geo_mode: 'off', countries: [] } }
+
+// AccessListsCard lists the reusable access lists (NPM-style) and hosts their editor.
+// Sits between the route list and the Plugins card.
+function AccessListsCard({ accessLists, plugins }) {
+  const qc = useQueryClient()
+  const [modal, setModal] = useState(null) // null | 'new' | {editing}
+  const [deleting, setDeleting] = useState(null)
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['proxy-access-lists'] }); qc.invalidateQueries({ queryKey: ['proxy-routes'] }) }
+  const delMut = useMutation({
+    mutationFn: (id) => deleteProxyAccessList(id),
+    onSuccess: () => { invalidate(); setDeleting(null) },
+  })
+  return (
+    <div className="bg-surface border border-border rounded-xl">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-content-strong">Access lists</span>
+          <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">reusable auth + IP rules</span>
+        </div>
+        <Btn onClick={() => setModal('new')}>＋ Add access list</Btn>
+      </div>
+      {accessLists.length === 0 ? (
+        <p className="text-sm text-content-subtle px-4 py-6 text-center">No access lists yet. Create one to reuse the same basic-auth users and IP rules across multiple routes.</p>
+      ) : (
+        <div className="divide-y divide-border">
+          {accessLists.map(a => {
+            const allow = (a.rules || []).filter(r => r.action === 'allow').length
+            const deny = (a.rules || []).filter(r => r.action === 'deny').length
+            return (
+              <div key={a.id} className="flex items-center gap-3 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-content-strong">{a.name}</span>
+                    {(a.users || []).length > 0 && <Badge cls="bg-brand-600/15 text-brand-300">{a.users.length} user{a.users.length > 1 ? 's' : ''}</Badge>}
+                    {allow > 0 && <Badge>{allow} allow</Badge>}
+                    {deny > 0 && <Badge cls="bg-danger-subtle/50 text-danger-fg">{deny} deny</Badge>}
+                    {a.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-brand-300">🌐 allow {(a.countries || []).length}</Badge>}
+                    {a.geo_mode === 'block' && <Badge cls="bg-danger-subtle/50 text-danger-fg">🌐 block {(a.countries || []).length}</Badge>}
+                    {!a.pass_auth && <Badge>strips auth header</Badge>}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Btn variant="ghost" onClick={() => setModal({ editing: a })}>Edit</Btn>
+                  <Btn variant="ghost" onClick={() => setDeleting(a)}>✕</Btn>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      {modal && <AccessListModal initial={modal === 'new' ? null : modal.editing} plugins={plugins} onClose={() => setModal(null)} onSaved={() => { invalidate(); setModal(null) }} />}
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-sm mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete access list “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Routes using it become publicly accessible (no auth/IP restriction) until reconfigured.</p>
+            <div className="flex gap-2 justify-end">
+              <Btn variant="secondary" onClick={() => setDeleting(null)}>Cancel</Btn>
+              <Btn variant="danger" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}>{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AccessListModal({ initial, plugins, onClose, onSaved }) {
+  const isEdit = !!initial
+  const [f, setF] = useState(() => initial
+    ? { ...blankAccessList(), ...initial, users: (initial.users || []).map(u => ({ user: u.user, password: '' })), rules: (initial.rules || []).map(r => ({ action: r.action || 'allow', address: r.address || '' })), geo_mode: initial.geo_mode || 'off', countriesText: (initial.countries || []).join(', ') }
+    : { ...blankAccessList(), countriesText: '' })
+  const [err, setErr] = useState('')
+  const set = (k, v) => { if (err) setErr(''); setF(s => ({ ...s, [k]: v })) }
+  const save = useMutation({
+    mutationFn: () => {
+      const countries = (f.countriesText || '').split(/[\s,]+/).map(c => c.trim().toUpperCase()).filter(c => c.length === 2)
+      const body = {
+        name: f.name, pass_auth: !!f.pass_auth,
+        users: f.users.filter(u => u.user).map(u => ({ user: u.user, password: u.password || '' })),
+        rules: f.rules.filter(r => r.address).map(r => ({ action: r.action === 'deny' ? 'deny' : 'allow', address: r.address })),
+        geo_mode: countries.length ? f.geo_mode : 'off',
+        countries,
+      }
+      return isEdit ? updateProxyAccessList(initial.id, body) : createProxyAccessList(body)
+    },
+    onSuccess: onSaved,
+    onError: (e) => setErr(errMsg(e, 'Save failed')),
+  })
+  function trySave() { setErr(''); if (!f.name.trim()) { setErr('Name is required'); return } save.mutate() }
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-xl my-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit access list — ${initial.name}` : 'Add access list'}</span>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div><Label>Name</Label><Input value={f.name} onChange={v => set('name', v)} placeholder="Office + admins" /></div>
+
+          <div className="border-t border-border pt-3">
+            <Label>Authorized users (basic auth)</Label>
+            <div className="space-y-2 mt-1">
+              {f.users.map((u, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={u.user} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
+                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                  <input type="password" value={u.password} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
+                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                  <button onClick={() => set('users', f.users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                </div>
+              ))}
+              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+            </div>
+            <div className="mt-2"><Toggle checked={!!f.pass_auth} onChange={v => set('pass_auth', v)} label="Forward the Authorization header to the upstream" /></div>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <Label>IP rules</Label>
+            <p className="text-[11px] text-content-faint mt-1 mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted (everything else denied). Deny rules document exclusions; a deny-only list can’t be enforced at the proxy.</p>
+            <div className="space-y-2">
+              {f.rules.map((r, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                    <option value="allow">Allow</option><option value="deny">Deny</option>
+                  </select>
+                  <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4"
+                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                  <button onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                </div>
+              ))}
+              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add IP rule</button>
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <Label>GeoIP country policy</Label>
+            <div className="grid grid-cols-2 gap-3 mt-1">
+              <Select value={f.geo_mode || 'off'} onChange={v => set('geo_mode', v)} options={[
+                { value: 'off', label: 'Off' },
+                { value: 'allow', label: 'Allow only these countries' },
+                { value: 'block', label: 'Block these countries' },
+              ]} />
+              <Input value={f.countriesText} onChange={v => set('countriesText', v)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} />
+            </div>
+            <p className="text-[11px] text-content-faint mt-1">
+              Two-letter <a href="https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" target="_blank" rel="noreferrer" className="text-brand-400 underline">ISO country codes</a>, comma-separated.
+              {!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}
+            </p>
+          </div>
+
+          {err && (
+            <details open className="text-sm bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">
+              <summary className="cursor-pointer text-danger-fg font-medium select-none">Couldn’t save — details</summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-danger-fg/90 font-mono">{err}</pre>
+            </details>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save access list'}</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// TestToast is the compact, auto-dismissing result shown next to "Test upstream".
+function TestToast({ test, onClose }) {
+  if (test.loading) return <span className="text-xs text-content-muted">Testing…</span>
+  const rs = test.results || []
+  const good = rs.filter(r => r.ok).length
+  const allOk = !test.error && rs.length > 0 && good === rs.length
+  let msg, tone
+  if (test.error) { msg = `✕ ${test.error}`; tone = 'danger' }
+  else if (rs.length === 0) { msg = 'No upstreams to test'; tone = 'muted' }
+  else if (allOk) { msg = rs.length === 1 ? `✓ ${rs[0].target} reachable (${rs[0].latency_ms}ms)` : `✓ all ${good} upstreams reachable`; tone = 'success' }
+  else { const b = rs.find(r => !r.ok); msg = `✕ ${rs.length - good}/${rs.length} failed — ${b.target}: ${b.error}`; tone = 'danger' }
+  const cls = tone === 'success' ? 'bg-success-subtle/40 border-success-border/50 text-success-fg'
+    : tone === 'danger' ? 'bg-danger-subtle/40 border-danger-border/50 text-danger-fg'
+    : 'bg-surface-overlay/40 border-border text-content-muted'
+  return (
+    <div className={`flex items-center gap-1.5 min-w-0 text-xs px-2 py-1 rounded-md border ${cls}`}>
+      <span className="truncate" title={msg}>{msg}</span>
+      <button onClick={onClose} className="shrink-0 opacity-60 hover:opacity-100">✕</button>
+    </div>
+  )
+}
+
+function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
   const isEdit = !!initial
   const [f, setF] = useState(() => {
     if (!initial) return blankRoute()
-    return { ...blankRoute(), ...initial, upstreams: initial.upstreams?.length ? initial.upstreams : [{ scheme: 'http', host: '', port: '' }], locations: initial.locations || [], auth_users: (initial.auth_users || []).map(u => ({ user: u.user, password: '' })) }
+    return {
+      ...blankRoute(), ...initial,
+      upstreams: initial.upstreams?.length ? initial.upstreams : [{ scheme: 'http', host: '', port: '' }],
+      locations: (initial.locations || []).map(normLocation),
+      auth_users: (initial.auth_users || []).map(u => ({ user: u.user, password: '' })),
+    }
   })
+  const [tab, setTab] = useState('basics')
   const [err, setErr] = useState('')
   const [test, setTest] = useState(null)
   const { data: certData } = useQuery({ queryKey: ['proxy-certs'], queryFn: fetchProxyCerts })
   const certs = certData?.certs || []
   const inheritedEmail = certData?.acme_email || '(not set in Settings)'
-  const set = (k, v) => setF(s => ({ ...s, [k]: v }))
-  const setUp = (i, k, v) => setF(s => ({ ...s, upstreams: s.upstreams.map((u, j) => j === i ? { ...u, [k]: v } : u) }))
+  // Any edit to the form clears a stale save error (user asked: message goes away
+  // as soon as they start making changes).
+  const set = (k, v) => { if (err) setErr(''); setF(s => ({ ...s, [k]: v })) }
+  const setUp = (i, k, v) => { if (err) setErr(''); setF(s => ({ ...s, upstreams: s.upstreams.map((u, j) => j === i ? { ...u, [k]: v } : u) })) }
+  // location upstream helpers (li = location index, ui = upstream index)
+  const setLoc = (li, k, v) => set('locations', f.locations.map((l, j) => j === li ? { ...l, [k]: v } : l))
+  const setLocUp = (li, ui, k, v) => set('locations', f.locations.map((l, j) => j === li ? { ...l, upstreams: l.upstreams.map((u, m) => m === ui ? { ...u, [k]: v } : u) } : l))
+
+  const needsToS = (f.tls_mode === 'le-http' || f.tls_mode === 'le-dns') && !f.accept_tos
 
   const save = useMutation({
     mutationFn: () => {
       const body = {
         ...f,
+        access_list_id: Number(f.access_list_id) || 0,
         redirect_code: Number(f.redirect_code) || 301,
         hsts_seconds: f.hsts_seconds > 0 ? Number(f.hsts_seconds) : 0,
         upstreams: f.upstreams.filter(u => u.host).map(u => ({ scheme: u.scheme, host: u.host, port: Number(u.port) || 0 })),
         auth_users: f.auth_mode === 'basic' ? f.auth_users.filter(u => u.user) : [],
-        locations: (f.locations || []).filter(l => l.path && l.host).map(l => ({ path: l.path, scheme: l.scheme || 'http', host: l.host, port: Number(l.port) || 0, forward_path: l.forward_path || '' })),
+        locations: (f.locations || []).map(l => ({
+          path: l.path,
+          forward_path: l.forward_path || '',
+          upstreams: (l.upstreams || []).filter(u => u.host).map(u => ({ scheme: u.scheme || 'http', host: u.host, port: Number(u.port) || 0 })),
+        })).filter(l => l.path && l.upstreams.length),
       }
       return isEdit ? updateProxyRoute(initial.id, body) : createProxyRoute(body)
     },
     onSuccess: onSaved,
-    onError: (e) => setErr(e?.response?.data?.error || 'Save failed'),
+    onError: (e) => setErr(errMsg(e, 'Save failed')),
   })
 
+  function trySave() {
+    setErr('')
+    if (needsToS) {
+      setTab('certs')
+      setErr("Accept the Let's Encrypt Terms of Service (Certs & SSL tab) to use a Let's Encrypt certificate.")
+      return
+    }
+    save.mutate()
+  }
+
+  // Test result behaves like a toaster: clears itself after ~12s. The ref lets a new
+  // test cancel the prior timer so an old result can't wipe a fresh one early.
+  const testTimer = useRef(null)
+  function showTest(state) {
+    if (testTimer.current) clearTimeout(testTimer.current)
+    setTest(state)
+    if (state && !state.loading) testTimer.current = setTimeout(() => setTest(null), 12000)
+  }
   async function runTest() {
-    setTest({ loading: true })
+    showTest({ loading: true })
     try {
       const res = await testProxyRoute(isEdit ? initial.id : null, { upstreams: f.upstreams.filter(u => u.host).map(u => ({ scheme: u.scheme, host: u.host, port: Number(u.port) || 0 })) })
-      setTest({ results: res.results || [] })
-    } catch (e) { setTest({ error: e?.response?.data?.error || 'Test failed' }) }
+      showTest({ results: res.results || [] })
+    } catch (e) { showTest({ error: errMsg(e, 'Test failed') }) }
   }
 
   const isRedirect = f.type === 'redirect'
   const tlsOn = f.tls_mode !== 'none'
+
+  const tabs = [
+    { id: 'basics', label: 'Basics & Security' },
+    ...(!isRedirect ? [{ id: 'locations', label: 'Locations' }] : []),
+    { id: 'certs', label: 'Certs & SSL' },
+    ...(!isRedirect ? [{ id: 'advanced', label: 'Advanced' }] : []),
+  ]
+  const activeTab = tabs.some(t => t.id === tab) ? tab : 'basics'
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
@@ -312,7 +589,12 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
           <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit route — ${initial.name}` : 'Add route'}</span>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
         </div>
-        <div className="px-5 py-4 space-y-4">
+        <div className="flex gap-1 px-5 border-b border-border">
+          {tabs.map(t => <TabBtn key={t.id} active={activeTab === t.id} onClick={() => setTab(t.id)}>{t.label}</TabBtn>)}
+        </div>
+        <div className="px-5 py-4 space-y-4 min-h-[18rem]">
+          {/* ── Basics & Security ─────────────────────────────────────────── */}
+          {activeTab === 'basics' && (<>
           <div className="grid grid-cols-2 gap-3 items-end">
             <div><Label>Name</Label><Input value={f.name} onChange={v => set('name', v)} placeholder="Jellyfin" /></div>
             <div>
@@ -358,37 +640,96 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Custom locations (NPM parity) — sub-paths each forwarding to their own upstream */}
+          {/* Access & hardening */}
           {!isRedirect && (
-            <details className="border-t border-border pt-3">
-              <summary className="text-xs font-semibold text-content-muted cursor-pointer">Custom locations</summary>
-              <p className="text-[11px] text-content-faint mt-2 mb-2">Forward sub-paths on this host to different services. Each inherits this route's TLS, auth and headers.</p>
-              <div className="space-y-2">
+            <div className="border-t border-border pt-3 space-y-3">
+              <div>
+                <Label>Access list</Label>
+                <Select value={String(f.access_list_id || 0)} onChange={v => set('access_list_id', Number(v))}
+                  options={[{ value: '0', label: 'None — configure below' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
+                {accessLists.length === 0 && <p className="text-[11px] text-content-faint mt-1">Tip: create reusable lists in the Access lists section to share auth + IP rules across routes.</p>}
+              </div>
+
+              {Number(f.access_list_id) > 0 ? (() => {
+                const al = accessLists.find(a => a.id === Number(f.access_list_id))
+                if (!al) return <p className="text-xs text-danger-fg">Selected access list no longer exists — pick another or choose None.</p>
+                const allow = (al.rules || []).filter(r => r.action === 'allow').length
+                const deny = (al.rules || []).filter(r => r.action === 'deny').length
+                return (
+                  <div className="rounded-lg bg-surface-raised/40 border border-border-strong/50 px-3 py-2 text-xs text-content-subtle">
+                    Auth &amp; IP are managed by access list <span className="text-content font-medium">{al.name}</span>: {(al.users || []).length} user{(al.users || []).length === 1 ? '' : 's'}, {allow} allow rule{allow === 1 ? '' : 's'}{deny ? `, ${deny} deny rule${deny === 1 ? '' : 's'}` : ''}{al.pass_auth ? '' : ' · strips auth header'}. Edit it in the Access lists section below.
+                  </div>
+                )
+              })() : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Authentication</Label><Select value={f.auth_mode} onChange={v => set('auth_mode', v)} options={[{ value: 'none', label: 'None' }, { value: 'basic', label: 'Basic auth' }]} /></div>
+                    <div><Label>IP allowlist (CIDR)</Label><Input value={f.ip_allow} onChange={v => set('ip_allow', v)} placeholder="192.168.0.0/16" /></div>
+                  </div>
+                  {f.auth_mode === 'basic' && (
+                    <div className="space-y-2">
+                      {f.auth_users.map((u, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <input value={u.user} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
+                            className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                          <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
+                            className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                          <button onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                        </div>
+                      ))}
+                      <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+                    </div>
+                  )}
+                </>
+              )}
+              <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Security headers (block common exploits, lite)" />
+            </div>
+          )}
+          </>)}
+
+          {/* ── Locations (custom locations, NPM parity) ──────────────────── */}
+          {activeTab === 'locations' && !isRedirect && (
+            <div>
+              <p className="text-[11px] text-content-faint mb-3">Forward sub-paths on this host to different services. Each inherits this route's TLS, auth and headers. Add more than one upstream to load-balance that path.</p>
+              <div className="space-y-3">
                 {(f.locations || []).map((l, i) => (
-                  <div key={i} className="flex items-center gap-1.5 flex-wrap">
-                    <input value={l.path} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, path: e.target.value } : x))} placeholder="/path"
-                      className="w-24 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                    <select value={l.scheme || 'http'} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, scheme: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
-                      <option value="http">http</option><option value="https">https</option>
-                    </select>
-                    <input value={l.host} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, host: e.target.value } : x))} placeholder="10.0.0.5"
-                      className="flex-1 min-w-[90px] px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                    <span className="text-content-muted">:</span>
-                    <input value={l.port} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, port: e.target.value } : x))} placeholder="80"
-                      className="w-16 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                    <input value={l.forward_path || ''} onChange={e => set('locations', f.locations.map((x, j) => j === i ? { ...x, forward_path: e.target.value } : x))} placeholder="/fwd (opt)"
-                      className="w-24 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                    <button onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1">🗑</button>
+                  <div key={i} className="border border-border rounded-lg p-3 space-y-2 bg-surface-raised/30">
+                    <div className="flex items-center gap-2">
+                      <input value={l.path} onChange={e => setLoc(i, 'path', e.target.value)} placeholder="/path"
+                        className="w-28 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                      <input value={l.forward_path || ''} onChange={e => setLoc(i, 'forward_path', e.target.value)} placeholder="forward to /sub (optional)"
+                        className="flex-1 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                      <button onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} title="Remove location" className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                    </div>
+                    <div className="space-y-1.5 pl-1">
+                      {(l.upstreams || []).map((u, k) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <select value={u.scheme || 'http'} onChange={e => setLocUp(i, k, 'scheme', e.target.value)} className="px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                            <option value="http">http</option><option value="https">https</option>
+                          </select>
+                          <input value={u.host} onChange={e => setLocUp(i, k, 'host', e.target.value)} placeholder="10.0.0.5"
+                            className="flex-1 min-w-[90px] px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                          <span className="text-content-muted">:</span>
+                          <input value={u.port} onChange={e => setLocUp(i, k, 'port', e.target.value)} placeholder="80"
+                            className="w-16 px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                          <button onClick={() => setLoc(i, 'upstreams', l.upstreams.filter((_, m) => m !== k))} title="Remove upstream"
+                            className="text-content-faint hover:text-danger-fg px-1" disabled={l.upstreams.length <= 1}>🗑</button>
+                        </div>
+                      ))}
+                      <button onClick={() => setLoc(i, 'upstreams', [...(l.upstreams || []), blankUpstream()])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add upstream</button>
+                    </div>
                   </div>
                 ))}
-                <button onClick={() => set('locations', [...(f.locations || []), { path: '', scheme: 'http', host: '', port: '', forward_path: '' }])}
+                <button onClick={() => set('locations', [...(f.locations || []), blankLocation()])}
                   className="text-xs text-brand-400 hover:text-brand-300">＋ Add location</button>
+                {(!f.locations || f.locations.length === 0) && <p className="text-xs text-content-subtle">No custom locations — all traffic goes to the upstreams on the Basics tab.</p>}
               </div>
-            </details>
+            </div>
           )}
 
-          {/* TLS */}
-          <div className="border-t border-border pt-3 space-y-3">
+          {/* ── Certs & SSL ───────────────────────────────────────────────── */}
+          {activeTab === 'certs' && (
+          <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Certificate</Label><Select value={f.tls_mode} onChange={v => set('tls_mode', v)} options={TLS_OPTIONS} /></div>
               {f.tls_mode === 'existing' && (
@@ -429,67 +770,49 @@ function RouteModal({ initial, plugins, onClose, onSaved }) {
             )}
             <p className="text-[11px] text-content-faint">✓ Reuse serves a stored cert matching the host (nothing re-issued). HTTP/2 and WebSocket are automatic.</p>
           </div>
-
-          {/* Access */}
-          {!isRedirect && (
-            <div className="border-t border-border pt-3 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Authentication</Label><Select value={f.auth_mode} onChange={v => set('auth_mode', v)} options={[{ value: 'none', label: 'None' }, { value: 'basic', label: 'Basic auth' }]} /></div>
-                <div><Label>IP allowlist (CIDR)</Label><Input value={f.ip_allow} onChange={v => set('ip_allow', v)} placeholder="192.168.0.0/16" /></div>
-              </div>
-              {f.auth_mode === 'basic' && (
-                <div className="space-y-2">
-                  {f.auth_users.map((u, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <input value={u.user} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
-                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                      <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
-                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                      <button onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
-                    </div>
-                  ))}
-                  <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
-                </div>
-              )}
-              <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Security headers (block common exploits, lite)" />
-              <div className="space-y-1.5 pt-1">
-                {plugins?.waf_enabled
-                  ? <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
-                  : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page first to use it here.</p>}
-                {plugins?.cache_enabled
-                  ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
-                  : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page first to use it here.</p>}
-              </div>
-            </div>
           )}
 
-          {/* Advanced */}
-          {!isRedirect && (
-            <details className="border-t border-border pt-3">
-              <summary className="text-xs font-semibold text-content-muted cursor-pointer">Advanced</summary>
-              <div className="flex flex-col gap-2 mt-2">
+          {/* ── Advanced ──────────────────────────────────────────────────── */}
+          {activeTab === 'advanced' && !isRedirect && (
+            <div className="space-y-4">
+              <div className="flex flex-col gap-2">
                 <Toggle checked={!!f.pass_host_header} onChange={v => set('pass_host_header', v)} label="Pass host header" />
                 {f.path_prefix && <Toggle checked={!!f.strip_prefix} onChange={v => set('strip_prefix', v)} label="Strip path prefix" />}
                 <Toggle checked={!!f.insecure_skip_verify} onChange={v => set('insecure_skip_verify', v)} label="Allow self-signed upstream" />
               </div>
-            </details>
-          )}
-
-          {test?.results && (
-            <div className="text-xs space-y-1">
-              {test.results.map((t, i) => (
-                <div key={i} className={t.ok ? 'text-success-fg' : 'text-danger-fg'}>{t.ok ? `✓ ${t.target} (${t.latency_ms}ms)` : `✕ ${t.target} — ${t.error}`}</div>
-              ))}
+              <div className="border-t border-border pt-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-semibold text-content-muted uppercase tracking-wider">Plugins</span>
+                  <span title="WAF and asset cache are Traefik plugins. Enable them instance-wide on the Proxy Service page first; then attach them per route here."
+                    className="text-content-faint cursor-help text-xs">ⓘ</span>
+                </div>
+                <div className="space-y-1.5">
+                  {plugins?.waf_enabled
+                    ? <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
+                    : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page first to use it here.</p>}
+                  {plugins?.cache_enabled
+                    ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
+                    : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page first to use it here.</p>}
+                </div>
+              </div>
             </div>
           )}
-          {test?.error && <p className="text-xs text-danger-fg">{test.error}</p>}
-          {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+
+          {err && (
+            <details open className="text-sm bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">
+              <summary className="cursor-pointer text-danger-fg font-medium select-none">Couldn’t save route — details</summary>
+              <pre className="mt-2 whitespace-pre-wrap break-words text-xs text-danger-fg/90 font-mono">{err}</pre>
+            </details>
+          )}
         </div>
-        <div className="flex items-center justify-between px-5 py-3 border-t border-border">
-          {!isRedirect ? <Btn variant="ghost" onClick={runTest} disabled={test?.loading}>{test?.loading ? 'Testing…' : '⚡ Test upstream'}</Btn> : <span />}
-          <div className="flex gap-2">
+        <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-border">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {!isRedirect && <Btn variant="ghost" onClick={runTest} disabled={test?.loading}>{test?.loading ? 'Testing…' : '⚡ Test upstream'}</Btn>}
+            {test && <TestToast test={test} onClose={() => showTest(null)} />}
+          </div>
+          <div className="flex gap-2 shrink-0">
             <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={() => { setErr(''); save.mutate() }} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save route'}</Btn>
+            <Btn onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save route'}</Btn>
           </div>
         </div>
       </div>

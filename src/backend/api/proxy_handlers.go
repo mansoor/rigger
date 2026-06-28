@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -24,10 +25,20 @@ import (
 func (h *Handler) renderProxy() error {
 	waf := h.appSetting("proxy_waf_enabled") == "true"
 	cache := h.appSetting("proxy_cache_enabled") == "true"
-	return proxyroutes.Render(h.db, proxyroutes.DynDir(), h.cryptoKey, waf, cache)
+	geo := h.appSetting("proxy_geoip_enabled") == "true"
+	return proxyroutes.Render(h.db, proxyroutes.DynDir(), h.cryptoKey, waf, cache, geo)
 }
 
 func (h *Handler) proxyStore() *proxyroutes.Store { return proxyroutes.NewStore(h.db) }
+
+// recoverProxy turns a panic in a proxy handler into a logged, JSON 500 instead of a
+// silent connection reset (which surfaces in the UI as a detail-less "Save failed").
+func recoverProxy(w http.ResponseWriter, op string) {
+	if v := recover(); v != nil {
+		log.Printf("proxy: %s handler panic: %v\n%s", op, v, debug.Stack())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("internal error (%s): %v", op, v)})
+	}
+}
 
 // RenderProxyRoutes re-renders the file-provider config at boot (drift repair). Writes
 // the base file even when no routes exist. Errors are logged, never fatal.
@@ -181,6 +192,7 @@ func (h *Handler) ListProxyRoutes(w http.ResponseWriter, r *http.Request) {
 
 // CreateProxyRoute — POST /api/proxy/routes.
 func (h *Handler) CreateProxyRoute(w http.ResponseWriter, r *http.Request) {
+	defer recoverProxy(w, "create")
 	var req proxyReq
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -214,6 +226,7 @@ func (h *Handler) CreateProxyRoute(w http.ResponseWriter, r *http.Request) {
 
 // UpdateProxyRoute — PUT /api/proxy/routes/{id}.
 func (h *Handler) UpdateProxyRoute(w http.ResponseWriter, r *http.Request) {
+	defer recoverProxy(w, "update")
 	id, err := parseTrailingID(r.URL.Path, "/api/proxy/routes/")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
@@ -265,6 +278,203 @@ func (h *Handler) DeleteProxyRoute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.proxyStore().Delete(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := h.renderProxy(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "deleted, but failed to apply: " + err.Error()})
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── Access Lists ────────────────────────────────────────────────────────────────
+// Reusable named sets of basic-auth users + IP rules a route can reference.
+
+// accessListReq shadows the user list so passwords arrive in plaintext (hashed here);
+// GET never returns the bcrypt hashes.
+type accessListReq struct {
+	proxyroutes.AccessList
+	Users []struct {
+		User     string `json:"user"`
+		Password string `json:"password"`
+	} `json:"users"`
+}
+
+func maskAccessList(a proxyroutes.AccessList) proxyroutes.AccessList {
+	for i := range a.Users {
+		a.Users[i].Hash = ""
+	}
+	return a
+}
+
+// toAccessList folds a request onto a stored list, hashing new passwords and preserving
+// unchanged ones (blank password = keep the existing hash for that username).
+func (h *Handler) toAccessList(req accessListReq, existing *proxyroutes.AccessList) (proxyroutes.AccessList, error) {
+	a := req.AccessList
+	now := time.Now().Unix()
+	a.UpdatedAt = now
+	if existing != nil {
+		a.ID = existing.ID
+		a.CreatedAt = existing.CreatedAt
+	} else {
+		a.CreatedAt = now
+	}
+	prior := map[string]string{}
+	if existing != nil {
+		for _, u := range existing.Users {
+			prior[u.User] = u.Hash
+		}
+	}
+	users := make([]proxyroutes.BasicUser, 0, len(req.Users))
+	for _, u := range req.Users {
+		name := strings.TrimSpace(u.User)
+		if name == "" {
+			continue
+		}
+		hash := prior[name]
+		if u.Password != "" {
+			b, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+			if err != nil {
+				return proxyroutes.AccessList{}, err
+			}
+			hash = string(b)
+		}
+		if hash == "" {
+			continue // new user with no password is dropped
+		}
+		users = append(users, proxyroutes.BasicUser{User: name, Hash: hash})
+	}
+	a.Users = users
+	// Keep only well-formed rules.
+	rules := make([]proxyroutes.AccessRule, 0, len(a.Rules))
+	for _, r := range a.Rules {
+		addr := strings.TrimSpace(r.Address)
+		if addr == "" {
+			continue
+		}
+		action := r.Action
+		if action != "deny" {
+			action = "allow"
+		}
+		rules = append(rules, proxyroutes.AccessRule{Action: action, Address: addr})
+	}
+	a.Rules = rules
+
+	// GeoIP: normalize mode + country codes (upper-cased ISO 3166-1 alpha-2, deduped).
+	if a.GeoMode != "allow" && a.GeoMode != "block" {
+		a.GeoMode = "off"
+	}
+	seen := map[string]bool{}
+	codes := make([]string, 0, len(a.Countries))
+	for _, c := range a.Countries {
+		c = strings.ToUpper(strings.TrimSpace(c))
+		if len(c) != 2 || seen[c] {
+			continue
+		}
+		seen[c] = true
+		codes = append(codes, c)
+	}
+	a.Countries = codes
+	if a.GeoMode == "off" || len(codes) == 0 {
+		a.GeoMode, a.Countries = "off", []string{}
+	}
+	return a, nil
+}
+
+// ListProxyAccessLists — GET /api/proxy/access-lists.
+func (h *Handler) ListProxyAccessLists(w http.ResponseWriter, r *http.Request) {
+	lists, err := h.proxyStore().ListAccessLists()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]proxyroutes.AccessList, len(lists))
+	for i, a := range lists {
+		out[i] = maskAccessList(a)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// CreateProxyAccessList — POST /api/proxy/access-lists.
+func (h *Handler) CreateProxyAccessList(w http.ResponseWriter, r *http.Request) {
+	defer recoverProxy(w, "create access list")
+	var req accessListReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	a, err := h.toAccessList(req, nil)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(a.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	id, err := h.proxyStore().CreateAccessList(a)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	a.ID = id
+	writeJSON(w, http.StatusCreated, maskAccessList(a))
+}
+
+// UpdateProxyAccessList — PUT /api/proxy/access-lists/{id}. Re-renders so routes that
+// reference the list pick up the new users/rules immediately.
+func (h *Handler) UpdateProxyAccessList(w http.ResponseWriter, r *http.Request) {
+	defer recoverProxy(w, "update access list")
+	id, err := parseTrailingID(r.URL.Path, "/api/proxy/access-lists/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	existing, ok, err := h.proxyStore().GetAccessList(id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	var req accessListReq
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	a, err := h.toAccessList(req, &existing)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(a.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if err := h.proxyStore().UpdateAccessList(a); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := h.renderProxy(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "saved, but failed to apply: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, maskAccessList(a))
+}
+
+// DeleteProxyAccessList — DELETE /api/proxy/access-lists/{id}. Detaches it from routes
+// (store sets their access_list_id=0) and re-renders.
+func (h *Handler) DeleteProxyAccessList(w http.ResponseWriter, r *http.Request) {
+	defer recoverProxy(w, "delete access list")
+	id, err := parseTrailingID(r.URL.Path, "/api/proxy/access-lists/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	if err := h.proxyStore().DeleteAccessList(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -331,6 +541,7 @@ func (h *Handler) GetProxyPlugins(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"waf_enabled":   h.appSetting("proxy_waf_enabled") == "true",
 		"cache_enabled": h.appSetting("proxy_cache_enabled") == "true",
+		"geoip_enabled": h.appSetting("proxy_geoip_enabled") == "true",
 	})
 }
 
@@ -339,6 +550,7 @@ func (h *Handler) SetProxyPlugins(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		WAF   *bool `json:"waf_enabled"`
 		Cache *bool `json:"cache_enabled"`
+		Geo   *bool `json:"geoip_enabled"`
 	}
 	if err := readJSON(r, &b); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
@@ -349,6 +561,9 @@ func (h *Handler) SetProxyPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 	if b.Cache != nil {
 		h.setAppSetting("proxy_cache_enabled", strconv.FormatBool(*b.Cache))
+	}
+	if b.Geo != nil {
+		h.setAppSetting("proxy_geoip_enabled", strconv.FormatBool(*b.Geo))
 	}
 	if err := h.renderProxy(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

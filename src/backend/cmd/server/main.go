@@ -991,6 +991,14 @@ func main() {
 			handler.CreateProxyRoute(w, r)
 		case r.Method == "GET" && path == "/api/proxy/certs":
 			handler.ListProxyCerts(w, r)
+		case r.Method == "GET" && path == "/api/proxy/access-lists":
+			handler.ListProxyAccessLists(w, r)
+		case r.Method == "POST" && path == "/api/proxy/access-lists":
+			handler.CreateProxyAccessList(w, r)
+		case r.Method == "PUT" && matchPrefix(path, "/api/proxy/access-lists/"):
+			handler.UpdateProxyAccessList(w, r)
+		case r.Method == "DELETE" && matchPrefix(path, "/api/proxy/access-lists/"):
+			handler.DeleteProxyAccessList(w, r)
 		case r.Method == "POST" && matchPrefix(path, "/api/proxy/routes/") && hasSuffix(path, "/test"):
 			handler.TestProxyRoute(w, r)
 		case r.Method == "PUT" && matchPrefix(path, "/api/proxy/routes/"):

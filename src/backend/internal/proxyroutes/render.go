@@ -64,9 +64,13 @@ func keyPath(dir string, id int64) string  { return filepath.Join(dir, "secrets"
 // Render rebuilds the file-provider config for all routes: it writes proxy-base.yml +
 // one proxy-<id>.yml per enabled route, then removes any stale proxy-*.yml. waf/cache
 // middleware refs are emitted only when that plugin is enabled instance-wide (PX-6).
-func Render(d *db.DB, dir string, cryptoKey []byte, wafEnabled, cacheEnabled bool) error {
+func Render(d *db.DB, dir string, cryptoKey []byte, wafEnabled, cacheEnabled, geoEnabled bool) error {
 	st := NewStore(d)
 	routes, err := st.List()
+	if err != nil {
+		return err
+	}
+	lists, err := st.AccessListMap()
 	if err != nil {
 		return err
 	}
@@ -81,7 +85,7 @@ func Render(d *db.DB, dir string, cryptoKey []byte, wafEnabled, cacheEnabled boo
 		if !r.Enabled {
 			continue
 		}
-		yaml, err := routeYAML(r, dir, cryptoKey, wafEnabled, cacheEnabled)
+		yaml, err := routeYAML(r, dir, cryptoKey, wafEnabled, cacheEnabled, geoEnabled, lists)
 		if err != nil {
 			return fmt.Errorf("proxyroutes: render route %d (%s): %w", r.ID, r.Name, err)
 		}
@@ -104,9 +108,68 @@ func Render(d *db.DB, dir string, cryptoKey []byte, wafEnabled, cacheEnabled boo
 	return nil
 }
 
+// effectiveAccess resolves a route's auth users / pass-auth / IP allow CIDRs / GeoIP
+// policy: from the referenced access list when one is set (and exists), else from the
+// route's own inline fields. Traefik's ipAllowList is allow-only, so only "allow" rules
+// become a sourceRange. GeoIP is access-list-only (no inline equivalent).
+func effectiveAccess(r Route, lists map[int64]AccessList) (users []BasicUser, passAuth bool, cidrs []string, geoMode string, countries []string) {
+	passAuth = true
+	geoMode = "off"
+	if r.AccessListID > 0 {
+		if al, ok := lists[r.AccessListID]; ok {
+			passAuth = al.PassAuth
+			users = al.Users
+			for _, rule := range al.Rules {
+				if rule.Action == "allow" {
+					if a := strings.TrimSpace(rule.Address); a != "" {
+						cidrs = append(cidrs, a)
+					}
+				}
+			}
+			if al.GeoMode == "allow" || al.GeoMode == "block" {
+				geoMode = al.GeoMode
+				countries = al.Countries
+			}
+			return users, passAuth, cidrs, geoMode, countries
+		}
+		// referenced list was deleted — fall through to inline (defensive)
+	}
+	if r.AuthMode == "basic" {
+		users = r.AuthUsers
+	}
+	cidrs = splitCSV(r.IPAllow)
+	return users, passAuth, cidrs, geoMode, countries
+}
+
+// geoDBPath is where the GeoIP database is expected inside the Traefik container. Mount
+// an IP2Location LITE BIN DB here (see docker-compose.yml + docs/design/proxy-service.md).
+const geoDBPath = "/geoip/IP2LOCATION-LITE-DB1.IPV6.BIN"
+
+// geoMiddleware emits an nscuro/traefik-plugin-geoblock instance for one route. mode is
+// "allow" (only the listed countries) or "block" (everything except the listed). The
+// plugin name "geoblock" must match the experimental.plugins.geoblock static declaration.
+func geoMiddleware(b *strings.Builder, id, mode string, countries []string) {
+	fmt.Fprintf(b, "    %s-geo:\n      plugin:\n        geoblock:\n", id)
+	b.WriteString("          enabled: true\n")
+	fmt.Fprintf(b, "          databaseFilePath: %q\n", geoDBPath)
+	b.WriteString("          allowPrivate: true\n")
+	b.WriteString("          disallowedStatusCode: 403\n")
+	key := "allowedCountries"
+	if mode == "block" {
+		key = "blockedCountries"
+		b.WriteString("          defaultAllow: true\n")
+	} else {
+		b.WriteString("          defaultAllow: false\n")
+	}
+	fmt.Fprintf(b, "          %s:\n", key)
+	for _, c := range countries {
+		fmt.Fprintf(b, "            - %q\n", c)
+	}
+}
+
 // routeYAML renders the file-provider YAML for one enabled route. Returns "" when the
 // route emits nothing (default route in page mode).
-func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled bool) (string, error) {
+func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled, geoEnabled bool, lists map[int64]AccessList) (string, error) {
 	id := rid(r.ID)
 	tlsOn := r.TLSMode != "" && r.TLSMode != "none"
 	entry := "web"
@@ -125,19 +188,30 @@ func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled b
 
 	// ── Redirect-scheme (force HTTPS) lives on a separate web→websecure router below;
 	//    here we collect content middlewares applied to the main (serving) router. ──
-	if r.AuthMode == "basic" && len(r.AuthUsers) > 0 {
-		fmt.Fprintf(&middlewares, "    %s-auth:\n      basicAuth:\n        users:\n", id)
-		for _, u := range r.AuthUsers {
+	// Auth + IP + GeoIP come from the route's access list when set, else inline fields.
+	authUsers, passAuth, ipCIDRs, geoMode, geoCountries := effectiveAccess(r, lists)
+	if len(authUsers) > 0 {
+		fmt.Fprintf(&middlewares, "    %s-auth:\n      basicAuth:\n", id)
+		if !passAuth {
+			middlewares.WriteString("        removeHeader: true\n")
+		}
+		middlewares.WriteString("        users:\n")
+		for _, u := range authUsers {
 			fmt.Fprintf(&middlewares, "          - %q\n", u.User+":"+u.Hash)
 		}
 		mws = append(mws, id+"-auth")
 	}
-	if cidrs := splitCSV(r.IPAllow); len(cidrs) > 0 {
+	if len(ipCIDRs) > 0 {
 		fmt.Fprintf(&middlewares, "    %s-ipallow:\n      ipAllowList:\n        sourceRange:\n", id)
-		for _, c := range cidrs {
+		for _, c := range ipCIDRs {
 			fmt.Fprintf(&middlewares, "          - %q\n", c)
 		}
 		mws = append(mws, id+"-ipallow")
+	}
+	// GeoIP country policy (geoblock plugin) — only when the plugin is enabled instance-wide.
+	if geoEnabled && (geoMode == "allow" || geoMode == "block") && len(geoCountries) > 0 {
+		geoMiddleware(&middlewares, id, geoMode, geoCountries)
+		mws = append(mws, id+"-geo")
 	}
 	if hdr := headersMiddleware(id, r); hdr != "" {
 		middlewares.WriteString(hdr)
@@ -202,7 +276,8 @@ func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled b
 	if !isRedirectKind && !isStatusKind && !r.IsDefault {
 		hosts := hostsExpr(r.Host)
 		for n, loc := range r.Locations {
-			if strings.TrimSpace(loc.Path) == "" || strings.TrimSpace(loc.Host) == "" {
+			servers := loc.Servers()
+			if strings.TrimSpace(loc.Path) == "" || len(servers) == 0 {
 				continue
 			}
 			lid := fmt.Sprintf("%s-loc%d", id, n)
@@ -213,8 +288,10 @@ func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled b
 					lid, "^"+regexp.QuoteMeta(loc.Path)+"(/.*)?$", strings.TrimRight(fp, "/")+"$1")
 				lmws = append([]string{lid + "-rw"}, lmws...)
 			}
-			fmt.Fprintf(&services, "    %s:\n      loadBalancer:\n        passHostHeader: %t\n        servers:\n          - url: %q\n",
-				lid, r.PassHostHeader, upstreamURL(Upstream{Scheme: loc.Scheme, Host: loc.Host, Port: loc.Port}))
+			fmt.Fprintf(&services, "    %s:\n      loadBalancer:\n        passHostHeader: %t\n        servers:\n", lid, r.PassHostHeader)
+			for _, u := range servers {
+				fmt.Fprintf(&services, "          - url: %q\n", upstreamURL(u))
+			}
 			if r.InsecureSkipVerify {
 				fmt.Fprintf(&services, "        serversTransport: %s-transport\n", lid)
 				fmt.Fprintf(&transports, "    %s-transport:\n      insecureSkipVerify: true\n", lid)

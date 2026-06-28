@@ -7,7 +7,7 @@ import (
 
 func render(t *testing.T, r Route) string {
 	t.Helper()
-	y, err := routeYAML(r, t.TempDir(), nil, false, false)
+	y, err := routeYAML(r, t.TempDir(), nil, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("routeYAML: %v", err)
 	}
@@ -82,6 +82,53 @@ func TestDefaultRoutePageEmitsNothing(t *testing.T) {
 	if y != "" {
 		t.Errorf("default page mode should emit nothing, got:\n%s", y)
 	}
+}
+
+func TestAccessListAppliedToRoute(t *testing.T) {
+	lists := map[int64]AccessList{
+		9: {
+			ID: 9, Name: "office", PassAuth: false,
+			Users: []BasicUser{{User: "bob", Hash: "$2y$zz"}},
+			Rules: []AccessRule{{Action: "allow", Address: "10.0.0.0/8"}, {Action: "deny", Address: "1.2.3.4"}},
+		},
+	}
+	y, err := routeYAML(Route{
+		ID: 4, Name: "app", Enabled: true, Type: "proxy", Host: "app.example.com",
+		Upstreams: []Upstream{{Scheme: "http", Host: "10.0.0.2", Port: 3000}},
+		TLSMode:   "none", AccessListID: 9,
+	}, t.TempDir(), nil, false, false, false, lists)
+	if err != nil {
+		t.Fatalf("routeYAML: %v", err)
+	}
+	mustContain(t, y,
+		"proxy-4-auth:", "basicAuth:", "removeHeader: true", `"bob:$2y$zz"`,
+		"proxy-4-ipallow:", `"10.0.0.0/8"`,
+	)
+	if strings.Contains(y, "1.2.3.4") {
+		t.Errorf("deny address must not appear in the Traefik allow-list:\n%s", y)
+	}
+}
+
+func TestAccessListGeoBlock(t *testing.T) {
+	lists := map[int64]AccessList{
+		2: {ID: 2, Name: "geo", GeoMode: "block", Countries: []string{"RU", "CN"}},
+		3: {ID: 3, Name: "geoallow", GeoMode: "allow", Countries: []string{"US"}},
+	}
+	r := func(id, alID int64) Route {
+		return Route{ID: id, Name: "g", Enabled: true, Type: "proxy", Host: "g.example.com",
+			Upstreams: []Upstream{{Scheme: "http", Host: "10.0.0.9", Port: 80}}, TLSMode: "none", AccessListID: alID}
+	}
+	// geo plugin disabled instance-wide → no geo middleware even with a policy.
+	off, _ := routeYAML(r(6, 2), t.TempDir(), nil, false, false, false, lists)
+	if strings.Contains(off, "-geo:") {
+		t.Errorf("geo middleware must not render when the plugin is disabled:\n%s", off)
+	}
+	// block mode enabled.
+	y, _ := routeYAML(r(6, 2), t.TempDir(), nil, false, false, true, lists)
+	mustContain(t, y, "proxy-6-geo:", "geoblock:", "blockedCountries:", `"RU"`, `"CN"`, "defaultAllow: true")
+	// allow mode enabled.
+	ya, _ := routeYAML(r(7, 3), t.TempDir(), nil, false, false, true, lists)
+	mustContain(t, ya, "proxy-7-geo:", "allowedCountries:", `"US"`, "defaultAllow: false")
 }
 
 func TestIPAllowAndExistingCert(t *testing.T) {

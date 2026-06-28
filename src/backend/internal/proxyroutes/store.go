@@ -29,14 +29,31 @@ type BasicUser struct {
 }
 
 // Location is an NPM-style custom location: a sub-path on the route's host(s) that
-// forwards to its own upstream. It inherits the route's TLS / auth / headers. An
-// optional ForwardPath rewrites the upstream path (sub-folder forwarding).
+// forwards to its own upstream(s). It inherits the route's TLS / auth / headers. An
+// optional ForwardPath rewrites the upstream path (sub-folder forwarding). Multiple
+// upstreams load-balance, exactly like the route's own upstreams.
+//
+// Scheme/Host/Port are the legacy single-target fields kept for back-compat with rows
+// written before per-location load balancing; Servers() reconciles the two shapes.
 type Location struct {
-	Path        string `json:"path"`         // PathPrefix on the route's host(s), e.g. /api
-	Scheme      string `json:"scheme"`       // http | https
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	ForwardPath string `json:"forward_path"` // optional upstream sub-path; "" = forward as-is
+	Path        string     `json:"path"`              // PathPrefix on the route's host(s), e.g. /api
+	Upstreams   []Upstream `json:"upstreams"`         // load-balanced targets
+	Scheme      string     `json:"scheme,omitempty"`  // legacy single target
+	Host        string     `json:"host,omitempty"`    // legacy single target
+	Port        int        `json:"port,omitempty"`    // legacy single target
+	ForwardPath string     `json:"forward_path"`      // optional upstream sub-path; "" = forward as-is
+}
+
+// Servers returns the location's effective upstream list, folding the legacy single
+// host/port into the slice form when no explicit upstreams are present.
+func (l Location) Servers() []Upstream {
+	if len(l.Upstreams) > 0 {
+		return l.Upstreams
+	}
+	if l.Host != "" {
+		return []Upstream{{Scheme: l.Scheme, Host: l.Host, Port: l.Port}}
+	}
+	return nil
 }
 
 // Route is one proxy entry. Secrets (the custom-cert private key) live in tls_key_enc
@@ -68,6 +85,7 @@ type Route struct {
 	AuthMode           string     `json:"auth_mode"` // none|basic
 	AuthUsers          []BasicUser `json:"auth_users"`
 	IPAllow            string     `json:"ip_allow"`
+	AccessListID       int64      `json:"access_list_id"` // 0 = none; else use the named access list's users + IP rules
 	SecurityHeaders    bool       `json:"security_headers"`
 	StripPrefix        bool       `json:"strip_prefix"`
 	WAF                bool       `json:"waf"`
@@ -88,7 +106,7 @@ const cols = `id, name, enabled, type, is_default, default_mode, host, path_pref
 	upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 	tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 	hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-	security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at`
+	security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id`
 
 func b2i(b bool) int {
 	if b {
@@ -106,7 +124,7 @@ func scan(s interface{ Scan(...any) error }) (Route, error) {
 		&upstreamsJSON, &passHost, &insecure, &r.RedirectTo, &r.RedirectCode,
 		&r.TLSMode, &r.TLSCertRef, &r.TLSCertPEM, &r.TLSKeyEnc, &r.ACMEEmail, &forceHTTPS,
 		&r.HSTSSeconds, &hstsSub, &hstsPre, &r.AuthMode, &authUsersJSON, &r.IPAllow,
-		&secHdr, &strip, &waf, &cache, &locationsJSON, &acceptToS, &r.Notes, &r.CreatedAt, &r.UpdatedAt,
+		&secHdr, &strip, &waf, &cache, &locationsJSON, &acceptToS, &r.Notes, &r.CreatedAt, &r.UpdatedAt, &r.AccessListID,
 	)
 	if err != nil {
 		return Route{}, err
@@ -173,7 +191,7 @@ func argsFor(r Route) []any {
 		r.TLSMode, r.TLSCertRef, r.TLSCertPEM, r.TLSKeyEnc, r.ACMEEmail, b2i(r.ForceHTTPS),
 		r.HSTSSeconds, b2i(r.HSTSSubdomains), b2i(r.HSTSPreload), r.AuthMode, string(au), r.IPAllow,
 		b2i(r.SecurityHeaders), b2i(r.StripPrefix), b2i(r.WAF), b2i(r.Cache), string(loc), b2i(r.AcceptToS), r.Notes,
-		r.CreatedAt, r.UpdatedAt,
+		r.CreatedAt, r.UpdatedAt, r.AccessListID,
 	}
 }
 
@@ -184,8 +202,8 @@ func (s *Store) Create(r Route) (int64, error) {
 		upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 		tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 		hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-		security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
+		security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
 	if err != nil {
 		return 0, err
 	}
@@ -200,7 +218,7 @@ func (s *Store) Update(r Route) error {
 		upstreams=?, pass_host_header=?, insecure_skip_verify=?, redirect_to=?, redirect_code=?,
 		tls_mode=?, tls_cert_ref=?, tls_cert_pem=?, tls_key_enc=?, acme_email=?, force_https=?,
 		hsts_seconds=?, hsts_subdomains=?, hsts_preload=?, auth_mode=?, auth_users=?, ip_allow=?,
-		security_headers=?, strip_prefix=?, waf=?, cache=?, locations=?, accept_tos=?, notes=?, created_at=?, updated_at=?
+		security_headers=?, strip_prefix=?, waf=?, cache=?, locations=?, accept_tos=?, notes=?, created_at=?, updated_at=?, access_list_id=?
 		WHERE id=?`, args...)
 	return err
 }

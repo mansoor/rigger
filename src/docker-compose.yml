@@ -168,16 +168,25 @@ services:
       - --providers.file.directory=/dynamic
       - --providers.file.watch=true
       # ── Proxy Service plugins (PX-6) — OPT-IN, one-time ──
-      # The Proxy Service can attach a WAF (Coraza/OWASP CRS) or an HTTP cache (Souin)
-      # to routes/apps. Those are Traefik plugins, declared statically here. They are
-      # commented out so a stock instance never downloads/compiles them. To use them:
-      # uncomment the matching block, pin a current version, rebuild rigger-traefik
-      # ONCE, then toggle WAF/Cache in Proxy Service → Plugins (per-route after that is
-      # instant). Verify the module path/version against the plugin's docs before use.
+      # The Proxy Service can attach a WAF (Coraza/OWASP CRS), an HTTP cache (Souin), or
+      # GeoIP country blocking (geoblock) to routes/apps. Those are Traefik plugins,
+      # declared statically here. They are commented out so a stock instance never
+      # downloads/compiles them. To use one: uncomment the matching block, pin a current
+      # version, rebuild rigger-traefik ONCE, then toggle it in Proxy Service → Plugins
+      # (per-route/access-list after that is instant). Verify the module path/version
+      # against the plugin's docs before use.
       # - --experimental.plugins.coraza.modulename=github.com/jcchavezs/coraza-http-wasm-traefik
       # - --experimental.plugins.coraza.version=v0.0.0
       # - --experimental.plugins.souin.modulename=github.com/darkweak/souin/plugins/traefik
       # - --experimental.plugins.souin.version=v0.0.0
+      # GeoIP (offline, per-access-list country policy). Uses an IP2Location LITE BIN DB
+      # mounted at /geoip (see the volume below) — download it free (DB1, IPv6) and refresh
+      # monthly. NOTE: behind another proxy (e.g. NPM), GeoIP needs the real client IP, so
+      # also enable forwarded-headers trust on the entrypoints with YOUR proxy's IP, e.g.:
+      #   - --entrypoints.web.forwardedHeaders.trustedIPs=<npm-ip>/32
+      #   - --entrypoints.websecure.forwardedHeaders.trustedIPs=<npm-ip>/32
+      # - --experimental.plugins.geoblock.modulename=github.com/nscuro/traefik-plugin-geoblock
+      # - --experimental.plugins.geoblock.version=v0.0.0
       # ── Logging ──
       - --log.level=INFO
       - --accesslog=false
@@ -199,6 +208,9 @@ services:
       # writes; read-only here). The token lives in /dynamic/secrets so the file
       # provider (which scans /dynamic top-level) never tries to parse it as config.
       - rigger-dynamic:/dynamic:ro
+      # GeoIP database for the geoblock plugin (see the commented plugin block above).
+      # Uncomment and point at a host dir holding IP2LOCATION-LITE-DB1.IPV6.BIN.
+      # - ./geoip:/geoip:ro
     networks:
       - traefik_net
     depends_on:
