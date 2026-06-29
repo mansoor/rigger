@@ -545,6 +545,24 @@ func main() {
 			default:
 				http.NotFound(w, r)
 			}
+		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "access-lists":
+			// Workspace-scoped Access Lists (reusable auth + IP + GeoIP, strictly isolated).
+			// /api/workspaces/{ws}/access-lists[/{id}]
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("aclid", pathSegment(r.URL.Path, 4))
+			id := pathSegment(r.URL.Path, 4)
+			switch {
+			case r.Method == "GET" && id == "":
+				handler.ListWorkspaceAccessLists(w, r)
+			case r.Method == "POST" && id == "":
+				handler.CreateWorkspaceAccessList(w, r)
+			case r.Method == "PUT" && id != "":
+				handler.UpdateWorkspaceAccessList(w, r)
+			case r.Method == "DELETE" && id != "":
+				handler.DeleteWorkspaceAccessList(w, r)
+			default:
+				http.NotFound(w, r)
+			}
 		case matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 3) == "members":
 			// Workspace membership (Phase 5.2). /api/workspaces/{ws}/members[/{id}[/projects/{proj}]]
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))

@@ -50,7 +50,7 @@ func wsMinRole(method, seg3, seg4, seg5 string) string {
 		return auth.RoleAdmin
 	case "members", "settings":
 		return auth.RoleAdmin
-	case "hosts", "registries", "backup-targets", "notification-channels", "alerts":
+	case "hosts", "registries", "backup-targets", "notification-channels", "alerts", "access-lists":
 		if isGET {
 			return auth.RoleViewer // members may view the pool (e.g. to pick on deploy)
 		}

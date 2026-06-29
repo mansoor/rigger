@@ -380,7 +380,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 			string(hc.StartInterval))
 	}
 
-	g.deployBlock(isSwarm, svc.Name, string(svc.Replicas), restart)
+	g.deployBlock(isSwarm, svc.Name, string(svc.Replicas), restart, false) // app/build service — scalable
 
 	// extra_compose: service-level then env-level override.
 	g.emitExtraCompose(svc.ExtraCompose)
@@ -433,6 +433,13 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 			publishes = append(publishes, hp+":"+portOr(port, "80"))
 		}
 	case isRouted && e.TraefikEnabled:
+		// Attach the env's workspace access list + WAF/cache plugin middlewares to APP routers
+		// only — never the synthesized admin sidecars (Adminer / MinIO console), whose
+		// AuthProtect basic-auth shouldn't be double-gated. See workspace-plugins design doc.
+		g.appMW = nil
+		if !svc.AuthProtect {
+			g.appMW = e.RouterMiddlewares
+		}
 		if viaRouteTable {
 			// Labels come from the project routing table — one path-group router (Host &&
 			// PathPrefix||…) plus a router per subdomain route. The legacy single-host path is
@@ -709,7 +716,7 @@ func (g *gen) buildCloudflared(prefix string, isSwarm bool) {
 	g.line("    environment:")
 	g.line("      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}")
 	g.managedNet(prefix, "cloudflared")
-	g.deployBlock(isSwarm, "cloudflared", "1", "unless-stopped")
+	g.deployBlock(isSwarm, "cloudflared", "1", "unless-stopped", true)
 	g.line("")
 }
 
@@ -778,7 +785,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("      - " + prefix + "_pg_data:/var/lib/postgresql/data")
 		g.managedNet(prefix, "postgres")
 		g.healthcheck("pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}", "10s", "5s", "5", "30s", "")
-		g.deployBlock(isSwarm, "postgres", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "postgres", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -810,7 +817,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		} else {
 			g.healthcheck("mysqladmin ping -h localhost --silent", "10s", "5s", "5", "30s", "")
 		}
-		g.deployBlock(isSwarm, engine, "1", "unless-stopped")
+		g.deployBlock(isSwarm, engine, "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -837,7 +844,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		// mongosh ships in 6+, the legacy `mongo` shell in 5 — try both so the probe
 		// works across selectable versions.
 		g.healthcheck("mongosh --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1 || mongo --quiet --eval \"db.adminCommand('ping').ok\" | grep -q 1", "10s", "5s", "5", "40s", "")
-		g.deployBlock(isSwarm, "mongodb", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "mongodb", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -864,7 +871,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("      - " + prefix + "_opensearch_data:/usr/share/opensearch/data")
 		g.managedNet(prefix, "opensearch")
 		g.healthcheck("curl -ksf -u admin:${OPENSEARCH_PASSWORD} https://localhost:9200/_cluster/health || exit 1", "15s", "10s", "10", "60s", "")
-		g.deployBlock(isSwarm, "opensearch", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "opensearch", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -884,7 +891,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_victoriametrics_data:/victoria-metrics-data")
 		g.managedNet(prefix, "victoriametrics")
-		g.deployBlock(isSwarm, "victoriametrics", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "victoriametrics", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -898,7 +905,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("      - " + prefix + "_redis_data:/data")
 		g.managedNet(prefix, "redis")
 		g.healthcheck("redis-cli ping | grep -q PONG || exit 1", "10s", "3s", "3", "10s", "")
-		g.deployBlock(isSwarm, "redis", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "redis", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}
 
@@ -921,7 +928,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		// No Docker healthcheck: the minio image is distroless-ish (no curl/shell), so a
 		// CMD-SHELL probe would fail and Traefik would drop it. A container with NO
 		// healthcheck reads as healthy; the mc-init below retry-loops until MinIO is up.
-		g.deployBlock(isSwarm, "minio", "1", "unless-stopped")
+		g.deployBlock(isSwarm, "minio", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 
 		// One-shot bucket init: wait for MinIO, then create the app's bucket (idempotent).

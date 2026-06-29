@@ -83,6 +83,7 @@ func (o Options) advancePointers(cfg *wsconfig.Config, builds []wsconfig.Service
 		DNSProvider:   o.DNSProvider,
 		OverrideCert:  o.OverrideCert,
 		CustomDomains: o.CustomDomains,
+		RouterMiddlewares: o.RouterMiddlewares,
 		// cfgBytes is read from disk (the project's own registry); pass the effective
 		// registry so the regenerated compose's image: defaults match the advanced tags.
 		Registry: o.Registry,

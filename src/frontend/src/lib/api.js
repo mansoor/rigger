@@ -355,6 +355,12 @@ export const fetchProxyAccessLists  = ()         => api.get('/proxy/access-lists
 export const createProxyAccessList  = (body)     => api.post('/proxy/access-lists', body).then(r => r.data)
 export const updateProxyAccessList  = (id, body) => api.put(`/proxy/access-lists/${id}`, body).then(r => r.data)
 export const deleteProxyAccessList  = (id)       => api.delete(`/proxy/access-lists/${id}`).then(r => r.data)
+// Workspace-scoped Access Lists (strictly isolated per workspace; see
+// docs/design/workspace-plugins-and-access-lists.md).
+export const fetchWorkspaceAccessLists = (ws)        => api.get(`/workspaces/${ws}/access-lists`).then(r => r.data)
+export const createWorkspaceAccessList = (ws, body)  => api.post(`/workspaces/${ws}/access-lists`, body).then(r => r.data)
+export const updateWorkspaceAccessList = (ws, id, b) => api.put(`/workspaces/${ws}/access-lists/${id}`, b).then(r => r.data)
+export const deleteWorkspaceAccessList = (ws, id)    => api.delete(`/workspaces/${ws}/access-lists/${id}`).then(r => r.data)
 
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)

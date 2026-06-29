@@ -732,14 +732,22 @@ func (d *DB) migrate() error {
 		rules       TEXT    NOT NULL DEFAULT '[]', -- JSON [{action,address}] action=allow|deny
 		geo_mode    TEXT    NOT NULL DEFAULT 'off', -- off|allow|block (GeoIP country policy)
 		countries   TEXT    NOT NULL DEFAULT '[]',  -- JSON ["US","DE"] ISO 3166-1 alpha-2
+		workspace   TEXT    NOT NULL DEFAULT '',    -- '' = global (Proxy Service); else workspace key (strict isolation)
 		created_at  INTEGER NOT NULL DEFAULT 0,
 		updated_at  INTEGER NOT NULL DEFAULT 0
 	)`) //nolint:errcheck
 	// GeoIP country policy columns for access lists created before they existed.
 	d.addColumn("proxy_access_lists", "geo_mode TEXT NOT NULL DEFAULT 'off'")
 	d.addColumn("proxy_access_lists", "countries TEXT NOT NULL DEFAULT '[]'")
+	// Workspace scope: '' = global (super-admin Proxy Service); non-empty = that workspace key.
+	// Strictly isolated — a workspace sees only its own lists (no global/cross-WS inheritance);
+	// see docs/design/workspace-plugins-and-access-lists.md.
+	d.addColumn("proxy_access_lists", "workspace TEXT NOT NULL DEFAULT ''")
 	// proxy_routes references an access list (0 = none; inline auth/IP used instead).
 	d.addColumn("proxy_routes", "access_list_id INTEGER NOT NULL DEFAULT 0")
+	// Inline GeoIP country policy on a route (used when access_list_id == 0), mirroring access lists.
+	d.addColumn("proxy_routes", "geo_mode TEXT NOT NULL DEFAULT 'off'") // off|allow|block
+	d.addColumn("proxy_routes", "countries TEXT NOT NULL DEFAULT '[]'") // JSON ["US","DE"]
 	// Pipeline alerting: channels to notify on run events + which events fire.
 	d.addColumn("pipelines", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("pipelines", "notify_events TEXT NOT NULL DEFAULT '{}'")

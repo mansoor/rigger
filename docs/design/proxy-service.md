@@ -286,6 +286,57 @@ correctness depends on cache-key + cacheable-method config (default to GET/HEAD 
 The restart caveat is shown as a **tooltip on a small info icon** next to the Plugins heading,
 not a persistent banner.
 
+## Phase 3.1 (TARGET, not built) — UI-managed plugin activation (image-bundled + Rigger-owned static config)
+
+**Problem with the shipped opt-in.** Today enabling a plugin means each operator hand-edits
+their own `docker-compose.yml` (uncomment `--experimental.plugins.*`, pin a version, mount the
+GeoIP DB) and rebuilds/restarts `rigger-traefik` — on **every** installation, local and remote.
+That's because Traefik plugins load from **static config at Traefik startup** (Yaegi interprets
+the plugin *source* fetched from GitHub; Coraza is a WASM module) and the static config lives as
+CLI args in the operator-owned compose. Rigger's image-distribution model (GHCR images + in-app
+updater) swaps *images*, not the operator's compose — so plugins stay a manual per-install chore.
+
+**Target model — make activation a UI toggle on every install, no compose editing.** Four parts,
+all enabled by the fact that we now control the distributed artifact:
+
+1. **Bundle the plugins inside the Rigger image we already ship.** Vendor the Yaegi plugin
+   *sources* (Souin, geoblock) + the Coraza `.wasm` + the OWASP CRS ruleset into the rigger image.
+   On boot, Rigger copies them into a shared `traefik-plugins` volume laid out as Traefik's
+   `/plugins-local/src/<module>` (and a wasm dir). Effect: plugins travel **with the release** —
+   pinned + reviewed once by us, **no per-install GitHub fetch**, works **air-gapped**. Traefik
+   stays the **stock `traefik:v3.4`** image (the rigger image is the plugin *carrier*; no need to
+   fork/build a custom Traefik image). Traefik loads them via `experimental.localPlugins.<name>`
+   (local source) instead of `experimental.plugins.<name>` (remote fetch).
+2. **Move the plugin *declaration* from compose CLI args to a Rigger-owned static config file.**
+   Ship `rigger-traefik` pointed at a static `traefik.yml` Rigger writes on a shared volume
+   (one-time compose change in a release; existing CLI args migrate into the file). Enabling a
+   plugin = Rigger adds the `localPlugins` block to that file. (Static config still needs a
+   restart — that's Traefik, not us.)
+3. **Rigger orchestrates the restart it already knows how to do.** The Plugins toggle →
+   Rigger ensures the source is staged (done at boot) → regenerates the static file → runs
+   `docker restart rigger-traefik` (same capability used for CF-token rotation, via socket-proxy).
+   **Per-route / per-access-list attach stays fully dynamic** (file provider, instant) — only
+   enable/disable hits the restart path, a rare admin action.
+4. **GeoIP DB from the UI too.** Instead of a manual `./geoip` file, Rigger downloads + refreshes
+   the IP2Location LITE `.BIN` to the shared volume from a free download token the admin pastes in
+   Settings (mirrors the CF-token pattern), on a monthly schedule. Removes the last manual asset.
+
+**Net:** "manage plugins from the UI" = toggle → stage bundled plugin + write static file +
+Rigger restarts Traefik → done, identically on every install.
+
+**Trade-offs / impact (decide before building):**
+- **Unavoidable:** a Traefik restart on enable/disable briefly interrupts *all* routed traffic
+  (proxy + every app env) for a few seconds → a maintenance action, surfaced in the UI.
+- **Image grows** by plugin sources/wasm + CRS rules (modest), and **we own keeping plugin
+  versions current** (security) — one review per release vs every operator pinning arbitrary
+  versions (smaller supply-chain surface overall).
+- **Licensing/attribution pass** before bundling: Coraza (Apache-2.0), Souin (MIT), geoblock
+  (MIT/Apache), CRS (Apache-2.0), IP2Location LITE (CC-BY → needs attribution). Generally
+  redistributable; ties to the open-core/monetization thinking.
+- **One-time migration:** the static-config-file switch is a compose change delivered in a release.
+- This supersedes the "rewrite the Traefik command via managed-sidecar" idea sketched in Phase 3
+  step 1 — the static-config-file + localPlugins approach is the concrete mechanism.
+
 ## UI notes (from mockup review)
 
 - Form always opens with **Name** + **Type** (proxy / redirect segmented control), then host /
@@ -406,9 +457,13 @@ plugin layer (Phase 3 above). Gates after every phase: containerized `go build/v
   mode = 404 verified. Flip doc status to BUILT; add a memory entry.
 
 **PX-6 — Plugins (deferred, Phase 3).**
-- Managed enable for Coraza (WAF) + Souin (cache): rewrite `rigger-traefik`'s static command +
-  managed restart (mirror the CF-token flow); per-route + per-project/env opt-in toggles;
-  composegen attaches the middleware to app routers. Ships only when greenlit.
+- *Shipped (v0.1.21):* WAF (Coraza) + cache (Souin) + GeoIP (geoblock) scaffolding — settings
+  flags, render emits middleware refs, per-route/access-list toggles. Activation is a one-time,
+  per-install **commented opt-in** in docker-compose (uncomment plugin decl + DB mount + restart).
+- *Target activation (Phase 3.1, not built):* image-bundled plugins + Rigger-owned Traefik static
+  config (`localPlugins`) + UI toggle that stages the plugin and restarts `rigger-traefik` — so
+  plugins are managed from the UI on every install, no compose editing. GeoIP DB auto-fetched from
+  a token in Settings. See the **Phase 3.1** section above. Ships only when greenlit.
 
 ## Related
 

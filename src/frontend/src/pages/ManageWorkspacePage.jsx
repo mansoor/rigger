@@ -20,6 +20,7 @@ import {
   fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider, startGitHubAppManifest, gitHubAppInstallURL,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
   fetchWorkspaceNotificationChannels, createWorkspaceNotificationChannel, updateWorkspaceNotificationChannel, deleteWorkspaceNotificationChannel, testWorkspaceNotificationChannel,
+  fetchWorkspaceAccessLists, createWorkspaceAccessList, updateWorkspaceAccessList, deleteWorkspaceAccessList, fetchProxyPlugins,
   fetchAlertMeta, fetchWorkspaceAlertRules, createWorkspaceAlertRule, updateWorkspaceAlertRule, deleteWorkspaceAlertRule,
   fetchWorkspaceSettings, updateWorkspaceSettings,
   fetchMemberCandidates, fetchWorkspaceMembers, setWorkspaceMember, removeWorkspaceMember, setProjectOverride, removeProjectOverride,
@@ -40,6 +41,7 @@ const TABS = [
   { id: 'git',            label: 'Git', icon: '🔑' },
   { id: 'backup-targets', label: 'Backup Targets',   icon: '💾' },
   { id: 'notifications',  label: 'Notifications',    icon: '📣' },
+  { id: 'access-lists',   label: 'Access Lists',     icon: '🔒' },
   { id: 'alerts',         label: 'Alert Rules',      icon: '🚨' },
   { group: 'Workspace' },
   { id: 'danger',         label: 'Danger Zone',      icon: '⚠', danger: true },
@@ -98,6 +100,7 @@ export default function ManageWorkspacePage() {
           {tab === 'git'            && <GitSection workspace={workspace} qc={qc} />}
           {tab === 'backup-targets' && <BackupTargetsSection workspace={workspace} qc={qc} />}
           {tab === 'notifications'  && <NotificationsSection workspace={workspace} qc={qc} />}
+          {tab === 'access-lists'   && <AccessListsSection workspace={workspace} qc={qc} />}
           {tab === 'alerts'         && <AlertRulesSection workspace={workspace} projects={projects} qc={qc} />}
           {tab === 'api-keys'       && <ApiKeysManager workspace={workspace} />}
           {tab === 'danger'         && <DangerZone workspace={workspace} ws={ws} projects={projects} others={others} qc={qc} setCurrent={setCurrent} navigate={navigate} />}
@@ -1402,6 +1405,167 @@ const SEVERITY_BADGE = {
 // WsRuleForm — workspace-scoped alert rule form. The workspace tier is fixed
 // (ws_key set server-side); only stack-scope conditions are offered; the project
 // picker lists this workspace's projects; channels come from the workspace pool.
+// ── Access Lists (workspace-scoped; strictly isolated) ──────────────────────────
+// Reusable basic-auth users + IP allow/deny + GeoIP country policy this workspace's
+// projects can attach to an env's app routers (Edit Project → env Security). Rendered as
+// shared Traefik file-provider middlewares. See workspace-plugins-and-access-lists design.
+const aclInput = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
+
+function AccessListsSection({ workspace, qc }) {
+  const key = ['ws-access-lists', workspace]
+  const { data: lists = [], isLoading } = useQuery({ queryKey: key, queryFn: () => fetchWorkspaceAccessLists(workspace), enabled: !!workspace })
+  const { data: plugins } = useQuery({ queryKey: ['proxy-plugins'], queryFn: fetchProxyPlugins })
+  const [modal, setModal] = useState(null)     // null | 'new' | {editing}
+  const [deleting, setDeleting] = useState(null)
+  const delMut = useMutation({
+    mutationFn: (id) => deleteWorkspaceAccessList(workspace, id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: key }); setDeleting(null) },
+  })
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-content">Access lists</h2>
+          <p className="text-xs text-content-subtle mt-0.5">Reusable basic-auth users + IP allow/deny + GeoIP country policy, private to this workspace. Attach one to a project environment under Edit Project → Security.</p>
+        </div>
+        <button onClick={() => setModal('new')} className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">＋ Add access list</button>
+      </div>
+      <div className="bg-surface border border-border rounded-xl">
+        {isLoading ? <p className="p-5 text-sm text-content-subtle">Loading…</p>
+          : lists.length === 0 ? <p className="p-5 text-sm text-content-subtle">No access lists yet. Create one to reuse the same auth + IP/Geo policy across this workspace's app environments.</p>
+          : (
+            <div className="divide-y divide-border">
+              {lists.map(a => {
+                const allow = (a.rules || []).filter(r => r.action === 'allow').length
+                const deny = (a.rules || []).filter(r => r.action === 'deny').length
+                return (
+                  <div key={a.id} className="flex items-center gap-3 p-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-content-strong">{a.name}</span>
+                        {(a.users || []).length > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">{a.users.length} user{a.users.length > 1 ? 's' : ''}</span>}
+                        {allow > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">{allow} allow</span>}
+                        {deny > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100/70 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">{deny} deny</span>}
+                        {a.geo_mode === 'allow' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100/70 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">🌐 allow {(a.countries || []).length}</span>}
+                        {a.geo_mode === 'block' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100/70 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300">🌐 block {(a.countries || []).length}</span>}
+                        {!a.pass_auth && <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">strips auth</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={() => setModal({ editing: a })} className="px-2.5 py-1 text-xs rounded-md border border-border-strong text-content hover:bg-surface-raised">Edit</button>
+                      <button onClick={() => setDeleting(a)} className="px-2.5 py-1 text-xs rounded-md text-content-faint hover:text-rose-600">Delete</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+      </div>
+      {modal && <AccessListWSModal workspace={workspace} plugins={plugins} initial={modal === 'new' ? null : modal.editing}
+        onClose={() => setModal(null)} onSaved={() => { qc.invalidateQueries({ queryKey: key }); setModal(null) }} />}
+      {deleting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setDeleting(null)}>
+          <div className="bg-surface border border-border rounded-xl w-full max-w-sm mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-content-strong">Delete access list “{deleting.name}”?</h3>
+            <p className="text-sm text-content-muted">Any environment using it becomes publicly accessible (no auth/IP restriction) on next deploy.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleting(null)} className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending} className="px-3 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{delMut.isPending ? 'Deleting…' : 'Delete'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
+  const isEdit = !!initial
+  const [f, setF] = useState(() => initial
+    ? { name: initial.name || '', pass_auth: initial.pass_auth !== false, users: (initial.users || []).map(u => ({ user: u.user, password: '' })), rules: (initial.rules || []).map(r => ({ action: r.action || 'allow', address: r.address || '' })), geo_mode: initial.geo_mode || 'off', countriesText: (initial.countries || []).join(', ') }
+    : { name: '', pass_auth: true, users: [], rules: [], geo_mode: 'off', countriesText: '' })
+  const [err, setErr] = useState('')
+  const set = (k, v) => { if (err) setErr(''); setF(s => ({ ...s, [k]: v })) }
+  const save = useMutation({
+    mutationFn: () => {
+      const countries = (f.countriesText || '').split(/[\s,]+/).map(c => c.trim().toUpperCase()).filter(c => c.length === 2)
+      const body = {
+        name: f.name, pass_auth: !!f.pass_auth,
+        users: f.users.filter(u => u.user).map(u => ({ user: u.user, password: u.password || '' })),
+        rules: f.rules.filter(r => r.address).map(r => ({ action: r.action === 'deny' ? 'deny' : 'allow', address: r.address })),
+        geo_mode: countries.length ? f.geo_mode : 'off', countries,
+      }
+      return isEdit ? updateWorkspaceAccessList(workspace, initial.id, body) : createWorkspaceAccessList(workspace, body)
+    },
+    onSuccess: onSaved,
+    onError: (e) => setErr(e?.response?.data?.error || 'Save failed'),
+  })
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-surface border border-border rounded-xl w-full max-w-xl my-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit access list — ${initial.name}` : 'Add access list'}</span>
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Name</label>
+            <input value={f.name} onChange={e => set('name', e.target.value)} placeholder="Office + admins" className={aclInput} />
+          </div>
+          <div className="border-t border-border pt-3">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Authorized users (basic auth)</label>
+            <div className="space-y-2 mt-1">
+              {f.users.map((u, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input value={u.user} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username" className={aclInput} />
+                  <input type="password" value={u.password} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'} className={aclInput} />
+                  <button onClick={() => set('users', f.users.filter((_, j) => j !== i))} className="text-content-faint hover:text-rose-600 px-1.5">🗑</button>
+                </div>
+              ))}
+              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+            </div>
+            <label className="flex items-center gap-2 mt-2 text-sm text-content cursor-pointer">
+              <input type="checkbox" checked={!!f.pass_auth} onChange={e => set('pass_auth', e.target.checked)} />
+              Forward the Authorization header to the upstream
+            </label>
+          </div>
+          <div className="border-t border-border pt-3">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">IP rules</label>
+            <p className="text-[11px] text-content-faint mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted. A deny-only list can’t be enforced at the proxy.</p>
+            <div className="space-y-2">
+              {f.rules.map((r, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                    <option value="allow">Allow</option><option value="deny">Deny</option>
+                  </select>
+                  <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4" className={aclInput} />
+                  <button onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} className="text-content-faint hover:text-rose-600 px-1.5">🗑</button>
+                </div>
+              ))}
+              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add IP rule</button>
+            </div>
+          </div>
+          <div className="border-t border-border pt-3">
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">GeoIP country policy</label>
+            <div className="grid grid-cols-2 gap-3 mt-1">
+              <select value={f.geo_mode} onChange={e => set('geo_mode', e.target.value)} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                <option value="off">Off</option><option value="allow">Allow only these countries</option><option value="block">Block these countries</option>
+              </select>
+              <input value={f.countriesText} onChange={e => set('countriesText', e.target.value)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} className={aclInput} />
+            </div>
+            <p className="text-[11px] text-content-faint mt-1">Two-letter ISO country codes, comma-separated.{!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}</p>
+          </div>
+          {err && <p className="text-sm text-rose-600 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg px-3 py-2">{err}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+          <button onClick={() => { setErr(''); if (!f.name.trim()) { setErr('Name is required'); return } save.mutate() }} disabled={save.isPending} className="px-3 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{save.isPending ? 'Saving…' : 'Save access list'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, saving }) {
   const conditions = (meta?.conditions || []).filter(c => c.scope !== 'host')
   const isEdit = !!initial?.id

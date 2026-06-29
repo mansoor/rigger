@@ -25,17 +25,21 @@ type AccessList struct {
 	Rules     []AccessRule `json:"rules"`
 	GeoMode   string      `json:"geo_mode"`  // off|allow|block — GeoIP country policy
 	Countries []string    `json:"countries"` // ISO 3166-1 alpha-2 codes
-	CreatedAt int64       `json:"created_at"`
-	UpdatedAt int64       `json:"updated_at"`
+	// Workspace scopes the list: "" = global (super-admin Proxy Service), else the workspace
+	// key. Strictly isolated — a workspace only ever sees its own lists. See
+	// docs/design/workspace-plugins-and-access-lists.md.
+	Workspace string `json:"workspace"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
-const alCols = `id, name, pass_auth, users, rules, geo_mode, countries, created_at, updated_at`
+const alCols = `id, name, pass_auth, users, rules, geo_mode, countries, workspace, created_at, updated_at`
 
 func scanAccessList(s interface{ Scan(...any) error }) (AccessList, error) {
 	var a AccessList
 	var passAuth int
 	var usersJSON, rulesJSON, countriesJSON string
-	if err := s.Scan(&a.ID, &a.Name, &passAuth, &usersJSON, &rulesJSON, &a.GeoMode, &countriesJSON, &a.CreatedAt, &a.UpdatedAt); err != nil {
+	if err := s.Scan(&a.ID, &a.Name, &passAuth, &usersJSON, &rulesJSON, &a.GeoMode, &countriesJSON, &a.Workspace, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return AccessList{}, err
 	}
 	a.PassAuth = passAuth != 0
@@ -57,9 +61,20 @@ func scanAccessList(s interface{ Scan(...any) error }) (AccessList, error) {
 	return a, nil
 }
 
-// ListAccessLists returns every access list, name-ordered.
+// ListAccessLists returns every access list (all scopes), name-ordered. Used by the renderer.
 func (s *Store) ListAccessLists() ([]AccessList, error) {
-	rows, err := s.DB.Query(`SELECT ` + alCols + ` FROM proxy_access_lists ORDER BY name, id`)
+	return s.queryAccessLists(`SELECT ` + alCols + ` FROM proxy_access_lists ORDER BY name, id`)
+}
+
+// ListAccessListsByScope returns only the lists in one scope ("" = global / Proxy Service,
+// else a workspace key). This is the strict-isolation read used by the API — a workspace
+// never sees global or other-workspace lists.
+func (s *Store) ListAccessListsByScope(workspace string) ([]AccessList, error) {
+	return s.queryAccessLists(`SELECT `+alCols+` FROM proxy_access_lists WHERE workspace=? ORDER BY name, id`, workspace)
+}
+
+func (s *Store) queryAccessLists(q string, args ...any) ([]AccessList, error) {
+	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -108,13 +123,13 @@ func alArgs(a AccessList) []any {
 	if mode == "" {
 		mode = "off"
 	}
-	return []any{a.Name, b2i(a.PassAuth), string(u), string(r), mode, string(c), a.CreatedAt, a.UpdatedAt}
+	return []any{a.Name, b2i(a.PassAuth), string(u), string(r), mode, string(c), a.Workspace, a.CreatedAt, a.UpdatedAt}
 }
 
 // CreateAccessList inserts an access list and returns its new id.
 func (s *Store) CreateAccessList(a AccessList) (int64, error) {
 	res, err := s.DB.Exec(`INSERT INTO proxy_access_lists
-		(name, pass_auth, users, rules, geo_mode, countries, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`, alArgs(a)...)
+		(name, pass_auth, users, rules, geo_mode, countries, workspace, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`, alArgs(a)...)
 	if err != nil {
 		return 0, err
 	}
@@ -125,7 +140,7 @@ func (s *Store) CreateAccessList(a AccessList) (int64, error) {
 func (s *Store) UpdateAccessList(a AccessList) error {
 	args := append(alArgs(a), a.ID)
 	_, err := s.DB.Exec(`UPDATE proxy_access_lists SET
-		name=?, pass_auth=?, users=?, rules=?, geo_mode=?, countries=?, created_at=?, updated_at=? WHERE id=?`, args...)
+		name=?, pass_auth=?, users=?, rules=?, geo_mode=?, countries=?, workspace=?, created_at=?, updated_at=? WHERE id=?`, args...)
 	return err
 }
 

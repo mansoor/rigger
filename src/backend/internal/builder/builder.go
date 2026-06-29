@@ -46,6 +46,9 @@ type Options struct {
 	// CustomDomains are the env's VERIFIED external domains (Render-style), carried so
 	// the post-build compose has the same custom-domain routers as deploy/refresh.
 	CustomDomains []string
+	// RouterMiddlewares are the env's workspace access list + WAF/cache plugin refs, carried
+	// so the post-build compose keeps the same app-router middlewares as deploy/refresh.
+	RouterMiddlewares []string
 	// GitAuth (may be nil) supplies private-repo credentials for the source clone,
 	// resolved by the bridge from the project's git_provider_id. The bridge owns its
 	// Cleanup (called after Build returns). nil ⇒ public-repo clone (unchanged).

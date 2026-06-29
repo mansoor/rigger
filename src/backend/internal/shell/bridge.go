@@ -22,6 +22,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/deployhistory"
 	"github.com/mansoor/rigger/ui/internal/dockerops"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/proxyroutes"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/stats"
@@ -142,6 +143,31 @@ func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
 // public domain whose EFFECTIVE email (env → workspace → global) differs from the
 // global. composegen then emits tls=true with no certresolver. (The cert itself is
 // issued by the API layer's maybeIssueOverrideCert / the renewal scheduler.)
+// routerMiddlewares resolves the Traefik file-provider middleware refs to attach to an env's
+// APP routers — its workspace access list (auth/IP/GeoIP) + WAF/cache plugins, when enabled
+// instance-wide. Best-effort; empty when nothing attaches (golden parity). See
+// docs/design/workspace-plugins-and-access-lists.md.
+func (b *Bridge) routerMiddlewares(workspaceName, project, env string) []string {
+	if b.db == nil {
+		return nil
+	}
+	data, err := os.ReadFile(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil
+	}
+	geoEnabled := settings.AppSetting(b.db, "proxy_geoip_enabled") == "true"
+	out := proxyroutes.ResolveRouterMiddlewares(b.db, workspaceName, data, env,
+		settings.AppSetting(b.db, "proxy_waf_enabled") == "true",
+		settings.AppSetting(b.db, "proxy_cache_enabled") == "true",
+		geoEnabled)
+	// Per-env INLINE access (IP allow-list / GeoIP / block-exploits) when no access list is
+	// attached — rendered to the file provider and prepended so it gates before WAF/cache.
+	if inline, ierr := proxyroutes.RenderEnvMiddlewares(proxyroutes.DynDir(), workspaceName, project, env, data, geoEnabled); ierr == nil && len(inline) > 0 {
+		out = append(inline, out...)
+	}
+	return out
+}
+
 func (b *Bridge) usesOverrideCert(workspaceName, project, env string) bool {
 	if b.db == nil {
 		return false
@@ -1481,6 +1507,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
+			RouterMiddlewares: b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
 			Exec:          runExec, // default: env's deploy host (or local) — used by promote
@@ -1602,6 +1629,7 @@ func (b *Bridge) Run(opts RunOptions) error {
 			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
 			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
 			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
+			RouterMiddlewares: b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
 			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
 			Exec:          runExec, // context-bound (local or remote) — cancellable
 		}

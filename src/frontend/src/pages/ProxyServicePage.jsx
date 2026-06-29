@@ -86,6 +86,7 @@ function blankRoute() {
     tls_mode: 'none', tls_cert_ref: '', acme_email: '',
     force_https: true, hsts_seconds: 0,
     auth_mode: 'none', auth_users: [], ip_allow: '', access_list_id: 0, security_headers: false,
+    geo_mode: 'off', countriesText: '',
     strip_prefix: false, waf: false, cache: false, accept_tos: false, locations: [], notes: '',
   }
 }
@@ -218,6 +219,8 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
             : <>
                 {r.auth_mode === 'basic' && <Badge cls="bg-brand-600/15 text-brand-300">Basic auth</Badge>}
                 {r.ip_allow && <Badge>IP allow</Badge>}
+                {r.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-brand-300">🌐 allow</Badge>}
+                {r.geo_mode === 'block' && <Badge cls="bg-danger-subtle/50 text-danger-fg">🌐 deny</Badge>}
               </>}
           {r.hsts_seconds > 0 && <Badge>HSTS</Badge>}
           {r.waf && plugins?.waf_enabled && <Badge cls="bg-brand-600/15 text-brand-300">WAF</Badge>}
@@ -506,8 +509,16 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
       upstreams: initial.upstreams?.length ? initial.upstreams : [{ scheme: 'http', host: '', port: '' }],
       locations: (initial.locations || []).map(normLocation),
       auth_users: (initial.auth_users || []).map(u => ({ user: u.user, password: '' })),
+      geo_mode: initial.geo_mode || 'off',
+      countriesText: (initial.countries || []).join(', '),
     }
   })
+  // Access mode (Public / Basic auth / Access list) is a single radio over the existing
+  // auth_mode + access_list_id fields; ipEnabled gates the IP allow-list box (ip_allow is a
+  // plain string, so an explicit toggle lets it show "on but empty"). Mirrors the env editor.
+  const [accessMode, setAccessMode] = useState(
+    Number(initial?.access_list_id) > 0 ? 'list' : (initial?.auth_mode === 'basic' ? 'basic' : 'public'))
+  const [ipEnabled, setIpEnabled] = useState(!!(initial?.ip_allow || '').trim())
   const [tab, setTab] = useState('basics')
   const [err, setErr] = useState('')
   const [test, setTest] = useState(null)
@@ -517,6 +528,13 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
   // Any edit to the form clears a stale save error (user asked: message goes away
   // as soon as they start making changes).
   const set = (k, v) => { if (err) setErr(''); setF(s => ({ ...s, [k]: v })) }
+  const chooseAccess = (m) => {
+    if (err) setErr('')
+    setAccessMode(m)
+    if (m === 'public') setF(s => ({ ...s, auth_mode: 'none', access_list_id: 0 }))
+    else if (m === 'basic') setF(s => ({ ...s, auth_mode: 'basic', access_list_id: 0 }))
+    else setF(s => ({ ...s, auth_mode: 'none' })) // list: keep access_list_id; the dropdown sets it
+  }
   const setUp = (i, k, v) => { if (err) setErr(''); setF(s => ({ ...s, upstreams: s.upstreams.map((u, j) => j === i ? { ...u, [k]: v } : u) })) }
   // location upstream helpers (li = location index, ui = upstream index)
   const setLoc = (li, k, v) => set('locations', f.locations.map((l, j) => j === li ? { ...l, [k]: v } : l))
@@ -526,11 +544,15 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
 
   const save = useMutation({
     mutationFn: () => {
+      const countries = (f.countriesText || '').split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
       const body = {
         ...f,
         access_list_id: Number(f.access_list_id) || 0,
         redirect_code: Number(f.redirect_code) || 301,
         hsts_seconds: f.hsts_seconds > 0 ? Number(f.hsts_seconds) : 0,
+        ip_allow: ipEnabled ? f.ip_allow : '',
+        geo_mode: countries.length ? f.geo_mode : 'off',
+        countries,
         upstreams: f.upstreams.filter(u => u.host).map(u => ({ scheme: u.scheme, host: u.host, port: Number(u.port) || 0 })),
         auth_users: f.auth_mode === 'basic' ? f.auth_users.filter(u => u.user) : [],
         locations: (f.locations || []).map(l => ({
@@ -643,46 +665,114 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
           {/* Access & hardening */}
           {!isRedirect && (
             <div className="border-t border-border pt-3 space-y-3">
-              <div>
-                <Label>Access list</Label>
-                <Select value={String(f.access_list_id || 0)} onChange={v => set('access_list_id', Number(v))}
-                  options={[{ value: '0', label: 'None — configure below' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
-                {accessLists.length === 0 && <p className="text-[11px] text-content-faint mt-1">Tip: create reusable lists in the Access lists section to share auth + IP rules across routes.</p>}
+              {/* Access mode — Public / Basic auth / Access list (mutually exclusive). */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                {[
+                  { v: 'public', label: 'Public' },
+                  { v: 'basic', label: 'Basic Auth — HTTP password' },
+                  { v: 'list', label: 'Access list' },
+                ].map(o => (
+                  <label key={o.v} className="flex items-center gap-2 text-sm text-content-muted cursor-pointer">
+                    <input type="radio" name="route-access" value={o.v} checked={accessMode === o.v}
+                      onChange={() => chooseAccess(o.v)} className="w-3.5 h-3.5 accent-brand-500" />
+                    {o.label}
+                  </label>
+                ))}
               </div>
 
-              {Number(f.access_list_id) > 0 ? (() => {
+              {/* Access list — GLOBAL Proxy Service lists only (workspace lists stay isolated). */}
+              {accessMode === 'list' && (() => {
                 const al = accessLists.find(a => a.id === Number(f.access_list_id))
-                if (!al) return <p className="text-xs text-danger-fg">Selected access list no longer exists — pick another or choose None.</p>
-                const allow = (al.rules || []).filter(r => r.action === 'allow').length
-                const deny = (al.rules || []).filter(r => r.action === 'deny').length
                 return (
-                  <div className="rounded-lg bg-surface-raised/40 border border-border-strong/50 px-3 py-2 text-xs text-content-subtle">
-                    Auth &amp; IP are managed by access list <span className="text-content font-medium">{al.name}</span>: {(al.users || []).length} user{(al.users || []).length === 1 ? '' : 's'}, {allow} allow rule{allow === 1 ? '' : 's'}{deny ? `, ${deny} deny rule${deny === 1 ? '' : 's'}` : ''}{al.pass_auth ? '' : ' · strips auth header'}. Edit it in the Access lists section below.
+                  <div>
+                    <Label>Access list</Label>
+                    <Select value={String(f.access_list_id || 0)} onChange={v => set('access_list_id', Number(v))}
+                      options={[{ value: '0', label: accessLists.length ? 'Select a list…' : 'No lists available' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
+                    {accessLists.length === 0
+                      ? <p className="text-[11px] text-content-faint mt-1">No global access lists yet — create them in the Access lists section below.</p>
+                      : al ? (() => {
+                          const allow = (al.rules || []).filter(r => r.action === 'allow').length
+                          const deny = (al.rules || []).filter(r => r.action === 'deny').length
+                          const geo = al.geo_mode && al.geo_mode !== 'off' ? `, GeoIP ${al.geo_mode} ${(al.countries || []).length}` : ''
+                          return <p className="text-[11px] text-content-subtle mt-1">{(al.users || []).length} user{(al.users || []).length === 1 ? '' : 's'}, {allow} allow{deny ? `, ${deny} deny` : ''}{geo}{al.pass_auth ? '' : ' · strips auth header'}. Edit it in the Access lists section below.</p>
+                        })()
+                      : <p className="text-xs text-danger-fg mt-1">Selected access list no longer exists — pick another.</p>}
                   </div>
                 )
-              })() : (
-                <>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Authentication</Label><Select value={f.auth_mode} onChange={v => set('auth_mode', v)} options={[{ value: 'none', label: 'None' }, { value: 'basic', label: 'Basic auth' }]} /></div>
-                    <div><Label>IP allowlist (CIDR)</Label><Input value={f.ip_allow} onChange={v => set('ip_allow', v)} placeholder="192.168.0.0/16" /></div>
-                  </div>
-                  {f.auth_mode === 'basic' && (
-                    <div className="space-y-2">
-                      {f.auth_users.map((u, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          <input value={u.user} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
-                            className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                          <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
-                            className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                          <button onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
-                        </div>
-                      ))}
-                      <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+              })()}
+
+              {/* Basic auth — username/password list. */}
+              {accessMode === 'basic' && (
+                <div className="space-y-2">
+                  {f.auth_users.map((u, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input value={u.user} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
+                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                      <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
+                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                      <button onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
                     </div>
-                  )}
+                  ))}
+                  <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+                </div>
+              )}
+
+              {/* Inline IP allow-list + GeoIP — for Public & Basic auth (a chosen list carries its own). */}
+              {accessMode !== 'list' && (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm text-content-muted cursor-pointer shrink-0 pt-2">
+                      <input type="checkbox" checked={ipEnabled}
+                        onChange={e => { setIpEnabled(e.target.checked); if (!e.target.checked) set('ip_allow', '') }}
+                        className="w-3.5 h-3.5 accent-brand-500" />
+                      Enable IP rules
+                    </label>
+                    {ipEnabled && (
+                      <div className="flex-1 min-w-0 max-w-md">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-content-subtle shrink-0">IP / CIDR:</span>
+                          <Input value={f.ip_allow} onChange={v => set('ip_allow', v)} placeholder="192.168.0.0/16, 203.0.113.7" />
+                        </div>
+                        <p className="text-[11px] text-content-faint mt-1">Allow-list — only these IPs / CIDRs may reach the route (comma-separated). Traefik has no native deny-list.</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm text-content-muted cursor-pointer shrink-0 pt-2">
+                      <input type="checkbox" checked={f.geo_mode === 'allow' || f.geo_mode === 'block'}
+                        onChange={e => set('geo_mode', e.target.checked ? 'allow' : 'off')}
+                        disabled={!plugins?.geoip_enabled}
+                        className="w-3.5 h-3.5 accent-brand-500 disabled:opacity-50" />
+                      Enable GeoIP country policy
+                    </label>
+                    {!plugins?.geoip_enabled
+                      ? <p className="flex-1 text-[11px] text-content-faint pt-2">Enable the GeoIP plugin (Plugins card) to use this.</p>
+                      : (f.geo_mode === 'allow' || f.geo_mode === 'block') && (
+                        <div className="flex-1 min-w-0 max-w-md">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-3 shrink-0">
+                              {[{ v: 'allow', l: 'Allow' }, { v: 'block', l: 'Deny' }].map(o => (
+                                <label key={o.v} className="flex items-center gap-1.5 text-xs text-content-muted cursor-pointer">
+                                  <input type="radio" name="route-geo" checked={f.geo_mode === o.v}
+                                    onChange={() => set('geo_mode', o.v)} className="w-3 h-3 accent-brand-500" />
+                                  {o.l}
+                                </label>
+                              ))}
+                            </div>
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="text-xs text-content-subtle shrink-0">Country codes:</span>
+                              <Input value={f.countriesText} onChange={v => set('countriesText', v)} placeholder="US, DE, GB" />
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-content-faint mt-1">ISO 3166-1 alpha-2 codes. <span className="text-content-subtle">Allow</span> = only these; <span className="text-content-subtle">Deny</span> = block these (allow the rest).</p>
+                        </div>
+                      )}
+                  </div>
                 </>
               )}
-              <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Security headers (block common exploits, lite)" />
+
+              <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Block common exploits (security headers)" />
             </div>
           )}
           </>)}

@@ -159,6 +159,12 @@ type Env struct {
 	// in addition to its auto subdomain (Render-style). Not persisted in config.json —
 	// the bridge injects them from the DB onto RouteOpts at generation time.
 	CustomDomains  []string `json:"-"`
+	// RouterMiddlewares: extra Traefik file-provider middleware refs (workspace access list +
+	// WAF/cache plugins) for this env's APP routers. Not persisted here — the API/bridge
+	// resolves them from the DB onto RouteOpts at generation time (the per-env attach inputs
+	// access_list_id/waf/cache live in config.json and survive verbatim via PutConfig). See
+	// docs/design/workspace-plugins-and-access-lists.md.
+	RouterMiddlewares []string `json:"-"`
 	RedisEnabled   bool     `json:"redis_enabled"`
 	GarageEnabled  bool     `json:"garage_enabled"`
 	TraefikEnabled bool     `json:"traefik_enabled"`

@@ -86,6 +86,8 @@ type Route struct {
 	AuthUsers          []BasicUser `json:"auth_users"`
 	IPAllow            string     `json:"ip_allow"`
 	AccessListID       int64      `json:"access_list_id"` // 0 = none; else use the named access list's users + IP rules
+	GeoMode            string     `json:"geo_mode"`       // off|allow|block — inline GeoIP (used when AccessListID == 0)
+	Countries          []string   `json:"countries"`      // ISO 3166-1 alpha-2 codes for inline GeoIP
 	SecurityHeaders    bool       `json:"security_headers"`
 	StripPrefix        bool       `json:"strip_prefix"`
 	WAF                bool       `json:"waf"`
@@ -106,7 +108,8 @@ const cols = `id, name, enabled, type, is_default, default_mode, host, path_pref
 	upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 	tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 	hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-	security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id`
+	security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id,
+	geo_mode, countries`
 
 func b2i(b bool) int {
 	if b {
@@ -118,13 +121,14 @@ func b2i(b bool) int {
 func scan(s interface{ Scan(...any) error }) (Route, error) {
 	var r Route
 	var enabled, isDefault, passHost, insecure, forceHTTPS, hstsSub, hstsPre, secHdr, strip, waf, cache, acceptToS int
-	var upstreamsJSON, authUsersJSON, locationsJSON string
+	var upstreamsJSON, authUsersJSON, locationsJSON, countriesJSON string
 	err := s.Scan(
 		&r.ID, &r.Name, &enabled, &r.Type, &isDefault, &r.DefaultMode, &r.Host, &r.PathPrefix,
 		&upstreamsJSON, &passHost, &insecure, &r.RedirectTo, &r.RedirectCode,
 		&r.TLSMode, &r.TLSCertRef, &r.TLSCertPEM, &r.TLSKeyEnc, &r.ACMEEmail, &forceHTTPS,
 		&r.HSTSSeconds, &hstsSub, &hstsPre, &r.AuthMode, &authUsersJSON, &r.IPAllow,
 		&secHdr, &strip, &waf, &cache, &locationsJSON, &acceptToS, &r.Notes, &r.CreatedAt, &r.UpdatedAt, &r.AccessListID,
+		&r.GeoMode, &countriesJSON,
 	)
 	if err != nil {
 		return Route{}, err
@@ -138,6 +142,7 @@ func scan(s interface{ Scan(...any) error }) (Route, error) {
 	_ = json.Unmarshal([]byte(upstreamsJSON), &r.Upstreams)
 	_ = json.Unmarshal([]byte(authUsersJSON), &r.AuthUsers)
 	_ = json.Unmarshal([]byte(locationsJSON), &r.Locations)
+	_ = json.Unmarshal([]byte(countriesJSON), &r.Countries)
 	if r.Upstreams == nil {
 		r.Upstreams = []Upstream{}
 	}
@@ -146,6 +151,12 @@ func scan(s interface{ Scan(...any) error }) (Route, error) {
 	}
 	if r.Locations == nil {
 		r.Locations = []Location{}
+	}
+	if r.Countries == nil {
+		r.Countries = []string{}
+	}
+	if r.GeoMode == "" {
+		r.GeoMode = "off"
 	}
 	return r, nil
 }
@@ -185,13 +196,18 @@ func argsFor(r Route) []any {
 	up, _ := json.Marshal(r.Upstreams)
 	au, _ := json.Marshal(r.AuthUsers)
 	loc, _ := json.Marshal(r.Locations)
+	ctr, _ := json.Marshal(r.Countries)
+	geoMode := r.GeoMode
+	if geoMode == "" {
+		geoMode = "off"
+	}
 	return []any{
 		r.Name, b2i(r.Enabled), r.Type, b2i(r.IsDefault), r.DefaultMode, r.Host, r.PathPrefix,
 		string(up), b2i(r.PassHostHeader), b2i(r.InsecureSkipVerify), r.RedirectTo, r.RedirectCode,
 		r.TLSMode, r.TLSCertRef, r.TLSCertPEM, r.TLSKeyEnc, r.ACMEEmail, b2i(r.ForceHTTPS),
 		r.HSTSSeconds, b2i(r.HSTSSubdomains), b2i(r.HSTSPreload), r.AuthMode, string(au), r.IPAllow,
 		b2i(r.SecurityHeaders), b2i(r.StripPrefix), b2i(r.WAF), b2i(r.Cache), string(loc), b2i(r.AcceptToS), r.Notes,
-		r.CreatedAt, r.UpdatedAt, r.AccessListID,
+		r.CreatedAt, r.UpdatedAt, r.AccessListID, geoMode, string(ctr),
 	}
 }
 
@@ -202,8 +218,9 @@ func (s *Store) Create(r Route) (int64, error) {
 		upstreams, pass_host_header, insecure_skip_verify, redirect_to, redirect_code,
 		tls_mode, tls_cert_ref, tls_cert_pem, tls_key_enc, acme_email, force_https,
 		hsts_seconds, hsts_subdomains, hsts_preload, auth_mode, auth_users, ip_allow,
-		security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
+		security_headers, strip_prefix, waf, cache, locations, accept_tos, notes, created_at, updated_at, access_list_id,
+		geo_mode, countries)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, argsFor(r)...)
 	if err != nil {
 		return 0, err
 	}
@@ -218,7 +235,8 @@ func (s *Store) Update(r Route) error {
 		upstreams=?, pass_host_header=?, insecure_skip_verify=?, redirect_to=?, redirect_code=?,
 		tls_mode=?, tls_cert_ref=?, tls_cert_pem=?, tls_key_enc=?, acme_email=?, force_https=?,
 		hsts_seconds=?, hsts_subdomains=?, hsts_preload=?, auth_mode=?, auth_users=?, ip_allow=?,
-		security_headers=?, strip_prefix=?, waf=?, cache=?, locations=?, accept_tos=?, notes=?, created_at=?, updated_at=?, access_list_id=?
+		security_headers=?, strip_prefix=?, waf=?, cache=?, locations=?, accept_tos=?, notes=?, created_at=?, updated_at=?, access_list_id=?,
+		geo_mode=?, countries=?
 		WHERE id=?`, args...)
 	return err
 }

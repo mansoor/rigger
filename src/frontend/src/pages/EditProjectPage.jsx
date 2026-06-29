@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain, fetchWorkspaceAccessLists, fetchProxyPlugins } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -1143,8 +1143,12 @@ function SwarmSettings({ cfg, onChange, projectType, imageNames = [], managedDep
   const updPolicy = (key, patch) => updSwarm({ [key]: { ...(sw[key] || {}), ...patch } })
   const [advOpen, setAdvOpen] = useState(false)
 
-  // Managed deps (DB/Redis/Garage) are project-level now — passed in.
+  // Managed deps (DB/Redis/object storage) are project-level now — passed in. They're
+  // Rigger-managed single-instance stateful services, so their replica count is locked
+  // to 1 (scaling a single-volume stateful container corrupts data); only placement is
+  // editable. The user's own app/build services stay freely scalable.
   const services = [...imageNames, ...managedDeps]
+  const managed = new Set(managedDeps)
 
   const svcReplicas = (svc) => {
     const o = sw.services?.[svc]
@@ -1164,14 +1168,19 @@ function SwarmSettings({ cfg, onChange, projectType, imageNames = [], managedDep
 
       <div className="space-y-1.5">
         {services.length === 0 && <p className="text-xs text-content-subtle">No services to configure.</p>}
-        {services.map(svc => (
-          <div key={svc} className="grid grid-cols-[110px_80px_1fr] gap-2 items-center">
-            <span className="font-mono text-xs text-content-muted truncate" title={svc}>{svc}</span>
-            <Input type="number" value={svcReplicas(svc)} onChange={v => updSvc(svc, { replicas: v })} />
-            <Input value={svcPlacement(svc)} onChange={v => setPlacement(svc, v)} placeholder="placement, e.g. node.role==manager, node.labels.zone==a" />
-          </div>
-        ))}
-        <p className="text-[11px] text-content-faint">replicas · placement constraints (comma-separated). Pin stateful services (db) to a node; scale stateless ones.</p>
+        {services.map(svc => {
+          const locked = managed.has(svc) // Rigger-managed stateful service → single-instance
+          return (
+            <div key={svc} className="grid grid-cols-[110px_80px_1fr] gap-2 items-center">
+              <span className="font-mono text-xs text-content-muted truncate" title={svc}>{svc}</span>
+              <Input type="number" value={locked ? 1 : svcReplicas(svc)} onChange={v => updSvc(svc, { replicas: v })}
+                disabled={locked}
+                title={locked ? 'Managed stateful service — runs single-instance. Pin it with a placement constraint; horizontal scaling needs a clustered topology (not yet supported).' : undefined} />
+              <Input value={svcPlacement(svc)} onChange={v => setPlacement(svc, v)} placeholder="placement, e.g. node.role==manager, node.labels.zone==a" />
+            </div>
+          )
+        })}
+        <p className="text-[11px] text-content-faint">replicas · placement constraints (comma-separated). Managed services (db / redis / object storage) run single-instance — pin them with placement; scale your own stateless services.</p>
       </div>
 
       <div>
@@ -1373,11 +1382,24 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
   const [open, setOpen] = useState(defaultOpen || isNew) // collapsible — first/new env open
   const [copyOpen, setCopyOpen] = useState(false)
   const upd = (k, v) => onChange({ ...cfg, [k]: v })
+  // Workspace access lists + proxy plugin state for the per-env app-protection picker.
+  const { data: accessLists = [] } = useQuery({ queryKey: ['ws-access-lists', workspace], queryFn: () => fetchWorkspaceAccessLists(workspace), enabled: !!workspace })
+  const { data: proxyPlugins } = useQuery({ queryKey: ['proxy-plugins'], queryFn: fetchProxyPlugins })
   // Unified exposure model: one selector drives expose_mode + the legacy traefik_enabled
   // toggle together. Legacy configs (no expose_mode) map by traefik_enabled so they keep
   // routing identically. See docs/EXPOSURE_AND_REMOTE_ACCESS.md.
   const exMode = cfg.expose_mode || (cfg.traefik_enabled ? 'traefik' : 'host_port')
   const authGate = cfg.auth_gate || 'none'
+  // App access mode (Public · Basic auth · Access list) is a single mutually-exclusive
+  // choice rendered as a radio; it maps onto the existing auth_gate + access_list_id
+  // fields so the backend is unchanged. Local state holds "list mode, none picked yet".
+  const [accessMode, setAccessMode] = useState(cfg.access_list_id > 0 ? 'list' : (authGate === 'basic' ? 'basic' : 'public'))
+  const chooseMode = (m) => {
+    setAccessMode(m)
+    if (m === 'public') onChange({ ...cfg, auth_gate: '', access_list_id: 0 })
+    else if (m === 'basic') onChange({ ...cfg, auth_gate: 'basic', access_list_id: 0 })
+    else onChange({ ...cfg, auth_gate: '' }) // list: keep current access_list_id; the dropdown sets it
+  }
   const setExMode = (m) => {
     if (m === 'traefik') onChange({ ...cfg, expose_mode: '', traefik_enabled: true })
     else if (m === 'host_port') onChange({ ...cfg, expose_mode: 'host_port', traefik_enabled: false, ssl_enabled: false })
@@ -1488,10 +1510,19 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
       </div>
 
+      {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. Placed
+          right under the Deployment Target so it reads as part of that choice. */}
+      {cfg.deployment === 'swarm' && (
+        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames}
+          managedDeps={projectDatabase && projectDatabase !== 'none'
+            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]
+            : [...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]} />
+      )}
+
       <div className="space-y-3 pt-3 border-t border-border-strong/50">
         <div>
           <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1.5">Exposure</p>
-          <Label>How is this app reachable?</Label>
+          <Label>How is this domain reachable?</Label>
           <Select value={exMode} onChange={setExMode} options={[
             { value: 'traefik', label: 'Routed by domain (Rigger proxy / Traefik) + optional SSL' },
             { value: 'host_port', label: 'Host port — publish a port; bring your own proxy / DNS' },
@@ -1553,20 +1584,165 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </div>
           )
         })()}
+        {/* Custom domains — per-env extra hostnames + their own TLS (verify flow). */}
+        {exMode === 'traefik' && (isNew
+          ? <p className="text-xs text-content-faint">Save this environment to attach custom domains.</p>
+          : <CustomDomainsPanel workspaceName={workspaceName} envName={envName} />)}
+
+        {/* Let's Encrypt account email — inherits the workspace / instance default; the
+            override only changes which LE account issues THIS env's certs. */}
+        {exMode === 'traefik' && (() => {
+          const override = (cfg.acme_email || '').trim()
+          const emailBad = override !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(override)
+          return (
+            <div>
+              <Label>Let&apos;s Encrypt email</Label>
+              <p className="text-xs text-content-subtle mb-1">
+                From {acmeDefault ? 'workspace / admin' : 'instance default'}: <code className="font-mono text-xs">{acmeDefault || 'set in admin Settings'}</code>
+              </p>
+              <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
+                placeholder={acmeDefault ? `Override — blank inherits ${acmeDefault}` : 'Override — blank inherits instance email'} />
+              {emailBad
+                ? <p className="text-xs text-danger-fg mt-1">Enter a valid email address, or leave blank to inherit.</p>
+                : <p className="text-xs text-content-subtle mt-1">Account/recovery contact for this env&apos;s certs — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Only set this to use a different LE account for this environment.</p>}
+            </div>
+          )
+        })()}
+
+        {/* App access & protection — one mutually-exclusive access mode (Public / Basic auth /
+            Access list); inline IP allow-list + GeoIP policy for Public & Basic (a chosen access
+            list carries its own); plus block-exploits / WAF / cache hardening. All applied to
+            THIS env's public app router via Traefik middlewares. Traefik routing only. */}
         {exMode === 'traefik' && (
-          /* Advanced — Traefik network + per-env Let's Encrypt account email override.
-             TLS is automatic per address now, so there's no SSL toggle here. */
+          <div className="space-y-3 pt-1">
+            <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">App access &amp; protection</p>
+
+            {/* Single access mode — replaces the old auth-gate + access-list dropdown pair. */}
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+              {[
+                { v: 'public', label: 'Public' },
+                { v: 'basic', label: 'Basic Auth — HTTP password' },
+                { v: 'list', label: 'Access list' },
+              ].map(o => (
+                <label key={o.v} className="flex items-center gap-2 text-sm text-content-muted cursor-pointer">
+                  <input type="radio" name={`access-${envName}`} value={o.v} checked={accessMode === o.v}
+                    onChange={() => chooseMode(o.v)} className="w-3.5 h-3.5 accent-brand-500" />
+                  {o.label}
+                </label>
+              ))}
+            </div>
+
+            {/* Basic auth — the radio IS the choice; just the generated-password note. */}
+            {accessMode === 'basic' && (
+              <div>
+                <Label>Require sign-in (auth gate)</Label>
+                <p className="text-xs text-content-subtle">
+                  A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
+                </p>
+                <p className="text-xs text-warning-fg mt-1">
+                  ⚠ Use it for static sites / apps without their own login. For token-based apps (Activepieces, Grafana, most SPAs), use Cloudflare Tunnel + Access.
+                </p>
+              </div>
+            )}
+
+            {/* Inline IP allow-list + GeoIP — for Public & Basic auth (an attached access list
+                carries its own, so these are hidden in list mode). */}
+            {accessMode !== 'list' && (
+              <>
+                {/* IP rules — a single enable checkbox + CIDR box (allow-list only). */}
+                <div className="flex items-start justify-between gap-3">
+                  <label className="flex items-center gap-2 text-sm text-content-muted cursor-pointer shrink-0 pt-2">
+                    <input type="checkbox" checked={cfg.ip_mode === 'allow'}
+                      onChange={e => upd('ip_mode', e.target.checked ? 'allow' : '')}
+                      className="w-3.5 h-3.5 accent-brand-500" />
+                    Enable IP rules
+                  </label>
+                  {cfg.ip_mode === 'allow' && (
+                    <div className="flex-1 min-w-0 max-w-md">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-content-subtle shrink-0">IP / CIDR:</span>
+                        <Input value={cfg.ip_cidrs || ''} onChange={v => upd('ip_cidrs', v)} placeholder="203.0.113.0/24, 198.51.100.7" />
+                      </div>
+                      <p className="text-[11px] text-content-faint mt-1">
+                        Allow-list — only these IPs / CIDRs reach the app (comma / space separated). Traefik has no native deny-list; block specific IPs at your edge firewall or with the WAF.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* GeoIP — enable checkbox + Allow/Deny + country codes (needs the GeoIP plugin). */}
+                {proxyPlugins?.geoip_enabled ? (
+                  <div className="flex items-start justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm text-content-muted cursor-pointer shrink-0 pt-2">
+                      <input type="checkbox" checked={cfg.geo_mode === 'allow' || cfg.geo_mode === 'block'}
+                        onChange={e => upd('geo_mode', e.target.checked ? 'allow' : '')}
+                        className="w-3.5 h-3.5 accent-brand-500" />
+                      Enable GeoIP country policy
+                    </label>
+                    {(cfg.geo_mode === 'allow' || cfg.geo_mode === 'block') && (
+                      <div className="flex-1 min-w-0 max-w-md">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <div className="flex items-center gap-3 shrink-0">
+                            {[{ v: 'allow', l: 'Allow' }, { v: 'block', l: 'Deny' }].map(o => (
+                              <label key={o.v} className="flex items-center gap-1.5 text-xs text-content-muted cursor-pointer">
+                                <input type="radio" name={`geo-${envName}`} checked={cfg.geo_mode === o.v}
+                                  onChange={() => upd('geo_mode', o.v)} className="w-3 h-3 accent-brand-500" />
+                                {o.l}
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <span className="text-xs text-content-subtle shrink-0">Country codes:</span>
+                            <Input value={cfg.geo_countries || ''} onChange={v => upd('geo_countries', v)} placeholder="US, CA, GB" />
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-content-faint mt-1">
+                          ISO 3166-1 alpha-2 codes. <strong>Allow</strong> = only these countries; <strong>Deny</strong> = block these (allow the rest). Offline geolocation (IP2Location LITE); behind a fronting proxy set Traefik trustedIPs.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-content-faint">GeoIP — enable the plugin on the Proxy Service page to use it here.</p>
+                )}
+              </>
+            )}
+
+            {/* Access list — a reusable workspace list (auth + IP + GeoIP) attached at the edge. */}
+            {accessMode === 'list' && (
+              <div>
+                <Label>Access list</Label>
+                <Select value={String(cfg.access_list_id || 0)} onChange={v => upd('access_list_id', Number(v))}
+                  options={[{ value: '0', label: accessLists.length ? 'Select a list…' : 'No lists available' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
+                <p className="text-[11px] text-content-faint mt-1">
+                  {accessLists.length === 0
+                    ? 'No workspace access lists yet — create them in Manage Workspace → Access Lists.'
+                    : 'Basic-auth + IP allow/deny + GeoIP applied at the edge before this env’s app. Manage lists in Manage Workspace → Access Lists.'}
+                </p>
+              </div>
+            )}
+
+            {/* Hardening toggles — block-exploits is plugin-free; WAF/cache need the
+                instance-wide plugin enabled. */}
+            <div className="space-y-1.5">
+              <Toggle label="Block common exploits"
+                hint="Adds hardening response headers (clickjacking, MIME-sniffing, XSS, referrer). For request-pattern filtering (SQLi / path traversal), enable WAF."
+                checked={!!cfg.block_exploits} onChange={v => upd('block_exploits', v)} />
+              {proxyPlugins?.waf_enabled
+                ? <Toggle label="Web application firewall (WAF)" checked={!!cfg.waf} onChange={v => upd('waf', v)} />
+                : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page to use it here.</p>}
+              {proxyPlugins?.cache_enabled
+                ? <Toggle label="Cache assets" checked={!!cfg.cache} onChange={v => upd('cache', v)} />
+                : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page to use it here.</p>}
+            </div>
+          </div>
+        )}
+
+        {/* Advanced — the shared proxy network (TLS is automatic per address now). */}
+        {exMode === 'traefik' && (
           <details className="text-xs">
             <summary className="cursor-pointer text-content-faint hover:text-content-subtle select-none">Advanced</summary>
             <div className="mt-2 pl-3 border-l-2 border-border-strong space-y-3">
-              <div>
-                <Label>Let&apos;s Encrypt email <span className="font-normal normal-case text-content-faint">(override)</span></Label>
-                <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
-                  placeholder={acmeDefault ? `inherits ${acmeDefault}` : 'inherit workspace / instance email'} />
-                <p className="text-xs text-content-subtle mt-1">
-                  Account/recovery contact for this env&apos;s certs — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Only set this to use a different LE account for this environment.
-                </p>
-              </div>
               <div>
                 <Label>Traefik network</Label>
                 <Input value={cfg.traefik_network} onChange={v => upd('traefik_network', v)} placeholder="traefik_net" />
@@ -1578,31 +1754,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </div>
           </details>
         )}
-
-        {/* Auth gate — only under Traefik (basic-auth is a Traefik edge middleware). */}
-        {exMode === 'traefik' && (
-          <div>
-            <Label>Require sign-in (auth gate)</Label>
-            <Select value={authGate} onChange={v => upd('auth_gate', v === 'none' ? '' : v)} options={[
-              { value: 'none', label: 'None — open to anyone who has the URL' },
-              { value: 'basic', label: 'Basic auth — HTTP password at the Traefik edge' },
-            ]} />
-            {authGate === 'basic' && (
-              <>
-                <p className="text-xs text-content-subtle mt-1">
-                  A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
-                </p>
-                <p className="text-xs text-warning-fg mt-1">
-                  ⚠ Use it for static sites / apps without their own login. For token-based apps (Activepieces, Grafana, most SPAs), use Cloudflare Tunnel + Access.
-                </p>
-              </>
-            )}
-          </div>
-        )}
-
-        {exMode === 'traefik' && (isNew
-          ? <p className="text-xs text-content-faint">Save this environment to attach custom domains.</p>
-          : <CustomDomainsPanel workspaceName={workspaceName} envName={envName} />)}
 
         {exMode === 'host_port' && (() => {
           const host = (appHost || '').trim() || 'localhost'
@@ -1698,14 +1849,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             onChange={v => upd('protect_admin_uis', v)}
           />
         </div>
-      )}
-
-      {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. */}
-      {cfg.deployment === 'swarm' && (
-        <SwarmSettings cfg={cfg} onChange={onChange} projectType={projectType} imageNames={imageNames}
-          managedDeps={projectDatabase && projectDatabase !== 'none'
-            ? [projectDatabase, ...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]
-            : [...(projectRedis ? ['redis'] : []), ...(projectObjectStorage === 'minio' ? ['minio'] : [])]} />
       )}
 
       {/* Build source (Git) — only for projects that build from a repo. The repo is

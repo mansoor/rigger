@@ -26,7 +26,12 @@ func (h *Handler) renderProxy() error {
 	waf := h.appSetting("proxy_waf_enabled") == "true"
 	cache := h.appSetting("proxy_cache_enabled") == "true"
 	geo := h.appSetting("proxy_geoip_enabled") == "true"
-	return proxyroutes.Render(h.db, proxyroutes.DynDir(), h.cryptoKey, waf, cache, geo)
+	if err := proxyroutes.Render(h.db, proxyroutes.DynDir(), h.cryptoKey, waf, cache, geo); err != nil {
+		return err
+	}
+	// Workspace-scoped access lists render as shared file-provider middlewares that hosted-app
+	// routers reference by name@file (docs/design/workspace-plugins-and-access-lists.md).
+	return proxyroutes.RenderSharedACLs(h.db, proxyroutes.DynDir(), geo)
 }
 
 func (h *Handler) proxyStore() *proxyroutes.Store { return proxyroutes.NewStore(h.db) }
@@ -317,6 +322,7 @@ func (h *Handler) toAccessList(req accessListReq, existing *proxyroutes.AccessLi
 	if existing != nil {
 		a.ID = existing.ID
 		a.CreatedAt = existing.CreatedAt
+		a.Workspace = existing.Workspace // scope is immutable on update — never trust client
 	} else {
 		a.CreatedAt = now
 	}
@@ -382,9 +388,11 @@ func (h *Handler) toAccessList(req accessListReq, existing *proxyroutes.AccessLi
 	return a, nil
 }
 
-// ListProxyAccessLists — GET /api/proxy/access-lists.
+// ListProxyAccessLists — GET /api/proxy/access-lists. Global (Proxy Service) scope only —
+// workspace-scoped lists belong to their workspace and are NOT shown or attachable here
+// (strict isolation in both directions; see docs/design/workspace-plugins-and-access-lists.md).
 func (h *Handler) ListProxyAccessLists(w http.ResponseWriter, r *http.Request) {
-	lists, err := h.proxyStore().ListAccessLists()
+	lists, err := h.proxyStore().ListAccessListsByScope("")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -413,6 +421,7 @@ func (h *Handler) CreateProxyAccessList(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
+	a.Workspace = "" // Proxy Service lists are always global (super-admin); never trust client scope
 	id, err := h.proxyStore().CreateAccessList(a)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

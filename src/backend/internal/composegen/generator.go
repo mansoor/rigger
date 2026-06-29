@@ -50,6 +50,12 @@ type RouteOpts struct {
 	// registry tags/pulls against it. Empty ⇒ use config.json's own `registry`
 	// (today's behavior; Phase 0 always resolves to this).
 	Registry string
+	// RouterMiddlewares are extra Traefik file-provider middleware refs (e.g.
+	// "acl-acme-5-auth@file", "proxy-waf@file") attached to THIS env's APP routers —
+	// the resolved workspace access list + WAF/cache plugins for the env. Resolved by
+	// the API/bridge (which has DB access); empty -> nothing extra (golden parity).
+	// See docs/design/workspace-plugins-and-access-lists.md.
+	RouterMiddlewares []string
 }
 
 func Generate(configJSON []byte, env string) ([]byte, error) {
@@ -123,6 +129,7 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 		e.useFileCert = true
 	}
 	e.CustomDomains = ro.CustomDomains
+	e.RouterMiddlewares = ro.RouterMiddlewares
 	applyWebEntryFallback(cfg, e)
 	applyPreDeploy(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
@@ -354,6 +361,12 @@ type gen struct {
 	// service sets env_file_mount; envCfgUsed records whether any service did.
 	envFile    string
 	envCfgUsed bool
+	// appMW is the current service's extra file-provider middleware refs (a workspace
+	// access list + WAF/cache plugins, resolved by the API into Env.RouterMiddlewares).
+	// Set per-service in buildService — populated only for app routers, never admin
+	// sidecars — and prepended to their middleware chain. See
+	// docs/design/workspace-plugins-and-access-lists.md.
+	appMW []string
 }
 
 // line appends s followed by a newline (echo "s").
@@ -436,7 +449,13 @@ func (g *gen) build() {
 // update_config + (optional) rollback_config, sourced from the env's SwarmConfig
 // (g.e.Swarm) with a per-service override for replicas/placement. When no SwarmConfig
 // is set the output is byte-identical to the historical hardcoded block.
-func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
+//
+// singleInstance pins the service to its passed replica count regardless of any
+// per-service override: Rigger-managed stateful services (db / redis / object storage /
+// search / TSDB) run single-instance — scaling a single-volume stateful container
+// corrupts data and gives no HA. Placement IS still honored so they can be pinned to
+// their volume's node. Real scaling for those needs a clustered topology (future).
+func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string, singleInstance bool) {
 	if replicas == "" {
 		replicas = "1"
 	}
@@ -457,8 +476,10 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string) {
 	sw := g.e.Swarm
 	var placement []string
 	if so, ok := sw.Services[svc]; ok {
-		if r := string(so.Replicas); r != "" {
-			replicas = r
+		if !singleInstance { // managed stateful services ignore the replica override
+			if r := string(so.Replicas); r != "" {
+				replicas = r
+			}
 		}
 		placement = so.Placement
 	}
@@ -606,6 +627,11 @@ func (g *gen) emitTraefikRouter(s routerSpec) {
 	if auth {
 		mws = router + "_auth," + mws
 	}
+	// Workspace access list + WAF/cache plugins (resolved by the API) run FIRST — auth/IP/geo
+	// gate before the app sees the request. Only set for app routers (never admin sidecars).
+	if len(g.appMW) > 0 {
+		mws = strings.Join(g.appMW, ",") + "," + mws
+	}
 	// service line: define our own loadbalancer, or reference a shared one (route mode).
 	emitService := func() {
 		if s.serviceRef != "" {
@@ -742,6 +768,9 @@ func (g *gen) traefikCustomDomains(router, port, usersVar string, domains []stri
 	mws := "rigger-loading@file"
 	if usersVar != "" {
 		mws = router + "_auth," + mws // reuse the apex router's basic-auth middleware
+	}
+	if len(g.appMW) > 0 {
+		mws = strings.Join(g.appMW, ",") + "," + mws // workspace access list + plugins (app routers)
 	}
 	for i, d := range domains {
 		d = strings.TrimSpace(d)

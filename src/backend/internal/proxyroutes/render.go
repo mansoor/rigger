@@ -116,28 +116,30 @@ func effectiveAccess(r Route, lists map[int64]AccessList) (users []BasicUser, pa
 	passAuth = true
 	geoMode = "off"
 	if r.AccessListID > 0 {
-		if al, ok := lists[r.AccessListID]; ok {
+		// Strict isolation: a global Proxy Service route only ever applies a GLOBAL access
+		// list (al.Workspace == ""). A workspace list id (which the UI no longer offers here)
+		// is ignored — the route falls through to its inline config rather than reaching
+		// across the tenant boundary. See docs/design/workspace-plugins-and-access-lists.md.
+		if al, ok := lists[r.AccessListID]; ok && al.Workspace == "" {
 			passAuth = al.PassAuth
 			users = al.Users
-			for _, rule := range al.Rules {
-				if rule.Action == "allow" {
-					if a := strings.TrimSpace(rule.Address); a != "" {
-						cidrs = append(cidrs, a)
-					}
-				}
-			}
+			cidrs = allowCIDRs(al.Rules)
 			if al.GeoMode == "allow" || al.GeoMode == "block" {
 				geoMode = al.GeoMode
 				countries = al.Countries
 			}
 			return users, passAuth, cidrs, geoMode, countries
 		}
-		// referenced list was deleted — fall through to inline (defensive)
+		// referenced list missing or out-of-scope — fall through to inline (defensive)
 	}
 	if r.AuthMode == "basic" {
 		users = r.AuthUsers
 	}
 	cidrs = splitCSV(r.IPAllow)
+	if r.GeoMode == "allow" || r.GeoMode == "block" {
+		geoMode = r.GeoMode
+		countries = r.Countries
+	}
 	return users, passAuth, cidrs, geoMode, countries
 }
 
@@ -167,6 +169,37 @@ func geoMiddleware(b *strings.Builder, id, mode string, countries []string) {
 	}
 }
 
+// writeAccessMiddlewares emits basicAuth / ipAllowList / geoblock middleware definitions under
+// the given name prefix and returns the middleware names (in chain order). Shared by per-route
+// proxy rendering (prefix "proxy-<id>") and the workspace shared-ACL renderer (prefix
+// "acl-<ws>-<id>"). Geo is emitted only when the plugin is enabled instance-wide.
+func writeAccessMiddlewares(b *strings.Builder, prefix string, users []BasicUser, passAuth bool, cidrs []string, geoMode string, countries []string, geoEnabled bool) []string {
+	var names []string
+	if len(users) > 0 {
+		fmt.Fprintf(b, "    %s-auth:\n      basicAuth:\n", prefix)
+		if !passAuth {
+			b.WriteString("        removeHeader: true\n")
+		}
+		b.WriteString("        users:\n")
+		for _, u := range users {
+			fmt.Fprintf(b, "          - %q\n", u.User+":"+u.Hash)
+		}
+		names = append(names, prefix+"-auth")
+	}
+	if len(cidrs) > 0 {
+		fmt.Fprintf(b, "    %s-ipallow:\n      ipAllowList:\n        sourceRange:\n", prefix)
+		for _, c := range cidrs {
+			fmt.Fprintf(b, "          - %q\n", c)
+		}
+		names = append(names, prefix+"-ipallow")
+	}
+	if geoEnabled && (geoMode == "allow" || geoMode == "block") && len(countries) > 0 {
+		geoMiddleware(b, prefix, geoMode, countries)
+		names = append(names, prefix+"-geo")
+	}
+	return names
+}
+
 // routeYAML renders the file-provider YAML for one enabled route. Returns "" when the
 // route emits nothing (default route in page mode).
 func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled, geoEnabled bool, lists map[int64]AccessList) (string, error) {
@@ -190,29 +223,7 @@ func routeYAML(r Route, dir string, cryptoKey []byte, wafEnabled, cacheEnabled, 
 	//    here we collect content middlewares applied to the main (serving) router. ──
 	// Auth + IP + GeoIP come from the route's access list when set, else inline fields.
 	authUsers, passAuth, ipCIDRs, geoMode, geoCountries := effectiveAccess(r, lists)
-	if len(authUsers) > 0 {
-		fmt.Fprintf(&middlewares, "    %s-auth:\n      basicAuth:\n", id)
-		if !passAuth {
-			middlewares.WriteString("        removeHeader: true\n")
-		}
-		middlewares.WriteString("        users:\n")
-		for _, u := range authUsers {
-			fmt.Fprintf(&middlewares, "          - %q\n", u.User+":"+u.Hash)
-		}
-		mws = append(mws, id+"-auth")
-	}
-	if len(ipCIDRs) > 0 {
-		fmt.Fprintf(&middlewares, "    %s-ipallow:\n      ipAllowList:\n        sourceRange:\n", id)
-		for _, c := range ipCIDRs {
-			fmt.Fprintf(&middlewares, "          - %q\n", c)
-		}
-		mws = append(mws, id+"-ipallow")
-	}
-	// GeoIP country policy (geoblock plugin) — only when the plugin is enabled instance-wide.
-	if geoEnabled && (geoMode == "allow" || geoMode == "block") && len(geoCountries) > 0 {
-		geoMiddleware(&middlewares, id, geoMode, geoCountries)
-		mws = append(mws, id+"-geo")
-	}
+	mws = append(mws, writeAccessMiddlewares(&middlewares, id, authUsers, passAuth, ipCIDRs, geoMode, geoCountries, geoEnabled)...)
 	if hdr := headersMiddleware(id, r); hdr != "" {
 		middlewares.WriteString(hdr)
 		mws = append(mws, id+"-headers")
