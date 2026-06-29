@@ -139,12 +139,9 @@ export default function ProxyServicePage() {
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold text-content-strong">Proxy service</h1>
-            <p className="text-sm text-content-subtle mt-0.5">Route public hostnames to any service — on Rigger, your LAN, or a remote host.</p>
-          </div>
-          <Btn onClick={() => setModal('new')}>＋ Add route</Btn>
+        <div>
+          <h1 className="text-lg font-semibold text-content-strong">Proxy service</h1>
+          <p className="text-sm text-content-subtle mt-0.5">Route public hostnames to any service — on Rigger, your LAN, or a remote host.</p>
         </div>
 
         <div className="flex items-start gap-2 bg-info-subtle/40 border border-info-border/50 rounded-lg px-3 py-2 text-xs text-info-fg">
@@ -154,20 +151,27 @@ export default function ProxyServicePage() {
 
         {isLoading ? (
           <p className="text-sm text-content-subtle py-8 text-center">Loading…</p>
-        ) : realRoutes.length === 0 ? (
-          <div className="bg-surface border border-border rounded-xl p-10 text-center">
-            <p className="text-content font-medium mb-1">No proxy routes yet</p>
-            <p className="text-sm text-content-subtle mb-4">Add a route to send a hostname to a service anywhere on your network.</p>
-            <Btn onClick={() => setModal('new')}>＋ Add first route</Btn>
-          </div>
         ) : (
-          <div className="bg-surface border border-border rounded-xl divide-y divide-border">
-            {realRoutes.map(r => (
-              <RouteRow key={r.id} r={r} plugins={plugins} accessLists={accessLists}
-                onToggle={() => toggleMut.mutate(r)}
-                onEdit={() => setModal({ editing: r })}
-                onDelete={() => setDeleting(r)} />
-            ))}
+          <div className="bg-surface border border-border rounded-xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-content-strong">Routes</span>
+                <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">hostname → upstream</span>
+              </div>
+              <Btn onClick={() => setModal('new')}>＋ Add route</Btn>
+            </div>
+            {realRoutes.length === 0 ? (
+              <p className="text-sm text-content-subtle px-4 py-6 text-center">No proxy routes yet. Add a route to send a hostname to a service anywhere on your network.</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {realRoutes.map(r => (
+                  <RouteRow key={r.id} r={r} plugins={plugins} accessLists={accessLists}
+                    onToggle={() => toggleMut.mutate(r)}
+                    onEdit={() => setModal({ editing: r })}
+                    onDelete={() => setDeleting(r)} />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
