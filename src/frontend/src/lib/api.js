@@ -351,6 +351,7 @@ export const testProxyRoute     = (id, body) => api.post(`/proxy/routes/${id || 
 export const fetchProxyCerts    = ()         => api.get('/proxy/certs').then(r => r.data)
 export const fetchProxyPlugins  = ()         => api.get('/settings/proxy/plugins').then(r => r.data)
 export const updateProxyPlugins = (body)     => api.post('/settings/proxy/plugins', body).then(r => r.data)
+export const setProxyGeoIPDB    = (token)    => api.post('/settings/proxy/geoip', { token }).then(r => r.data)
 export const fetchProxyAccessLists  = ()         => api.get('/proxy/access-lists').then(r => r.data)
 export const createProxyAccessList  = (body)     => api.post('/proxy/access-lists', body).then(r => r.data)
 export const updateProxyAccessList  = (id, body) => api.put(`/proxy/access-lists/${id}`, body).then(r => r.data)

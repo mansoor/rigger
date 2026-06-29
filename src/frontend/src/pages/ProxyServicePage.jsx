@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
-  testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins,
+  testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
   fetchProxyAccessLists, createProxyAccessList, updateProxyAccessList, deleteProxyAccessList,
 } from '../lib/api'
 
@@ -241,26 +241,58 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
 
 function PluginsCard({ plugins }) {
   const qc = useQueryClient()
+  const [geoToken, setGeoToken] = useState('')
+  const [geoMsg, setGeoMsg] = useState(null)
   const mut = useMutation({
     mutationFn: (body) => updateProxyPlugins(body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['proxy-plugins'] }); qc.invalidateQueries({ queryKey: ['proxy-routes'] }) },
   })
+  const geoMut = useMutation({
+    mutationFn: () => setProxyGeoIPDB(geoToken.trim()),
+    onSuccess: () => { setGeoMsg({ ok: true }); setGeoToken(''); qc.invalidateQueries({ queryKey: ['proxy-plugins'] }) },
+    onError: (e) => setGeoMsg({ error: e.response?.data?.error || 'Download failed' }),
+  })
   if (!plugins) return null
+  const db = plugins.geoip_db || {}
   return (
     <div className="bg-surface border border-border rounded-xl p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className="text-sm font-semibold text-content-strong">Plugins</span>
         <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">advanced</span>
-        <span title="Enabling installs the plugin into Traefik (a one-time declaration in docker-compose + rebuild) and may restart the proxy once. Per-route toggling afterwards is instant."
-          className="text-content-faint cursor-help text-xs">ⓘ</span>
       </div>
-      <p className="text-xs text-content-subtle mb-3">Optional WAF, asset cache, and GeoIP country blocking — attachable per route/access-list once enabled. Each requires the matching Traefik plugin to be declared in docker-compose (see proxy-service docs).</p>
+      <p className="text-xs text-content-subtle mb-1">Optional WAF, asset cache, and GeoIP country blocking — attachable per route / access list / hosted env once enabled. Managed from here; no docker-compose edit.</p>
+      <p className="text-[11px] text-warning-fg mb-3">⚠ Enabling or disabling a plugin restarts the reverse proxy — a few seconds of downtime for ALL routed apps. Per-route attach afterwards is instant.{mut.isPending && ' · applying…'}</p>
       <div className="flex gap-6 flex-wrap">
         <Toggle checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
         <Toggle checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
         <Toggle checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
       </div>
-      {plugins.geoip_enabled && <p className="text-[11px] text-content-faint mt-2">GeoIP uses an offline IP2Location LITE DB mounted into Traefik at /geoip, and the real client IP (set forwardedHeaders trust if Rigger sits behind another proxy). Set country policies per access list.</p>}
+      <p className="text-[11px] text-content-faint mt-2">Pinned: Coraza {plugins.waf_version} · Souin {plugins.cache_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working; <span className="text-warning-fg">Souin (cache) is experimental — current versions may not load under Traefik&apos;s plugin interpreter (Yaegi). If cached routes error, disable Cache or set a compatible version.</span></p>
+
+      {plugins.geoip_enabled && (
+        <div className="mt-3 border-t border-border pt-3">
+          <p className="text-xs font-semibold text-content-strong mb-1">GeoIP database (IP2Location LITE)</p>
+          <p className="text-[11px] text-content-faint mb-2">
+            {db.present
+              ? <>Installed — {(db.size / 1e6).toFixed(1)} MB, updated {new Date(db.mod_time).toLocaleDateString()}.</>
+              : <>Not downloaded yet — GeoIP rules won&apos;t match until a database is installed.</>}
+            {' '}Get a free token at ip2location.com (LITE, DB1, IPv6 BIN); refresh monthly.
+          </p>
+          <div className="flex items-center gap-2">
+            <input type="password" value={geoToken} onChange={e => { setGeoToken(e.target.value); setGeoMsg(null) }}
+              placeholder={plugins.geoip_token_set ? 'token saved — paste to replace, or just refresh' : 'IP2Location LITE download token'}
+              className="flex-1 bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500" />
+            <button type="button" onClick={() => { setGeoMsg(null); geoMut.mutate() }}
+              disabled={geoMut.isPending || (!geoToken.trim() && !plugins.geoip_token_set)}
+              className="px-3 py-2 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white shrink-0">
+              {geoMut.isPending ? 'Downloading…' : db.present ? 'Refresh' : 'Download'}
+            </button>
+          </div>
+          {geoMsg?.ok && <p className="text-[11px] text-brand-400 mt-1">Database updated.</p>}
+          {geoMsg?.error && <p className="text-[11px] text-danger-fg mt-1">{geoMsg.error}</p>}
+          <p className="text-[11px] text-content-faint mt-1">Behind another proxy (NPM / Cloudflare)? GeoIP needs the real client IP — set Traefik forwardedHeaders trust for your proxy.</p>
+        </div>
+      )}
     </div>
   )
 }

@@ -36,7 +36,7 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git provider not found"})
 			return
 		}
-		if auth, perr = p.BuildAuth(); perr != nil {
+		if auth, perr = p.BuildAuth(strings.TrimSpace(body.Repo)); perr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": perr.Error()})
 			return
 		}

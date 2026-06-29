@@ -1051,17 +1051,45 @@ function GitSection({ workspace, qc }) {
 
 // GitProviderModal — add/edit a Git provider. Token vs SSH-deploy-key; editing keeps
 // the stored secret if the secret field is left blank.
+// Token-provider presets: GitHub / GitLab / Bitbucket / Gitea all share one HTTPS-token
+// engine (Basic user:token injected at clone time) — these just prefill the host + the
+// right username convention and tailor the labels/help. "Other" = any HTTPS git host.
+const GIT_SERVICES = {
+  github:    { label: 'GitHub',    host: '',              hostPlaceholder: 'blank for github.com — or your GitHub Enterprise host', username: 'x-access-token', secretLabel: 'Personal access token', hint: 'Fine-grained or classic PAT with read access to the repo (Contents: Read).' },
+  gitlab:    { label: 'GitLab',    host: 'gitlab.com',    hostPlaceholder: 'gitlab.com — or your self-managed GitLab host',        username: 'oauth2',         secretLabel: 'Personal access token', hint: 'PAT or project/group token with read_repository. Set Host to your server for self-managed GitLab.' },
+  bitbucket: { label: 'Bitbucket', host: 'bitbucket.org', hostPlaceholder: 'bitbucket.org',                                        username: '',               secretLabel: 'App password',          hint: 'Bitbucket App password (Personal settings → App passwords) with Repositories: Read. Username = your Bitbucket username.' },
+  gitea:     { label: 'Gitea',     host: '',              hostPlaceholder: 'your Gitea / Forgejo host, e.g. git.example.com',       username: '',               secretLabel: 'Access token',          hint: 'Gitea / Forgejo access token with repo read. Username = your account name.' },
+  generic:   { label: 'Other',     host: '',              hostPlaceholder: 'your git host, e.g. git.example.com',                   username: '',               secretLabel: 'Token / password',      hint: 'Any HTTPS git host — username + token are sent as Basic auth at clone time.' },
+}
+function inferGitService(host) {
+  const x = (host || '').toLowerCase()
+  if (x.includes('gitlab')) return 'gitlab'
+  if (x.includes('bitbucket')) return 'bitbucket'
+  if (x.includes('gitea') || x.includes('forgejo')) return 'gitea'
+  if (x === '' || x.includes('github')) return 'github'
+  return 'generic'
+}
+// The provider persists its chosen service preset in meta json (the host string alone
+// can't identify a self-hosted gitea/GitLab) — read it back so Edit reopens the right
+// tab; fall back to host inference for providers saved before this was stored.
+function serviceForEdit(p) {
+  try { const s = JSON.parse(p?.meta || '{}').service; if (s && GIT_SERVICES[s]) return s } catch { /* ignore */ }
+  return inferGitService(p?.host)
+}
+
 function GitProviderModal({ initial, onSave, onClose, saving, error }) {
   const editing = !!initial
   const [kind, setKind]   = useState(initial?.kind || 'token')
   const [name, setName]   = useState(initial?.name || '')
   const [host, setHost]   = useState(initial?.host || '')
   const [username, setUsername] = useState(initial?.username || '')
+  const [service, setService] = useState(() => serviceForEdit(initial))
   const [secret, setSecret] = useState('')
+  const svc = GIT_SERVICES[service] || GIT_SERVICES.generic
   const canSave = name.trim() && (editing || kind === 'ssh_key' || secret.trim())
   const submit = () => {
     if (!canSave) return
-    onSave({ name: name.trim(), kind, host: host.trim(), username: username.trim(), secret })
+    onSave({ name: name.trim(), kind, host: host.trim(), username: username.trim(), secret, service: kind === 'token' ? service : '' })
   }
   const inp = 'w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500'
   const lbl = 'block text-xs font-medium text-content-muted mb-1'
@@ -1089,21 +1117,34 @@ function GitProviderModal({ initial, onSave, onClose, saving, error }) {
           <label className={lbl}>Name</label>
           <input className={inp} value={name} onChange={e => setName(e.target.value)} placeholder="e.g. GitHub (acme org)" />
         </div>
+        {kind === 'token' && (
+          <div>
+            <label className={lbl}>Service</label>
+            <div className="grid grid-cols-5 gap-1.5">
+              {Object.entries(GIT_SERVICES).map(([k, s]) => (
+                <button key={k} type="button"
+                  onClick={() => { setService(k); if (s.host) setHost(s.host); if (s.username) setUsername(s.username) }}
+                  className={`px-2 py-1.5 text-xs rounded-lg border ${service === k ? 'border-brand-500 text-content-strong bg-surface-raised' : 'border-border text-content-muted'}`}>{s.label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div>
           <label className={lbl}>Host <span className="text-content-faint font-normal">(optional)</span></label>
-          <input className={inp} value={host} onChange={e => setHost(e.target.value)} placeholder="github.com — or your self-hosted host" />
+          <input className={inp} value={host} onChange={e => setHost(e.target.value)} placeholder={kind === 'token' ? svc.hostPlaceholder : 'your git host (optional)'} />
         </div>
 
         {kind === 'token' ? (
           <>
             <div>
               <label className={lbl}>Username <span className="text-content-faint font-normal">(optional)</span></label>
-              <input className={inp} value={username} onChange={e => setUsername(e.target.value)} placeholder="x-access-token (GitHub) / oauth2 (GitLab)" />
+              <input className={inp} value={username} onChange={e => setUsername(e.target.value)} placeholder={svc.username || 'your username'} />
             </div>
             <div>
-              <label className={lbl}>Token{!editing && <span className="text-danger-fg ml-0.5">*</span>}</label>
-              <input className={inp} type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder={editing ? 'leave blank to keep current' : 'personal access / deploy token'} />
-              <p className="text-[11px] text-content-faint mt-1">Stored encrypted; sent only via the git config header at clone time. Use a fine-grained token with read access to the repo(s).</p>
+              <label className={lbl}>{svc.secretLabel}{!editing && <span className="text-danger-fg ml-0.5">*</span>}</label>
+              <input className={inp} type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder={editing ? 'leave blank to keep current' : 'paste the token'} />
+              <p className="text-[11px] text-content-faint mt-1">{svc.hint} Stored encrypted; sent only via the git config header at clone time.</p>
             </div>
           </>
         ) : (

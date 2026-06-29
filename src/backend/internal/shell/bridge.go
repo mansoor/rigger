@@ -1104,7 +1104,7 @@ func (b *Bridge) resolveGitAuth(workspaceName, project string) (*gitsync.Auth, e
 	if p == nil {
 		return nil, nil // provider was deleted — fall back to a public clone attempt
 	}
-	return p.BuildAuth()
+	return p.BuildAuth(cfg.Project.GitRepo)
 }
 
 // deployRegistryGate blocks a deploy whose built image would have nowhere to be

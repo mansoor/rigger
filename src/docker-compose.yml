@@ -52,6 +52,13 @@ services:
       - traefik-certs:/certs:ro
       # Out-of-band override certs + dynamic TLS config (rigger writes; Traefik file-provider reads).
       - rigger-dynamic:/dynamic
+      # UI-managed Traefik STATIC config (rigger writes traefik.yml here; Traefik mounts the
+      # same volume read-only at /etc/traefik). Lets Proxy Service → Plugins enable WAF/cache/
+      # GeoIP from the UI (declares the plugin + restarts Traefik) with no manual compose edit.
+      - rigger-traefik-config:/traefikcfg
+      # Offline GeoIP database (rigger downloads the IP2Location LITE BIN here; Traefik reads
+      # it read-only at /geoip for the geoblock plugin).
+      - rigger-geoip:/geoip
     environment:
       - LISTEN_ADDR=:8080
       - TOOLKIT_ROOT=/toolkit
@@ -83,6 +90,17 @@ services:
       # Local timezone for server-rendered timestamps (e.g. pipeline alert times).
       # Default UTC; set e.g. America/Los_Angeles in .env. tzdata is in the image.
       - TZ=${TZ:-UTC}
+      # ACME account email for the Traefik resolvers. Rigger writes it into the
+      # UI-managed traefik.yml (must match what Traefik used before via ${ACME_EMAIL}).
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    # Healthcheck gates Traefik's startup (depends_on below): Rigger writes the UI-managed
+    # traefik.yml on boot, so Traefik must wait until Rigger is up to read it.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     networks:
       - traefik_net
     # Optional: expose Rigger UI itself via Traefik + SSL at RIGGER_DOMAIN.
@@ -127,72 +145,14 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    command:
-      # ── Entrypoints ──
-      - --entrypoints.web.address=:80
-      - --entrypoints.websecure.address=:443
-      # ── Docker provider ──
-      # Watches all containers on traefik_net for label changes. Talks to Docker
-      # through the socket-proxy over TCP (NOT the raw socket): Docker Desktop
-      # proxies the mounted socket and its proxy breaks Traefik's direct API
-      # calls; the socket-proxy re-exposes a clean, allowlisted API. Also more
-      # secure (Traefik never touches the socket) and works on plain dockerd.
-      - --providers.docker=true
-      - --providers.docker.endpoint=tcp://socket-proxy:2375
-      - --providers.docker.network=traefik_net
-      - --providers.docker.exposedbydefault=false
-      # ── Let's Encrypt ACME (HTTP-01 challenge) — per-host certs ──
-      # Used for custom domains + base-domain envs when no DNS provider is set.
-      - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
-      - --certificatesresolvers.letsencrypt.acme.storage=/certs/acme.json
-      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
-      # ── Let's Encrypt ACME (DNS-01 challenge) — WILDCARD certs ──
-      # Lets Traefik issue *.{apps_base_domain} via the DNS provider's API (no
-      # port-80 challenge), so every app under the base domain shares ONE cert.
-      # Only used by routers composegen emits with certresolver=dns (when the
-      # admin sets a DNS provider in Settings → General). Cloudflare reads the
-      # token from CF_DNS_API_TOKEN (set in src/.env). Empty token ⇒ resolver
-      # exists but is never exercised, so this is harmless when DNS-01 is unused.
-      - --certificatesresolvers.dns.acme.email=${ACME_EMAIL:-admin@example.com}
-      - --certificatesresolvers.dns.acme.storage=/certs/acme-dns.json
-      - --certificatesresolvers.dns.acme.dnschallenge=true
-      - --certificatesresolvers.dns.acme.dnschallenge.provider=cloudflare
-      # HTTP→HTTPS redirect is now per-router (emitted by composegen for SSL
-      # envs only), so HTTP-only local envs (*.localhost) aren't forced onto a
-      # cert-less HTTPS. Do NOT re-add a global web→websecure redirection here.
-      # ── File provider (per-email override certs) ──
-      # Rigger issues per-workspace/per-env Let's Encrypt certs OUT-OF-BAND (one-shot
-      # lego, DNS-01) under their own ACME email, then drops the cert + a dynamic TLS
-      # config into this watched dir — Traefik hot-reloads them with NO restart. An
-      # empty/absent dir is a no-op, so this is harmless until an override is used.
-      - --providers.file.directory=/dynamic
-      - --providers.file.watch=true
-      # ── Proxy Service plugins (PX-6) — OPT-IN, one-time ──
-      # The Proxy Service can attach a WAF (Coraza/OWASP CRS), an HTTP cache (Souin), or
-      # GeoIP country blocking (geoblock) to routes/apps. Those are Traefik plugins,
-      # declared statically here. They are commented out so a stock instance never
-      # downloads/compiles them. To use one: uncomment the matching block, pin a current
-      # version, rebuild rigger-traefik ONCE, then toggle it in Proxy Service → Plugins
-      # (per-route/access-list after that is instant). Verify the module path/version
-      # against the plugin's docs before use.
-      # - --experimental.plugins.coraza.modulename=github.com/jcchavezs/coraza-http-wasm-traefik
-      # - --experimental.plugins.coraza.version=v0.0.0
-      # - --experimental.plugins.souin.modulename=github.com/darkweak/souin/plugins/traefik
-      # - --experimental.plugins.souin.version=v0.0.0
-      # GeoIP (offline, per-access-list country policy). Uses an IP2Location LITE BIN DB
-      # mounted at /geoip (see the volume below) — download it free (DB1, IPv6) and refresh
-      # monthly. NOTE: behind another proxy (e.g. NPM), GeoIP needs the real client IP, so
-      # also enable forwarded-headers trust on the entrypoints with YOUR proxy's IP, e.g.:
-      #   - --entrypoints.web.forwardedHeaders.trustedIPs=<npm-ip>/32
-      #   - --entrypoints.websecure.forwardedHeaders.trustedIPs=<npm-ip>/32
-      # - --experimental.plugins.geoblock.modulename=github.com/nscuro/traefik-plugin-geoblock
-      # - --experimental.plugins.geoblock.version=v0.0.0
-      # ── Logging ──
-      - --log.level=INFO
-      - --accesslog=false
-      # ── Dashboard (disabled by default) ──
-      # To enable: change to --api.dashboard=true and add labels to this service.
-      - --api.dashboard=false
+    # ── Static config is UI-managed (no `command:` here) ──
+    # Traefik auto-loads /etc/traefik/traefik.yml. Rigger OWNS that file (written to the
+    # rigger-traefik-config volume, mounted read-only below) — it reproduces the former
+    # CLI args (entrypoints, docker + file providers, LE http-01 + cloudflare dns-01
+    # resolvers) AND declares whichever Proxy Service plugins (Coraza WAF / Souin cache /
+    # geoblock GeoIP) are enabled in Proxy Service → Plugins. Enabling a plugin rewrites
+    # the file + restarts this container (a brief routing blip) — no manual compose edit.
+    # Static-config sources are mutually exclusive in Traefik, so do NOT re-add `command:`.
     environment:
       # Cloudflare DNS-01 API token for the wildcard cert (see the `dns` resolver
       # above), read from a FILE on the shared volume rather than a static env var.
@@ -208,13 +168,21 @@ services:
       # writes; read-only here). The token lives in /dynamic/secrets so the file
       # provider (which scans /dynamic top-level) never tries to parse it as config.
       - rigger-dynamic:/dynamic:ro
-      # GeoIP database for the geoblock plugin (see the commented plugin block above).
-      # Uncomment and point at a host dir holding IP2LOCATION-LITE-DB1.IPV6.BIN.
-      # - ./geoip:/geoip:ro
+      # UI-managed STATIC config: Rigger writes traefik.yml here; Traefik auto-loads
+      # /etc/traefik/traefik.yml. (Read-only — only Rigger writes it.)
+      - rigger-traefik-config:/etc/traefik:ro
+      # Offline GeoIP database for the geoblock plugin (rigger downloads the IP2Location
+      # LITE BIN; read-only here at the path proxyroutes geoDBPath expects).
+      - rigger-geoip:/geoip:ro
     networks:
       - traefik_net
     depends_on:
-      - socket-proxy
+      socket-proxy:
+        condition: service_started
+      # Rigger writes the UI-managed traefik.yml on boot — wait for it (healthcheck) so
+      # the static config exists before Traefik starts.
+      rigger:
+        condition: service_healthy
 
   # ── Docker socket proxy (API-version rewriter) ──
   # Traefik hardcodes Docker API v1.24, but Docker 29+ daemons set
@@ -281,3 +249,7 @@ volumes:
   traefik-certs:
   # Out-of-band override certs + their dynamic TLS config (rigger ⇄ Traefik file provider)
   rigger-dynamic:
+  # UI-managed Traefik STATIC config (rigger writes traefik.yml; Traefik reads /etc/traefik)
+  rigger-traefik-config:
+  # Offline GeoIP database for the geoblock plugin (rigger downloads; Traefik reads /geoip)
+  rigger-geoip:

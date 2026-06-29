@@ -286,7 +286,25 @@ correctness depends on cache-key + cacheable-method config (default to GET/HEAD 
 The restart caveat is shown as a **tooltip on a small info icon** next to the Plugins heading,
 not a persistent banner.
 
-## Phase 3.1 (TARGET, not built) — UI-managed plugin activation (image-bundled + Rigger-owned static config)
+## Phase 3.1 — UI-managed plugin activation
+
+**STATUS: BUILT — "UI-managed config, no bundling" variant (develop, uncommitted, 2026-06-29).**
+Rigger now OWNS the full Traefik static config (`internal/traefikcfg` → `traefik.yml` on the shared
+`rigger-traefik-config` volume, auto-loaded by Traefik at `/etc/traefik`), reproducing the former
+compose `command:` args + an `experimental.plugins` block for the enabled plugins. The compose
+`command:` was removed (static-config sources are mutually exclusive); Traefik `depends_on` rigger
+(new `/healthz` + healthcheck) so the config exists before it starts. The Proxy Service → Plugins
+toggle rewrites the file + restarts Traefik (`acme.Issuer.RestartProxy`); per-route attach stays
+dynamic. GeoIP DB download from a token is `internal/geoipdb` (POST `/api/settings/proxy/geoip`).
+Plugin versions are operator-overridable settings. **Live-verified:** Coraza WAF (WASM, v0.2.1) +
+geoblock (v0.14.0) load + serve. **Souin/cache (v1.7.8) loads but PANICS under Traefik's Yaegi
+interpreter** (`reflect.Value.Field`) — cache defaulted off + UI-flagged experimental; making it
+work needs the **bundled** variant below (vendored, not Yaegi-interpreted). The original
+image-bundling target (below) is deferred — it remains the path for Souin + air-gapped installs.
+
+---
+
+## Phase 3.1 (image-bundled variant — DEFERRED) — bundled plugins + Rigger-owned static config
 
 **Problem with the shipped opt-in.** Today enabling a plugin means each operator hand-edits
 their own `docker-compose.yml` (uncomment `--experimental.plugins.*`, pin a version, mount the

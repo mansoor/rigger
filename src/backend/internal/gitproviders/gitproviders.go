@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -160,22 +161,26 @@ func Create(d *db.DB, key []byte, p Provider) (*Provider, error) {
 	return Get(d, key, id)
 }
 
-// Update edits mutable fields; an empty Secret keeps the stored one.
-func Update(d *db.DB, key []byte, id int64, name, host, username, secret string) (*Provider, error) {
-	if secret == "" {
-		_, err := d.Exec(`UPDATE git_providers SET name=?, host=?, username=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-			name, host, username, id)
+// Update edits mutable fields. An empty secret keeps the stored one; an empty meta
+// keeps the stored meta (so an unrelated edit never clobbers a github_app's meta).
+func Update(d *db.DB, key []byte, id int64, name, host, username, secret, meta string) (*Provider, error) {
+	sets := []string{"name=?", "host=?", "username=?"}
+	args := []any{name, host, username}
+	if meta != "" {
+		sets = append(sets, "meta=?")
+		args = append(args, meta)
+	}
+	if secret != "" {
+		enc, err := crypto.Encrypt(key, []byte(secret))
 		if err != nil {
 			return nil, err
 		}
-		return Get(d, key, id)
+		sets = append(sets, "secret_enc=?")
+		args = append(args, enc)
 	}
-	enc, err := crypto.Encrypt(key, []byte(secret))
-	if err != nil {
-		return nil, err
-	}
-	if _, err := d.Exec(`UPDATE git_providers SET name=?, host=?, username=?, secret_enc=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-		name, host, username, enc, id); err != nil {
+	sets = append(sets, "updated_at=CURRENT_TIMESTAMP")
+	args = append(args, id)
+	if _, err := d.Exec(`UPDATE git_providers SET `+strings.Join(sets, ", ")+` WHERE id=?`, args...); err != nil {
 		return nil, err
 	}
 	return Get(d, key, id)
@@ -251,18 +256,39 @@ func GenerateSSHKey(comment string) (privPEM, pubAuthorized string, err error) {
 
 // ── per-clone auth ───────────────────────────────────────────────────────────
 
+// authScope returns the git `http.<url>` scope the credential header is bound to. It
+// prefers the EXACT origin of the target repo (scheme://host[:port]/) so the header
+// attaches to the real request — including self-hosted gitea/GitLab served over plain
+// http or on a non-default port — and never leaks to a different origin. Git only
+// applies an http.<url> extraheader when scheme, host AND port match, so a hardcoded
+// "https://host/" scope silently drops the header for an http:// (or :3000) repo.
+// Falls back to https://<host>/ when the repo isn't known yet, or to an unscoped
+// (global) header when neither repo nor host is set.
+func authScope(repo, host string) string {
+	if r := strings.TrimSpace(repo); r != "" {
+		if u, err := url.Parse(r); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+			return u.Scheme + "://" + u.Host + "/"
+		}
+	}
+	if host != "" {
+		return "https://" + host + "/"
+	}
+	return ""
+}
+
 // httpsTokenAuth builds a gitsync.Auth that injects an HTTPS Basic credential via a
 // temp gitconfig http.extraheader (referenced by GIT_CONFIG_GLOBAL) — keeping the
-// token out of argv, the URL, and logs. Shared by token + github_app providers.
-func httpsTokenAuth(user, token, host string) (*gitsync.Auth, error) {
+// token out of argv, the URL, and logs. scope is the git http.<url> the header binds
+// to (see authScope); "" emits a global, unscoped header. Shared by token + github_app.
+func httpsTokenAuth(user, token, scope string) (*gitsync.Auth, error) {
 	dir, err := os.MkdirTemp("", "rigger-gitcfg-")
 	if err != nil {
 		return nil, err
 	}
 	basic := base64.StdEncoding.EncodeToString([]byte(user + ":" + token))
 	section := "[http]"
-	if host != "" {
-		section = fmt.Sprintf("[http %q]", "https://"+host+"/")
+	if scope != "" {
+		section = fmt.Sprintf("[http %q]", scope)
 	}
 	cfg := section + "\n\textraheader = Authorization: Basic " + basic + "\n"
 	cfgPath := filepath.Join(dir, "config")
@@ -278,8 +304,10 @@ func httpsTokenAuth(user, token, host string) (*gitsync.Auth, error) {
 
 // BuildAuth materializes the provider's credential into a gitsync.Auth, writing any
 // secret to a 0600 temp file referenced only via the git child's environment (never
-// argv/URL/logs). The caller MUST invoke the returned Cleanup after the git ops.
-func (p *Provider) BuildAuth() (*gitsync.Auth, error) {
+// argv/URL/logs). The caller MUST invoke the returned Cleanup after the git ops. repo
+// is the target repository URL (may be "") — token/github_app providers scope their
+// auth header to its exact origin so it attaches to http/non-standard-port hosts.
+func (p *Provider) BuildAuth(repo string) (*gitsync.Auth, error) {
 	switch p.Kind {
 	case KindToken:
 		if p.Secret == "" {
@@ -289,7 +317,7 @@ func (p *Provider) BuildAuth() (*gitsync.Auth, error) {
 		if user == "" {
 			user = "x-access-token" // works for GitHub; GitLab/Bitbucket accept any user with a PAT
 		}
-		return httpsTokenAuth(user, p.Secret, p.Host)
+		return httpsTokenAuth(user, p.Secret, authScope(repo, p.Host))
 	case KindGitHubApp:
 		// Mint a fresh 1-hour installation token and use it as the HTTPS clone
 		// credential (x-access-token). Never persisted.
@@ -298,7 +326,7 @@ func (p *Provider) BuildAuth() (*gitsync.Auth, error) {
 		if err != nil {
 			return nil, err
 		}
-		return httpsTokenAuth("x-access-token", token, p.Host)
+		return httpsTokenAuth("x-access-token", token, authScope(repo, p.Host))
 	case KindSSHKey:
 		if p.Secret == "" {
 			return nil, fmt.Errorf("git provider %q has no SSH key", p.Name)
@@ -334,7 +362,7 @@ func (p *Provider) Verify(repo string) error {
 	if strings.TrimSpace(repo) == "" {
 		return fmt.Errorf("a repository URL is required to test access")
 	}
-	auth, err := p.BuildAuth()
+	auth, err := p.BuildAuth(repo)
 	if err != nil {
 		return err
 	}

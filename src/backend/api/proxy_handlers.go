@@ -12,8 +12,11 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/mansoor/rigger/ui/internal/acme"
 	"github.com/mansoor/rigger/ui/internal/crypto"
+	"github.com/mansoor/rigger/ui/internal/geoipdb"
 	"github.com/mansoor/rigger/ui/internal/proxyroutes"
+	"github.com/mansoor/rigger/ui/internal/traefikcfg"
 )
 
 // Proxy Service — standalone reverse-proxy manager (docs/design/proxy-service.md).
@@ -543,42 +546,115 @@ func (h *Handler) TestProxyRoute(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
-// GetProxyPlugins — GET /api/settings/proxy/plugins. Instance-wide WAF/cache enable
-// state (PX-6). Enabling makes the renderer emit the plugin middleware instances; the
-// plugins must also be declared in Traefik's static command (one-time, see compose).
+// GetProxyPlugins — GET /api/settings/proxy/plugins. Instance-wide WAF/cache/GeoIP enable
+// state + the pinned plugin versions (operator-overridable) + GeoIP DB status. Rigger now
+// OWNS the Traefik static config (traefikcfg), so enabling a plugin declares it there and
+// restarts Traefik — no manual docker-compose edit.
 func (h *Handler) GetProxyPlugins(w http.ResponseWriter, r *http.Request) {
+	o := traefikcfg.FromSettings(h.db)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"waf_enabled":   h.appSetting("proxy_waf_enabled") == "true",
-		"cache_enabled": h.appSetting("proxy_cache_enabled") == "true",
-		"geoip_enabled": h.appSetting("proxy_geoip_enabled") == "true",
+		"waf_enabled":   o.WAF,
+		"cache_enabled": o.Cache,
+		"geoip_enabled": o.GeoIP,
+		"waf_version":   o.CorazaVer,
+		"cache_version": o.SouinVer,
+		"geoip_version": o.GeoblockVer,
+		"geoip_db":        geoipdb.Stat(),
+		"geoip_token_set": strings.TrimSpace(h.appSetting("proxy_geoip_token")) != "",
 	})
 }
 
-// SetProxyPlugins — POST /api/settings/proxy/plugins {waf_enabled, cache_enabled}.
+// SetProxyPlugins — POST /api/settings/proxy/plugins {waf_enabled, cache_enabled,
+// geoip_enabled, *_version}. Persists the flags/versions, rewrites the Traefik static
+// config, re-renders the dynamic middleware instances, and — when an enable/version
+// actually changed — restarts Traefik so the new plugin set loads. The restart briefly
+// drops all routed traffic (static config always needs a restart).
 func (h *Handler) SetProxyPlugins(w http.ResponseWriter, r *http.Request) {
 	var b struct {
-		WAF   *bool `json:"waf_enabled"`
-		Cache *bool `json:"cache_enabled"`
-		Geo   *bool `json:"geoip_enabled"`
+		WAF        *bool   `json:"waf_enabled"`
+		Cache      *bool   `json:"cache_enabled"`
+		Geo        *bool   `json:"geoip_enabled"`
+		WAFVer     *string `json:"waf_version"`
+		CacheVer   *string `json:"cache_version"`
+		GeoVer     *string `json:"geoip_version"`
 	}
 	if err := readJSON(r, &b); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
 		return
 	}
+	changed := false
+	setIf := func(key, val string) {
+		if h.appSetting(key) != val {
+			h.setAppSetting(key, val)
+			changed = true
+		}
+	}
 	if b.WAF != nil {
-		h.setAppSetting("proxy_waf_enabled", strconv.FormatBool(*b.WAF))
+		setIf("proxy_waf_enabled", strconv.FormatBool(*b.WAF))
 	}
 	if b.Cache != nil {
-		h.setAppSetting("proxy_cache_enabled", strconv.FormatBool(*b.Cache))
+		setIf("proxy_cache_enabled", strconv.FormatBool(*b.Cache))
 	}
 	if b.Geo != nil {
-		h.setAppSetting("proxy_geoip_enabled", strconv.FormatBool(*b.Geo))
+		setIf("proxy_geoip_enabled", strconv.FormatBool(*b.Geo))
+	}
+	if b.WAFVer != nil {
+		setIf("proxy_waf_version", strings.TrimSpace(*b.WAFVer))
+	}
+	if b.CacheVer != nil {
+		setIf("proxy_cache_version", strings.TrimSpace(*b.CacheVer))
+	}
+	if b.GeoVer != nil {
+		setIf("proxy_geoip_version", strings.TrimSpace(*b.GeoVer))
+	}
+	// Rewrite the static config (plugin declarations) + the dynamic middleware instances.
+	if err := traefikcfg.Write(h.db); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write traefik config: " + err.Error()})
+		return
 	}
 	if err := h.renderProxy(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// Only restart when a plugin enable/version actually changed (static config differs);
+	// the toggle is saved regardless, so a restart failure is reported, not fatal to state.
+	if changed {
+		if err := acme.New(nil).RestartProxy(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "settings saved, but the Traefik restart failed (apply manually): " + err.Error()})
+			return
+		}
+	}
 	h.GetProxyPlugins(w, r)
+}
+
+// SetProxyGeoIPDB — POST /api/settings/proxy/geoip {token}. Downloads/refreshes the
+// offline IP2Location LITE GeoIP database to the shared volume the geoblock plugin reads.
+// A supplied token is remembered (for monthly refresh); blank reuses the stored one.
+func (h *Handler) SetProxyGeoIPDB(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		Token string `json:"token"`
+	}
+	if err := readJSON(r, &b); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	token := strings.TrimSpace(b.Token)
+	if token == "" {
+		token = strings.TrimSpace(h.appSetting("proxy_geoip_token"))
+	}
+	if token == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "an IP2Location LITE download token is required"})
+		return
+	}
+	if err := geoipdb.Download(token); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(b.Token) != "" {
+		h.setAppSetting("proxy_geoip_token", strings.TrimSpace(b.Token)) // remember on success
+	}
+	writeJSON(w, http.StatusOK, geoipdb.Stat())
 }
 
 // ProxyDefault — PUBLIC GET /__proxydefault/{mode}. The catch-all default route (when

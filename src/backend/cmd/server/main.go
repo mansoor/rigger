@@ -27,6 +27,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
+	"github.com/mansoor/rigger/ui/internal/traefikcfg"
 )
 
 //go:embed all:dist
@@ -88,6 +89,18 @@ func seedMaintenanceService() {
 	}
 	if err := os.WriteFile(dir+"/rigger-maint.yml", []byte(maintenance.SeedServiceYAML), 0o644); err != nil {
 		log.Printf("maintenance-service: write failed: %v (skipping)", err)
+	}
+}
+
+// seedTraefikStatic writes Rigger's UI-managed Traefik static config (traefik.yml) to the
+// shared rigger-traefik-config volume (mounted at Traefik's /etc/traefik). It reproduces
+// the former compose `command:` CLI args and declares whichever Proxy Service plugins are
+// enabled, so Traefik loads them at startup. Rewritten on every boot (so a one-click update
+// that recreates only the rigger container keeps it current); Traefik depends_on rigger
+// health so the file exists before Traefik starts. Best-effort, like the other seeders.
+func seedTraefikStatic(d *db.DB) {
+	if err := traefikcfg.Write(d); err != nil {
+		log.Printf("traefik-static: %v (skipping)", err)
 	}
 }
 
@@ -224,6 +237,7 @@ func main() {
 	// just means no loading page — never fatal.
 	seedLoadingMiddleware()
 	seedMaintenanceService() // shared rigger-maint@file service for per-env maintenance routers
+	seedTraefikStatic(database) // UI-managed Traefik static config (entrypoints/resolvers + enabled plugins)
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
 
@@ -238,6 +252,13 @@ func main() {
 
 	// ── Router ────────────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
+
+	// Liveness probe (no JWT). Used by the Traefik container's depends_on healthcheck so
+	// Rigger has written the UI-managed Traefik static config before Traefik starts.
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok"))
+	})
 
 	// Setup / auth (no JWT required)
 	mux.HandleFunc("GET /api/setup/status", handler.SetupStatus)
@@ -882,6 +903,8 @@ func main() {
 			handler.GetProxyPlugins(w, r)
 		case r.Method == "POST" && path == "/api/settings/proxy/plugins":
 			handler.SetProxyPlugins(w, r)
+		case r.Method == "POST" && path == "/api/settings/proxy/geoip":
+			handler.SetProxyGeoIPDB(w, r)
 		case r.Method == "POST" && path == "/api/settings/notification-channels":
 			handler.CreateNotificationChannel(w, r)
 		case r.Method == "POST" && matchPrefix(path, "/api/settings/notification-channels/") && hasSuffix(path, "/test"):

@@ -5,12 +5,30 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 )
+
+// gitConfigContents reads the temp gitconfig an http-token auth points GIT_CONFIG_GLOBAL at.
+func gitConfigContents(t *testing.T, auth *gitsync.Auth) string {
+	t.Helper()
+	for _, e := range auth.Env {
+		if path, ok := strings.CutPrefix(e, "GIT_CONFIG_GLOBAL="); ok {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read gitconfig: %v", err)
+			}
+			return string(b)
+		}
+	}
+	t.Fatalf("no GIT_CONFIG_GLOBAL in auth env: %v", auth.Env)
+	return ""
+}
 
 var testKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes for AES-256
 
@@ -53,7 +71,7 @@ func TestTokenProviderRoundTripAndAuth(t *testing.T) {
 	if got == nil || got.Secret != "ghp_supersecret" {
 		t.Fatalf("Get should decrypt the token, got %+v", got)
 	}
-	auth, err := got.BuildAuth()
+	auth, err := got.BuildAuth("https://github.com/acme/widgets.git")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +87,31 @@ func TestTokenProviderRoundTripAndAuth(t *testing.T) {
 	}
 }
 
+// The credential header binds to the EXACT repo origin so it attaches to a self-hosted
+// gitea served over plain http on a non-default port (the bug that made Test fail) —
+// and falls back to https://<host>/ when no repo is supplied.
+func TestTokenAuthScopesToRepoOrigin(t *testing.T) {
+	p := &Provider{Name: "gitea", Kind: KindToken, Host: "git.example.com", Username: "me", Secret: "tok"}
+
+	auth, err := p.BuildAuth("http://git.example.com:3000/me/repo.git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer auth.Cleanup()
+	if cfg := gitConfigContents(t, auth); !strings.Contains(cfg, `[http "http://git.example.com:3000/"]`) {
+		t.Fatalf("header must scope to the http :3000 origin, got:\n%s", cfg)
+	}
+
+	auth2, err := p.BuildAuth("") // no repo ⇒ fall back to the provider host over https
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer auth2.Cleanup()
+	if cfg := gitConfigContents(t, auth2); !strings.Contains(cfg, `[http "https://git.example.com/"]`) {
+		t.Fatalf("no-repo fallback must scope to https host, got:\n%s", cfg)
+	}
+}
+
 // A generated SSH provider yields a usable keypair; BuildAuth points GIT_SSH_COMMAND
 // at a private-key file (not the key inline).
 func TestSSHKeyGenerateAndAuth(t *testing.T) {
@@ -80,7 +123,7 @@ func TestSSHKeyGenerateAndAuth(t *testing.T) {
 		t.Fatalf("bad keypair: priv=%.30q pub=%.30q", priv, pub)
 	}
 	p := &Provider{Name: "deploy", Kind: KindSSHKey, Secret: priv, PublicKey: pub}
-	auth, err := p.BuildAuth()
+	auth, err := p.BuildAuth("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,10 +158,10 @@ func TestAppJWT(t *testing.T) {
 
 // An empty Secret can't build auth (clear error, no panic).
 func TestBuildAuthMissingSecret(t *testing.T) {
-	if _, err := (&Provider{Kind: KindToken}).BuildAuth(); err == nil {
+	if _, err := (&Provider{Kind: KindToken}).BuildAuth(""); err == nil {
 		t.Fatal("expected error for token provider with no secret")
 	}
-	if _, err := (&Provider{Kind: KindGitHubApp}).BuildAuth(); err == nil {
+	if _, err := (&Provider{Kind: KindGitHubApp}).BuildAuth(""); err == nil {
 		t.Fatal("github_app should report not-yet-supported")
 	}
 }

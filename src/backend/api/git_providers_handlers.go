@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strconv"
@@ -9,6 +10,19 @@ import (
 	"github.com/mansoor/rigger/ui/internal/gitproviders"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
+
+// tokenMeta encodes a token provider's chosen service preset (github|gitlab|bitbucket|
+// gitea|generic) as non-secret meta json so editing a provider reopens the right tab
+// and labels — the host string alone can't identify a self-hosted service. Empty
+// service ⇒ "" (leave meta untouched on update; never clobber a github_app's meta).
+func tokenMeta(service string) string {
+	s := strings.TrimSpace(service)
+	if s == "" {
+		return ""
+	}
+	b, _ := json.Marshal(map[string]string{"service": s})
+	return string(b)
+}
 
 // Workspace-scoped Git provider connections (Phase 12) — the credentials Rigger
 // uses to clone PRIVATE repos. Mirrors the workspace Docker-registries handlers:
@@ -46,6 +60,7 @@ type gitProviderBody struct {
 	Host     string `json:"host"`     // optional (e.g. github.com, gitlab.example.com)
 	Username string `json:"username"` // optional token user
 	Secret   string `json:"secret"`   // PAT, or an SSH private key (ssh_key); blank ssh_key ⇒ generate
+	Service  string `json:"service"`  // token preset (github|gitlab|bitbucket|gitea|generic) — UI only
 }
 
 // POST /api/workspaces/{workspace}/git-providers — create a provider private to the
@@ -68,6 +83,7 @@ func (h *Handler) CreateWorkspaceGitProvider(w http.ResponseWriter, r *http.Requ
 		Host:       strings.TrimSpace(body.Host),
 		Username:   strings.TrimSpace(body.Username),
 		Secret:     body.Secret,
+		Meta:       tokenMeta(body.Service),
 		OwnerScope: gitproviders.WorkspaceScope(ws),
 	}
 	switch p.Kind {
@@ -115,7 +131,7 @@ func (h *Handler) UpdateWorkspaceGitProvider(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	updated, err := gitproviders.Update(h.db, h.cryptoKey, id, strings.TrimSpace(body.Name), strings.TrimSpace(body.Host), strings.TrimSpace(body.Username), body.Secret)
+	updated, err := gitproviders.Update(h.db, h.cryptoKey, id, strings.TrimSpace(body.Name), strings.TrimSpace(body.Host), strings.TrimSpace(body.Username), body.Secret, tokenMeta(body.Service))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
