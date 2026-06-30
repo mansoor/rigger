@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
+	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
 // clientIP extracts the best-effort client IP for audit records.
@@ -170,12 +172,23 @@ func shellRun(wsName, name, env, cmd string, out *bytes.Buffer) shell.RunOptions
 // and the value is left in .env as a fallback (never silently dropped).
 func (h *Handler) seedEnvVars(wsName, name string, env workspace.EnvRequest, claims *auth.Claims, ip string) error {
 	pkey := h.resourcePrefix(wsName, name)
+	// The wizard sends a template's RAW default_env_vars (e.g. DB_PASSWORD=CHANGE_ME).
+	// Bootstrap's envgen already wrote the resolved secrets to .env, so resolve these the
+	// same way — REUSING the .env's existing values — before applying them. Writing the raw
+	// placeholders verbatim would overwrite the resolved secret, leaving an insecure CHANGE_ME
+	// in .env while config.json holds the real value: an insecure default AND a refresh-time
+	// password drift (a regenerated .env then no longer matches an already-initialized DB volume).
+	existing := readEnvMap(wspath.DotEnv(h.workspacesDir, wsName, name, env.Name))
+	vars := make(map[string]string, len(env.Vars))
+	for k, v := range env.Vars {
+		vars[k] = envgen.ResolveImageValue(k, v, existing, envgen.CryptoRand)
+	}
 	skip := map[string]bool{}
 	versions := map[string]int{}
 	var warn error
 	if env.Deployment == "swarm" {
 		for _, k := range env.SecretKeys {
-			val, ok := env.Vars[k]
+			val, ok := vars[k]
 			if !ok || val == "" {
 				continue
 			}
@@ -187,7 +200,7 @@ func (h *Handler) seedEnvVars(wsName, name string, env workspace.EnvRequest, cla
 			skip[k] = true
 		}
 	}
-	if err := workspace.UpdateEnvVars(h.workspacesDir, wsName, name, env.Name, env.Vars, nil, skip); err != nil {
+	if err := workspace.UpdateEnvVars(h.workspacesDir, wsName, name, env.Name, vars, nil, skip); err != nil {
 		return err
 	}
 	if len(versions) > 0 {
@@ -196,7 +209,7 @@ func (h *Handler) seedEnvVars(wsName, name string, env workspace.EnvRequest, cla
 		}
 	}
 	for _, k := range env.SecretKeys {
-		if _, ok := env.Vars[k]; ok {
+		if _, ok := vars[k]; ok {
 			h.recordSecretEvent(pkey, env.Name, k, "write", claims, ip)
 		}
 	}

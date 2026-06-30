@@ -86,6 +86,37 @@ func TestImageSecretPreservation(t *testing.T) {
 	}
 }
 
+// ResolveImageValue is the contract create-time seeding (api.seedEnvVars) relies on to
+// resolve a template's raw default_env_vars against the secrets bootstrap already wrote:
+// a placeholder secret reuses the existing resolved value (no clobber → no insecure
+// CHANGE_ME, no config/.env drift); generates one when absent; and leaves real values,
+// skip-keys, and placeholder non-secrets untouched.
+func TestResolveImageValue(t *testing.T) {
+	existing := map[string]string{"DB_PASSWORD": "rigger-already"}
+	cases := []struct {
+		name, key, value, want string
+		existing               map[string]string
+	}{
+		{"placeholder secret reuses existing", "DB_PASSWORD", "CHANGE_ME", "rigger-already", existing},
+		{"placeholder secret generates when absent", "API_TOKEN", "CHANGE_ME", "", nil}, // non-empty checked below
+		{"real value kept", "DB_USERNAME", "immich_user", "immich_user", existing},
+		{"placeholder skip-key kept (PORT)", "IMMICH_PORT", "CHANGE_ME", "CHANGE_ME", existing},
+		{"placeholder non-secret kept", "APP_NAME", "CHANGE_ME", "CHANGE_ME", existing},
+	}
+	for _, c := range cases {
+		got := ResolveImageValue(c.key, c.value, c.existing, fixedRand)
+		if c.name == "placeholder secret generates when absent" {
+			if got == "" || got == "CHANGE_ME" {
+				t.Errorf("%s: expected a generated secret, got %q", c.name, got)
+			}
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: ResolveImageValue(%q,%q) = %q, want %q", c.name, c.key, c.value, got, c.want)
+		}
+	}
+}
+
 func TestCustomPostgresEnv(t *testing.T) {
 	c := cfg(t, `{
       "project": { "name": "myapp", "registry": "reg",
@@ -115,8 +146,6 @@ func TestCustomPostgresEnv(t *testing.T) {
 		"BACKEND_IMAGE":        "reg/myapp-backend:1.0.0-build.2-prod",
 		"FRONTEND_IMAGE":       "reg/myapp-frontend:1.0.0-build.2-prod",
 		"DOMAIN":               "myapp.com",
-		"HTTP_PORT":            "80",
-		"HTTPS_PORT":           "443",
 		"DATABASE":             "postgres",
 		"POSTGRES_HOST":        "myapp_prod_postgres",
 		"POSTGRES_DB":          "myapp_prod",
@@ -138,6 +167,13 @@ func TestCustomPostgresEnv(t *testing.T) {
 	}
 	if !strings.HasPrefix(m["POSTGRES_PASSWORD"], "changeme_") {
 		t.Errorf("POSTGRES_PASSWORD = %q, want changeme_ prefix", m["POSTGRES_PASSWORD"])
+	}
+	// HTTP_PORT/HTTPS_PORT must NOT be written: env_file injects the whole .env into every
+	// container, and a bare HTTP_PORT collides with apps that read it as their listen port.
+	for _, leak := range []string{"HTTP_PORT", "HTTPS_PORT"} {
+		if _, ok := m[leak]; ok {
+			t.Errorf("%s must not be emitted to .env (leaks into every container via env_file)", leak)
+		}
 	}
 	if !strings.HasPrefix(m["APP_KEY"], "base64:") {
 		t.Errorf("APP_KEY = %q, want base64: prefix", m["APP_KEY"])

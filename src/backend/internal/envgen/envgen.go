@@ -478,10 +478,14 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	p("\n")
 
-	p("# ── Domain & ports ─────────────────────────────────────────\n")
+	p("# ── Domain ─────────────────────────────────────────────────\n")
 	p("DOMAIN=%s\n", e.Domain)
-	p("HTTP_PORT=%s\n", e.HTTPPort)
-	p("HTTPS_PORT=%s\n\n", e.HTTPSPort)
+	// HTTP_PORT/HTTPS_PORT are deliberately NOT emitted: they were never used for compose
+	// interpolation (host ports are written by composegen straight from config.json), yet
+	// `env_file: .env` injected them into EVERY container — and an app that reads a bare
+	// HTTP_PORT (e.g. Gitea) then bound to Rigger's host port instead of its own and became
+	// unreachable. The authoritative host port lives in config.json (e.HTTPPort).
+	p("\n")
 
 	p("# ── Stack config ────────────────────────────────────────────\n")
 	p("DEPLOYMENT=%s\n", e.Deployment)
