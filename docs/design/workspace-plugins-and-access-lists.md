@@ -9,6 +9,12 @@ Access Lists** (basic-auth users + IP allow/deny + GeoIP country policy) — and
 available on **Rigger-hosted app domains** (per workspace / project / environment), owned by
 workspace members rather than only the global super-admin.
 
+> **Caveat (2026-06-30): Cache is hard-disabled instance-wide.** The Souin cache plugin panics
+> under Traefik's Yaegi interpreter and took down all routing when enabled, so
+> `traefikcfg.CacheSupported = false` (see [proxy-service.md](proxy-service.md) § Phase 3.1).
+> Every "Cache" toggle/attach below is therefore **inert** until a Yaegi-compatible cache plugin
+> (or a CDN / cache-sidecar alternative) exists. WAF (Coraza) + GeoIP (geoblock) are unaffected.
+
 ## Goal / non-goals
 
 **Goal:** a workspace admin can protect their own apps — staging, preview, prod envs — with the

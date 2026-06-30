@@ -495,17 +495,19 @@ A separate, full-workspace archival feature available from **Tools → Workspace
 
 ## 14. Git Sync
 
-> **Not currently available.** The earlier Bash `sync` command (git pull → build → deploy) was retired during the move to the native Go runtime. Git-driven sync is planned for a later phase (alongside remote backup targets). The `git` block can still be stored in `config.json` for forward compatibility:
+**Private-repo credentials (built).** Rigger clones/builds from **private** Git repositories using credentials stored per workspace under **Manage Workspace → Git**. The credential never enters the repo URL, `config.json`, or logs — it's encrypted at rest (`internal/crypto`) and injected only via the git child's environment:
+
+- **HTTPS token** — a PAT / access token, with first-class **service presets** (GitHub · GitLab · Bitbucket · Gitea · Other) that prefill the host + the right username convention + labels. Works against any HTTPS Git host, including **self-hosted Gitea/GitLab served over plain http or a non-default port** — the auth header is scoped to the repo's exact origin (`scheme://host[:port]`).
+- **SSH deploy key** — Rigger generates an ed25519 keypair; add the public key as a read-only deploy key and use an `ssh://` / `git@…` URL.
+- **GitHub App** — one-click **Connect GitHub** (App-manifest flow) → install → clones with short-lived 1-hour installation tokens (never persisted).
+
+Pick a provider on a project's source in **New / Edit Project** (or inline-create one there); **Test** verifies access with `git ls-remote`.
+
+**Auto-deploy on git push** (webhook-driven pull → build → deploy) is not yet wired to Git providers — that's a later phase (the provider webhook would feed Pipelines / preview environments). For now, deploy from a built/pushed image with `build` + `promote`, or rebuild from updated source with `build <env> --push`. The legacy `git` block remains in `config.json` for forward compatibility:
 
 ```json
-"git": {
-  "enabled": true,
-  "repo":    "git@github.com:org/repo.git",
-  "branch":  "main"
-}
+"git": { "enabled": true, "repo": "git@github.com:org/repo.git", "branch": "main" }
 ```
-
-In the meantime, deploy from a built/pushed image with `build` + `promote`, or rebuild from updated source with `build <env> --push`.
 
 ---
 
@@ -724,7 +726,7 @@ docker compose up --build -d
 
 ### Navigation
 
-**Top bar:** Dashboard · Housekeeping · Tools · Settings · user menu
+**Top bar:** Dashboard · Housekeeping · Tools · Proxy Service (admin) · Settings · user menu
 
 **Left sidebar:** workspace list with live status dots · New workspace button · Recent activity · Backup history · Version log (slide-out panels)
 
@@ -834,6 +836,15 @@ The **first** Tools tab. A single workspace selector at the top drives two consi
 - **Create backup** — optional backup-filename field + Start button; async **`.rwb`** job with live polling; shows archive filename + size on completion
 - **Archives on server** — lists all `.rwb` (and legacy `.tar.gz`) archives in `/data/workspace-archives/` with date, size, **Download** (authenticated fetch → blob URL), **Restore** (one-click, no re-upload), **Delete**
 - **Restore from upload** — drag-and-drop or file picker; "Overwrite if exists" checkbox; streams restore status; workspace appears in the sidebar immediately after success
+
+### Proxy Service (`/proxy`, admin-only)
+
+A standalone, NPM-style reverse-proxy manager — route public hostnames to **any** upstream (on Rigger, your LAN, or a remote host), independent of projects. Requests reach these routes only when Rigger's Traefik receives them on :80/:443 (as your edge, or forwarded from an existing proxy).
+
+- **Routes** — host(s) → upstream(s); load-balanced custom locations, multi-domain rules, per-route certs/SSL (ACME via the DNS-01 issuer), and an optional access list. The Routes card has its own header + section-level **Add route** button.
+- **Access lists** — reusable, named bundles of basic-auth users + IP allow/deny rules + GeoIP country policy, attachable to multiple routes.
+- **Plugins** (Traefik, UI-managed — Rigger owns Traefik's static config, no docker-compose editing): **WAF (Coraza)** and **GeoIP blocking (geoblock)** toggle here (enabling/disabling a plugin restarts Traefik briefly — downtime for all routed apps; per-route attach is instant). GeoIP uses an offline IP2Location LITE database downloaded from the UI. **Cache (Souin) is currently unavailable** — it crashes Traefik's Yaegi plugin interpreter, which would drop all routed apps; use a CDN (e.g. Cloudflare) or a cache sidecar for asset caching instead.
+- **Default route** — catch-all behavior (a branded page or a redirect) for hosts matching no project URL or route.
 
 ### Authentication
 

@@ -1,7 +1,9 @@
 # Proxy Service — standalone reverse-proxy manager (top-level page)
 
-**Status: BUILT (PX-1–PX-5, develop). PX-6 (WAF/cache/GeoIP plugins) scaffolding shipped;
-the one-time plugin install in docker-compose is a documented opt-in (commented).**
+**Status: BUILT (PX-1–PX-6, develop + pushed). PX-6 plugins are now UI-managed (Phase 3.1):
+WAF (Coraza) + GeoIP (geoblock) activate from the Plugins card — Rigger owns Traefik's static
+config, no docker-compose editing. Cache (Souin) is HARD-DISABLED — it panics under Traefik's
+Yaegi interpreter and took down all routing when enabled (see Phase 3.1).**
 Backend: `internal/proxyroutes` (store + file-provider renderer, unit-tested),
 `api/proxy_handlers.go` (CRUD + `/test` probe + `/certs` + plugin toggles), migration
 `proxy_routes`, boot re-render, catch-all `/__proxydefault/{mode}` responder. Frontend:
@@ -16,7 +18,12 @@ rendered. Full interactive E2E pending user testing.
   (legacy single host/port folded in via `Location.Servers()`).
 - **Multi-domain** host field (`Host(a)||Host(b)`), **ACME email override** (per-route, via
   the DNS-01 issuer) + **LE ToS** gate, default cert **None**.
-- **WAF/Cache** per-route toggles moved to the **Advanced** tab.
+- **WAF/Cache** per-route toggles moved to the **Advanced** tab. (Cache is inert instance-wide
+  — Souin is hard-disabled, see Phase 3.1 — so its per-route toggle never emits a middleware
+  until a working cache plugin exists.)
+- **Routes section** now has its own card header ("Routes" + a `hostname → upstream` badge) with
+  the **Add route** button at the section level, matching the Access lists and Plugins cards
+  (page-header Add-route button removed; empty state folded into the card).
 - **Error UX**: save failures render in a collapsible details box (real server message via
   `errMsg`), clear on edit; **Test upstream** result is a toaster next to the button that
   auto-dismisses (~12s). Create/Update handlers wrapped in `recoverProxy` (panic → logged
@@ -297,10 +304,25 @@ compose `command:` args + an `experimental.plugins` block for the enabled plugin
 toggle rewrites the file + restarts Traefik (`acme.Issuer.RestartProxy`); per-route attach stays
 dynamic. GeoIP DB download from a token is `internal/geoipdb` (POST `/api/settings/proxy/geoip`).
 Plugin versions are operator-overridable settings. **Live-verified:** Coraza WAF (WASM, v0.2.1) +
-geoblock (v0.14.0) load + serve. **Souin/cache (v1.7.8) loads but PANICS under Traefik's Yaegi
-interpreter** (`reflect.Value.Field`) — cache defaulted off + UI-flagged experimental; making it
-work needs the **bundled** variant below (vendored, not Yaegi-interpreted). The original
-image-bundling target (below) is deferred — it remains the path for Souin + air-gapped installs.
+geoblock (v0.14.0) load + serve.
+
+**Souin/Cache — HARD-DISABLED (2026-06-30).** Souin (v1.7.8) loads but then **PANICS under
+Traefik's Yaegi interpreter** while building the middleware handler (`reflect.Value.Field` →
+`souin … middleware.NewHTTPCacheHandler`). Critically, a failing plugin **poisons router
+building**: with Souin declared, Traefik stayed "up" but dropped **all Docker-provider routers**
+to 404 — every hosted app (a live Gitea project answered on its published host port but 404'd on
+its domain) until Souin was removed and Traefik restarted. There is no Yaegi-compatible cache
+plugin to swap in (Traefik is migrating plugins to WebAssembly). So Rigger no longer offers or
+emits Souin: `traefikcfg.CacheSupported = false` is the single source of truth, AND-ed into
+`FromSettings` + `Generate` (static config) and the `renderProxy`/bridge cache flags (dynamic
+config), so neither the static plugin list nor any per-route/access-list/env `proxy-cache@file`
+middleware is produced regardless of the stored `proxy_cache_enabled` value. The Plugins UI shows
+Cache as **unavailable** with CDN / cache-sidecar guidance. **Re-enabling:** flip
+`CacheSupported` to `true` once a Yaegi-compatible cache build exists. Robust alternatives that
+don't ride Yaegi: a **CDN in front** (Cloudflare) or a dedicated **cache sidecar**
+(Varnish / Nginx `proxy_cache`) — neither built. The image-bundling variant below was the
+original path for Souin + air-gapped installs and remains deferred (it would not fix the Yaegi
+panic — Souin's interpreted build is the problem).
 
 ---
 

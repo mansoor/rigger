@@ -1,9 +1,42 @@
 # Git provider integration (private-repo access)
 
-**Status: DESIGN (nothing built).** Adds first-class, securely-stored Git credentials so
-Rigger can clone/build/auto-deploy from **private** repositories — the "click to connect,
-authorize, store, reuse" flow users expect from Coolify / Dokploy / Render. Stored
-workspace-level (a sibling to Docker Registries), creatable inline from New Project.
+**Status: Phase 1 BUILT + live-verified (token path verified against a self-hosted Gitea, 2026-06-29).**
+Adds first-class, securely-stored Git credentials so Rigger can clone/build/auto-deploy from
+**private** repositories — the "click to connect, authorize, store, reuse" flow users expect
+from Coolify / Dokploy / Render. Stored workspace-level (a sibling to Docker Registries),
+creatable inline from New Project. The design below is the original plan; **"What's built"**
+records the shipped reality.
+
+## What's built (current state)
+
+- **Phase 1 shipped:** `git_providers` + `global_git_provider_grants` tables (encrypted via
+  `internal/crypto`), `internal/gitproviders` store, **HTTPS token + SSH deploy key + GitHub
+  App** (manifest create → install → 1-hour installation tokens, never persisted). `gitsync.Sync`
+  takes a `*gitsync.Auth`; the bridge resolves the project's `git_provider_id` → auth. UI:
+  **Manage Workspace → "Git"** tab (`GitSection`/`GitProviderModal`) + reusable
+  `GitProviderPicker` (select or inline-create) wired into New/Edit Project. Image ships
+  `git` + `openssh-client`.
+- **Token presets (GitHub / GitLab / Bitbucket / Gitea / Other), frontend-only:** the
+  HTTPS-token engine was already provider-agnostic (`httpsTokenAuth` → Basic `user:token`
+  extraheader for any host), so the presets just prefill host + the right username convention
+  + secret label/help. All stored as `kind=token`; no new `Kind`.
+- **Auth-scope fix (2026-06-29):** the credential header is scoped to the **exact repo
+  origin** (`scheme://host[:port]/`) — not a hardcoded `https://<host>/`. Git only attaches an
+  `http.<url>` extraheader when scheme + host + port match, so the old hardcode silently
+  dropped the token for **self-hosted Gitea/GitLab served over plain http or a non-default
+  port** (the "Test failed against a valid Gitea repo" bug). `Provider.BuildAuth(repo string)`
+  threads the target repo through `Verify` (Test), the build/clone path, and repo scan; falls
+  back to `https://<host>/` when no repo is known. Regression test
+  `TestTokenAuthScopesToRepoOrigin`.
+- **Service persistence fix (2026-06-29):** the chosen service preset is stored in the
+  provider's `meta` json (`{"service":"…"}`), so **Edit** reopens the correct tab — the host
+  string alone can't identify a self-hosted service. The modal inits from
+  `serviceForEdit(initial)` (meta → fallback host-infer), and preset buttons only overwrite
+  host/username when the preset has a non-empty default (so switching tabs no longer **blanks**
+  typed values).
+- **Backlog (Phase 2):** GitLab/Bitbucket/Gitea **OAuth apps** (repo dropdowns, token refresh)
+  + App-driven auto-webhooks into pipelines/previews. Token presets cover plain cloning today;
+  OAuth's real win is auto-webhooks. Deferred by decision.
 
 ## Problem / today's state
 
