@@ -31,12 +31,14 @@
         "./volumes/prometheus_data:/prometheus",
         "./prometheus.yml:/etc/prometheus/prometheus.yml:ro"
       ],
+      "extra_compose": "user: \"0:0\"",
       "depends_on": [],
       "extra_ports": [],
       "env_vars": {}
     },
     {
       "name": "grafana",
+      "web_routed": true,
       "image": "grafana/grafana",
       "tag": "10.2.0",
       "port": 3000,
@@ -52,6 +54,7 @@
       "volumes": [
         "./volumes/grafana_data:/var/lib/grafana"
       ],
+      "extra_compose": "user: \"0:0\"",
       "depends_on": [
         "prometheus"
       ],
@@ -68,5 +71,21 @@
     "GRAFANA_PORT": "3000",
     "GF_SECURITY_ADMIN_USER": "admin",
     "GF_SECURITY_ADMIN_PASSWORD": "CHANGE_ME"
+  },
+  "files": {
+    "prometheus.yml": [
+      "global:",
+      "  scrape_interval: 15s",
+      "  evaluation_interval: 15s",
+      "",
+      "scrape_configs:",
+      "  - job_name: prometheus",
+      "    static_configs:",
+      "      - targets: ['localhost:9090']",
+      "",
+      "  - job_name: grafana",
+      "    static_configs:",
+      "      - targets: ['grafana:3000']"
+    ]
   }
 }

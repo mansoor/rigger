@@ -18,7 +18,7 @@
       "tag": "pg15-v0.2.0",
       "port": 5432,
       "host_port": "",
-      "command": "postgres -c shared_preload_libraries=vectors.so -c search_path=\"$$user\", public, vectors -c logging_collector=on -c max_wal_size=2GB -c shared_buffers=512MB -c wal_compression=lz4",
+      "command": "postgres -c shared_preload_libraries=vectors.so -c 'search_path=\"$$user\", public, vectors' -c logging_collector=on -c max_wal_size=2GB -c shared_buffers=512MB -c wal_compression=lz4",
       "healthcheck": "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE_NAME}",
       "healthcheck_config": {
         "interval": "10s",
@@ -60,12 +60,13 @@
     },
     {
       "name": "app",
+      "web_routed": true,
       "image": "ghcr.io/immich-app/immich-server",
       "tag": "release",
       "port": 2283,
       "host_port": "${IMMICH_PORT}",
       "command": "",
-      "healthcheck": "curl -sf http://localhost:2283/api/server-info/ping -o /dev/null || exit 1",
+      "healthcheck": "curl -sf http://localhost:2283/api/server/ping -o /dev/null || exit 1",
       "healthcheck_config": {
         "interval": "30s",
         "timeout": "10s",
@@ -73,8 +74,7 @@
         "start_period": "60s"
       },
       "volumes": [
-        "./volumes/immich_uploads:${UPLOAD_LOCATION}",
-        "./hwaccel.transcoding.yml:/usr/src/app/hwaccel.transcoding.yml:ro"
+        "./volumes/immich_uploads:${UPLOAD_LOCATION}"
       ],
       "depends_on": [
         "db",
@@ -87,7 +87,8 @@
         "DB_DATABASE_NAME": "${DB_DATABASE_NAME}",
         "DB_USERNAME": "${DB_USERNAME}",
         "DB_PASSWORD": "${DB_PASSWORD}",
-        "REDIS_HOSTNAME": "redis"
+        "REDIS_HOSTNAME": "redis",
+        "IMMICH_MACHINE_LEARNING_URL": "http://ml:3003"
       }
     },
     {
@@ -97,13 +98,7 @@
       "port": 3003,
       "host_port": "",
       "command": "",
-      "healthcheck": "curl -sf http://localhost:3003/ping -o /dev/null || exit 1",
-      "healthcheck_config": {
-        "interval": "30s",
-        "timeout": "10s",
-        "retries": "3",
-        "start_period": "90s"
-      },
+      "healthcheck": "",
       "volumes": [
         "./volumes/ml_cache:/cache"
       ],
