@@ -34,6 +34,18 @@ const (
 	defaultGeoblockVersion = "v0.14.0"
 )
 
+// CacheSupported gates the Souin HTTP-cache plugin. It is FALSE: Souin (the only
+// mainstream Traefik cache plugin) panics under Traefik's Yaegi plugin interpreter at
+// load — and because a failed plugin poisons router building, enabling it drops ALL
+// Docker-routed apps to 404 (observed 2026-06-30). Traefik is migrating plugins to
+// WebAssembly; there is no Yaegi-compatible cache plugin to swap in today, so Rigger
+// does not offer/emit Souin. This is the single source of truth: every read of the
+// cache-enabled flag is AND-ed with it, so flipping this back to true (once a
+// compatible build exists) re-enables the whole path. Robust caching alternatives that
+// don't ride Yaegi: a CDN in front (Cloudflare), or a dedicated cache sidecar
+// (Varnish / Nginx proxy_cache) — neither built yet.
+const CacheSupported = false
+
 // Settings keys: plugin enable flags (shared with proxy_handlers) + version overrides.
 const (
 	keyWAF   = "proxy_waf_enabled"
@@ -89,7 +101,7 @@ func FromSettings(d *db.DB) Options {
 	return Options{
 		ACMEEmail:   acmeEmail(),
 		WAF:         settings.AppSetting(d, keyWAF) == "true",
-		Cache:       settings.AppSetting(d, keyCache) == "true",
+		Cache:       CacheSupported && settings.AppSetting(d, keyCache) == "true",
 		GeoIP:       settings.AppSetting(d, keyGeo) == "true",
 		CorazaVer:   verOr(d, keyCorazaVer, defaultCorazaVersion),
 		SouinVer:    verOr(d, keySouinVer, defaultSouinVersion),
@@ -142,7 +154,8 @@ func Generate(o Options) string {
 	if o.WAF {
 		plugins = append(plugins, plug{"coraza", corazaModule, o.CorazaVer})
 	}
-	if o.Cache {
+	if o.Cache && CacheSupported {
+		// Never reached while CacheSupported is false — Souin panics under Yaegi (see const).
 		plugins = append(plugins, plug{"souin", souinModule, o.SouinVer})
 	}
 	if o.GeoIP {

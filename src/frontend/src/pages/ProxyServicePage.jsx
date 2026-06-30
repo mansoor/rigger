@@ -266,12 +266,14 @@ function PluginsCard({ plugins }) {
       </div>
       <p className="text-xs text-content-subtle mb-1">Optional WAF, asset cache, and GeoIP country blocking — attachable per route / access list / hosted env once enabled. Managed from here; no docker-compose edit.</p>
       <p className="text-[11px] text-warning-fg mb-3">⚠ Enabling or disabling a plugin restarts the reverse proxy — a few seconds of downtime for ALL routed apps. Per-route attach afterwards is instant.{mut.isPending && ' · applying…'}</p>
-      <div className="flex gap-6 flex-wrap">
+      <div className="flex gap-6 flex-wrap items-center">
         <Toggle checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
-        <Toggle checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
+        {plugins.cache_supported
+          ? <Toggle checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
+          : <span className="inline-flex items-center gap-1.5 text-sm text-content-faint" title="Souin is incompatible with Traefik's Yaegi plugin interpreter">🚫 Cache assets <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-overlay/50 text-content-muted">unavailable</span></span>}
         <Toggle checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
       </div>
-      <p className="text-[11px] text-content-faint mt-2">Pinned: Coraza {plugins.waf_version} · Souin {plugins.cache_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working; <span className="text-warning-fg">Souin (cache) is experimental — current versions may not load under Traefik&apos;s plugin interpreter (Yaegi). If cached routes error, disable Cache or set a compatible version.</span></p>
+      <p className="text-[11px] text-content-faint mt-2">Pinned: Coraza {plugins.waf_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working.{!plugins.cache_supported && <> <span className="text-warning-fg">Asset cache (Souin) is disabled — it panics under Traefik&apos;s plugin interpreter (Yaegi), which would drop every routed app. For caching, put a CDN (e.g. Cloudflare) in front, or run a dedicated cache sidecar (Varnish / Nginx).</span></>}</p>
 
       {plugins.geoip_enabled && (
         <div className="mt-3 border-t border-border pt-3">
@@ -918,7 +920,9 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                     : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page first to use it here.</p>}
                   {plugins?.cache_enabled
                     ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
-                    : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page first to use it here.</p>}
+                    : <p className="text-xs text-content-faint">{plugins?.cache_supported === false
+                        ? 'Cache assets — unavailable (Souin is incompatible with Traefik’s plugin interpreter). Use a CDN or cache sidecar instead.'
+                        : 'Cache assets — enable the plugin on the Proxy Service page first to use it here.'}</p>}
                 </div>
               </div>
             </div>

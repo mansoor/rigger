@@ -27,7 +27,7 @@ import (
 // middleware refs are emitted only when that plugin is enabled instance-wide (PX-6).
 func (h *Handler) renderProxy() error {
 	waf := h.appSetting("proxy_waf_enabled") == "true"
-	cache := h.appSetting("proxy_cache_enabled") == "true"
+	cache := traefikcfg.CacheSupported && h.appSetting("proxy_cache_enabled") == "true" // Souin disabled (Yaegi panic)
 	geo := h.appSetting("proxy_geoip_enabled") == "true"
 	if err := proxyroutes.Render(h.db, proxyroutes.DynDir(), h.cryptoKey, waf, cache, geo); err != nil {
 		return err
@@ -553,12 +553,13 @@ func (h *Handler) TestProxyRoute(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetProxyPlugins(w http.ResponseWriter, r *http.Request) {
 	o := traefikcfg.FromSettings(h.db)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"waf_enabled":   o.WAF,
-		"cache_enabled": o.Cache,
-		"geoip_enabled": o.GeoIP,
-		"waf_version":   o.CorazaVer,
-		"cache_version": o.SouinVer,
-		"geoip_version": o.GeoblockVer,
+		"waf_enabled":     o.WAF,
+		"cache_enabled":   o.Cache, // always false while cache_supported is false
+		"cache_supported": traefikcfg.CacheSupported,
+		"geoip_enabled":   o.GeoIP,
+		"waf_version":     o.CorazaVer,
+		"cache_version":   o.SouinVer,
+		"geoip_version":   o.GeoblockVer,
 		"geoip_db":        geoipdb.Stat(),
 		"geoip_token_set": strings.TrimSpace(h.appSetting("proxy_geoip_token")) != "",
 	})

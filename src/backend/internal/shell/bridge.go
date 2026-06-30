@@ -158,7 +158,7 @@ func (b *Bridge) routerMiddlewares(workspaceName, project, env string) []string 
 	geoEnabled := settings.AppSetting(b.db, "proxy_geoip_enabled") == "true"
 	out := proxyroutes.ResolveRouterMiddlewares(b.db, workspaceName, data, env,
 		settings.AppSetting(b.db, "proxy_waf_enabled") == "true",
-		settings.AppSetting(b.db, "proxy_cache_enabled") == "true",
+		false, // cache (Souin) disabled — incompatible with Traefik's Yaegi interpreter; see traefikcfg.CacheSupported
 		geoEnabled)
 	// Per-env INLINE access (IP allow-list / GeoIP / block-exploits) when no access list is
 	// attached — rendered to the file provider and prepended so it gates before WAF/cache.
