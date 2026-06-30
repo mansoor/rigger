@@ -253,6 +253,14 @@ func (r *runner) compose(args ...string) error {
 	if err := r.ensureSynced(); err != nil {
 		return err
 	}
+	// Guard `up` (start / deploy / refresh / restart-fallback / update): a bind-mounted
+	// config file that doesn't exist would be silently created by Docker as a directory,
+	// breaking the container's file mount. Fail with an actionable message instead.
+	if len(args) > 0 && args[0] == "up" {
+		if err := r.checkBindFiles(); err != nil {
+			return err
+		}
+	}
 	full := append([]string{"compose", "-p", r.stack, "-f", "docker-compose.yml"}, args...)
 	return executor.Default(r.opts.Exec).Docker(executor.Spec{
 		Args: full, Dir: r.envDir, Env: r.opts.EnvVars,
