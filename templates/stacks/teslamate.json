@@ -29,6 +29,7 @@
       "host_port": "",
       "image": "teslamate/teslamate",
       "name": "teslamate",
+      "web_routed": true,
       "port": 4000,
       "restart": "always",
       "tag": "latest",

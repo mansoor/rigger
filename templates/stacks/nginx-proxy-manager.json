@@ -41,6 +41,7 @@
     },
     {
       "name": "app",
+      "web_routed": true,
       "image": "jc21/nginx-proxy-manager",
       "tag": "latest",
       "port": 80,

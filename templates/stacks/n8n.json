@@ -39,6 +39,7 @@
     },
     {
       "name": "app",
+      "web_routed": true,
       "image": "n8nio/n8n",
       "tag": "latest",
       "port": 5678,

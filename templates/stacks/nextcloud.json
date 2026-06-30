@@ -61,6 +61,7 @@
     },
     {
       "name": "app",
+      "web_routed": true,
       "image": "nextcloud",
       "tag": "28-apache",
       "port": 80,

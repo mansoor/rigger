@@ -1690,6 +1690,30 @@ function NamedVolumeEditor({ volumes, onChange }) {
   )
 }
 
+// Images that back infrastructure (DB / cache / queue / search) — never the public web
+// entry. Mirrors composegen.isDatastoreImage so the wizard's default web-entry pick
+// matches what the backend fallback would choose for an app+db stack.
+const DATASTORE_IMAGES = new Set([
+  'postgres', 'postgresql', 'mysql', 'mariadb', 'percona', 'mongo', 'mongodb', 'redis',
+  'valkey', 'keydb', 'memcached', 'clickhouse', 'rabbitmq', 'nats', 'kafka', 'zookeeper',
+  'elasticsearch', 'opensearch', 'etcd', 'cassandra', 'influxdb', 'victoriametrics',
+  'meilisearch', 'typesense', 'qdrant',
+])
+// Engine forks/variants whose image name embeds the engine (clickhouse/clickhouse-server,
+// tensorchord/pgvecto-rs, postgis/postgis). High-confidence substrings — no common web/UI
+// image embeds these. Mirrors composegen.datastoreSubstrings.
+const DATASTORE_SUBSTRINGS = ['postgres', 'postgis', 'pgvecto', 'pgvector', 'timescale', 'clickhouse', 'mariadb', 'mysql']
+function isDatastoreImage(image) {
+  if (!image) return false
+  const base = String(image).split('/').pop().split(':')[0].split('@')[0].toLowerCase()
+  return DATASTORE_IMAGES.has(base) || DATASTORE_SUBSTRINGS.some(p => base.includes(p))
+}
+// Index of the implicit web entry among image services: the first non-datastore service
+// (so app+db stacks route to the app, not the database). -1 when all look like datastores.
+function defaultWebEntryIdx(images) {
+  return images.findIndex(im => !isDatastoreImage(im.image))
+}
+
 function Step4({ data, onChange, errors = {}, workspace = '' }) {
   // updateImage uses data.images indices (not filtered activeImages indices)
   function updateImage(idx, updated) {
@@ -1701,6 +1725,27 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
   // For prebuilt, same — images array is populated from template
   const showServices = data.stackType === 'image' || data.stackType === 'prebuilt'
   const serviceImages = data.images.filter(i => i.name && i.image)
+
+  // Default web entry: when a multi-service image/prebuilt stack marks none (the bundled
+  // app+db templates like Gitea/Ghost/WordPress don't), pre-select the first non-datastore
+  // service so it routes by domain under Traefik instead of 404'ing. Mirrors the backend
+  // fallback; the radio below lets the user override. Single-service stacks are handled at
+  // payload build (a lone image is implicitly the entry).
+  useEffect(() => {
+    if (!showServices) return
+    const entries = data.images.map((im, i) => ({ im, i })).filter(x => x.im.name && x.im.image)
+    if (entries.length < 2 || entries.some(x => x.im.web_routed)) return
+    const pick = defaultWebEntryIdx(entries.map(x => x.im))
+    if (pick < 0) return
+    const target = entries[pick].i
+    onChange('images', data.images.map((im, i) => ({ ...im, web_routed: i === target })))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showServices, data.images.length])
+
+  // Set the web entry from the radio: web_routed=true on the chosen image, false on the rest.
+  function pickWebEntry(idx) {
+    onChange('images', data.images.map((im, i) => ({ ...im, web_routed: i === idx })))
+  }
 
   // Within-workspace duplicate host ports (cheap, local).
   const dupWarnings = portConflicts(serviceImages.map(img => ({ name: img.name, ports: hostPortsFromMappings(img) })))
@@ -1742,6 +1787,23 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
             <p className="text-xs text-warning-fg/80 flex items-center gap-1.5">
               <span>ℹ</span> Values pre-filled from template — adjust host ports or leave as-is.
             </p>
+          )}
+          {/* Web entry — which service Traefik routes the env's domain to. Only meaningful
+              for multi-service stacks (a lone image is always the entry). */}
+          {serviceImages.length >= 2 && (
+            <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
+              <p className="text-[11px] text-content-faint uppercase tracking-wide">Web entry — which service receives external traffic (the env&apos;s domain / Traefik route):</p>
+              {data.images.map((img, i) => (img.name && img.image) ? (
+                <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="radio" name="img-webentry" checked={!!img.web_routed} onChange={() => pickWebEntry(i)}
+                    className="w-3.5 h-3.5 accent-brand-500 shrink-0" title="Set as web entry" />
+                  <span className="font-mono text-content">{img.name}</span>
+                  <span className="text-content-faint">{img.image}{img.tag ? `:${img.tag}` : ''}</span>
+                  {isDatastoreImage(img.image) && <span className="text-content-faint">· datastore</span>}
+                  {img.web_routed && <span className="text-success-fg">web</span>}
+                </label>
+              ) : null)}
+            </div>
           )}
           {data.images.map((img, i) =>
             img.name && img.image ? (

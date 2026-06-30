@@ -155,19 +155,87 @@ func applyWebEntryFallback(cfg *Config, e Env) {
 		}
 	}
 	if web == -1 {
-		// Nothing marked — promote the sole service (multi-service stacks must
-		// pick a web entry explicitly, so leave those alone).
-		if len(cfg.Services) != 1 {
+		// Nothing is marked as the web entry, yet Traefik resolved a domain — without a
+		// router the env 404s on its domain (Traefik silently drops an empty/failed router,
+		// so the whole stack looks "up" but is unreachable). Promote a sensible default:
+		//   • single service           → it's unambiguously the entry.
+		//   • multi-service image stack → the first NON-datastore service, so an app+db
+		//     template (Gitea/Ghost/WordPress/…) routes to the app, not its postgres/mysql.
+		// Skipped when the project drives ingress from the routing table (Config.Routes —
+		// web_routed is ignored in route mode) or when every service looks like a datastore.
+		if len(cfg.Routes) > 0 {
 			return
 		}
-		cfg.Services[0].WebRouted = true
-		web = 0
+		web = defaultWebEntry(cfg.Services)
+		if web == -1 {
+			return
+		}
+		cfg.Services[web].WebRouted = true
 	}
 	// A web entry with no container port can't form a valid Traefik service port —
 	// default to 80 (the near-universal HTTP default for images like nginx).
 	if string(cfg.Services[web].Port) == "" {
 		cfg.Services[web].Port = flexStr("80")
 	}
+}
+
+// defaultWebEntry picks the implicit web entry for a stack that marked none. A single
+// service is unambiguously the entry; among several, the first that isn't a recognized
+// datastore/cache wins (so an app+db stack routes to the app, never the database).
+// Returns -1 when no suitable entry exists (every service looks like a datastore).
+func defaultWebEntry(svcs []Service) int {
+	if len(svcs) == 1 {
+		return 0
+	}
+	for i := range svcs {
+		if !isDatastoreImage(svcs[i].Image) {
+			return i
+		}
+	}
+	return -1
+}
+
+// datastoreImages name backing infrastructure (DB / cache / queue / search) that never
+// serves the public HTTP entry — used to skip them when guessing a stack's web entry.
+var datastoreImages = map[string]bool{
+	"postgres": true, "postgresql": true, "mysql": true, "mariadb": true, "percona": true,
+	"mongo": true, "mongodb": true, "redis": true, "valkey": true, "keydb": true,
+	"memcached": true, "clickhouse": true, "rabbitmq": true, "nats": true, "kafka": true,
+	"zookeeper": true, "elasticsearch": true, "opensearch": true, "etcd": true,
+	"cassandra": true, "influxdb": true, "victoriametrics": true, "meilisearch": true,
+	"typesense": true, "qdrant": true,
+}
+
+// datastoreSubstrings catch engine forks/variants whose image name embeds the engine —
+// e.g. clickhouse/clickhouse-server, tensorchord/pgvecto-rs, postgis/postgis, a pinned
+// "postgres-15". High-confidence: no common web/UI image embeds these as a substring.
+var datastoreSubstrings = []string{
+	"postgres", "postgis", "pgvecto", "pgvector", "timescale",
+	"clickhouse", "mariadb", "mysql",
+}
+
+// isDatastoreImage reports whether an image reference names a known datastore/cache/queue,
+// matched on the final path segment with any registry/org prefix and tag/digest stripped
+// (so "bitnami/postgresql" and "docker.io/library/postgres:15" both match "postgres"), plus
+// a substring pass for engine forks ("clickhouse/clickhouse-server", "tensorchord/pgvecto-rs").
+func isDatastoreImage(image string) bool {
+	base := image
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	if i := strings.IndexAny(base, ":@"); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.ToLower(base)
+	if datastoreImages[base] {
+		return true
+	}
+	for _, p := range datastoreSubstrings {
+		if strings.Contains(base, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyPreDeploy synthesizes a one-shot "{svc}-migrate" service for each BUILD service

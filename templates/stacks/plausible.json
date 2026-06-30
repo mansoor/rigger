@@ -61,6 +61,7 @@
     },
     {
       "name": "app",
+      "web_routed": true,
       "image": "ghcr.io/plausible/community-edition",
       "tag": "v2.1",
       "port": 8000,
