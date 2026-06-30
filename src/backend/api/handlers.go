@@ -341,7 +341,7 @@ func (h *Handler) RecordTemplateUse(w http.ResponseWriter, r *http.Request) {
 // GET /api/templates/{name}  — returns full template (images + default env vars)
 func (h *Handler) GetTemplate(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	images, envs, err := workspace.LoadTemplate(h.templatesDir, name)
+	images, envs, files, err := workspace.LoadTemplate(h.templatesDir, name)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -349,6 +349,7 @@ func (h *Handler) GetTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"images":       images,
 		"default_envs": envs,
+		"files":        files,
 	})
 }
 
@@ -446,8 +447,8 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// files during bootstrap. This matches what init_workspace.sh does via CLI.
 	if msg.Workspace.Type == "image" {
 		if msg.Workspace.Template != "" {
-			// Pre-built template: load images + default env vars from template JSON
-			templateImages, defaultEnvs, err := workspace.LoadTemplate(h.templatesDir, msg.Workspace.Template)
+			// Pre-built template: load images + default env vars + seed files from template JSON
+			templateImages, defaultEnvs, seedFiles, err := workspace.LoadTemplate(h.templatesDir, msg.Workspace.Template)
 			if err != nil {
 				send("\033[31m✗ Error loading template: " + err.Error() + "\033[0m\n")
 				return
@@ -457,6 +458,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 			if len(defaultEnvs) > 0 {
 				msg.Workspace.TemplateEnvs = workspace.GenerateSmartDefaults(defaultEnvs)
+			}
+			if len(seedFiles) > 0 {
+				msg.Workspace.SeedFiles = seedFiles
 			}
 		} else if len(msg.Workspace.CustomEnvVars) > 0 {
 			// Custom image stack: apply smart defaults to user-supplied env vars

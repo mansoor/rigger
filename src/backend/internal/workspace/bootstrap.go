@@ -142,7 +142,41 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 		fmt.Fprintf(out, "  adminer-login.php generated\n")
 	}
 
+	// 6. Static seed files (Project.SeedFiles) — config files a template ships for an app
+	// that bind-mounts them (e.g. prometheus.yml). Written ONLY when absent so a user's
+	// later edits (or per-env tweaks) survive a re-bootstrap/refresh, and so they persist
+	// across restarts (they live in the env dir on the host bind). Nested dirs are created;
+	// absolute paths and parent-escapes are rejected so a template can't write outside the env.
+	if err := writeSeedFiles(cfg, outDir, out); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(out, "Environment '%s' bootstrapped\n", env)
+	return nil
+}
+
+// writeSeedFiles materializes cfg.Project.SeedFiles into the env dir, write-if-absent.
+func writeSeedFiles(cfg *wsconfig.Config, outDir string, out io.Writer) error {
+	for relPath, contents := range cfg.Project.SeedFiles {
+		clean := filepath.Clean(filepath.FromSlash(relPath))
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			fmt.Fprintf(out, "  ⚠ skipped unsafe seed file path %q\n", relPath)
+			continue
+		}
+		dst := filepath.Join(outDir, clean)
+		if _, err := os.Stat(dst); err == nil {
+			continue // present — preserve user edits / per-env changes
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(dst, []byte(contents), 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "  seed file written: %s\n", clean)
+	}
 	return nil
 }
 

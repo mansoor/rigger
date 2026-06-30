@@ -16,6 +16,10 @@ import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
 import { useConfirm } from '../context/ConfirmContext'
 
+// Text/config file extensions accepted by the Static-files drop zone (a seed file is a
+// config the app bind-mounts — never a binary). Mirrors the dialog `accept` list below.
+const SF_FILE_EXTS = ['json', 'yml', 'yaml', 'conf', 'cfg', 'toml', 'ini', 'env', 'properties', 'xml', 'txt']
+
 // ── docker-compose → Rigger template converter ──────────────────────────────────
 //
 // Parses a docker-compose.yml (services block) into a Rigger template JSON.
@@ -581,6 +585,8 @@ function ComposeToTemplate() {
   const [validation, setValidation] = useState(null)    // null | {checking} | {ok:true,...} | {ok:false,errors:[]}
   const [copied, setCopied]         = useState(false)
   const [saveState, setSaveState]   = useState(null)    // null | 'saving' | 'saved' | { error }
+  const [sfRows, setSfRows]         = useState([])      // Static-files form rows: [{path, content}]
+  const [sfDropErr, setSfDropErr]   = useState('')      // rejected-drop message (wrong type / too big)
   const tplFileRef                  = useRef(null)       // template upload
   const [composeModalOpen, setComposeModalOpen] = useState(false)  // docker-compose convert modal
   const qc = useQueryClient()
@@ -708,6 +714,77 @@ function ComposeToTemplate() {
     URL.revokeObjectURL(a.href)
   }
 
+  // Warn when a service bind-mounts a config FILE (e.g. ./prometheus.yml) that the template
+  // doesn't ship in its `files` map — at deploy that file won't exist, Docker creates the
+  // bind source as a directory, and the container's file mount fails (the Layer-1 deploy
+  // guard catches it, but flagging it here turns a deploy-time failure into an author hint).
+  // Data-dir mounts (./volumes/db_data, no extension) and named volumes are ignored.
+  function seedFileWarnings(tpl) {
+    const files = (tpl && tpl.files && typeof tpl.files === 'object') ? tpl.files : {}
+    const out = []
+    const seen = new Set()
+    for (const img of (Array.isArray(tpl?.images) ? tpl.images : [])) {
+      for (const vol of (Array.isArray(img?.volumes) ? img.volumes : [])) {
+        if (typeof vol !== 'string') continue
+        const m = vol.match(/^\.\/([^:]+):/)        // env-dir-relative bind source
+        if (!m) continue
+        const src = m[1]
+        if (!/\.[A-Za-z0-9]{1,6}$/.test(src.split('/').pop())) continue  // looks like a dir, not a file
+        if (Object.prototype.hasOwnProperty.call(files, src) || seen.has(src)) continue
+        seen.add(src)
+        out.push(`Service "${img?.name || '?'}" bind-mounts ./${src}, but there's no "files" entry for it — it won't be seeded and the deploy will fail unless the file is provided.`)
+      }
+    }
+    return out
+  }
+
+  // ── Static files form ────────────────────────────────────────────────────────
+  // Lets an author add bind-mounted config files (prometheus.yml, etc.) by typing the
+  // content into a textarea — no hand-escaping of newlines. Rows sync into the template
+  // JSON's `files` map; multi-line bodies are written as a readable line-array (the
+  // backend joins them with "\n"), single-line bodies as a plain string.
+  function pullFiles() {
+    let tpl
+    try { tpl = JSON.parse(tplJson) } catch { return }
+    const f = (tpl && tpl.files && typeof tpl.files === 'object') ? tpl.files : {}
+    setSfRows(Object.entries(f).map(([path, c]) => ({ path, content: Array.isArray(c) ? c.join('\n') : String(c) })))
+  }
+  function applyFiles(rows) {
+    setSfRows(rows)
+    let tpl
+    try { tpl = JSON.parse(tplJson) } catch { return } // only patch when the JSON is valid
+    const files = {}
+    for (const r of rows) {
+      const p = r.path.trim()
+      if (!p) continue
+      files[p] = r.content.includes('\n') ? r.content.replace(/\n$/, '').split('\n') : r.content
+    }
+    if (Object.keys(files).length) tpl.files = files
+    else delete tpl.files
+    editJson(JSON.stringify(tpl, null, 2))
+  }
+  // Drop/browse a text config file → pre-populate a new row with its name + content (same
+  // flow as Add file). Accepts only text/config formats; re-dropping a known name updates it.
+  async function addDroppedFile(file) {
+    setSfDropErr('')
+    const name = file.name
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+    if (!SF_FILE_EXTS.includes(ext)) {
+      setSfDropErr(`"${name}" — only text/config files are allowed (${SF_FILE_EXTS.join(', ')}).`)
+      return
+    }
+    if (file.size > 1024 * 1024) {
+      setSfDropErr(`"${name}" is too large — config files are expected to be under 1 MB.`)
+      return
+    }
+    let text
+    try { text = await file.text() } catch { setSfDropErr(`Could not read "${name}".`); return }
+    const at = sfRows.findIndex(r => r.path.trim() === name)
+    applyFiles(at >= 0
+      ? sfRows.map((r, i) => i === at ? { ...r, content: text } : r)
+      : [...sfRows, { path: name, content: text }])
+  }
+
   // Validate the template structure and confirm the name is unique. Success is
   // what unlocks Save.
   async function runValidate() {
@@ -740,7 +817,8 @@ function ComposeToTemplate() {
       }
     }
     const overwrite = nm === editingName
-    setValidation(errors.length ? { ok: false, errors } : { ok: true, name: nm, services: tpl.images.length, overwrite })
+    const warnings = seedFileWarnings(tpl)
+    setValidation(errors.length ? { ok: false, errors } : { ok: true, name: nm, services: tpl.images.length, overwrite, warnings })
   }
 
   async function saveAsTemplate() {
@@ -916,6 +994,54 @@ function ComposeToTemplate() {
                 <p className="text-xs text-danger-fg/80">⚠ The JSON isn't valid yet — fix it to validate and save.</p>
               )}
 
+              {/* Static files — author bind-mounted config files without hand-escaping newlines. */}
+              <details
+                className="rounded-lg border border-border-strong/60 bg-surface-raised/30"
+                onToggle={e => { if (e.target.open && sfRows.length === 0 && parsed?.files && Object.keys(parsed.files).length) pullFiles() }}
+              >
+                <summary className="text-xs font-semibold text-content-muted px-3 py-2 cursor-pointer select-none">
+                  Static files <span className="text-content-faint font-normal">— config files this template bind-mounts (e.g. <code className="font-mono">prometheus.yml</code>). Type the content; newlines are escaped into the JSON for you.</span>
+                </summary>
+                <div className="px-3 pb-3 pt-0 space-y-3">
+                  {sfRows.length === 0 && (
+                    <p className="text-xs text-content-subtle">
+                      None yet. <button type="button" onClick={() => applyFiles([{ path: '', content: '' }])} className="text-brand-400 hover:text-brand-300">Add a file</button>
+                      {parsed?.files && Object.keys(parsed.files).length > 0 && <> or <button type="button" onClick={pullFiles} className="text-brand-400 hover:text-brand-300">pull the {Object.keys(parsed.files).length} already in the JSON</button></>}.
+                    </p>
+                  )}
+                  {sfRows.map((row, i) => (
+                    <div key={i} className="space-y-1.5 border border-border-strong/40 rounded-lg p-2">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text" value={row.path} placeholder="prometheus.yml (path relative to the env dir)"
+                          onChange={e => applyFiles(sfRows.map((r, j) => j === i ? { ...r, path: e.target.value } : r))}
+                          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono focus:outline-none focus:border-brand-500" />
+                        <button type="button" title="Remove file" onClick={() => applyFiles(sfRows.filter((_, j) => j !== i))}
+                          className="text-content-subtle hover:text-danger-fg shrink-0 px-1.5 py-1 rounded hover:bg-danger-subtle/30">✕</button>
+                      </div>
+                      <textarea
+                        value={row.content} rows={6} spellCheck={false} placeholder={"global:\n  scrape_interval: 15s"}
+                        onChange={e => applyFiles(sfRows.map((r, j) => j === i ? { ...r, content: e.target.value } : r))}
+                        className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono leading-relaxed focus:outline-none focus:border-brand-500" />
+                    </div>
+                  ))}
+                  {sfRows.length > 0 && (
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => applyFiles([...sfRows, { path: '', content: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add file</button>
+                      <button type="button" onClick={pullFiles} className="text-xs text-content-subtle hover:text-content" title="Discard form edits and reload from the JSON above">⟲ Reload from JSON</button>
+                    </div>
+                  )}
+                  {/* Drop / browse text-config files → pre-fills a row with the file's name + content. */}
+                  <DropZone
+                    onFile={addDroppedFile}
+                    multiple
+                    accept=".json,.yml,.yaml,.conf,.cfg,.toml,.ini,.env,.properties,.xml,.txt,text/*"
+                    hint="Drop config files here (or click to browse) — .json .yml .conf .cfg … — to add them with their name & content"
+                  />
+                  {sfDropErr && <p className="text-xs text-danger-fg/80">⚠ {sfDropErr}</p>}
+                </div>
+              </details>
+
               {/* Validate → Save (Save unlocks only after a successful validation) */}
               <div className="flex items-center gap-2 flex-wrap pt-1">
                 <button
@@ -964,6 +1090,16 @@ function ComposeToTemplate() {
                     : <>name <code className="font-mono">{validation.name}</code> is available</>
                   } ({validation.services} service{validation.services !== 1 ? 's' : ''}). Ready to save.
                 </p>
+              )}
+              {/* Non-blocking seed-file warnings — valid to save, but the deploy would fail. */}
+              {validation?.ok && validation.warnings?.length > 0 && (
+                <div className="rounded-lg bg-warning-subtle/30 border border-warning-border/30 p-3">
+                  <p className="text-warning-fg text-xs font-semibold mb-1">⚠ {validation.warnings.length} seed-file warning{validation.warnings.length !== 1 ? 's' : ''}</p>
+                  <ul className="text-warning-fg/80 text-xs list-disc list-inside space-y-0.5">
+                    {validation.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                  <p className="text-warning-fg/60 text-[11px] mt-1.5">Add each file to the template&apos;s <code className="font-mono">files</code> map (or remove the bind mount).</p>
+                </div>
               )}
 
               {/* Save error / success */}

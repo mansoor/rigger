@@ -17,6 +17,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // Config is the subset of config.json the non-compose operations read.
@@ -172,6 +173,12 @@ type Project struct {
 	// from env names. Drives the release pipeline and the project-page env strip.
 	// See internal/envorder.
 	EnvOrder []string `json:"env_order,omitempty"`
+	// SeedFiles are static config files (relative path → contents) a template ships for
+	// apps that bind-mount a config file — e.g. prometheus.yml. Bootstrap writes each into
+	// the env dir ONLY when absent, so they survive restarts (they live on the host bind)
+	// and a user's later edits are never clobbered on refresh. Carried in config.json so a
+	// project stays self-contained even if the source template later changes or is removed.
+	SeedFiles map[string]MultilineString `json:"seed_files,omitempty"`
 	// Managed dependencies are PROJECT-level (consistent across all environments):
 	// the database engine (none|postgres|mysql|mariadb), its catalog version, and
 	// the Redis toggle. Only the per-env DBExternal (host-port exposure) stays on
@@ -597,3 +604,39 @@ func (s *Str) UnmarshalJSON(b []byte) error {
 }
 
 func (s Str) String() string { return string(s) }
+
+// ── MultilineString ──────────────────────────────────────────────────────────────
+// A seed-file body that unmarshals from EITHER a JSON string OR an array of strings,
+// in which case the lines are joined with "\n" (plus a trailing newline, so the file
+// ends cleanly). The array form lets a template author a multi-line config file as a
+// readable line list instead of one long "\n"-escaped string — avoiding the easy
+// mistake of a malformed escape breaking the whole JSON. It marshals back as a plain
+// string (the default for a string type), so config.json always stores the joined form.
+type MultilineString string
+
+func (m *MultilineString) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || string(b) == "null" {
+		*m = ""
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*m = MultilineString(s)
+		return nil
+	}
+	if b[0] == '[' {
+		var lines []string
+		if err := json.Unmarshal(b, &lines); err != nil {
+			return fmt.Errorf("seed file content must be a string or array of strings: %w", err)
+		}
+		*m = MultilineString(strings.Join(lines, "\n") + "\n")
+		return nil
+	}
+	return fmt.Errorf("seed file content must be a string or array of strings, got %s", b)
+}
+
+func (m MultilineString) String() string { return string(m) }

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
@@ -57,6 +58,7 @@ type CreateRequest struct {
 	NamedVolumes   []NamedVolume     `json:"named_volumes"`    // additional named volumes (Step 4)
 	Backup         *BackupCfg        `json:"backup"`           // backup configuration (Step 5)
 	TemplateEnvs   map[string]string `json:"-"`                // resolved env vars (post-smart-defaults); set server-side
+	SeedFiles      map[string]string `json:"-"`                // static config files (relpath→contents) from the template; set server-side, written to env dirs by bootstrap
 	ProjectRootDir string            `json:"-"`                // host-side folder path; set server-side at creation
 }
 
@@ -405,6 +407,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 	if req.ProjectRootDir != "" {
 		project["project_root_dir"] = req.ProjectRootDir
 	}
+	// Static seed files the template ships (relpath→contents) — bootstrap materializes
+	// them into each env dir (write-if-absent). Kept in config.json so the project is
+	// self-contained even if the source template later changes or is removed.
+	if len(req.SeedFiles) > 0 {
+		project["seed_files"] = req.SeedFiles
+	}
 	// Services come straight from the wizard when the repo scanner (or manual
 	// editor) produced them; otherwise seed from the legacy wizard fields.
 	services := req.Services
@@ -627,20 +635,32 @@ func ListTemplates(templatesDir string) ([]TemplateInfo, error) {
 	return templates, nil
 }
 
-// LoadTemplate reads a template JSON and returns its images and default env vars.
-func LoadTemplate(templatesDir, name string) ([]ImageDef, map[string]string, error) {
+// LoadTemplate reads a template JSON and returns its images, default env vars, and any
+// static seed files (relative path → contents) the template ships for apps that bind-mount
+// a config file (e.g. prometheus.yml). Seed files are materialized into each env dir by
+// bootstrap (write-if-absent). Returns a nil files map when the template declares none.
+func LoadTemplate(templatesDir, name string) ([]ImageDef, map[string]string, map[string]string, error) {
 	path := filepath.Join(templatesDir, "stacks", name+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, nil, fmt.Errorf("template %q not found", name)
+		return nil, nil, nil, fmt.Errorf("template %q not found", name)
 	}
 
 	var raw struct {
-		Images      []ImageDef        `json:"images"`
-		DefaultEnvs map[string]string `json:"default_env_vars"`
+		Images      []ImageDef                          `json:"images"`
+		DefaultEnvs map[string]string                   `json:"default_env_vars"`
+		Files       map[string]wsconfig.MultilineString `json:"files"` // string OR line-array
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return raw.Images, raw.DefaultEnvs, nil
+	// Normalize line-array file bodies to joined strings so config.json stores one form.
+	var files map[string]string
+	if len(raw.Files) > 0 {
+		files = make(map[string]string, len(raw.Files))
+		for k, v := range raw.Files {
+			files[k] = string(v)
+		}
+	}
+	return raw.Images, raw.DefaultEnvs, files, nil
 }
