@@ -16,6 +16,12 @@ import (
 type RouteOpts struct {
 	BaseDomain string // e.g. "apps.example.com"; "" → fall back to AutoURL/localhost
 	LocalTLS   bool   // serve the local *.localhost route over self-signed HTTPS
+	// KeepHostPortsUnderTraefik is the workspace default for whether a web-routed service
+	// still publishes its primary host port when Traefik is enabled. false (zero value =
+	// default) ⇒ strip it (Traefik routes by domain; the host port is redundant and the
+	// main cause of host-port conflicts). Overridden per-env by Env.TraefikHostPorts.
+	// The bridge sets true only when a workspace opts its default back to "keep".
+	KeepHostPortsUnderTraefik bool
 	// AutoURLMode / AutoURLHost build a cross-machine auto-URL when no base domain is
 	// set (the magic-DNS fallback). Mode: "sslip"|"nip"|"traefikme"|"localhost"|"off"
 	// (default "localhost"). Host is the IP other machines reach this host on
@@ -130,6 +136,15 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	}
 	e.CustomDomains = ro.CustomDomains
 	e.RouterMiddlewares = ro.RouterMiddlewares
+	// Resolve whether web-routed services keep their host port under Traefik: per-env
+	// override wins, else the workspace default (RouteOpts; default = strip).
+	e.keepHostPort = ro.KeepHostPortsUnderTraefik
+	switch e.TraefikHostPorts {
+	case "keep":
+		e.keepHostPort = true
+	case "strip":
+		e.keepHostPort = false
+	}
 	applyWebEntryFallback(cfg, e)
 	applyPreDeploy(cfg, e)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}

@@ -475,14 +475,14 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 				g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
 			}
 		}
-		// An EXPLICIT host-port mapping on an APP service is honored even under Traefik
-		// routing — publish it so a user-run reverse proxy / DNS can target this host:port
-		// directly (e.g. when this Rigger isn't public-facing / port 80 isn't routed to it),
-		// IN ADDITION to Traefik's in-network routing. Skipped for synthesized admin
-		// sidecars (Adminer / MinIO console, AuthProtect=true), whose host_port is an
-		// internal default and which are meant to be Traefik-routed only. No host_port ⇒
-		// Traefik-only (today's default).
-		if hp := string(svc.HostPort); hp != "" && !svc.AuthProtect {
+		// An explicit host-port mapping on an APP service can be published even under
+		// Traefik routing so a user-run reverse proxy / DNS can target host:port directly
+		// (e.g. when this Rigger isn't public-facing). But under Traefik the app is already
+		// reached by domain, so the host port is redundant and the main cause of host-port
+		// conflicts — it's stripped by default (e.keepHostPort=false), re-enabled per-env or
+		// per-workspace ("keep"). Only this PRIMARY web-entry port is affected; extra_ports
+		// below always publish. Synthesized admin sidecars (AuthProtect) are Traefik-only.
+		if hp := string(svc.HostPort); hp != "" && !svc.AuthProtect && e.keepHostPort {
 			publishes = append(publishes, hp+":"+portOr(port, "80"))
 		}
 	case svc.WebRouted && svc.Subdomain == "":

@@ -152,6 +152,14 @@ type Env struct {
 	// ("" = inherit project, then the traefik/none baseline). See gen.exposeMode.
 	ExposeMode string `json:"expose_mode,omitempty"`
 	AuthGate   string `json:"auth_gate,omitempty"`
+	// TraefikHostPorts is a per-env override of whether a WEB-ROUTED service still
+	// publishes its primary host port when Traefik is enabled: "" inherit the workspace
+	// default (RouteOpts.KeepHostPortsUnderTraefik; default = strip), "strip" force off,
+	// "keep" force on. Under Traefik the app is reached by domain, so the host port is
+	// redundant and the main source of host-port conflicts — stripping it is the default.
+	// Only the web entry's primary port is affected; extra_ports and non-web-routed
+	// services (a deliberately-exposed DB / SSH port) always publish. See gen.keepHostPort.
+	TraefikHostPorts string `json:"traefik_host_ports,omitempty"`
 	// AttachNetwork joins web service(s) to an existing external Docker network so a
 	// user-run proxy / another stack can reach the app in-network. Must already exist.
 	AttachNetwork string `json:"attach_network,omitempty"`
@@ -202,6 +210,10 @@ type Env struct {
 	// resolver: the router emits tls=true with NO certresolver, so Traefik serves the
 	// matching file cert by SNI. Set from RouteOpts.OverrideCert.
 	useFileCert bool
+	// keepHostPort is the resolved decision (per-env override → workspace default) for
+	// whether a web-routed service publishes its primary host port under Traefik. false
+	// (default) ⇒ Traefik-only (strip the redundant host port). Set in generate().
+	keepHostPort bool
 }
 
 // Service is one entry in config.json services[] — the unified app-service model

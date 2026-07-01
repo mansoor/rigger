@@ -1,6 +1,7 @@
 package composegen
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -642,23 +643,60 @@ func TestExposeAttachNetwork(t *testing.T) {
 // A Traefik-routed web service with an EXPLICIT host_port publishes that host port AND
 // keeps its Traefik router — so a user-run reverse proxy can target host:port directly
 // (e.g. when Rigger isn't public-facing) while Traefik still routes the domain.
-func TestWebRoutedHostPortPublishedUnderTraefik(t *testing.T) {
-	cfg := `{
+// Under Traefik a web-routed service's primary host port is STRIPPED by default (the app is
+// reached by domain; the host port is redundant and conflict-prone) and RE-PUBLISHED only when
+// the env/workspace opts to "keep" it. The Traefik router is emitted in both cases.
+func TestWebRoutedHostPortStrippedUnderTraefikByDefault(t *testing.T) {
+	base := `{
 		"project":{"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
 		"services":[{"name":"frontend","image":"nginx","tag":"alpine","port":"3000","web_routed":true,"host_port":"3456"}],
-		"environments":{"dev":{"deployment":"compose","traefik_enabled":true}}
+		"environments":{"dev":{"deployment":"compose","traefik_enabled":true%s}}
 	}`
-	out, err := GenerateAt([]byte(cfg), "dev", time.Unix(0, 0).UTC())
+	// Default: no host port published, router present.
+	out, err := GenerateAt([]byte(fmt.Sprintf(base, "")), "dev", time.Unix(0, 0).UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(out)
-	web := svcBlock(t, s, "frontend")
-	if !strings.Contains(web, `- "3456:3000"`) {
-		t.Errorf("explicit host_port must be published under Traefik\n---\n%s", web)
+	web := svcBlock(t, string(out), "frontend")
+	if strings.Contains(web, `- "3456:3000"`) {
+		t.Errorf("primary host_port must be stripped under Traefik by default\n---\n%s", web)
 	}
 	if !strings.Contains(web, "traefik.http.routers.") {
-		t.Errorf("Traefik router must still be emitted alongside the host port\n---\n%s", web)
+		t.Errorf("Traefik router must still be emitted\n---\n%s", web)
+	}
+	// Per-env override "keep": host port re-published, router still present.
+	out2, err := GenerateAt([]byte(fmt.Sprintf(base, `,"traefik_host_ports":"keep"`)), "dev", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	web2 := svcBlock(t, string(out2), "frontend")
+	if !strings.Contains(web2, `- "3456:3000"`) {
+		t.Errorf("host_port must be published when the env keeps it\n---\n%s", web2)
+	}
+	if !strings.Contains(web2, "traefik.http.routers.") {
+		t.Errorf("Traefik router must still be emitted alongside the kept host port\n---\n%s", web2)
+	}
+}
+
+// The workspace default (RouteOpts.KeepHostPortsUnderTraefik=true) re-publishes host ports for
+// every env that doesn't override it; extra_ports and non-web-routed services are unaffected.
+func TestKeepHostPortsWorkspaceDefault(t *testing.T) {
+	cfg := `{
+		"project":{"name":"app1","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services":[{"name":"app","image":"gitea/gitea","tag":"1.21","port":"3000","web_routed":true,"host_port":"3000","extra_ports":["2222:22"]}],
+		"environments":{"dev":{"deployment":"compose","traefik_enabled":true}}
+	}`
+	out, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{KeepHostPortsUnderTraefik: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := svcBlock(t, string(out), "app")
+	if !strings.Contains(app, `- "3000:3000"`) {
+		t.Errorf("workspace keep-default must publish the host port\n---\n%s", app)
+	}
+	// extra_ports always publish regardless of the strip decision.
+	if !strings.Contains(app, `- "2222:22"`) {
+		t.Errorf("extra_ports must always publish\n---\n%s", app)
 	}
 }
 
