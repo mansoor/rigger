@@ -8,7 +8,7 @@
 #
 # Environment variable overrides (prefix the one-liner):
 #   RIGGER_DIR=/opt/rigger        — where to clone the repo   (default: ~/rigger)
-#   RIGGER_PORT=8080            — UI host port               (default: 8080)
+#   RIGGER_PORT=9999            — UI host port               (default: 9999)
 #   RIGGER_BRANCH=main          — git branch to install      (default: main)
 #   RIGGER_REPO=<url>           — git clone URL              (default: GitHub HTTPS)
 #   RIGGER_IMAGE_TAG=latest     — published image tag to run (default: latest;
@@ -34,7 +34,7 @@ cd "$HOME" 2>/dev/null || cd /
 
 RIGGER_REPO="${RIGGER_REPO:-https://github.com/mansoor/rigger.git}"
 RIGGER_DIR="${RIGGER_DIR:-$HOME/rigger}"
-RIGGER_PORT="${RIGGER_PORT:-8080}"
+RIGGER_PORT="${RIGGER_PORT:-9999}"
 RIGGER_BRANCH="${RIGGER_BRANCH:-main}"
 RIGGER_IMAGE_TAG="${RIGGER_IMAGE_TAG:-latest}"
 RIGGER_BUILD="${RIGGER_BUILD:-0}"
@@ -347,7 +347,7 @@ EOF
 else
   info "Configuration file already exists — skipping generation"
   # Ensure RIGGER_PORT is up to date if user passed a custom port
-  if [[ "$RIGGER_PORT" != "8080" ]]; then
+  if [[ "$RIGGER_PORT" != "9999" ]]; then
     sed -i.bak "s/^RIGGER_PORT=.*/RIGGER_PORT=${RIGGER_PORT}/" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"
   fi
   # Ensure the image tag is recorded (append if a pre-image-era .env lacks it).

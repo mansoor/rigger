@@ -24,7 +24,7 @@ services:
     container_name: rigger
     restart: unless-stopped
     ports:
-      - "${RIGGER_PORT:-8080}:8080"
+      - "${RIGGER_PORT:-9999}:8080"
     volumes:
       # NOTE: toolkit logic lives in the Go binary (no scripts) — the old
       # `../:/toolkit:ro` code mount has been removed. Only rw DATA is mounted.
