@@ -24,6 +24,11 @@ var workspaceSettingKeys = map[string]bool{
 	// Image-distribution Phase 4: workspace default BUILD host (id; "" = unset →
 	// projects build on their env's deploy host). Per-project override in Edit Project.
 	"default_build_host_id": true,
+	// Workspace default for whether a web-routed service still publishes its primary host
+	// port under Traefik ("true" = keep; unset/"false" = strip — the app is reached by its
+	// domain, so the host port is redundant and conflict-prone). Per-env override in Edit
+	// Project. See settings.EffectiveKeepHostPortsUnderTraefik.
+	"keep_host_ports_under_traefik": true,
 	// W7: workspace default appearance (JSON blob; users can override per-account).
 	"appearance_prefs": true,
 	// Workspace default for destructive-action confirmations + whether members may

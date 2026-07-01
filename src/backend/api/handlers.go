@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/mansoor/rigger/ui/internal/acme"
 	"github.com/mansoor/rigger/ui/internal/actionruns"
 	"github.com/mansoor/rigger/ui/internal/alerts"
@@ -27,17 +28,16 @@ import (
 	"github.com/mansoor/rigger/ui/internal/customdomains"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/envgen"
+	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
-	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
-	"github.com/gorilla/websocket"
 )
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
@@ -60,8 +60,8 @@ type rateLimiter struct {
 }
 
 type rlEntry struct {
-	count     int
-	resetAt   time.Time
+	count   int
+	resetAt time.Time
 }
 
 var loginLimiter = &rateLimiter{entries: make(map[string]*rlEntry)}
@@ -84,21 +84,21 @@ func (rl *rateLimiter) allow(ip string) bool {
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 type Handler struct {
-	auth          *auth.Service
-	db            *db.DB
-	bridge        *shell.Bridge
-	workspacesDir string
+	auth                *auth.Service
+	db                  *db.DB
+	bridge              *shell.Bridge
+	workspacesDir       string
 	remoteWorkspacesDir string // WORKSPACES_DIR on remote hosts (Phase 7)
-	templatesDir  string
-	dataDir       string
-	imgCache      *imagecheck.Cache
-	jobs          *JobStore
-	migJobs       *migStore
-	alertBroker   *alerts.Broker
-	notifier      *notify.Dispatcher
-	cryptoKey     []byte // derived from JWT secret; encrypts host SSH keys (Phase 7)
-	acmeIssuer    *acme.Issuer // out-of-band per-email override cert issuer (DNS-01/lego)
-	acmeCerts     *acme.Store  // tracked override certs (domain → email) for renewal
+	templatesDir        string
+	dataDir             string
+	imgCache            *imagecheck.Cache
+	jobs                *JobStore
+	migJobs             *migStore
+	alertBroker         *alerts.Broker
+	notifier            *notify.Dispatcher
+	cryptoKey           []byte       // derived from JWT secret; encrypts host SSH keys (Phase 7)
+	acmeIssuer          *acme.Issuer // out-of-band per-email override cert issuer (DNS-01/lego)
+	acmeCerts           *acme.Store  // tracked override certs (domain → email) for renewal
 
 	// Live pipeline runs: runID → cancel func, so a Cancel request can kill an
 	// in-flight run's docker process. Populated for the lifetime of each run's
@@ -115,20 +115,20 @@ func NewHandler(a *auth.Service, d *db.DB, b *shell.Bridge, workspacesDir, remot
 	key, _ := crypto.DeriveKey([]byte(jwtSecret)) // empty only if secret empty (config defaults it)
 	return &Handler{
 		auth: a, db: d, bridge: b,
-		workspacesDir: workspacesDir,
+		workspacesDir:       workspacesDir,
 		remoteWorkspacesDir: remoteWorkspacesDir,
-		templatesDir:  templatesDir,
-		dataDir:       dataDir,
-		imgCache:      imgCache,
-		jobs:          newJobStore(),
-		migJobs:       newMigStore(),
-		alertBroker:   alertBroker,
-		notifier:      notifier,
-		cryptoKey:     key,
-		runCancels:    map[int64]context.CancelFunc{},
-		acmeIssuer:    acme.New(nil), // local docker daemon (lego runs on the rigger host)
-		acmeCerts:     acme.NewStore(d),
-		apiRL:         apikey.NewRateLimiter(),
+		templatesDir:        templatesDir,
+		dataDir:             dataDir,
+		imgCache:            imgCache,
+		jobs:                newJobStore(),
+		migJobs:             newMigStore(),
+		alertBroker:         alertBroker,
+		notifier:            notifier,
+		cryptoKey:           key,
+		runCancels:          map[int64]context.CancelFunc{},
+		acmeIssuer:          acme.New(nil), // local docker daemon (lego runs on the rigger host)
+		acmeCerts:           acme.NewStore(d),
+		apiRL:               apikey.NewRateLimiter(),
 	}
 }
 
@@ -302,10 +302,10 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 
 	type TemplateResponse struct {
 		workspace.TemplateInfo
-		Popular    bool   `json:"popular"`
-		PopularRank int   `json:"popular_rank"` // 0-based rank among popular; -1 if not popular
-		UseCount   int    `json:"use_count"`
-		LastUsedAt string `json:"last_used_at,omitempty"`
+		Popular     bool   `json:"popular"`
+		PopularRank int    `json:"popular_rank"` // 0-based rank among popular; -1 if not popular
+		UseCount    int    `json:"use_count"`
+		LastUsedAt  string `json:"last_used_at,omitempty"`
 	}
 
 	result := make([]TemplateResponse, 0, len(templates))
@@ -315,9 +315,14 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 		result = append(result, TemplateResponse{
 			TemplateInfo: t,
 			Popular:      isPop,
-			PopularRank:  func() int { if isPop { return rank }; return -1 }(),
-			UseCount:     u.UseCount,
-			LastUsedAt:   u.LastUsedAt,
+			PopularRank: func() int {
+				if isPop {
+					return rank
+				}
+				return -1
+			}(),
+			UseCount:   u.UseCount,
+			LastUsedAt: u.LastUsedAt,
 		})
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -398,7 +403,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// First message: { "token": "...", "workspace": { ...CreateRequest... } }
 	var msg struct {
-		Token string                  `json:"token"`
+		Token     string                  `json:"token"`
 		Workspace workspace.CreateRequest `json:"workspace"`
 	}
 	if err := conn.ReadJSON(&msg); err != nil {
@@ -694,7 +699,7 @@ func (h *Handler) DebugPaths(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"workspaces_dir":      h.workspacesDir,
+		"workspaces_dir":         h.workspacesDir,
 		"workspaces_dir_entries": names,
 		"workspaces_dir_err": func() string {
 			if err != nil {
@@ -855,7 +860,7 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 
 // annotateHosts fills each workspace's per-env host map (EnvHosts) from the
 // workspace_host_envs bindings (Phase 7). An explicit (workspace, env) row wins
-// over the env='' default. When every environment resolves to the same remote
+// over the env=” default. When every environment resolves to the same remote
 // host, the workspace-level HostID/HostName are also set as a convenience; a
 // mixed or local layout leaves them zero.
 func (h *Handler) annotateHosts(wss []workspace.Workspace) {
@@ -1293,8 +1298,8 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
 	var body struct {
-		Content   string   `json:"content"`    // raw JSON string
-		Bootstrap []string `json:"bootstrap"`  // env names to re-bootstrap after save
+		Content   string   `json:"content"`   // raw JSON string
+		Bootstrap []string `json:"bootstrap"` // env names to re-bootstrap after save
 	}
 	if err := readJSON(r, &body); err != nil || body.Content == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content required"})
@@ -1440,7 +1445,7 @@ func (h *Handler) regenCompose(workspaceName, project, configJSON string) {
 
 		// Phase 6.5 finish: generate natively in Go — no shell, no fallback. On
 		// error, log and skip this env (never write a partial compose file).
-		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: settings.EffectiveAutoURLMode(h.db, workspaceName), AutoURLHost: settings.EffectiveAutoURLHost(h.db, workspaceName), Registry: registry, EnvFile: string(envContent)})
+		content, err := composegen.GenerateRouted([]byte(configJSON), envName, composegen.RouteOpts{BaseDomain: baseDomain, AutoURLMode: settings.EffectiveAutoURLMode(h.db, workspaceName), AutoURLHost: settings.EffectiveAutoURLHost(h.db, workspaceName), KeepHostPortsUnderTraefik: settings.EffectiveKeepHostPortsUnderTraefik(h.db, workspaceName), Registry: registry, EnvFile: string(envContent)})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "composegen: failed for %s/%s: %v\n", workspaceName, envName, err)
 			continue
@@ -1526,7 +1531,7 @@ func (h *Handler) GetActivity(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	env  := r.PathValue("env")
+	env := r.PathValue("env")
 
 	// Resolve compose project name from config.json
 	cfgData, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsName, name))
@@ -1550,7 +1555,7 @@ func (h *Handler) GetEnvStatus(w http.ResponseWriter, r *http.Request) {
 		project = cfg.Project.Name
 	}
 	project += "_" + env
-	envDir  := wspath.EnvDir(h.workspacesDir, wsName, name, env)
+	envDir := wspath.EnvDir(h.workspacesDir, wsName, name, env)
 
 	// Query the daemon the env actually runs on (local, or its remote host).
 	ex, err := h.bridge.ExecForEnv(wsName, name, env)
@@ -1667,7 +1672,7 @@ func parseComposePsJSON(out []byte, runErr error) string {
 		if err := json.Unmarshal(line, &row); err != nil {
 			continue
 		}
-		state  := strings.ToLower(row.State + " " + row.Status)
+		state := strings.ToLower(row.State + " " + row.Status)
 		health := strings.ToLower(row.Health)
 		// One-shot synthesized jobs run once and exit 0 — that's success, not a stopped
 		// service. Skip them from the tally so a completed job doesn't drag the env to
@@ -1699,7 +1704,8 @@ func parseComposePsJSON(out []byte, runErr error) string {
 
 // parseComposeStatus inspects docker compose ps output and returns a status string.
 // docker compose ps table format has a STATUS column with values like:
-//   Up 2 hours, Up (healthy), Exited (0), Exit 1, Created, Restarting
+//
+//	Up 2 hours, Up (healthy), Exited (0), Exit 1, Created, Restarting
 func parseComposeStatus(output string, runErr error) string {
 	if runErr != nil && !strings.Contains(output, "NAME") {
 		// Command failed completely — compose file may not exist yet
@@ -1804,7 +1810,7 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	wss := []workspace.Workspace{ws}
 	h.annotateHosts(wss)
-	h.refineRemoteEnvURLs(wss)   // remote envs: show their own host in the route URL
+	h.refineRemoteEnvURLs(wss)    // remote envs: show their own host in the route URL
 	h.applyPrimaryDomainURLs(wss) // env card shows the ★ canonical custom domain
 	out := wss[0]
 	// Surface the host-side folder path so the UI can show where the workspace
@@ -2242,8 +2248,8 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		}
 		actionruns.Record(h.db, actionruns.Run{ //nolint:errcheck
 			Workspace: pkey, Env: req.Env, Command: req.Command,
-			Extra:     strings.Join(req.Extra, " "), Username: claims.Username,
-			Status:    status, Output: outBuf.String(),
+			Extra: strings.Join(req.Extra, " "), Username: claims.Username,
+			Status: status, Output: outBuf.String(),
 			StartedAt: startedAt.UnixMilli(), FinishedAt: time.Now().UnixMilli(),
 		})
 	}
@@ -2327,7 +2333,7 @@ func (h *Handler) GetLiveStats(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetContainers(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	env  := r.PathValue("env")
+	env := r.PathValue("env")
 
 	cfgPath := wspath.ConfigPath(h.workspacesDir, wsName, name)
 	data, err := os.ReadFile(cfgPath)
@@ -2734,8 +2740,8 @@ func (h *Handler) ListBackups(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	project := r.PathValue("name")
-	env     := r.PathValue("env")
-	date    := r.PathValue("date")
+	env := r.PathValue("env")
+	date := r.PathValue("date")
 
 	if wsName == "" || project == "" || env == "" || date == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace, project, env and date are required"})
@@ -2771,7 +2777,7 @@ func (h *Handler) DeleteBackup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
-	env  := r.PathValue("env")
+	env := r.PathValue("env")
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -2813,8 +2819,12 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cols, rows := init.Cols, init.Rows
-	if cols <= 0 { cols = 220 }
-	if rows <= 0 { rows = 50 }
+	if cols <= 0 {
+		cols = 220
+	}
+	if rows <= 0 {
+		rows = 50
+	}
 
 	// Resolve the docker exec target. Compose: the service name doubles as the
 	// prefixed container_name. Swarm: there's no fixed container name, so resolve

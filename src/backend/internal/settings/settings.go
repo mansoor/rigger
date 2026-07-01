@@ -524,6 +524,15 @@ func EffectiveBaseDomain(d *db.DB, wsKey string) string {
 	return AppSetting(d, "apps_base_domain")
 }
 
+// EffectiveKeepHostPortsUnderTraefik reports the workspace default for whether a web-routed
+// service still publishes its primary host port when Traefik is enabled. Default FALSE
+// (strip — the app is reached by domain, so the host port is redundant and conflict-prone).
+// A workspace opts back in with keep_host_ports_under_traefik=true. A per-env TraefikHostPorts
+// override still wins in composegen.
+func EffectiveKeepHostPortsUnderTraefik(d *db.DB, wsKey string) bool {
+	return strings.EqualFold(wsSetting(d, wsKey, "keep_host_ports_under_traefik"), "true")
+}
+
 // wsSetting reads one workspace-scoped setting value, or "" when unset / db nil.
 func wsSetting(d *db.DB, wsKey, key string) string {
 	if d == nil {
@@ -698,16 +707,16 @@ func DeleteWorkspaceSettings(d *db.DB, wsKey string) error {
 // Host is a registered remote host. The encrypted SSH key is never serialized;
 // the handler encrypts before Create/Update and decrypts GetHost for dialing.
 type Host struct {
-	ID            int64     `json:"id"`
-	Name          string    `json:"name"`
-	Address       string    `json:"address"`
-	SSHPort       int       `json:"ssh_port"`
-	SSHUser       string    `json:"ssh_user"`
-	SSHKeyEnc     string    `json:"-"` // AES-GCM ciphertext; never exposed
-	SSHHostKey    string    `json:"ssh_host_key,omitempty"`
-	WorkspacesDir string    `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
-	OwnerScope    string    `json:"owner_scope"`     // 'global' or 'ws:{key}'
-	Grants        []string  `json:"grants,omitempty"` // for global hosts: workspaces offered to ('*' = all)
+	ID            int64    `json:"id"`
+	Name          string   `json:"name"`
+	Address       string   `json:"address"`
+	SSHPort       int      `json:"ssh_port"`
+	SSHUser       string   `json:"ssh_user"`
+	SSHKeyEnc     string   `json:"-"` // AES-GCM ciphertext; never exposed
+	SSHHostKey    string   `json:"ssh_host_key,omitempty"`
+	WorkspacesDir string   `json:"workspaces_dir"`   // remote WORKSPACES_DIR ('' = global default)
+	OwnerScope    string   `json:"owner_scope"`      // 'global' or 'ws:{key}'
+	Grants        []string `json:"grants,omitempty"` // for global hosts: workspaces offered to ('*' = all)
 	// Capabilities probed from `docker info` on the last Test (image-distribution
 	// Phase 5). SwarmState is "" (never probed), "inactive", "active", "pending", …;
 	// SwarmManager is true when the node is a Swarm manager (can `stack deploy`).
@@ -958,7 +967,7 @@ func SetEnvHost(d *db.DB, workspace, env string, hostID int64) error {
 }
 
 // HostForEnv resolves the host for one environment (including the encrypted key,
-// for dialing): an explicit (workspace, env) row wins over the env='' workspace
+// for dialing): an explicit (workspace, env) row wins over the env=” workspace
 // default. (nil, nil) means the environment runs on the local control plane.
 func HostForEnv(d *db.DB, workspace, env string) (*Host, error) {
 	var hostID int64
@@ -985,7 +994,7 @@ type EnvHostBinding struct {
 	Address  string `json:"address"`
 }
 
-// EnvHosts lists every host binding for a workspace (incl. the env='' default),
+// EnvHosts lists every host binding for a workspace (incl. the env=” default),
 // joined to host name + address. Environments with no row are local and not listed.
 func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 	rows, err := d.Query(

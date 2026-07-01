@@ -22,14 +22,14 @@ import (
 	"github.com/mansoor/rigger/ui/internal/deployhistory"
 	"github.com/mansoor/rigger/ui/internal/dockerops"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/gitproviders"
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/proxyroutes"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/stats"
 	"github.com/mansoor/rigger/ui/internal/version"
 	"github.com/mansoor/rigger/ui/internal/workspace"
-	"github.com/mansoor/rigger/ui/internal/gitproviders"
-	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -1492,25 +1492,25 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// natively in Go. Env/Extra carry the run.sh argument layout.
 	if builder.Handles(opts.Command) {
 		bopts := builder.Options{
-			WorkspacesDir: b.workspacesDir,
-			Workspace:     opts.Workspace,
-			Project:       opts.Project,
-			Command:       opts.Command,
-			Env:           opts.Env,
-			Extra:         opts.Extra,
-			EnvVars:       shellEnv(),
-			Stdout:        opts.Stdout,
-			Stderr:        opts.Stderr,
-			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
-			AutoURLMode:   settings.EffectiveAutoURLMode(b.db, opts.Workspace),
-			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
-			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
-			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
-			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
-			RouterMiddlewares: b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
-			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
-			TemplatesDir:  filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
-			Exec:          runExec, // default: env's deploy host (or local) — used by promote
+			WorkspacesDir:             b.workspacesDir,
+			Workspace:                 opts.Workspace,
+			Project:                   opts.Project,
+			Command:                   opts.Command,
+			Env:                       opts.Env,
+			Extra:                     opts.Extra,
+			EnvVars:                   shellEnv(),
+			Stdout:                    opts.Stdout,
+			Stderr:                    opts.Stderr,
+			BaseDomain:                settings.EffectiveBaseDomain(b.db, opts.Workspace),
+			AutoURLMode:               settings.EffectiveAutoURLMode(b.db, opts.Workspace),
+			AutoURLHost:               b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
+			DNSProvider:               settings.EffectiveDNSProvider(b.db, opts.Workspace),
+			OverrideCert:              b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			CustomDomains:             customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
+			RouterMiddlewares:         b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
+			Registry:                  b.effectiveRegistry(opts.Workspace, opts.Project),
+			TemplatesDir:              filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
+			Exec:                      runExec,                                   // default: env's deploy host (or local) — used by promote
 		}
 		// Phase 4: `build` runs on the project's BUILD host, which may differ from the
 		// env's deploy host. With no explicit build host the default is to build on the
@@ -1613,25 +1613,26 @@ func (b *Bridge) Run(opts RunOptions) error {
 
 	if dockerops.Handles(opts.Command) {
 		dopts := dockerops.Options{
-			WorkspacesDir: b.workspacesDir,
-			Workspace:     opts.Workspace,
-			Project:       opts.Project,
-			Command:       opts.Command,
-			Env:           opts.Env,
-			Extra:         opts.Extra,
-			PurgeVolumes:  opts.PurgeVolumes,
-			EnvVars:       shellEnv(),
-			Stdout:        opts.Stdout,
-			Stderr:        opts.Stderr,
-			BaseDomain:    settings.EffectiveBaseDomain(b.db, opts.Workspace),
-			AutoURLMode:   settings.EffectiveAutoURLMode(b.db, opts.Workspace),
-			AutoURLHost:   b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
-			DNSProvider:   settings.EffectiveDNSProvider(b.db, opts.Workspace),
-			OverrideCert:  b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
-			CustomDomains: customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
-			RouterMiddlewares: b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
-			Registry:      b.effectiveRegistry(opts.Workspace, opts.Project),
-			Exec:          runExec, // context-bound (local or remote) — cancellable
+			WorkspacesDir:             b.workspacesDir,
+			Workspace:                 opts.Workspace,
+			Project:                   opts.Project,
+			Command:                   opts.Command,
+			Env:                       opts.Env,
+			Extra:                     opts.Extra,
+			PurgeVolumes:              opts.PurgeVolumes,
+			EnvVars:                   shellEnv(),
+			Stdout:                    opts.Stdout,
+			Stderr:                    opts.Stderr,
+			BaseDomain:                settings.EffectiveBaseDomain(b.db, opts.Workspace),
+			KeepHostPortsUnderTraefik: settings.EffectiveKeepHostPortsUnderTraefik(b.db, opts.Workspace),
+			AutoURLMode:               settings.EffectiveAutoURLMode(b.db, opts.Workspace),
+			AutoURLHost:               b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
+			DNSProvider:               settings.EffectiveDNSProvider(b.db, opts.Workspace),
+			OverrideCert:              b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			CustomDomains:             customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
+			RouterMiddlewares:         b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
+			Registry:                  b.effectiveRegistry(opts.Workspace, opts.Project),
+			Exec:                      runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
 			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
@@ -1660,23 +1661,23 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// supplies DB credentials.
 	if backup.Handles(opts.Command) {
 		bopts := backup.Options{
-			WorkspacesDir: b.workspacesDir,
-			Workspace:     opts.Workspace,
-			Project:       opts.Project,
-			Command:       opts.Command,
-			Env:           opts.Env,
-			Extra:         opts.Extra,
-			EnvVars:       shellEnv(),
-			Stdout:        opts.Stdout,
-			Stderr:        opts.Stderr,
-			Timestamp:     time.Now().UTC().Format("2006-01-02_15-04-05"),
-			Services:      opts.Services,
-			ScheduleID:    opts.ScheduleID,
-			ScheduleName:  opts.ScheduleName,
-			Trigger:       opts.Trigger,
+			WorkspacesDir:    b.workspacesDir,
+			Workspace:        opts.Workspace,
+			Project:          opts.Project,
+			Command:          opts.Command,
+			Env:              opts.Env,
+			Extra:            opts.Extra,
+			EnvVars:          shellEnv(),
+			Stdout:           opts.Stdout,
+			Stderr:           opts.Stderr,
+			Timestamp:        time.Now().UTC().Format("2006-01-02_15-04-05"),
+			Services:         opts.Services,
+			ScheduleID:       opts.ScheduleID,
+			ScheduleName:     opts.ScheduleName,
+			Trigger:          opts.Trigger,
 			SourceEnv:        opts.SourceEnv,
 			SkipTargetBackup: opts.SkipTargetBackup,
-			Exec:          runExec, // context-bound (local or remote) — cancellable
+			Exec:             runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
 			bopts.DotEnv = b.remoteDotEnv(rt, opts.Workspace, opts.Project, opts.Env)

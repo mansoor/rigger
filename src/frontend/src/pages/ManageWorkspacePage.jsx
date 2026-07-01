@@ -125,11 +125,13 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
   const [autoHost, setAutoHost] = useState('')
   const [dnsProvider, setDnsProvider] = useState('') // "" = inherit global
   const [dnsToken, setDnsToken] = useState('') // masked sentinel when already set
+  const [keepPorts, setKeepPorts] = useState(false) // keep web host ports under Traefik (default: strip)
   const [seeded, setSeeded] = useState(false)
   if (!seeded && saved) {
     setAcme(saved.acme_email || ''); setDomain(saved.domain || '')
     setAutoMode(saved.auto_url_mode || ''); setAutoHost(saved.auto_url_host || ''); setDnsProvider(saved.apps_dns_provider || '')
     setDnsToken(saved.apps_dns_token || '')
+    setKeepPorts(saved.keep_host_ports_under_traefik === 'true')
     setSeeded(true)
   }
 
@@ -138,12 +140,14 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
       acme_email: acme.trim(), domain: domain.trim(),
       auto_url_mode: autoMode, auto_url_host: autoHost.trim(), apps_dns_provider: dnsProvider,
       apps_dns_token: dnsToken, // backend keeps current on blank/masked, encrypts a new value
+      keep_host_ports_under_traefik: keepPorts ? 'true' : 'false',
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
   const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '')
     || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || '')
-    || dnsToken !== (saved.apps_dns_token || ''))
+    || dnsToken !== (saved.apps_dns_token || '')
+    || keepPorts !== (saved.keep_host_ports_under_traefik === 'true'))
 
   return (
     <section>
@@ -211,6 +215,17 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
           </div>
         )}
         <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
+        {/* Traefik routing: strip vs keep host ports (workspace default; per-env override in Edit Project). */}
+        <div className="pt-3 border-t border-border/60">
+          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+            <input type="checkbox" checked={keepPorts} onChange={e => setKeepPorts(e.target.checked)}
+              className="mt-0.5 rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500" />
+            <span>
+              <span className="text-sm text-content font-medium">Keep host ports under Traefik</span>
+              <p className="text-xs text-content-subtle mt-0.5">With Traefik routing on, an app is reached by its domain, so Rigger <strong>drops the redundant host-port mapping by default</strong> (this is what avoids host-port conflicts). Turn this on to also publish each web service&apos;s host port for direct <code className="font-mono">host:port</code> access. A single environment can override this either way in Edit Project → Environments. Applies on the next refresh/redeploy.</p>
+            </span>
+          </label>
+        </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
             className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
