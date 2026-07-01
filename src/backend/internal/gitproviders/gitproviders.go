@@ -372,9 +372,15 @@ func (p *Provider) Verify(repo string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", repo)
-	cmd.Env = append(os.Environ(), auth.Env...)
+	// Non-interactive so a wrong/missing credential fails fast with a readable message
+	// instead of blocking on git's username/password prompt until the timeout.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(cmd.Env, auth.Env...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("access test failed: %s", strings.TrimSpace(string(out)))
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("access test timed out — check the URL and that the host is reachable")
+		}
+		return gitsync.ClassifyError(string(out))
 	}
 	return nil
 }

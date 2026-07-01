@@ -55,10 +55,7 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 	var log bytes.Buffer
 	src, err := gitsync.Sync(tmp, strings.TrimSpace(body.Repo), strings.TrimSpace(body.Branch), auth, &log)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error": "couldn't clone repository: " + err.Error() +
-				" — check the URL/branch, or select a Git provider for a private repo",
-		})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "couldn't scan the repository: " + err.Error()})
 		return
 	}
 
