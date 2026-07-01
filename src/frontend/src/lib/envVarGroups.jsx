@@ -6,8 +6,10 @@
 // System = the keys Rigger generates: a managed dependency's connection vars
 // (POSTGRES_*/MYSQL_*/MARIADB_*/REDIS_*/GARAGE_*), per-service image pointers
 // (*_IMAGE), and a few platform vars. Everything else is the app's own config.
-const SYS_VAR_PREFIXES = ['POSTGRES_', 'MYSQL_', 'MARIADB_', 'REDIS_', 'GARAGE_']
-const SYS_VAR_EXACT = new Set(['ADMINER_LOGIN_SECRET', 'PROJECT_NAME', 'RESOURCE_PREFIX', 'REGISTRY', 'COMPOSE_PROJECT_NAME', 'MAIL_HOST'])
+// RIGGER_ namespaces Rigger's own platform metadata (RIGGER_ENV/DOMAIN/HTTP_PORT/…) so it
+// never collides with an app's vars; treat the whole prefix as System.
+const SYS_VAR_PREFIXES = ['POSTGRES_', 'MYSQL_', 'MARIADB_', 'REDIS_', 'GARAGE_', 'RIGGER_']
+const SYS_VAR_EXACT = new Set(['ADMINER_LOGIN_SECRET', 'RESOURCE_PREFIX', 'COMPOSE_PROJECT_NAME', 'MAIL_HOST'])
 
 export function isSystemVar(k) {
   if (SYS_VAR_EXACT.has(k)) return true

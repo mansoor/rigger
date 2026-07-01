@@ -458,14 +458,25 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("# DO NOT COMMIT — contains secrets\n")
 	p("# ============================================================\n\n")
 
-	p("# ── Project ────────────────────────────────────────────────\n")
+	// Rigger's own metadata is RIGGER_-prefixed so `env_file: .env` (which injects the whole
+	// file into every container) can't collide with a var an app reads under a generic name —
+	// e.g. Gitea reading a bare HTTP_PORT, or an app reading ENV / DOMAIN as its own. The
+	// values stay available (for tooling/debugging) under the namespaced name. COMPOSE_PROJECT_NAME
+	// keeps its docker-compose-reserved name (compose reads it; no app collides with it), and the
+	// {SVC}_IMAGE build pointers keep theirs (compose interpolates `image: ${SVC_IMAGE}`).
+	p("# ── Rigger metadata (RIGGER_-prefixed; never collides with app vars) ──────\n")
 	p("COMPOSE_PROJECT_NAME=%s\n", prefix)
-	p("PROJECT_NAME=%s\n", envQuote(project))
-	p("ENV=%s\n\n", env)
+	p("RIGGER_PROJECT_NAME=%s\n", envQuote(project))
+	p("RIGGER_ENV=%s\n", env)
+	p("RIGGER_DOMAIN=%s\n", e.Domain)
+	p("RIGGER_HTTP_PORT=%s\n", e.HTTPPort)
+	p("RIGGER_HTTPS_PORT=%s\n", e.HTTPSPort)
+	p("RIGGER_DEPLOYMENT=%s\n", e.Deployment)
+	p("RIGGER_TRAEFIK_ENABLED=%t\n\n", e.TraefikEnabled)
 
 	p("# ── Image tags (one per build service) ─────────────────────\n")
-	p("REGISTRY=%s\n", registry)
-	p("IMAGE_TAG=%s\n", tag)
+	p("RIGGER_REGISTRY=%s\n", registry)
+	p("RIGGER_IMAGE_TAG=%s\n", tag)
 	for _, svc := range cfg.BuildServices() {
 		// Omit the "{registry}/" prefix when there's no registry (local-only build) —
 		// a leading slash is an invalid image reference. Must match wsconfig.ImageTag
@@ -477,19 +488,6 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("%s=%s\n", imageEnvVar(svc.Name), img)
 	}
 	p("\n")
-
-	p("# ── Domain ─────────────────────────────────────────────────\n")
-	p("DOMAIN=%s\n", e.Domain)
-	// HTTP_PORT/HTTPS_PORT are deliberately NOT emitted: they were never used for compose
-	// interpolation (host ports are written by composegen straight from config.json), yet
-	// `env_file: .env` injected them into EVERY container — and an app that reads a bare
-	// HTTP_PORT (e.g. Gitea) then bound to Rigger's host port instead of its own and became
-	// unreachable. The authoritative host port lives in config.json (e.HTTPPort).
-	p("\n")
-
-	p("# ── Stack config ────────────────────────────────────────────\n")
-	p("DEPLOYMENT=%s\n", e.Deployment)
-	p("TRAEFIK_ENABLED=%t\n\n", e.TraefikEnabled)
 
 	p("# ── Database ───────────────────────────────────────────────\n")
 	// Managed deps are project-level (Eff* falls back to the legacy per-env value);

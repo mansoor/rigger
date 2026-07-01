@@ -141,11 +141,13 @@ func TestCustomPostgresEnv(t *testing.T) {
 
 	checks := map[string]string{
 		"COMPOSE_PROJECT_NAME": "myapp_prod",
-		"PROJECT_NAME":         "myapp",
-		"ENV":                  "prod",
 		"BACKEND_IMAGE":        "reg/myapp-backend:1.0.0-build.2-prod",
 		"FRONTEND_IMAGE":       "reg/myapp-frontend:1.0.0-build.2-prod",
-		"DOMAIN":               "myapp.com",
+		"RIGGER_PROJECT_NAME":  "myapp",
+		"RIGGER_ENV":           "prod",
+		"RIGGER_DOMAIN":        "myapp.com",
+		"RIGGER_HTTP_PORT":     "80",
+		"RIGGER_DEPLOYMENT":    "compose",
 		"DATABASE":             "postgres",
 		"POSTGRES_HOST":        "myapp_prod_postgres",
 		"POSTGRES_DB":          "myapp_prod",
@@ -168,11 +170,12 @@ func TestCustomPostgresEnv(t *testing.T) {
 	if !strings.HasPrefix(m["POSTGRES_PASSWORD"], "changeme_") {
 		t.Errorf("POSTGRES_PASSWORD = %q, want changeme_ prefix", m["POSTGRES_PASSWORD"])
 	}
-	// HTTP_PORT/HTTPS_PORT must NOT be written: env_file injects the whole .env into every
-	// container, and a bare HTTP_PORT collides with apps that read it as their listen port.
-	for _, leak := range []string{"HTTP_PORT", "HTTPS_PORT"} {
-		if _, ok := m[leak]; ok {
-			t.Errorf("%s must not be emitted to .env (leaks into every container via env_file)", leak)
+	// Rigger's metadata is RIGGER_-prefixed; the BARE names must never appear (env_file injects
+	// the whole .env into every container, and a bare HTTP_PORT/ENV/DOMAIN collides with apps
+	// that read those names). COMPOSE_PROJECT_NAME and {SVC}_IMAGE keep their names by design.
+	for _, bare := range []string{"HTTP_PORT", "HTTPS_PORT", "PROJECT_NAME", "ENV", "DOMAIN", "DEPLOYMENT", "TRAEFIK_ENABLED", "REGISTRY", "IMAGE_TAG"} {
+		if _, ok := m[bare]; ok {
+			t.Errorf("bare %s must not be emitted (use RIGGER_%s) — it leaks into every container", bare, bare)
 		}
 	}
 	if !strings.HasPrefix(m["APP_KEY"], "base64:") {
