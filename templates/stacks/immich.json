@@ -104,7 +104,9 @@
       ],
       "depends_on": [],
       "extra_ports": [],
-      "env_vars": {}
+      "env_vars": {
+        "IMMICH_PORT": "3003"
+      }
     }
   ],
   "default_env_vars": {

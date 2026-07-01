@@ -66,7 +66,7 @@
       "tag": "latest",
       "port": 80,
       "web_routed": true,
-      "host_port": "8080",
+      "host_port": "8082",
       "command": "",
       "healthcheck": "",
       "healthcheck_config": {},

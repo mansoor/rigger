@@ -18,7 +18,7 @@
       "tag": "latest",
       "port": 8080,
       "web_routed": true,
-      "host_port": "8080",
+      "host_port": "8084",
       "command": "",
       "healthcheck": "wget -q --spider http://127.0.0.1:8080/ || exit 1",
       "healthcheck_config": {
