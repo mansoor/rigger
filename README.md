@@ -60,7 +60,7 @@ curl -sSL https://raw.githubusercontent.com/mansoor/rigger/main/install.sh \
 
 **Supported OS:** Ubuntu/Debian, RHEL/CentOS/AlmaLinux/Fedora, Arch, Alpine, macOS (Docker Desktop required).
 
-After install, open `http://localhost:8080` — first visit prompts you to create an admin account.
+After install, open `http://localhost:9999` — first visit prompts you to create an admin account.
 
 **Manual install:**
 
@@ -194,7 +194,7 @@ workspaces/<project>/
 
 ## 5. Quick Start
 
-Most users create and operate workspaces from the **web UI** at `http://localhost:8080`. For headless / scripted setups, two non-UI paths exist:
+Most users create and operate workspaces from the **web UI** at `http://localhost:9999`. For headless / scripted setups, two non-UI paths exist:
 
 **Headless create** — the `rigger` binary's `init-workspace` subcommand takes a prepared `config.json` and scaffolds + bootstraps every environment:
 
@@ -561,7 +561,9 @@ Pick a provider on a project's source in **New / Edit Project** (or inline-creat
 
 ### How templates work
 
-Each template is a JSON file in `templates/stacks/`. It declares images, ports, volumes, healthchecks, and `default_env_vars`. The wizard discovers templates by globbing `templates/stacks/*.json` — no registration required.
+Each template is a JSON file in `templates/stacks/`. It declares images, ports, volumes, healthchecks, `default_env_vars`, an optional `files` map (see [Static config files](#static-config-files-seed-files)), and — for multi-service stacks — a `web_routed` flag on the service that fronts the web (see [Web entry](#web-entry-which-service-the-domain-routes-to)). The wizard discovers templates by globbing `templates/stacks/*.json` — no registration required.
+
+**Secrets.** A placeholder secret in `default_env_vars` (e.g. `DB_PASSWORD: CHANGE_ME` — also `CHANGEME`, `YOUR_…`, `REPLACE_ME`) is auto-replaced with a generated value at create time, for any key that looks like a secret (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY*`, `*SALT*`). The resolved value is written to `.env` and pinned in `config.json`, so it stays consistent across refreshes and matches an already-initialized data volume. Non-secret placeholders (ports, hosts, URLs) are kept for you to fill in.
 
 You can also create templates from the UI, all consolidated in **Tools → Template Manager**:
 - **Select image workspace** — pick any image-stack workspace + an environment to generate a draft template JSON from its config (secrets masked to `CHANGE_ME` **server-side**, so they never reach the browser)
@@ -572,6 +574,35 @@ You can also create templates from the UI, all consolidated in **Tools → Templ
 ### Volume mounts in templates
 
 All templates use **bind mounts**: `./volumes/<name>:/container/path`. Volume data lives in `envs/<env>/volumes/<name>/` on the host — no Docker named volume overhead.
+
+### Web entry: which service the domain routes to
+
+For a **multi-service** stack (an app plus its database/cache), exactly one service is the **web entry** — the one Traefik routes the env's domain to. Mark it with `"web_routed": true` on that service in the template. If a multi-service template marks none, Rigger promotes the **first non-datastore service** (it skips `postgres`/`mysql`/`mariadb`/`mongo`/`redis`/`clickhouse`/`pgvecto-rs`/… and forks) so an app+db stack routes to the app, never the database. A single-service stack is always its own web entry. In the **New Project** wizard's Services step you can pick or change the web entry directly (datastore services are labelled).
+
+### Static config files (seed files)
+
+Some apps bind-mount a **config file** (not a directory) — e.g. Prometheus reads `/etc/prometheus/prometheus.yml`. A bind mount whose host source doesn't exist is silently created by Docker as a *directory*, which breaks the container's file mount. Ship that file with the template instead, via a top-level `files` map (relative path → contents):
+
+```json
+"files": {
+  "prometheus.yml": [
+    "global:",
+    "  scrape_interval: 15s",
+    "scrape_configs:",
+    "  - job_name: prometheus",
+    "    static_configs:",
+    "      - targets: ['localhost:9090']"
+  ]
+}
+```
+
+- A file body may be a **string** or an **array of lines** (joined with `\n`), so a multi-line config reads cleanly without hand-escaping newlines.
+- At create, the `files` are persisted into the project's `config.json` (`project.seed_files`) so the project stays self-contained even if the template later changes.
+- On bootstrap, each is written into the env dir **only if absent** — they live on the host bind (so they survive restarts) and your later edits are **never clobbered** on refresh. Nested paths create their dirs; absolute/parent-escape paths are rejected.
+
+Author them in **Tools → Template Manager → Static files**: a path field + a textarea per file (type the content; newlines are escaped for you), plus a drop zone that accepts text/config files (`.json` `.yml` `.conf` `.cfg` …) and pre-fills the name + content. **Validate** warns when a service bind-mounts a file that has no `files` entry.
+
+> If a project ever reaches deploy with a bind-mounted config file that doesn't exist, Rigger **stops with a clear message** listing the missing file(s) instead of letting Docker create a bogus directory — see [Troubleshooting](#bind-mounted-config-file-missing).
 
 ---
 
@@ -721,7 +752,7 @@ cp .env.example .env
 # Set ACME_EMAIL for SSL
 docker network create traefik_net 2>/dev/null || true
 docker compose up --build -d
-# → http://localhost:8080
+# → http://localhost:9999
 ```
 
 ### Navigation
@@ -773,7 +804,7 @@ Skeleton loading animation while data fetches. Host/Docker panels refresh every 
 1. **Project** — name (checked for uniqueness against existing workspaces), registry dropdown
 2. **Stack** — Pre-built template (12 options with search + Popular/Browse All views) / Image stack / Custom app
 3. **Environments** — name, domain, Traefik, SSL, port (shown only for custom stacks with Traefik off), deployment, git sync. Adding an env inherits vars from the first env
-4. **Services** — per-service port mappings (with 🔗 env-card link checkbox), volume mappings (with **RW/RO** segmented control), restart policy, healthcheck command + timing, `depends_on`, Advanced YAML
+4. **Services** — per-service port mappings (with 🔗 env-card link checkbox), volume mappings (with **RW/RO** segmented control), restart policy, healthcheck command + timing, `depends_on`, Advanced YAML. For a **multi-service** image/prebuilt stack, a **Web entry** radio picks which service the env's domain routes to (datastore services labelled; the first non-datastore service is pre-selected)
 5. **Backup** — enable/disable, target (local or configured remote), schedule, retention
 6. **Review** — summary of all choices
 7. **Result** — live bootstrap terminal. Detects success/failure from output and shows a ✓ / ✗ banner. **Open workspace** button enabled only on success. **← Go back & fix** button on failure. Step numbers in the top bar are clickable once visited for direct navigation. Top-bar button changes from Cancel → Close after creation starts
@@ -825,9 +856,11 @@ Three ways to load JSON into the editor (toolbar buttons, left-to-right):
 The editor:
 - **Color-coded JSON** with a **line-number gutter** (dependency-free: a transparent textarea over a highlighted layer, scroll-synced)
 - Fixed height with an internal scrollbar so the **Validate** and **Save as Template** buttons stay on screen
-- **Validate** is disabled until JSON is loaded; **Save as Template** is disabled until validation passes
+- **Validate** is disabled until JSON is loaded; **Save as Template** is disabled until validation passes. Validate also surfaces non-blocking **seed-file warnings** — a service that bind-mounts a config file with no matching `files` entry (it wouldn't be seeded, so the deploy would fail)
 - **Copy** / **Download** (top) are visible from the start but disabled until JSON is loaded
 - **Save as template** writes to `templates/stacks/<name>.json` on the server — no rebuild needed
+
+**Static files** (collapsible section) — author the template's bind-mounted config files (e.g. `prometheus.yml`) without hand-escaping newlines (see [Static config files](#static-config-files-seed-files)). Per file: a **path** field + a **content textarea** (multi-line content round-trips into the JSON as a readable line-array). A **drop zone** accepts text/config files (`.json` `.yml` `.yaml` `.conf` `.cfg` `.toml` `.ini` `.env` `.xml` `.txt`, single or multiple) and pre-fills the name + content — re-dropping a known filename updates it. Edits sync live into the JSON's `files` map; **Reload from JSON** re-pulls after a raw edit.
 
 #### Workspace Manager (Backup & Restore)
 
@@ -1060,6 +1093,10 @@ Earlier versions computed per-workspace disk usage (`du`) **synchronously inside
 ### Port already in use
 
 Each environment must have a unique `http_port`. Check `config.json` and `docker ps -a`. Default assignments: dev=8080, stage=8180, prod=80.
+
+### Bind-mounted config file missing
+
+If a deploy fails with *"cannot deploy: the compose file bind-mounts config files that don't exist yet"* listing one or more files, a service mounts a **config file** (e.g. `prometheus.yml`) that hasn't been provided. Docker would otherwise create the missing source as a *directory* and the container's file mount would fail with a cryptic OCI "not a directory" error — Rigger stops first with the actionable message. Fix it by creating the listed file in the env dir (`envs/<env>/<file>`), or — for a template — ship it as a [seed file](#static-config-files-seed-files) so every new env gets it automatically. Bind mounts of **directories** (`./volumes/<name>`) are never affected; Docker creates those cleanly.
 
 ### Remote host: "No workspaces found" on Scan
 
