@@ -1137,9 +1137,8 @@ func parseDotenv(repoDir string) map[string]string {
 		line = strings.TrimPrefix(line, "export ")
 		if i := strings.IndexByte(line, '='); i > 0 {
 			k := strings.TrimSpace(line[:i])
-			v := strings.Trim(strings.TrimSpace(line[i+1:]), `"'`)
 			if k != "" {
-				out[k] = v
+				out[k] = parseDotenvValue(line[i+1:])
 			}
 		}
 	}
@@ -1147,6 +1146,32 @@ func parseDotenv(repoDir string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+// parseDotenvValue extracts the value from the RHS of a `KEY=` line, handling the two
+// dotenv shapes so an inline comment never leaks into the value (which would then get
+// double-quoted downstream when it picks up the comment's spaces):
+//   - Quoted ("…" or '…'): the value is the quoted content; anything after the closing
+//     quote (e.g. a trailing comment) is discarded, and a '#' inside the quotes is literal.
+//   - Unquoted: an inline comment begins at a '#' that FOLLOWS whitespace — cut there. A
+//     '#' with no leading space stays part of the value (e.g. a URL fragment).
+func parseDotenvValue(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if q := s[0]; q == '"' || q == '\'' {
+		if end := strings.IndexByte(s[1:], q); end >= 0 {
+			return s[1 : 1+end]
+		}
+		return s[1:] // unterminated quote — best-effort: drop the opening quote
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] == '#' && (s[i-1] == ' ' || s[i-1] == '\t') {
+			return strings.TrimSpace(s[:i])
+		}
+	}
+	return s
 }
 
 func scalarOrJoin(n yaml.Node) string {

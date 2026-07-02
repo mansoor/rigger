@@ -509,3 +509,22 @@ func TestRebaseHost(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDotenvValueInlineComments(t *testing.T) {
+	cases := map[string]string{
+		"http://localhost:3000           # Next.js frontend origin": "http://localhost:3000",
+		`"postgresql://qrhub:qrhub@localhost:5432/qrhub?schema=public"`: "postgresql://qrhub:qrhub@localhost:5432/qrhub?schema=public",
+		`"QR Hub <no-reply@qrhub.local>"`:                              "QR Hub <no-reply@qrhub.local>",
+		"QR Hub":                                                       "QR Hub",   // legit space, no comment
+		"development":                                                  "development",
+		"0                   # 0 = disabled (use external cron); >0":  "0",     // '#' comment even though it contains '='
+		"false                                # truncate/anonymize":    "false",
+		"a#b":                                                          "a#b",       // '#' with no leading space stays
+		"":                                                             "",
+	}
+	for in, want := range cases {
+		if got := parseDotenvValue(in); got != want {
+			t.Errorf("parseDotenvValue(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
