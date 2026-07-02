@@ -203,6 +203,16 @@ func (h *Handler) seedEnvVars(wsName, name string, env workspace.EnvRequest, cla
 	if err := workspace.UpdateEnvVars(h.workspacesDir, wsName, name, env.Name, vars, nil, skip); err != nil {
 		return err
 	}
+	// Mirror the same RESOLVED values into config.json's env_vars so the wizard's per-env
+	// vars survive to Edit Project and the next refresh/redeploy (which regenerates .env
+	// FROM config.json). Without this, a value the user set in the wizard (e.g.
+	// DEPLOYMENT_MODE=saas) lived only in .env while config.json kept the template default
+	// (enterprise) — so Edit Project showed the old value and a refresh reverted it. Mirrors
+	// the env-var EDIT endpoint (UpdateConfigEnvVars). Swarm-secret keys (skip) stay out of
+	// config.json just as they stay out of .env.
+	if err := workspace.UpdateConfigEnvVars(h.workspacesDir, wsName, name, env.Name, vars, nil, skip); err != nil {
+		return err
+	}
 	if len(versions) > 0 {
 		if err := workspace.SetSecretMeta(h.workspacesDir, wsName, name, env.Name, env.SecretKeys, versions); err != nil {
 			return err
