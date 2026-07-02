@@ -1510,24 +1510,6 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
         )}
       </div>
 
-      {/* Per-env override of the workspace "keep host ports under Traefik" default. Only
-          meaningful when this env routes through Traefik. */}
-      {exMode === 'traefik' && (
-        <div className="max-w-md">
-          <Label>Host port under Traefik</Label>
-          <Select
-            value={cfg.traefik_host_ports || ''}
-            onChange={v => { const n = { ...cfg }; if (v) n.traefik_host_ports = v; else delete n.traefik_host_ports; onChange(n) }}
-            options={[
-              { value: '', label: 'Inherit workspace default' },
-              { value: 'strip', label: 'Strip — Traefik only (recommended)' },
-              { value: 'keep', label: 'Keep — also publish the host port' },
-            ]}
-          />
-          <p className="text-xs text-content-subtle mt-1">Under Traefik the app is reached by its domain, so the host port is redundant. <strong>Strip</strong> drops it (avoids conflicts); <strong>Keep</strong> also publishes <code className="font-mono">host:port</code> for direct access. Extra ports (e.g. SSH) always publish.</p>
-        </div>
-      )}
-
       {/* Swarm scheduling — per-service replicas/placement + rolling-update policy. Placed
           right under the Deployment Target so it reads as part of that choice. */}
       {cfg.deployment === 'swarm' && (
@@ -1602,6 +1584,16 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             </div>
           )
         })()}
+        {/* Host port mapping — per-env override of the workspace "keep host ports under
+            Traefik" default. Off (unchecked) clears the key → inherits the workspace default
+            (strip). On → keep, also publishing host:port alongside domain routing. */}
+        {exMode === 'traefik' && (
+          <Toggle label="Also publish host port mapping"
+            hint="Under Traefik the app is reached by its domain, so the host port is usually redundant. Leave off to follow the workspace default (strip — avoids port conflicts). Turn on to also publish host:port for direct access. Extra ports (e.g. SSH) always publish."
+            checked={cfg.traefik_host_ports === 'keep'}
+            onChange={v => { const n = { ...cfg }; if (v) n.traefik_host_ports = 'keep'; else delete n.traefik_host_ports; onChange(n) }} />
+        )}
+
         {/* Custom domains — per-env extra hostnames + their own TLS (verify flow). */}
         {exMode === 'traefik' && (isNew
           ? <p className="text-xs text-content-faint">Save this environment to attach custom domains.</p>
