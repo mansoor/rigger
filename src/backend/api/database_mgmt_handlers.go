@@ -240,7 +240,14 @@ func (h *Handler) ListDatabaseSchemas(w http.ResponseWriter, r *http.Request) {
 			`WHERE s.schema_name NOT IN ('mysql','information_schema','performance_schema','sys') ` +
 			`GROUP BY s.schema_name ORDER BY s.schema_name`
 	}
-	out, err := c.run(sql, false)
+	// Listing ALL databases is a privileged read: MySQL's information_schema.SCHEMATA is
+	// filtered to what the CONNECTING user can see, so as the app user a newly-created
+	// database (owned by a new user the app user has no grant on) is invisible. Run it as
+	// root so every database shows; mysqlCreds(true) falls back to the app user when the
+	// root password is unknown (degraded to the app's own DB, never worse than before).
+	// (No-op for postgres — run() always connects as the app user and lists the current
+	// DB's schemas via pg_namespace, which are visible regardless.)
+	out, err := c.run(sql, true)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "query failed (is the database running?): " + strings.TrimSpace(string(out)+" "+err.Error())})
 		return
