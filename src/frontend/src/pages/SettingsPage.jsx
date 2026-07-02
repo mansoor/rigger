@@ -892,7 +892,7 @@ function DomainsTab() {
   if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
-    <div className="space-y-8 max-w-2xl">
+    <div className="space-y-8">
       {/* SSL / Let's Encrypt */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">SSL Certificates — Let's Encrypt</h2>
@@ -1131,7 +1131,7 @@ function GeneralTab() {
   if (isLoading) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
-    <div className="space-y-8 max-w-2xl">
+    <div className="space-y-8">
       {/* Naming — key length */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Naming — resource keys</h2>
@@ -1674,7 +1674,7 @@ function PreferencesTab() {
     cfValue = { confirm: general?.confirm_destructive || '', allow: general?.confirm_destructive_allow_override || '' }
   }
   return (
-    <div className="space-y-5 max-w-2xl">
+    <div className="space-y-5">
       <SettingsSection
         title="Default appearance"
         description="The instance-wide default theme & typography. Workspaces can override it (Manage Workspace → Preferences), and each user can override it for themselves (Profile → Appearance)."
@@ -2129,7 +2129,7 @@ function SystemEmailTab() {
   if (isLoading || !f) return <div className="py-12 text-center text-content-subtle text-sm">Loading…</div>
 
   return (
-    <div className="max-w-2xl">
+    <div>
       <div className="mb-6">
         <h2 className="text-base font-semibold text-content-strong">System email</h2>
         <Hint className="text-sm mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</Hint>
@@ -2239,7 +2239,7 @@ function UpdatesTab() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div>
       <div className="mb-6">
         <h2 className="text-base font-semibold text-content-strong">Updates</h2>
         <Hint className="text-sm mt-0.5">Check for a newer Rigger release and see what changed.</Hint>
