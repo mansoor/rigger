@@ -1781,7 +1781,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
       <div className="space-y-2 pt-3 border-t border-border-strong/50">
         <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Tooling (this environment)</p>
         {projectDatabase && projectDatabase !== 'none' && (
-          <TriOverride label="Adminer (web SQL)" projectDefault={projectWebSql} value={cfg.web_sql} onChange={v => upd('web_sql', v)} />
+          <TriOverride label={projectDatabase === 'mongodb' ? 'mongo-express (web console)' : 'Adminer (web SQL)'} projectDefault={projectWebSql} value={cfg.web_sql} onChange={v => upd('web_sql', v)} />
         )}
         {projectObjectStorage === 'minio' && (
           <TriOverride label="MinIO console" projectDefault={projectStorageUi} value={cfg.storage_ui} onChange={v => upd('storage_ui', v)} />
@@ -2795,8 +2795,8 @@ export default function EditProjectPage() {
             {project?.type !== 'image' && (
               <div className="mb-5">
                 <ManagedServices
-                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, storageLocal: !!project?.storage_local || project?.object_storage === 'local', storageMinio: !!project?.storage_minio || project?.object_storage === 'minio', storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql, mailpit: project?.mailpit }}
-                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, storage_local: !!v.storageLocal, storage_minio: !!v.storageMinio, object_storage: '', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (!!v.storageMinio && !!v.storageUi), web_sql: !!v.webSql, mailpit: !!v.mailpit }))}
+                  value={{ database: project?.database, dbVersion: project?.db_version, redis: project?.redis_enabled, search: project?.search, searchVersion: project?.search_version, tsdb: project?.tsdb, tsdbVersion: project?.tsdb_version, storageLocal: !!project?.storage_local || project?.object_storage === 'local', storageMinio: !!project?.storage_minio || project?.object_storage === 'minio', storageBucket: project?.storage_bucket, storagePath: project?.storage_path, storageUi: project?.storage_ui, webSql: project?.web_sql, mailpit: project?.mailpit }}
+                  onChange={v => setProject(p => ({ ...p, database: v.database, db_version: v.dbVersion, redis_enabled: !!v.redis, search: v.search || '', search_version: v.searchVersion || '', tsdb: v.tsdb || '', tsdb_version: v.tsdbVersion || '', storage_local: !!v.storageLocal, storage_minio: !!v.storageMinio, object_storage: '', storage_bucket: v.storageBucket || '', storage_path: v.storagePath || '', storage_ui: (!!v.storageMinio && !!v.storageUi), web_sql: !!v.webSql, mailpit: !!v.mailpit }))}
                   showWebSql={project?.type === 'database'}
                   resourcePrefix={project?.resource_prefix || `${workspace}_${project?.key || name}`}
                 />
@@ -2817,7 +2817,7 @@ export default function EditProjectPage() {
             <ImagesEditor images={images || []} onChange={setImages}
               gitRepo={project?.git_repo} gitBranch={project?.git_branch}
               gitProviderId={project?.git_provider_id || 0}
-              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, storageMinio: !!project?.storage_minio || project?.object_storage === 'minio' })} />
+              managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, search: project?.search, tsdb: project?.tsdb, storageMinio: !!project?.storage_minio || project?.object_storage === 'minio' })} />
             <PortWarnings warnings={hostWarnings} />
             <Hint className="mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</Hint>
           </section>

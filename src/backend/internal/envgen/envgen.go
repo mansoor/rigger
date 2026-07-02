@@ -157,9 +157,18 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			"MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD",
 			"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
 			"MONGO_HOST", "MONGO_PORT", "MONGO_DB", "MONGO_USER", "MONGO_PASSWORD", "MONGO_URI",
-			"OPENSEARCH_HOST", "OPENSEARCH_PORT", "OPENSEARCH_USER", "OPENSEARCH_PASSWORD", "OPENSEARCH_URL",
-			"VICTORIA_HOST", "VICTORIA_PORT", "VICTORIA_URL",
 		} {
+			out[k] = true
+		}
+	}
+	// Auxiliary engines own their own key families, independent of the primary DB.
+	if cfg.EffSearch(e) == "opensearch" {
+		for _, k := range []string{"OPENSEARCH_HOST", "OPENSEARCH_PORT", "OPENSEARCH_USER", "OPENSEARCH_PASSWORD", "OPENSEARCH_URL"} {
+			out[k] = true
+		}
+	}
+	if cfg.EffTSDB(e) == "victoriametrics" {
+		for _, k := range []string{"VICTORIA_HOST", "VICTORIA_PORT", "VICTORIA_URL"} {
 			out[k] = true
 		}
 	}
@@ -527,20 +536,24 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("MONGO_USER=%s\n", mongoUser)
 		p("MONGO_PASSWORD=%s\n", dbPassword)
 		p("MONGO_URI=mongodb://%s:%s@%s:27017/%s?authSource=admin\n", mongoUser, dbPassword, host, mongoDB)
-	case "opensearch":
-		// Security plugin ON → HTTPS + the fixed bootstrap `admin` user (OpenSearch
-		// doesn't provision a custom user in this cut). Apps connect over https with
-		// cert verification disabled (self-signed demo cert, in-network only). No
-		// "database" concept — OpenSearch uses indices, so there's no OPENSEARCH_DB.
+	}
+
+	// Auxiliary search / TSDB engines write ALONGSIDE the primary DB (independent of the
+	// engine switch above — they occupy their own project slots, not the Database slot).
+	if cfg.EffSearch(e) == "opensearch" {
+		// Security plugin ON → HTTPS + the fixed bootstrap `admin` user (OpenSearch doesn't
+		// provision a custom user in this cut). Apps connect over https with cert verification
+		// disabled (self-signed demo cert, in-network only). No "database" concept — indices.
 		host := prefix + "_opensearch"
 		p("OPENSEARCH_HOST=%s\n", host)
 		p("OPENSEARCH_PORT=9200\n")
 		p("OPENSEARCH_USER=admin\n")
 		p("OPENSEARCH_PASSWORD=%s\n", osPassword)
 		p("OPENSEARCH_URL=https://admin:%s@%s:9200\n", osPassword, host)
-	case "victoriametrics":
-		// Single-node TSDB, no auth on :8428 — connection is just the base URL. Apps
-		// push via remote-write (/api/v1/write) and query with PromQL (/api/v1/query).
+	}
+	if cfg.EffTSDB(e) == "victoriametrics" {
+		// Single-node TSDB, no auth on :8428 — connection is just the base URL. Apps push
+		// via remote-write (/api/v1/write) and query with PromQL (/api/v1/query).
 		host := prefix + "_victoriametrics"
 		p("VICTORIA_HOST=%s\n", host)
 		p("VICTORIA_PORT=8428\n")
@@ -548,16 +561,12 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	}
 	// When the DB is published externally, expose the host port (overridable) so the
 	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.
-	// DBExternal is per-environment (expose on dev, keep prod private).
+	// DBExternal is per-environment (expose on dev, keep prod private). Aux search/TSDB
+	// are internal-only in v1, so they never publish here.
 	if engine != "" && engine != "none" && e.DBExternal {
 		port := "3306"
-		switch engine {
-		case "postgres":
+		if engine == "postgres" {
 			port = "5432"
-		case "opensearch":
-			port = "9200"
-		case "victoriametrics":
-			port = "8428"
 		}
 		p("DB_EXTERNAL_PORT=%s\n", port)
 	}

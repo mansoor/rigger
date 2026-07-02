@@ -26,6 +26,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/customdomains"
+	"github.com/mansoor/rigger/ui/internal/databases"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/envorder"
@@ -1294,6 +1295,43 @@ func validateConfigRoutes(content []byte) string {
 	return ""
 }
 
+// validateManagedEngines checks the managed-engine slots hold engines of the right
+// category: Database ∈ database-category, Search ∈ search-category, TSDB ∈ tsdb-category.
+// This keeps an auxiliary engine (opensearch/victoriametrics) from being wedged into the
+// primary DB slot (or vice-versa) via a hand-edited config.
+func validateManagedEngines(content []byte) string {
+	var doc struct {
+		Project struct {
+			Database string `json:"database"`
+			Search   string `json:"search"`
+			TSDB     string `json:"tsdb"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(content, &doc); err != nil {
+		return ""
+	}
+	check := func(id, cat, label string) string {
+		if id == "" || id == "none" {
+			return ""
+		}
+		e, ok := databases.Get(id)
+		if !ok || e.Category != cat {
+			return fmt.Sprintf("invalid %s engine %q", label, id)
+		}
+		return ""
+	}
+	if m := check(doc.Project.Database, "database", "database"); m != "" {
+		return m
+	}
+	if m := check(doc.Project.Search, "search", "search"); m != "" {
+		return m
+	}
+	if m := check(doc.Project.TSDB, "tsdb", "TSDB"); m != "" {
+		return m
+	}
+	return ""
+}
+
 func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 	wsName := r.PathValue("workspace")
 	name := r.PathValue("name")
@@ -1316,6 +1354,10 @@ func (h *Handler) PutConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := validateConfigRoutes([]byte(body.Content)); msg != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	if msg := validateManagedEngines([]byte(body.Content)); msg != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}

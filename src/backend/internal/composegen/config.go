@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+
+	"github.com/mansoor/rigger/ui/internal/databases"
 )
 
 // Config is the complete view of a workspace config.json that the generator
@@ -82,6 +84,12 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
+	// Search / TSDB are opt-in auxiliary engines (opensearch / victoriametrics) emitted
+	// ALONGSIDE the primary DB (internal-only in v1). See gen.searchEngine/tsdbEngine.
+	Search        string `json:"search,omitempty"`
+	SearchVersion string `json:"search_version,omitempty"`
+	TSDB          string `json:"tsdb,omitempty"`
+	TSDBVersion   string `json:"tsdb_version,omitempty"`
 	// WebSQL synthesizes an Adminer web-SQL service (see buildAdminer) — the unified
 	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
@@ -353,7 +361,34 @@ func parseConfig(data []byte) (*Config, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err
 	}
+	c.normalizeAux()
 	return &c, nil
+}
+
+// normalizeAux relocates an auxiliary engine (opensearch / victoriametrics) that a legacy
+// config selected in the single Database slot into the Search / TSDB slots, so it emits as
+// an auxiliary service alongside the primary DB. composegen parses raw config.json bytes
+// (it doesn't go through wsconfig.Normalize), so it self-heals here. No-op otherwise.
+func (c *Config) normalizeAux() {
+	if c.Project.Database == "" {
+		return
+	}
+	eng, ok := databases.Get(c.Project.Database)
+	if !ok {
+		return
+	}
+	switch eng.Category {
+	case "search":
+		if c.Project.Search == "" {
+			c.Project.Search, c.Project.SearchVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	case "tsdb":
+		if c.Project.TSDB == "" {
+			c.Project.TSDB, c.Project.TSDBVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	}
 }
 
 // versionString reproduces lib.sh version_string(): "{major}.{minor}.{patch}-build.{build}".

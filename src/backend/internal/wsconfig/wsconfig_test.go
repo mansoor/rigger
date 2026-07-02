@@ -150,3 +150,27 @@ func TestVersionFallback(t *testing.T) {
 		t.Errorf("Version(redis) fallback = %q, want 7-alpine", got)
 	}
 }
+
+// TestNormalizeRelocatesAuxEngine: an aux engine (opensearch/victoriametrics) selected in
+// the legacy single Database slot is relocated to the Search/TSDB slots on parse, freeing
+// the DB slot; a real database is left untouched.
+func TestNormalizeRelocatesAuxEngine(t *testing.T) {
+	c, err := Parse([]byte(`{"project":{"name":"x","database":"opensearch","db_version":"1"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Project.Database != "" {
+		t.Errorf("Database should be cleared, got %q", c.Project.Database)
+	}
+	if c.Project.Search != "opensearch" || c.Project.SearchVersion != "1" {
+		t.Errorf("expected Search=opensearch/1, got %q/%q", c.Project.Search, c.Project.SearchVersion)
+	}
+	c2, _ := Parse([]byte(`{"project":{"database":"victoriametrics"}}`))
+	if c2.Project.TSDB != "victoriametrics" || c2.Project.Database != "" {
+		t.Errorf("vm not relocated to TSDB: db=%q tsdb=%q", c2.Project.Database, c2.Project.TSDB)
+	}
+	c3, _ := Parse([]byte(`{"project":{"database":"postgres"}}`))
+	if c3.Project.Database != "postgres" || c3.Project.Search != "" || c3.Project.TSDB != "" {
+		t.Errorf("real DB wrongly relocated: db=%q search=%q tsdb=%q", c3.Project.Database, c3.Project.Search, c3.Project.TSDB)
+	}
+}

@@ -86,7 +86,7 @@ function ConnectBtn({ openAdminer, webSqlEnabled, adminerUrl, as = 'admin', labe
 
 // DatabasePanel renders the database tab body. info is fetched here (keyed on reveal);
 // onMeta lets a parent (the console header) show the engine/version badge.
-export function DatabasePanel({ workspace, name, env, canReveal = false, showAll = false, canManage = false, webSqlEnabled = false, adminerUrl = '', onMeta }) {
+export function DatabasePanel({ workspace, name, env, canReveal = false, showAll = false, canManage = false, webSqlEnabled = false, adminerUrl = '', mongoExpressEnabled = false, mongoExpressUrl = '', onMeta }) {
   const [tab, setTab] = useState('connection')
   // For operator+ (canReveal) fetch the REAL secret values up front and mask them per-value
   // client-side (SecretValue), so Copy works without first revealing — same model as the
@@ -135,13 +135,23 @@ export function DatabasePanel({ workspace, name, env, canReveal = false, showAll
       ) : (
         <div className="space-y-5">
           {info.note && <Hint className="leading-relaxed">{info.note}</Hint>}
-          {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
-          {canManage && (
+          {/* One-click web console — Adminer (SQL, auto-login) or mongo-express (MongoDB). */}
+          {canManage && (info.engine === 'mongodb' ? (
+            <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
+              <Hint>Open the mongo-express web console connected to this database.</Hint>
+              {!mongoExpressEnabled
+                ? <Hint tone="faint" className="text-[11px]">Enable the <strong>web console</strong> in Edit Project → Services.</Hint>
+                : !mongoExpressUrl
+                  ? <Hint tone="faint" className="text-[11px]">Deploy with a domain to get a web URL.</Hint>
+                  : <a href={mongoExpressUrl} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-lg font-semibold text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 text-xs shrink-0">↗ Open mongo-express</a>}
+            </section>
+          ) : (
             <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
               <Hint>Open a browser SQL console connected to this database.</Hint>
               <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" />
             </section>
-          )}
+          ))}
 
           {/* In-network connection */}
           <section className="space-y-1.5">

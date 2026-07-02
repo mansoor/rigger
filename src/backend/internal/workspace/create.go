@@ -42,6 +42,10 @@ type CreateRequest struct {
 	Database     string            `json:"database"`     // none | postgres | mysql | mariadb (custom type)
 	DBVersion    string            `json:"db_version"`   // chosen DB image tag ("" → catalog default)
 	DBExternal   bool              `json:"db_external"`  // publish the DB port on the host
+	Search        string           `json:"search"`         // "" | opensearch — auxiliary search engine (alongside the DB)
+	SearchVersion string           `json:"search_version"` // chosen OpenSearch tag ("" → default)
+	TSDB          string           `json:"tsdb"`           // "" | victoriametrics — auxiliary TSDB (alongside the DB)
+	TSDBVersion   string           `json:"tsdb_version"`   // chosen VictoriaMetrics tag ("" → default)
 	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
 	Mailpit      bool              `json:"mailpit"`      // add the Mailpit test-SMTP sidecar (project default)
@@ -353,6 +357,19 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		}
 		if req.Redis {
 			project["redis_enabled"] = true
+		}
+		// Auxiliary search / time-series engines — run alongside the primary DB.
+		if req.Search != "" {
+			project["search"] = req.Search
+			if req.SearchVersion != "" {
+				project["search_version"] = req.SearchVersion
+			}
+		}
+		if req.TSDB != "" {
+			project["tsdb"] = req.TSDB
+			if req.TSDBVersion != "" {
+				project["tsdb_version"] = req.TSDBVersion
+			}
 		}
 		// Object storage backends are independent — both may be selected.
 		if req.StorageMinIO {

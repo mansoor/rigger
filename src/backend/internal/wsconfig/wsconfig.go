@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/mansoor/rigger/ui/internal/databases"
 )
 
 // Config is the subset of config.json the non-compose operations read.
@@ -187,6 +189,14 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
+	// Search / TSDB are opt-in AUXILIARY managed engines that run ALONGSIDE the primary
+	// Database (not in its slot): Search = "" | "opensearch"; TSDB = "" | "victoriametrics".
+	// Internal-only in v1 (no external host-port exposure). See EffSearch / EffTSDB and
+	// databases.CatalogByCategory.
+	Search        string `json:"search,omitempty"`
+	SearchVersion string `json:"search_version,omitempty"`
+	TSDB          string `json:"tsdb,omitempty"`
+	TSDBVersion   string `json:"tsdb_version,omitempty"`
 	// WebSQL adds an Adminer web-SQL client to the project (the unified flag, like
 	// Redis). composegen synthesizes the service from it for any stack with a
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
@@ -312,6 +322,14 @@ func (c *Config) EffDBVersion(e Env) string {
 
 // EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
 func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
+
+// EffSearch / EffTSDB return the project's auxiliary search / time-series engine
+// ("" = none). The Env param is kept for signature parity with the other Eff* helpers
+// (and a possible future per-env override); today they are strictly project-level.
+func (c *Config) EffSearch(_ Env) string        { return c.Project.Search }
+func (c *Config) EffSearchVersion(_ Env) string { return c.Project.SearchVersion }
+func (c *Config) EffTSDB(_ Env) string          { return c.Project.TSDB }
+func (c *Config) EffTSDBVersion(_ Env) string   { return c.Project.TSDBVersion }
 
 // MinIOOn / LocalStorageOn report the active object-storage backends (project-level,
 // independent — both may be on). New flags OR the legacy ObjectStorage enum. The Env
@@ -498,7 +516,35 @@ func Parse(data []byte) (*Config, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err
 	}
+	c.Normalize()
 	return &c, nil
+}
+
+// Normalize self-heals a freshly-parsed config. The search/tsdb engines (opensearch,
+// victoriametrics) were briefly selectable in the single Database slot; relocate any such
+// selection into the dedicated Search / TSDB slots (carrying its version) so it runs as an
+// auxiliary service alongside a primary DB and frees the DB slot. Idempotent; a no-op for
+// configs that never used them, so compose/env output stays byte-identical.
+func (c *Config) Normalize() {
+	if c.Project.Database == "" {
+		return
+	}
+	eng, ok := databases.Get(c.Project.Database)
+	if !ok {
+		return
+	}
+	switch eng.Category {
+	case "search":
+		if c.Project.Search == "" {
+			c.Project.Search, c.Project.SearchVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	case "tsdb":
+		if c.Project.TSDB == "" {
+			c.Project.TSDB, c.Project.TSDBVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	}
 }
 
 // ProjectType returns the project type, defaulting to "custom" (lib.sh

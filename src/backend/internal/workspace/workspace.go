@@ -47,6 +47,12 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
+	// Search / TSDB are opt-in auxiliary engines (opensearch / victoriametrics) running
+	// alongside the primary DB. The UI reads these to render the aux pickers + service rows.
+	Search        string `json:"search,omitempty"`
+	SearchVersion string `json:"search_version,omitempty"`
+	TSDB          string `json:"tsdb,omitempty"`
+	TSDBVersion   string `json:"tsdb_version,omitempty"`
 	// WebSQL adds an Adminer web-SQL client (composegen synthesizes it). The UI reads
 	// this to render the Adminer toggle + Manage-DB connect links.
 	WebSQL bool `json:"web_sql,omitempty"`
@@ -190,6 +196,13 @@ func managedDepServices(c *Config) []ConfigService {
 	}
 	if redis {
 		add("redis", "redis")
+	}
+	// Auxiliary search / time-series engines run alongside the primary DB (project-level).
+	if c.Project.Search != "" {
+		add(c.Project.Search, c.Project.Search) // opensearch
+	}
+	if c.Project.TSDB != "" {
+		add(c.Project.TSDB, c.Project.TSDB) // victoriametrics
 	}
 	// Object storage backends are independent — both may be on. (The MinIO console is
 	// per-env tooling now, surfaced in the env's Managed Service Console — not here.)

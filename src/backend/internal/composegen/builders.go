@@ -36,6 +36,7 @@ func (g *gen) buildStack(prefix, rp, registry, tag string, isSwarm bool) {
 	}
 	g.buildManagedDeps(prefix, isSwarm)
 	g.buildAdminer(prefix, rp, registry, tag, isSwarm)
+	g.buildMongoExpress(prefix, rp, registry, tag, isSwarm)
 	g.buildStorageConsole(prefix, rp, registry, tag, isSwarm)
 	g.buildMailpit(prefix, rp, registry, tag, isSwarm)
 	g.buildCloudflared(prefix, isSwarm)
@@ -111,6 +112,43 @@ func (g *gen) buildAdminer(prefix, rp, registry, tag string, isSwarm bool) {
 	// so the two don't collide in Traefik.
 	if g.hasAppWebEntry() {
 		svc.Subdomain = "adminer"
+	}
+	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
+}
+
+// buildMongoExpress synthesizes the mongo-express web console for a MongoDB project — the
+// document-store counterpart to Adminer (parity: SQL Database + Adminer ↔ Document DB +
+// mongo-express). Driven by the SAME web_sql toggle, but emitted only when the engine is
+// mongodb (buildAdminer skips non-SQL, this covers Mongo). Connects via the ready-made
+// ${MONGO_URI}; its own basic-auth is off, so — like Adminer — it opens straight in and
+// relies on Rigger's per-env edge basic-auth when ProtectAdminUIs is on. Apex web entry on
+// a pure DB-hosting project, else the "mongo" subdomain beside the app's web entry.
+func (g *gen) buildMongoExpress(prefix, rp, registry, tag string, isSwarm bool) {
+	if !g.webSQLOn() || g.hasService("mongo-express") {
+		return
+	}
+	if g.dbEngine() != "mongodb" {
+		return
+	}
+	svc := Service{
+		Name:      "mongo-express",
+		Image:     "mongo-express",
+		Tag:       "1.0.2",
+		Port:      "8081",  // mongo-express native HTTP port (Traefik / host-port target)
+		WebRouted: true,
+		HostPort:  "8979", // host publish for the no-Traefik case (distinct from Adminer's 8978)
+		EnvFile:   true,   // ${MONGO_URI} is resolved from .env at compose time
+		EnvVars: map[string]flexStr{
+			"ME_CONFIG_MONGODB_URL":          flexStr("${MONGO_URI}"),
+			"ME_CONFIG_MONGODB_ENABLE_ADMIN": flexStr("true"),
+			"ME_CONFIG_BASICAUTH":            flexStr("false"),
+		},
+		DependsOn: []string{"mongodb"},
+		// Admin UI → eligible for the per-env basic-auth middleware (gated on ProtectAdminUIs).
+		AuthProtect: true,
+	}
+	if g.hasAppWebEntry() {
+		svc.Subdomain = "mongo"
 	}
 	g.buildService(prefix, rp, registry, tag, svc, isSwarm)
 }
@@ -207,10 +245,10 @@ func (g *gen) emitVolumes(prefix string) {
 	if engine == "mongodb" {
 		add(prefix + "_mongodb_data")
 	}
-	if engine == "opensearch" {
+	if g.searchEngine() == "opensearch" {
 		add(prefix + "_opensearch_data")
 	}
-	if engine == "victoriametrics" {
+	if g.tsdbEngine() == "victoriametrics" {
 		add(prefix + "_victoriametrics_data")
 	}
 	if g.redisOn() {
@@ -659,6 +697,11 @@ func (g *gen) dbEngine() string {
 	return g.e.Database
 }
 
+// searchEngine / tsdbEngine return the auxiliary engines running ALONGSIDE the primary DB
+// ("" = none). Kept separate from dbEngine so their compose blocks emit in addition to it.
+func (g *gen) searchEngine() string { return g.cfg.Project.Search }
+func (g *gen) tsdbEngine() string   { return g.cfg.Project.TSDB }
+
 // redisOn reports whether Redis is enabled (project OR legacy env).
 func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
 
@@ -863,14 +906,14 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	// HTTPS on 9200 with a self-signed demo cert; the bootstrap admin user is `admin`
 	// with OPENSEARCH_INITIAL_ADMIN_PASSWORD. A JVM heap floor is set; the host must
 	// also have vm.max_map_count=262144 (documented in the console — not settable here).
-	if engine == "opensearch" {
+	if g.searchEngine() == "opensearch" {
 		eng, _ := databases.Get("opensearch")
-		ver := g.dbVersion(eng)
+		ver := databases.ResolveVersion(eng.ID, g.cfg.Project.SearchVersion)
 		g.line(sectionComment("OpenSearch "+ver, dashSearch))
 		g.line("  opensearch:")
 		g.line("    image: opensearchproject/opensearch:" + ver)
 		g.line("    container_name: " + prefix + "_opensearch")
-		g.dbExternalPorts(eng)
+		// Auxiliary services are internal-only in v1 (no dbExternalPorts — that's the DB's toggle).
 		g.line("    environment:")
 		g.line("      discovery.type: single-node")
 		g.line("      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${OPENSEARCH_PASSWORD}")
@@ -890,15 +933,15 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 	// FROM scratch (no shell/curl), so NO healthcheck is emitted (depHasHealthcheck
 	// returns false → dependents use service_started, like MinIO). Data persists in a
 	// named volume via -storageDataPath.
-	if engine == "victoriametrics" {
+	if g.tsdbEngine() == "victoriametrics" {
 		eng, _ := databases.Get("victoriametrics")
-		ver := g.dbVersion(eng)
+		ver := databases.ResolveVersion(eng.ID, g.cfg.Project.TSDBVersion)
 		g.line(sectionComment("VictoriaMetrics "+ver, dashTSDB))
 		g.line("  victoriametrics:")
 		g.line("    image: victoriametrics/victoria-metrics:" + ver)
 		g.line("    container_name: " + prefix + "_victoriametrics")
 		g.line("    command: -storageDataPath=/victoria-metrics-data -retentionPeriod=1")
-		g.dbExternalPorts(eng)
+		// Auxiliary services are internal-only in v1 (no dbExternalPorts).
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_victoriametrics_data:/victoria-metrics-data")
 		g.managedNet(prefix, "victoriametrics")

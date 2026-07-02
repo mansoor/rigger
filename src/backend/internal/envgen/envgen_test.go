@@ -278,8 +278,9 @@ func TestMongoEnv(t *testing.T) {
 // complexity-meeting password (its own default — not the shared "changeme_…"), embedded
 // in an https URL. The password is preserved across regen like every managed-DB secret.
 func TestOpenSearchEnv(t *testing.T) {
+	// OpenSearch is now an AUXILIARY engine (Project.Search), not the primary DB.
 	c := cfg(t, `{
-      "project": { "name": "logs", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "database": "opensearch" },
+      "project": { "name": "logs", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "search": "opensearch" },
       "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
       "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
     }`)
@@ -289,7 +290,6 @@ func TestOpenSearchEnv(t *testing.T) {
 	}
 	m := ParseEnv([]byte(env))
 	checks := map[string]string{
-		"DATABASE":        "opensearch",
 		"OPENSEARCH_HOST": "logs_dev_opensearch",
 		"OPENSEARCH_PORT": "9200",
 		"OPENSEARCH_USER": "admin",
@@ -329,8 +329,9 @@ func TestOpenSearchEnv(t *testing.T) {
 // Managed VictoriaMetrics writes the VICTORIA_* family with a plain http URL and NO
 // credentials (single-node has no auth) — so no password key and no generic DATABASE_URL.
 func TestVictoriaMetricsEnv(t *testing.T) {
+	// VictoriaMetrics is now an AUXILIARY engine (Project.TSDB), not the primary DB.
 	c := cfg(t, `{
-      "project": { "name": "metrics", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "database": "victoriametrics" },
+      "project": { "name": "metrics", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "tsdb": "victoriametrics" },
       "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
       "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
     }`)
@@ -340,7 +341,6 @@ func TestVictoriaMetricsEnv(t *testing.T) {
 	}
 	m := ParseEnv([]byte(env))
 	checks := map[string]string{
-		"DATABASE":      "victoriametrics",
 		"VICTORIA_HOST": "metrics_dev_victoriametrics",
 		"VICTORIA_PORT": "8428",
 		"VICTORIA_URL":  "http://metrics_dev_victoriametrics:8428",
@@ -790,5 +790,39 @@ func TestMinIOWiresLaravelS3(t *testing.T) {
 	// No duplicate FILESYSTEM_DISK (the repo extra must be skipped, not appended).
 	if n := strings.Count(env, "\nFILESYSTEM_DISK="); n != 1 {
 		t.Errorf("FILESYSTEM_DISK emitted %d times, want 1", n)
+	}
+}
+
+// TestAuxSearchTSDBEnv: OpenSearch + VictoriaMetrics run ALONGSIDE the primary Postgres,
+// so their env-var families are all written together (not mutually exclusive with the DB).
+func TestAuxSearchTSDBEnv(t *testing.T) {
+	c := cfg(t, `{
+      "project": { "name":"aux", "registry":"reg",
+        "version": {"major":1,"minor":0,"patch":0,"build":1},
+        "database":"postgres", "search":"opensearch", "tsdb":"victoriametrics" },
+      "services": [{"name":"backend","build":{"template":"nodejs"}}],
+      "environments": { "dev": { "deployment":"compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	for k, want := range map[string]string{
+		"DATABASE":        "postgres",
+		"POSTGRES_HOST":   "aux_dev_postgres",
+		"OPENSEARCH_HOST": "aux_dev_opensearch",
+		"OPENSEARCH_PORT": "9200",
+		"OPENSEARCH_USER": "admin",
+		"VICTORIA_HOST":   "aux_dev_victoriametrics",
+		"VICTORIA_PORT":   "8428",
+		"VICTORIA_URL":    "http://aux_dev_victoriametrics:8428",
+	} {
+		if m[k] != want {
+			t.Errorf("%s = %q, want %q", k, m[k], want)
+		}
+	}
+	if m["OPENSEARCH_PASSWORD"] == "" {
+		t.Error("OPENSEARCH_PASSWORD should be written when search is on")
 	}
 }

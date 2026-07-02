@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/databases"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
@@ -32,8 +33,10 @@ type consoleRow struct {
 // frontend builds the full URL from the env's apex), and whether bucket management
 // applies (S3+MinIO only).
 type consoleService struct {
-	Kind       string            `json:"kind"`                  // redis | s3 | storage_local | mailpit
-	Label      string            `json:"label"`                 //
+	Kind       string            `json:"kind"`                  // redis | s3 | storage_local | mailpit | search | tsdb
+	Label      string            `json:"label"`                 // GENERIC category name — the tab title (Cache, Search, …)
+	Product    string            `json:"product,omitempty"`     // concrete product for the tab heading (Redis, OpenSearch, …)
+	Version    string            `json:"version,omitempty"`     // product version shown beside the name in the heading
 	Subdomain  string            `json:"subdomain,omitempty"`   // web-UI subdomain ("storage"/"mail"); "" = no UI
 	Note       string            `json:"note,omitempty"`        //
 	Rows       []consoleRow      `json:"rows"`                  //
@@ -90,7 +93,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 		}
 		pass := dotenv["REDIS_PASSWORD"]
 		svc := consoleService{
-			Kind: "redis", Label: "Redis",
+			Kind: "redis", Label: "Cache", Product: "Redis", Version: cfg.Version("redis", "7-alpine"),
 			Note:    "In-network cache / queue backend. No web UI — connect from app services or a redis client.",
 			Rows:    []consoleRow{{Label: "Host", Value: host}, {Label: "Port", Value: port}},
 			EnvKeys: map[string]string{"REDIS_HOST": host, "REDIS_PORT": port},
@@ -123,7 +126,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 			region = "us-east-1"
 		}
 		svc := consoleService{
-			Kind: "s3", Label: "Object storage (MinIO)", Buckets: true,
+			Kind: "s3", Label: "Object storage", Product: "MinIO (S3)", Buckets: true,
 			Rows: []consoleRow{
 				{Label: "Endpoint (in-network)", Value: endpoint},
 				{Label: "Access key", Value: ak},
@@ -161,7 +164,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 			path = "/var/www/html/storage"
 		}
 		resp.Services = append(resp.Services, consoleService{
-			Kind: "storage_local", Label: "Object storage (local volume)",
+			Kind: "storage_local", Label: "Local storage", Product: "Local volume",
 			Note: "Files persist in the " + prefix + "_storage volume, mounted at " + path + ". No S3 endpoint or web UI.",
 			Rows: []consoleRow{
 				{Label: "Filesystem disk", Value: disk},
@@ -175,7 +178,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 	// ── Mailpit ────────────────────────────────────────────────────────────────
 	if cfg.EffMailpit(ec) {
 		resp.Services = append(resp.Services, consoleService{
-			Kind: "mailpit", Label: "Mailpit (test SMTP)", Subdomain: "mail",
+			Kind: "mailpit", Label: "Test SMTP", Product: "Mailpit", Subdomain: "mail",
 			Note: "Catch-all test mailbox: the app sends to it and every message lands in the web inbox — nothing is delivered externally.",
 			Rows: []consoleRow{
 				{Label: "SMTP host (in-network)", Value: "mailpit"},
@@ -183,6 +186,46 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 				{Label: "Encryption", Value: "none"},
 			},
 			EnvKeys: map[string]string{"MAIL_HOST": "mailpit", "MAIL_PORT": "1025"},
+		})
+	}
+
+	// ── Search (OpenSearch) — auxiliary engine, alongside the primary DB ─────────
+	if cfg.EffSearch(ec) == "opensearch" {
+		host := prefix + "_opensearch"
+		pass := dotenv["OPENSEARCH_PASSWORD"]
+		resp.Services = append(resp.Services, consoleService{
+			Kind: "search", Label: "Search", Product: "OpenSearch",
+			Version: databases.ResolveVersion("opensearch", cfg.EffSearchVersion(ec)),
+			Note:    "Single-node with the security plugin ON — HTTPS on :9200 with a self-signed demo cert (verification disabled in-network). User: admin. The host needs vm.max_map_count=262144.",
+			Rows: []consoleRow{
+				{Label: "Host", Value: host},
+				{Label: "Port", Value: "9200"},
+				{Label: "User", Value: "admin"},
+				{Label: "URL", Value: "https://" + host + ":9200"},
+				{Label: "Password", Value: mask(pass), Secret: true},
+			},
+			EnvKeys: map[string]string{
+				"OPENSEARCH_HOST": host, "OPENSEARCH_PORT": "9200", "OPENSEARCH_USER": "admin",
+				"OPENSEARCH_URL":      "https://admin:" + mask(pass) + "@" + host + ":9200",
+				"OPENSEARCH_PASSWORD": mask(pass),
+			},
+			SecretKeys: []string{"OPENSEARCH_PASSWORD"},
+		})
+	}
+
+	// ── Metrics (VictoriaMetrics) — auxiliary engine, alongside the primary DB ───
+	if cfg.EffTSDB(ec) == "victoriametrics" {
+		host := prefix + "_victoriametrics"
+		resp.Services = append(resp.Services, consoleService{
+			Kind: "tsdb", Label: "Metrics", Product: "VictoriaMetrics",
+			Version: databases.ResolveVersion("victoriametrics", cfg.EffTSDBVersion(ec)),
+			Note:    "Single-node time-series DB, no auth on :8428. Push metrics with remote-write (/api/v1/write); query with PromQL (/api/v1/query).",
+			Rows: []consoleRow{
+				{Label: "Host", Value: host},
+				{Label: "Port", Value: "8428"},
+				{Label: "URL", Value: "http://" + host + ":8428"},
+			},
+			EnvKeys: map[string]string{"VICTORIA_HOST": host, "VICTORIA_PORT": "8428", "VICTORIA_URL": "http://" + host + ":8428"},
 		})
 	}
 

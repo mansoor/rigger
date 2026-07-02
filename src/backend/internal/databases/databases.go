@@ -23,6 +23,10 @@ type Engine struct {
 	EnvPrefix      string   `json:"env_prefix"`      // connection env-var family: "POSTGRES" | "MYSQL"
 	Schemas        bool     `json:"schemas"`         // management: list/create schema or database
 	Users          bool     `json:"users"`           // management: user / grant administration
+	// Category groups the engine by role: "database" (the single primary DB slot),
+	// "search" (OpenSearch), or "tsdb" (VictoriaMetrics). Search/tsdb engines run as
+	// opt-in AUXILIARY services ALONGSIDE a primary database, not in the DB slot.
+	Category string `json:"category"`
 }
 
 // catalog is the ordered engine list (drives display order in the picker).
@@ -32,21 +36,21 @@ var catalog = []Engine{
 		Versions:       []string{"17-alpine", "16-alpine", "15-alpine", "14-alpine", "13-alpine"},
 		DefaultVersion: "15-alpine",
 		Port:           5432, VolumePath: "/var/lib/postgresql/data",
-		Driver: "postgres", EnvPrefix: "POSTGRES", Schemas: true, Users: true,
+		Driver: "postgres", EnvPrefix: "POSTGRES", Schemas: true, Users: true, Category: "database",
 	},
 	{
 		ID: "mysql", Label: "MySQL", Image: "mysql",
 		Versions:       []string{"8.4", "8.0", "5.7"},
 		DefaultVersion: "8.0",
 		Port:           3306, VolumePath: "/var/lib/mysql",
-		Driver: "mysql", EnvPrefix: "MYSQL", Schemas: true, Users: true,
+		Driver: "mysql", EnvPrefix: "MYSQL", Schemas: true, Users: true, Category: "database",
 	},
 	{
 		ID: "mariadb", Label: "MariaDB", Image: "mariadb",
 		Versions:       []string{"11", "10.11", "10.6"},
 		DefaultVersion: "11",
 		Port:           3306, VolumePath: "/var/lib/mysql",
-		Driver: "mysql", EnvPrefix: "MYSQL", Schemas: true, Users: true,
+		Driver: "mysql", EnvPrefix: "MYSQL", Schemas: true, Users: true, Category: "database",
 	},
 	{
 		// MongoDB — document store (NOT SQL). The SQL management surface (Adminer
@@ -57,7 +61,7 @@ var catalog = []Engine{
 		Versions:       []string{"7", "6", "5"},
 		DefaultVersion: "7",
 		Port:           27017, VolumePath: "/data/db",
-		Driver: "mongodb", EnvPrefix: "MONGO", Schemas: false, Users: false,
+		Driver: "mongodb", EnvPrefix: "MONGO", Schemas: false, Users: false, Category: "database",
 	},
 	{
 		// OpenSearch — search/analytics engine (Apache-2.0 fork of ElasticSearch, ES
@@ -70,7 +74,7 @@ var catalog = []Engine{
 		Versions:       []string{"2", "1"},
 		DefaultVersion: "2",
 		Port:           9200, VolumePath: "/usr/share/opensearch/data",
-		Driver: "opensearch", EnvPrefix: "OPENSEARCH", Schemas: false, Users: false,
+		Driver: "opensearch", EnvPrefix: "OPENSEARCH", Schemas: false, Users: false, Category: "search",
 	},
 	{
 		// VictoriaMetrics — time-series database (Prometheus-compatible: PromQL +
@@ -82,7 +86,7 @@ var catalog = []Engine{
 		Versions:       []string{"v1.102.0", "latest"},
 		DefaultVersion: "v1.102.0",
 		Port:           8428, VolumePath: "/victoria-metrics-data",
-		Driver: "victoriametrics", EnvPrefix: "VICTORIA", Schemas: false, Users: false,
+		Driver: "victoriametrics", EnvPrefix: "VICTORIA", Schemas: false, Users: false, Category: "tsdb",
 	},
 }
 
@@ -90,6 +94,19 @@ var catalog = []Engine{
 func Catalog() []Engine {
 	out := make([]Engine, len(catalog))
 	copy(out, catalog)
+	return out
+}
+
+// CatalogByCategory returns the engines in one category ("database" | "search" | "tsdb"),
+// preserving catalog order. Drives the primary-DB picker (database) and the auxiliary
+// Search / Metrics pickers.
+func CatalogByCategory(cat string) []Engine {
+	out := []Engine{}
+	for _, e := range catalog {
+		if e.Category == cat {
+			out = append(out, e)
+		}
+	}
 	return out
 }
 

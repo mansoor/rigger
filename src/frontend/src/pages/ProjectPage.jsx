@@ -905,7 +905,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
 
       {dbInfoOpen && (
         <ServiceConsoleModal workspace={workspace} name={name} env={envName}
-          hasManagedDB={hasManagedDB} canReveal={canManageDB} canManage={canManageDB}
+          hasManagedDB={hasManagedDB} dbKind={dbEngine} canReveal={canManageDB} canManage={canManageDB}
           apexUrl={accessUrls[0]?.href || ''}
           webSqlEnabled={(ws?.config?.services || []).some(s => s.name === 'adminer' || s.name === 'cloudbeaver') || !!ws?.config?.project?.web_sql}
           adminerUrl={(() => {
@@ -916,6 +916,15 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             if (!apex) return ''
             const appWeb = (ws?.config?.services || []).some(s => s.web_routed && s.name !== 'adminer')
             return appWeb ? apex.replace(/^(https?:\/\/)/, '$1adminer.') : apex
+          })()}
+          mongoExpressEnabled={(ws?.config?.services || []).some(s => s.name === 'mongo-express') || !!ws?.config?.project?.web_sql}
+          mongoExpressUrl={(() => {
+            // Apex when mongo-express owns the web entry (pure DB-hosting); else the "mongo"
+            // subdomain. Mirrors composegen.buildMongoExpress's apex-vs-subdomain rule.
+            const apex = accessUrls[0]?.href || ''
+            if (!apex) return ''
+            const appWeb = (ws?.config?.services || []).some(s => s.web_routed && s.name !== 'mongo-express')
+            return appWeb ? apex.replace(/^(https?:\/\/)/, '$1mongo.') : apex
           })()}
           onClose={() => setDbInfoOpen(false)} />
       )}

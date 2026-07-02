@@ -21,6 +21,8 @@ const SERVICE_META = {
   mariadb:         { label: 'MariaDB',       port: '3306',      vars: ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_DATABASE', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_ROOT_PASSWORD'], creds: true },
   mongodb:         { label: 'MongoDB',       port: '27017',     vars: ['MONGO_HOST', 'MONGO_PORT', 'MONGO_DB', 'MONGO_USER', 'MONGO_PASSWORD', 'MONGO_URI'], creds: true, note: 'Document store. The connection user is the root user (authSource=admin); a ready-to-use MONGO_URI is set in each environment’s .env. No web SQL client (Adminer is SQL-only) — view connection details on the Database tab.' },
   redis:           { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
+  opensearch:      { label: 'OpenSearch',    port: '9200',      vars: ['OPENSEARCH_HOST', 'OPENSEARCH_PORT', 'OPENSEARCH_USER', 'OPENSEARCH_PASSWORD', 'OPENSEARCH_URL'], creds: true, note: 'Search/analytics engine. HTTPS on :9200 with the security plugin (self-signed demo cert; user admin). Runs alongside your database. Host needs vm.max_map_count=262144. Connection details on the Search tab.' },
+  victoriametrics: { label: 'VictoriaMetrics', port: '8428',    vars: ['VICTORIA_HOST', 'VICTORIA_PORT', 'VICTORIA_URL'], note: 'Time-series DB (Prometheus-compatible). No auth on :8428. Push via remote-write; query with PromQL. Runs alongside your database. Connection details on the Metrics tab.' },
   minio:           { label: 'MinIO (S3)',    port: '9000',      vars: ['AWS_ENDPOINT', 'AWS_BUCKET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_USE_PATH_STYLE_ENDPOINT'], note: 'S3-compatible object store. The bucket is auto-created on first deploy; AWS_* credentials are the MinIO root user/password (revealable on the Database/Storage tab).' },
   storage_console: { label: 'MinIO Console', port: '9090',      vars: [], note: 'Browser admin UI for MinIO (opens3/console) — routed at the storage subdomain. Log in with the MinIO root credentials. Not used directly by your app.' },
   storage:         { label: 'Local volume',  volume: true,      vars: [], note: 'Uploads persist to a local named volume mounted at the app’s storage path — no S3 container. FILESYSTEM_DISK=local.' },
@@ -30,10 +32,13 @@ const SERVICE_META = {
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, storageLocal, storageMinio, storageUi, webSql, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, search, tsdb, storageLocal, storageMinio, storageUi, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
+  // Auxiliary search / time-series engines run alongside the primary database.
+  if (search && search !== 'none') out.push({ name: search, kind: search })
+  if (tsdb && tsdb !== 'none') out.push({ name: tsdb, kind: tsdb })
   // Object storage backends are independent — both may be on.
   if (storageMinio) {
     out.push({ name: 'minio', kind: 'minio' })
@@ -46,9 +51,11 @@ export function managedServiceList({ database, redis, storageLocal, storageMinio
 
 // enabledDependsOnTargets returns the managed-service names a real service may
 // depend_on (excludes UI-only sidecars / the local-volume pseudo-service).
-export function enabledDependsOnTargets({ database, redis, storageMinio } = {}) {
+export function enabledDependsOnTargets({ database, redis, storageMinio, search, tsdb } = {}) {
   const out = []
   if (database && database !== 'none') out.push(database)
+  if (search && search !== 'none') out.push(search)
+  if (tsdb && tsdb !== 'none') out.push(tsdb)
   if (redis) out.push('redis')
   if (storageMinio) out.push('minio')
   return out
@@ -130,6 +137,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
   const localOn = !!v.storageLocal
   const minioOn = !!v.storageMinio
   const isSql = SQL_ENGINES.includes(v.database)
+  const isMongo = v.database === 'mongodb'
   return (
     <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-4">
       <div>
@@ -170,9 +178,42 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
             onChange={x => set({ webSql: x })}
           />
         )}
-        {!isSql && (v.database && v.database !== 'none') && (
-          <Hint tone="faint">{SERVICE_META[v.database]?.label || v.database} is not SQL — Adminer doesn’t apply. Connection details are on the Database tab.</Hint>
+        {/* MongoDB counterpart to Adminer — the same web_sql toggle synthesizes mongo-express. */}
+        {isMongo && (
+          <MiniToggle
+            label="mongo-express (web console)"
+            hint="Browser admin UI for MongoDB — routed at the mongo subdomain; opens straight in (no login). Protect the route (internal/VPN, or the per-env basic-auth) for production DBs."
+            checked={!!v.webSql}
+            onChange={x => set({ webSql: x })}
+          />
         )}
+      </Group>
+
+      {/* ── Search & metrics group: optional aux engines running alongside the DB ── */}
+      <Group title="Search & metrics">
+        <div className="grid grid-cols-2 gap-3 items-end">
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Search engine</label>
+            <DatabaseSelect
+              category="search"
+              engine={v.search || 'none'}
+              version={v.searchVersion}
+              onChange={(eng, ver) => set({ search: eng === 'none' ? '' : eng, searchVersion: ver })}
+              caption={false}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Metrics (time-series)</label>
+            <DatabaseSelect
+              category="tsdb"
+              engine={v.tsdb || 'none'}
+              version={v.tsdbVersion}
+              onChange={(eng, ver) => set({ tsdb: eng === 'none' ? '' : eng, tsdbVersion: ver })}
+              caption={false}
+            />
+          </div>
+        </div>
+        <Hint tone="faint">Optional engines that run <strong>alongside</strong> your database — OpenSearch for full-text search, VictoriaMetrics for time-series/metrics. Internal-only; connection details appear on their own <strong>Search</strong> / <strong>Metrics</strong> tabs.</Hint>
       </Group>
 
       {/* ── Storage group: local volume and/or MinIO (S3) + its admin console ── */}

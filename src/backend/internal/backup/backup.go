@@ -132,12 +132,20 @@ func (c *ctx) backupDB(dateDir, backupDir string) {
 		if !c.sqlDump("mysql", "mariadb", "mysql", dateDir, backupDir) {
 			c.warn("SQL dump failed — filesystem fallback not available for custom stacks")
 		}
-	case "mongodb", "opensearch", "victoriametrics":
-		// Non-SQL engines have no logical-dump path here — capture the data volume
-		// instead (restore is volume-level, not logical). Volume name = {prefix}_{engine}_data.
+	case "mongodb":
+		// Non-SQL engine — no logical-dump path here — capture the data volume instead
+		// (restore is volume-level, not logical). Volume name = {prefix}_{engine}_data.
 		c.archiveManagedDBVolume(database, dateDir, backupDir)
 	default:
-		c.info("No database configured (database=%s) — skipping DB backup", database)
+		c.info("No primary database (database=%s) — skipping DB dump", database)
+	}
+	// Auxiliary engines run alongside the primary DB and are captured at the volume level
+	// (no logical dump). Independent of the DB switch above.
+	if eng := c.cfg.effSearch(); eng != "" {
+		c.archiveManagedDBVolume(eng, dateDir, backupDir)
+	}
+	if eng := c.cfg.effTSDB(); eng != "" {
+		c.archiveManagedDBVolume(eng, dateDir, backupDir)
 	}
 }
 

@@ -92,6 +92,8 @@ type wsConfig struct {
 		ResourcePrefix string `json:"resource_prefix"`
 		// Managed deps are project-level now; per-env fields kept for back-compat.
 		Database      string `json:"database"`
+		Search        string `json:"search"`         // opensearch (aux, alongside DB) — volume-level backup
+		TSDB          string `json:"tsdb"`           // victoriametrics (aux, alongside DB) — volume-level backup
 		StorageLocal  bool   `json:"storage_local"`  // independent backends — both may be on
 		StorageMinIO  bool   `json:"storage_minio"`
 		ObjectStorage string `json:"object_storage"` // legacy enum (back-compat); Garage retired
@@ -118,6 +120,10 @@ func (c *wsConfig) effDatabase(env string) string {
 	}
 	return c.Environments[env].Database
 }
+
+// effSearch / effTSDB return the project's auxiliary search / time-series engines (or "").
+func (c *wsConfig) effSearch() string { return c.Project.Search }
+func (c *wsConfig) effTSDB() string   { return c.Project.TSDB }
 
 // minioOn / localOn report the project's object-storage backends (independent — both
 // may be on). New flags OR the legacy ObjectStorage enum; garage is retired.

@@ -11,7 +11,7 @@ import { Hint } from './ui'
 // MinIO — bucket list/create. One shared secret-reveal toggle (operator+) unmasks
 // credentials across all tabs.
 
-const KIND_ICON = { database: '🗄', redis: '⚡', s3: '🪣', storage_local: '📁', mailpit: '✉️' }
+const KIND_ICON = { database: '🗄', redis: '⚡', s3: '🪣', storage_local: '📁', mailpit: '✉️', search: '🔍', tsdb: '📈' }
 
 // uiURLFor builds a sidecar's web-UI URL from the env's apex URL by prefixing the
 // service subdomain (storage./mail.). Mirrors composegen's subdomain routing. Returns
@@ -21,8 +21,8 @@ function uiURLFor(apexUrl, subdomain) {
   return apexUrl.replace(/^(https?:\/\/)/, `$1${subdomain}.`)
 }
 
-export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB = false,
-  canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', apexUrl = '', onClose }) {
+export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB = false, dbKind = '',
+  canReveal = false, canManage = false, webSqlEnabled = false, adminerUrl = '', mongoExpressEnabled = false, mongoExpressUrl = '', apexUrl = '', onClose }) {
   const [reveal, setReveal] = useState(false)
   const [dbMeta, setDbMeta] = useState(null)
   // For operator+ (canReveal) we fetch the REAL secret values up front and mask them
@@ -35,8 +35,10 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
   const services = data?.services || []
 
   // Tabs: database first (own endpoints), then each non-DB service from the console.
+  // Tab titles are the GENERIC category (SQL Database / Cache / Search / …); the concrete
+  // product + version shows as the heading at the top of each tab's body.
   const tabs = []
-  if (hasManagedDB) tabs.push({ key: 'database', kind: 'database', label: 'Database' })
+  if (hasManagedDB) tabs.push({ key: 'database', kind: 'database', label: dbKind === 'mongodb' ? 'Document DB' : 'SQL Database' })
   services.forEach(s => tabs.push({ key: s.kind, kind: s.kind, label: s.label, svc: s }))
 
   const [active, setActive] = useState(hasManagedDB ? 'database' : null)
@@ -53,9 +55,6 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
           <div className="flex items-center gap-2 text-sm">
             <span className="text-base">🧩</span>
             <span className="font-semibold text-content-strong">Managed services</span>
-            {activeTab?.kind === 'database' && dbMeta && (
-              <span className="px-1.5 py-0.5 rounded border border-border-strong bg-surface-raised text-xs text-content">{dbMeta.label} {dbMeta.version}</span>
-            )}
             <span className="text-xs text-content-subtle">· {env}</span>
           </div>
           <div className="flex items-center gap-3">
@@ -83,9 +82,24 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
         {/* Fixed body height so the modal stays the same size across tabs (content
             scrolls within) instead of resizing to each tab's content. */}
         <div className="h-[58vh] overflow-y-auto px-5 py-4">
+          {/* Product + version heading for the active tab (the tab title is the generic
+              category; here we name the concrete product). */}
+          {activeTab && (() => {
+            const isDb = activeTab.kind === 'database'
+            const product = isDb ? dbMeta?.label : activeTab.svc?.product
+            const version = isDb ? dbMeta?.version : activeTab.svc?.version
+            return (
+              <div className="mb-4 flex items-baseline gap-2 flex-wrap">
+                <h2 className="text-base font-bold text-content-strong">{product || activeTab.label}</h2>
+                {version && <span className="px-1.5 py-0.5 rounded border border-border-strong bg-surface-raised text-[11px] font-mono text-content">{version}</span>}
+                <span className="text-xs text-content-subtle">{activeTab.label}</span>
+              </div>
+            )
+          })()}
           {activeTab?.kind === 'database' ? (
             <DatabasePanel workspace={workspace} name={name} env={env} showAll={reveal}
-              canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} onMeta={setDbMeta} />
+              canReveal={canReveal} canManage={canManage} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl}
+              mongoExpressEnabled={mongoExpressEnabled} mongoExpressUrl={mongoExpressUrl} onMeta={setDbMeta} />
           ) : activeTab?.svc ? (
             <ServicePanel workspace={workspace} name={name} env={env} svc={activeTab.svc}
               apexUrl={apexUrl} canManage={canManage} canReveal={canReveal} showAll={reveal} />

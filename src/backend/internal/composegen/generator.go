@@ -356,9 +356,11 @@ func managedDBName(cfg *Config, e Env) string {
 		eng = e.Database
 	}
 	switch eng {
-	case "postgres", "mysql", "mariadb", "mongodb", "opensearch", "victoriametrics":
+	case "postgres", "mysql", "mariadb", "mongodb":
 		return eng
 	}
+	// opensearch / victoriametrics are auxiliary services (Project.Search/TSDB), not the
+	// primary DB — the app's auto migrate/depends_on gate targets the real DB only.
 	return ""
 }
 

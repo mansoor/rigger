@@ -1,6 +1,13 @@
 # Standalone Search & TSDB managed services (OpenSearch + VictoriaMetrics as auxiliary deps)
 
-**Status: PLANNED — not yet implemented (deferred; revisit after more testing).**
+**Status: IMPLEMENTED (2026-07-02).** OpenSearch (search) and VictoriaMetrics (tsdb) now run
+as opt-in auxiliary managed services ALONGSIDE a primary DB, each with its own console tab.
+Catalog `Category`; `Project.Search/TSDB` (+versions); `Config.Normalize()` (wsconfig) +
+`normalizeAux()` (composegen) relocate a legacy `Database: opensearch|victoriametrics` into the
+new slots; composegen/envgen/backup re-gated off `Search/TSDB`; PutConfig validates by category;
+`ManagedServices` "Search & metrics" group + category-filtered `DatabaseSelect`; Search/Metrics
+console tabs. Internal-only v1. Verified via unit tests + a throwaway postgres+opensearch+
+victoriametrics deploy. Out-of-scope items below remain deferred.
 **Decision taken: promote OpenSearch (Search) and VictoriaMetrics (Metrics/TSDB) from
 single-slot catalog database engines to opt-in AUXILIARY managed services that run
 ALONGSIDE a primary database + Redis + object storage + Mailpit, each with its own
