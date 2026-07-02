@@ -45,8 +45,11 @@ func Sync(envDir, repo, branch string, auth *Auth, out io.Writer) (string, error
 	if repo == "" {
 		return "", fmt.Errorf("no source repository configured")
 	}
+	// A blank branch means "the repository's default" — resolve it from the remote's HEAD
+	// symref rather than assuming "main" (repos also use master / develop / trunk). If it
+	// can't be resolved (auth/network), branch stays "" and git picks the default at clone.
 	if branch == "" {
-		branch = "main"
+		branch = resolveDefaultBranch(repo, auth)
 	}
 	src := SrcDir(envDir)
 	run := func(args ...string) error {
@@ -74,8 +77,12 @@ func Sync(envDir, repo, branch string, auth *Auth, out io.Writer) (string, error
 		return nil
 	}
 	if _, err := os.Stat(filepath.Join(src, ".git")); err == nil {
-		fmt.Fprintf(out, "⟳ Updating source (%s @ %s)\n", repo, branch)
-		if err := run("-C", src, "fetch", "--depth", "1", "origin", branch); err != nil {
+		fmt.Fprintf(out, "⟳ Updating source (%s @ %s)\n", repo, branchLabel(branch))
+		fetchArgs := []string{"-C", src, "fetch", "--depth", "1", "origin"}
+		if branch != "" {
+			fetchArgs = append(fetchArgs, branch)
+		}
+		if err := run(fetchArgs...); err != nil {
 			return "", err
 		}
 		if err := run("-C", src, "reset", "--hard", "FETCH_HEAD"); err != nil {
@@ -83,12 +90,52 @@ func Sync(envDir, repo, branch string, auth *Auth, out io.Writer) (string, error
 		}
 		return src, nil
 	}
-	fmt.Fprintf(out, "⟳ Cloning source (%s @ %s)\n", repo, branch)
+	fmt.Fprintf(out, "⟳ Cloning source (%s @ %s)\n", repo, branchLabel(branch))
 	_ = os.RemoveAll(src)
-	if err := run("clone", "--depth", "1", "--branch", branch, repo, src); err != nil {
+	cloneArgs := []string{"clone", "--depth", "1"}
+	if branch != "" {
+		cloneArgs = append(cloneArgs, "--branch", branch)
+	}
+	cloneArgs = append(cloneArgs, repo, src)
+	if err := run(cloneArgs...); err != nil {
 		return "", err
 	}
 	return src, nil
+}
+
+// branchLabel renders the branch for progress output, naming the empty (default) case.
+func branchLabel(branch string) string {
+	if branch == "" {
+		return "default branch"
+	}
+	return branch
+}
+
+// resolveDefaultBranch returns the remote repository's default branch (its HEAD symref),
+// so a blank branch clones whatever the repo actually defaults to — main, master, develop,
+// … — rather than assuming "main". Returns "" when it can't be determined (auth/network);
+// the caller then omits --branch and lets git pick the default at clone time.
+func resolveDefaultBranch(repo string, auth *Auth) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--symref", repo, "HEAD")
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if auth != nil && len(auth.Env) > 0 {
+		cmd.Env = append(cmd.Env, auth.Env...)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	// e.g. "ref: refs/heads/develop\tHEAD"
+	for _, line := range strings.Split(string(out), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "ref: refs/heads/"); ok {
+			if i := strings.IndexAny(rest, " \t"); i > 0 {
+				return rest[:i]
+			}
+		}
+	}
+	return ""
 }
 
 // ClassifyError turns git's captured output into a specific, user-facing reason for a

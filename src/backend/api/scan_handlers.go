@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -37,7 +38,8 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if auth, perr = p.BuildAuth(strings.TrimSpace(body.Repo)); perr != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": perr.Error()})
+			log.Printf("scan: build auth for provider %d (%s) repo %q: %v", body.ProviderID, p.Kind, body.Repo, perr)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "git provider auth failed: " + perr.Error()})
 			return
 		}
 		if auth.Cleanup != nil {
@@ -52,9 +54,10 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(tmp)
 
-	var log bytes.Buffer
-	src, err := gitsync.Sync(tmp, strings.TrimSpace(body.Repo), strings.TrimSpace(body.Branch), auth, &log)
+	var syncLog bytes.Buffer
+	src, err := gitsync.Sync(tmp, strings.TrimSpace(body.Repo), strings.TrimSpace(body.Branch), auth, &syncLog)
 	if err != nil {
+		log.Printf("scan: sync repo %q branch %q (provider %d): %v\n--- git output ---\n%s", body.Repo, body.Branch, body.ProviderID, err, syncLog.String())
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "couldn't scan the repository: " + err.Error()})
 		return
 	}

@@ -238,7 +238,7 @@ function ScanStack({ data, onChange, workspace }) {
         </div>
         <div>
           <Label>Branch</Label>
-          <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="main" />
+          <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="default branch" />
         </div>
         <button type="button" onClick={scan} disabled={busy || !(data.source_repo || '').trim()}
           className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
@@ -1239,7 +1239,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
                 </div>
                 <div>
                   <Label>Branch</Label>
-                  <Input value={env.git_branch} onChange={v => upd('git_branch', v)} placeholder="main" />
+                  <Input value={env.git_branch} onChange={v => upd('git_branch', v)} placeholder="default branch" />
                 </div>
               </div>
             )}
