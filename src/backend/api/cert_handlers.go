@@ -55,32 +55,50 @@ func (h *Handler) GetCertInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	domain := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("domain")))
+	writeJSON(w, http.StatusOK, h.certInfoForDomain(domain))
+}
+
+// certInfoForDomain reports the live TLS cert (issuer + expiry) serving `domain`, reading
+// Traefik's ACME stores + the file-provider store; if none is served yet, it falls back to
+// the tracked override store's recorded expiry. Zero value (Found:false) when nothing is
+// known. Shared by the env-card cert endpoint and the proxy-routes list.
+func (h *Handler) certInfoForDomain(domain string) certInfoResponse {
+	domain = strings.TrimSpace(strings.ToLower(domain))
 	if domain == "" {
-		writeJSON(w, http.StatusOK, certInfoResponse{Found: false})
-		return
+		return certInfoResponse{}
 	}
 	certsDir := os.Getenv("TRAEFIK_CERTS_DIR")
 	if certsDir == "" {
 		certsDir = "/certs"
 	}
-	cert := findServedCert(certsDir, domain)
-	if cert == nil {
-		writeJSON(w, http.StatusOK, certInfoResponse{Found: false})
-		return
-	}
 	now := time.Now()
-	issuer := cert.Issuer.CommonName
-	if issuer == "" && len(cert.Issuer.Organization) > 0 {
-		issuer = cert.Issuer.Organization[0]
+	if cert := findServedCert(certsDir, domain); cert != nil {
+		issuer := cert.Issuer.CommonName
+		if issuer == "" && len(cert.Issuer.Organization) > 0 {
+			issuer = cert.Issuer.Organization[0]
+		}
+		le := strings.Contains(strings.ToLower(strings.Join(cert.Issuer.Organization, " ")), "let's encrypt") ||
+			strings.Contains(strings.ToLower(issuer), "let's encrypt")
+		return certInfoResponse{
+			Found: true, Domain: domain, Issuer: issuer, LetsEncrypt: le,
+			NotAfter:      cert.NotAfter.UTC().Format(time.RFC3339),
+			DaysRemaining: int(cert.NotAfter.Sub(now).Hours() / 24),
+			Expired:       now.After(cert.NotAfter),
+		}
 	}
-	le := strings.Contains(strings.ToLower(strings.Join(cert.Issuer.Organization, " ")), "let's encrypt") ||
-		strings.Contains(strings.ToLower(issuer), "let's encrypt")
-	writeJSON(w, http.StatusOK, certInfoResponse{
-		Found: true, Domain: domain, Issuer: issuer, LetsEncrypt: le,
-		NotAfter:      cert.NotAfter.UTC().Format(time.RFC3339),
-		DaysRemaining: int(cert.NotAfter.Sub(now).Hours() / 24),
-		Expired:       now.After(cert.NotAfter),
-	})
+	// Not served yet — report the tracked (out-of-band lego) cert's recorded expiry if any.
+	if h.acmeCerts != nil {
+		if rec, found, _ := h.acmeCerts.Get(domain); found && rec.NotAfter > 0 {
+			t := time.Unix(rec.NotAfter, 0)
+			return certInfoResponse{
+				Found: true, Domain: domain, LetsEncrypt: true,
+				NotAfter:      t.UTC().Format(time.RFC3339),
+				DaysRemaining: int(t.Sub(now).Hours() / 24),
+				Expired:       now.After(t),
+			}
+		}
+	}
+	return certInfoResponse{}
 }
 
 // findServedCert scans Traefik's ACME stores for the leaf cert that serves `domain`

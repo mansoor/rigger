@@ -134,6 +134,25 @@ export function RadioGroup({ name, value, onChange, options, row = false, classN
   )
 }
 
+// CertBadge renders a TLS cert's expiry as a colored pill from a certInfo object
+// ({ found, days_remaining, expired, not_after, issuer }): red if expired / ≤0d, amber
+// within 14 days, else green. Renders a muted dash when there's no managed cert.
+export function CertBadge({ cert, className = '' }) {
+  if (!cert || !cert.found) return <span className={`text-content-faint ${className}`}>—</span>
+  const d = cert.days_remaining
+  const expired = cert.expired || d < 0
+  const tone = expired ? 'text-danger-fg' : d <= 14 ? 'text-warning-fg' : 'text-success-fg'
+  const label = expired ? 'expired' : d === 0 ? 'expires today' : `${d}d left`
+  const title = cert.not_after
+    ? `Valid until ${new Date(cert.not_after).toLocaleString()}${cert.issuer ? ` · ${cert.issuer}` : ''}`
+    : undefined
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${tone} ${className}`} title={title}>
+      <span aria-hidden>{expired ? '⚠' : '🔒'}</span>{label}
+    </span>
+  )
+}
+
 // Field: Label + control + Hint in one block, the common vertical form row.
 export function Field({ label, required, hint, htmlFor, children, className = '' }) {
   return (

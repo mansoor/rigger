@@ -876,10 +876,8 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
             aria-expanded={expanded}
             className="-mx-5 -mb-5 mt-1 flex w-[calc(100%+2.5rem)] items-center justify-center rounded-b-xl border-t border-border/60 py-1 text-content-faint hover:bg-surface-raised/40 hover:text-content transition-colors"
           >
-            <svg viewBox="0 0 16 16" className={`w-3.5 h-3.5 transition-transform duration-300 ${expanded ? 'rotate-180' : ''}`}
-              fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M4 6l4 4 4-4" />
-            </svg>
+            {/* Match the Services header's triangle glyph so both collapse controls look the same. */}
+            <span className="text-xs leading-none" aria-hidden="true">{expanded ? '▲' : '▼'}</span>
           </button>
         </div>
       )}

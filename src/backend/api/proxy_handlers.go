@@ -184,6 +184,13 @@ func (h *Handler) issueOverrideCerts(rt proxyroutes.Route) error {
 	return nil
 }
 
+// proxyRouteWithCert is a route plus the live TLS cert status for its host, so the routes
+// table can surface certificate expiry. cert is null for non-TLS / catch-all / hostless routes.
+type proxyRouteWithCert struct {
+	proxyroutes.Route
+	Cert *certInfoResponse `json:"cert,omitempty"`
+}
+
 // ListProxyRoutes — GET /api/proxy/routes.
 func (h *Handler) ListProxyRoutes(w http.ResponseWriter, r *http.Request) {
 	routes, err := h.proxyStore().List()
@@ -191,9 +198,15 @@ func (h *Handler) ListProxyRoutes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	out := make([]proxyroutes.Route, len(routes))
+	out := make([]proxyRouteWithCert, len(routes))
 	for i, rt := range routes {
-		out[i] = mask(rt)
+		out[i] = proxyRouteWithCert{Route: mask(rt)}
+		// Attach cert expiry for TLS-serving routes with a concrete host.
+		if rt.Host != "" && rt.TLSMode != "" && rt.TLSMode != "none" {
+			if info := h.certInfoForDomain(rt.Host); info.Found {
+				out[i].Cert = &info
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

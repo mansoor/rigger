@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { Hint } from '../components/ui'
+import { Hint, CertBadge } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -219,6 +219,7 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
           <span className="text-sm font-semibold text-content-strong">{r.name}</span>
           {r.type === 'redirect' && <Badge>Redirect</Badge>}
           {r.tls_mode !== 'none' && <Badge cls={tls.cls}>{tls.label}</Badge>}
+          {r.tls_mode !== 'none' && r.cert && <CertBadge cert={r.cert} />}
           {acl
             ? <Badge cls="bg-brand-600/15 text-brand-300">🔒 {acl.name}</Badge>
             : <>

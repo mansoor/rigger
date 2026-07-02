@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, Fragment } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage, fetchWorkspaces } from '../lib/api'
+import { fetchStats, fetchEnvStatus, fetchAlertSummary, fetchLiveStats, fetchBackupCoverage, fetchWorkspaces, fetchConfig, fetchWorkspace, fetchCertInfo } from '../lib/api'
+import { resolveEnvRoute } from '../lib/envRoute'
 import { useWorkspaceStore } from '../store/workspace'
+import { CertBadge } from '../components/ui'
 import Layout from '../components/Layout'
 
 // Aggregate the live per-project stats down to one workspace. Containers (running
@@ -121,6 +123,67 @@ function EnvDot({ workspace, wsName, envName }) {
   const status = data?.status || 'unknown'
   const dot = { running: 'bg-green-400', partial: 'bg-amber-400 animate-pulse', stopped: 'bg-red-500', unknown: 'bg-surface-overlay' }
   return <span title={`${envName}: ${status}`} className={`w-2 h-2 rounded-full inline-block ${dot[status] || dot.unknown}`} />
+}
+
+// EnvCertBadge — live TLS cert expiry for a resolved env domain (reuses the env-card endpoint).
+function EnvCertBadge({ workspace, name, env, domain }) {
+  const { data } = useQuery({
+    queryKey: ['cert', workspace, name, env, domain],
+    queryFn: () => fetchCertInfo(workspace, name, env, domain),
+    enabled: !!domain,
+    staleTime: 60_000,
+    retry: false,
+  })
+  if (!domain || !data?.found) return null
+  return <CertBadge cert={data} />
+}
+
+// ProjectEnvDetails — the expandable panel under a project row: one line per environment
+// with deployment mode, clickable URL + cert expiry, host, and host-port mapping. Config +
+// workspace URL settings are fetched lazily (only when the row is expanded).
+function ProjectEnvDetails({ workspace, name, envHosts = {} }) {
+  const { data: cfg, isLoading } = useQuery({ queryKey: ['config', workspace, name], queryFn: () => fetchConfig(workspace, name), staleTime: 30_000 })
+  const { data: wsInfo } = useQuery({ queryKey: ['workspace', workspace, name], queryFn: () => fetchWorkspace(workspace, name), staleTime: 30_000 })
+  if (isLoading || !cfg) return <p className="text-xs text-content-subtle">Loading environments…</p>
+  const prefix = cfg.project?.resource_prefix || `${workspace}_${name}`
+  const baseDomain = (wsInfo?.apps_base_domain || '').trim()
+  const autoUrlMode = wsInfo?.auto_url_mode || ''
+  const appHost = wsInfo?.app_host || ''
+  const localTLS = !!(cfg.project?.local_tls || cfg.local_tls)
+  const envNames = Object.keys(cfg.environments || {})
+  if (envNames.length === 0) return <p className="text-xs text-content-subtle">No environments defined.</p>
+  return (
+    // pl-[22px] lines the env dot up under the first letter of the project name (chevron
+    // w-3.5 + gap-2), so the panel reads as nested inside the project.
+    <div className="space-y-1.5 pl-[22px]">
+      {envNames.map(env => {
+        // resolveEnvRoute reads env-level fields (traefik_enabled, domain, ssl_*), so it
+        // takes the per-ENV config, not the whole project config.
+        const e = cfg.environments[env] || {}
+        const exposeMode = e.expose_mode || (e.traefik_enabled ? 'traefik' : 'host_port')
+        const route = resolveEnvRoute(e, prefix, env, baseDomain, localTLS, autoUrlMode, appHost)
+        const hostName = envHosts?.[env]?.host_name || 'localhost'
+        const hostPort = exposeMode === 'host_port' ? (e.http_port || 80) : null
+        return (
+          <div key={env} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="inline-flex items-center gap-1.5 w-28 shrink-0">
+              <EnvDot workspace={workspace} wsName={name} envName={env} />
+              <span className="font-semibold text-content">{env}</span>
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-surface-overlay text-content-muted" title="Deployment mode">
+              {e.deployment === 'swarm' ? 'Swarm' : 'Compose'}
+            </span>
+            {exposeMode === 'traefik' && route?.url
+              ? <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-400 hover:underline truncate max-w-[300px]">{route.url}</a>
+              : hostPort ? <span className="font-mono text-content-muted">host port :{hostPort}</span>
+              : <span className="text-content-faint">internal only</span>}
+            {exposeMode === 'traefik' && <EnvCertBadge workspace={workspace} name={name} env={env} domain={route?.domain} />}
+            <span className="text-content-faint" title={hostName === 'localhost' ? 'runs on this host' : `runs on ${hostName}`}>🖥 {hostName}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 // ── Info row ──────────────────────────────────────────────────────────────────
@@ -351,6 +414,9 @@ export default function DashboardPage() {
   // from the delta between consecutive live samples (rx = incoming, tx = outgoing).
   const prevNet = useRef(null)
   const [netRates, setNetRates] = useState({})
+  // Project rows whose environment details are expanded (by resource prefix).
+  const [expanded, setExpanded] = useState(() => new Set())
+  const toggleExpand = (key) => setExpanded(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
   useEffect(() => {
     if (!live || Object.keys(live).length === 0) return
     const now = Date.now()
@@ -488,9 +554,15 @@ export default function DashboardPage() {
                     const lv = aggregateLive(w, live)
                     const netRate = netRates[prefix] || { rx: 0, tx: 0 }
                     return (
-                    <tr key={prefix} className={`hover:bg-surface-raised/40 transition-colors group ${as.row}`}>
+                    <Fragment key={prefix}>
+                    <tr className={`hover:bg-surface-raised/40 transition-colors group ${as.row}`}>
                       <td className={`px-5 py-3 ${as.cell}`}>
                         <div className="flex items-center gap-2">
+                          <button onClick={() => toggleExpand(prefix)} title={expanded.has(prefix) ? 'Hide environments' : 'Show environments'}
+                            aria-label="Toggle environments" aria-expanded={expanded.has(prefix)}
+                            className="text-content-faint hover:text-content-muted transition-transform shrink-0">
+                            <svg className={`w-3.5 h-3.5 transition-transform ${expanded.has(prefix) ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor"><path d="M7 5l6 5-6 5V5z" /></svg>
+                          </button>
                           <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="font-medium text-content-strong group-hover:text-brand-400 transition-colors">
                             {w.display_name || w.name}
                           </Link>
@@ -575,6 +647,14 @@ export default function DashboardPage() {
                         </Link>
                       </td>
                     </tr>
+                    {expanded.has(prefix) && (
+                      <tr className="bg-surface-raised/20">
+                        <td colSpan={10} className="px-5 pb-3 pt-0">
+                          <ProjectEnvDetails workspace={w.workspace} name={w.name} envHosts={w.env_hosts} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                     )
                   })}
                 </tbody>
