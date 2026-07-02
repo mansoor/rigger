@@ -162,3 +162,31 @@ func TestRoutesEmptyLegacyParity(t *testing.T) {
 		t.Errorf("api unexpectedly routed without any route:\n%s", s)
 	}
 }
+
+// A service routed ONLY via the route table (web_routed=false) must also JOIN traefik_net —
+// otherwise Traefik emits a router whose backend it can't reach (502/404). Regression for the
+// QRHub "api off traefik_net after refresh" bug: label emission used the route table but network
+// attachment used the legacy web_routed flag, so the two disagreed for a path-routed backend.
+func TestRoutesTableServiceJoinsTraefikNet(t *testing.T) {
+	s := genDev(t, twoSvcConfig(`[
+	  {"service":"web","type":"path","match":"/"},
+	  {"service":"api","type":"path","match":"/api"}
+	]`))
+	api := svcBlock(t, s, "api")
+	if !strings.Contains(api, "traefik_net: {}") {
+		t.Errorf("route-table api service is not attached to traefik_net (Traefik can't reach it):\n%s", api)
+	}
+	// Sanity: the web entry is still attached too.
+	if web := svcBlock(t, s, "web"); !strings.Contains(web, "traefik_net: {}") {
+		t.Errorf("web entry lost traefik_net:\n%s", web)
+	}
+}
+
+// Inverse guard: with NO routes, a non-web_routed service must NOT join traefik_net (it's
+// in-network only) — the legacy behavior stays byte-identical.
+func TestRoutesNoTableUnroutedServiceStaysOffTraefikNet(t *testing.T) {
+	s := genDev(t, twoSvcConfig(""))
+	if api := svcBlock(t, s, "api"); strings.Contains(api, "traefik_net") {
+		t.Errorf("unrouted api joined traefik_net without any route:\n%s", api)
+	}
+}

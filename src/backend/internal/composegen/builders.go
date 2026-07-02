@@ -294,7 +294,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line("        aliases:")
 	g.line("          - " + svc.Name)
 	g.line("          - " + cname)
-	if svc.WebRouted && e.TraefikEnabled && g.exposeMode() == "traefik" {
+	if g.traefikRouted(svc) && e.TraefikEnabled && g.exposeMode() == "traefik" {
 		g.line("      " + e.TraefikNetwork + ": {}")
 	}
 	// Join a user-chosen external network so an outside proxy / another stack can reach
@@ -390,6 +390,19 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	g.line("")
 }
 
+// traefikRouted reports whether this service has a PUBLIC Traefik router — and so must
+// join the shared Traefik network to be reachable. It must stay in lock-step with the
+// isRouted decision in emitServicePorts (which emits the labels): with a project routing
+// table, "routed" means the table targets this service (or it's a web-entry keeping its
+// own subdomain router); otherwise it's the legacy web_routed flag. A mismatch here
+// produces a router whose backend container isn't on traefik_net → Traefik 502/404.
+func (g *gen) traefikRouted(svc Service) bool {
+	if len(g.cfg.Routes) > 0 {
+		return len(g.cfg.routesFor(svc.Name)) > 0 || (svc.WebRouted && svc.Subdomain != "")
+	}
+	return svc.WebRouted
+}
+
 // emitServicePorts handles web routing and port publishing, emitting at most ONE
 // `ports:` block (duplicate keys are invalid YAML). A web-routed apex service under
 // Traefik gets labels AND, if an EXPLICIT host_port is set, publishes it too (so a
@@ -414,10 +427,8 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 	// subdomain and are NEVER in the user-facing path-routing table, so in route mode they
 	// keep their legacy subdomain router instead of being dropped (len(routes)==0).
 	viaRouteTable := useRoutes && len(routes) > 0
-	isRouted := svc.WebRouted
-	if useRoutes {
-		isRouted = viaRouteTable || (svc.WebRouted && svc.Subdomain != "")
-	}
+	// Same predicate that decides traefik_net attachment — keep them one source of truth.
+	isRouted := g.traefikRouted(svc)
 	switch {
 	case svc.WebRouted && mode == "cloudflare_tunnel":
 		// No public router — the cloudflared connector reaches the app in-network. Honor an
