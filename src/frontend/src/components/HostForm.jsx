@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchManagedHostKey } from '../lib/api'
+import { Hint } from './ui'
 
 // Shared Remote Host add/edit form, used by both the admin Settings page (global
 // hosts, with a workspace allowlist) and Manage Workspace (workspace-owned hosts).
@@ -116,10 +117,10 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
       <div>
         <Label>Remote workspaces directory</Label>
         <Input value={wsDir} onChange={setWsDir} placeholder="/opt/rigger/workspaces" />
-        <p className="text-xs text-content-faint mt-1">
+        <Hint tone="faint">
           Absolute path on the host where workspaces live (for scan/import) and are pushed (for deploy/migrate).
           Leave blank to use the server default (<code className="font-mono">REMOTE_WORKSPACES_DIR</code>).
-        </p>
+        </Hint>
       </div>
 
       {/* Rigger-managed key toggle */}
@@ -141,10 +142,10 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
               {copied ? '✓' : 'Copy'}
             </button>
           </div>
-          <p className="text-xs text-content-subtle">
+          <Hint>
             2. Then add the host and click <strong className="text-content-muted">Test</strong>. The host only needs Docker + SSH.
             (The private key never leaves Rigger.)
-          </p>
+          </Hint>
         </div>
       ) : (
         <div>
@@ -175,11 +176,11 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
             <input type="checkbox" checked={buildOnly} onChange={e => setBuildOnly(e.target.checked)} className="accent-brand-500 mt-0.5" />
             <span>
               <span className="text-sm text-content">Build-only (dedicated builder)</span>
-              <span className="block text-xs text-content-subtle mt-0.5">
+              <Hint className="mt-0.5">
                 Use this host only to build &amp; push images — it's hidden from deploy-host pickers and runs no workloads,
                 so it can be torn down at any time. Leave unchecked for a normal <strong className="text-content-muted">Build + Deploy</strong> host.
                 {isEdit && ' A host that is still a deploy target for an environment can\'t be switched to build-only until those environments are moved.'}
-              </span>
+              </Hint>
             </span>
           </label>
         </div>
@@ -210,9 +211,9 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
               ))}
             </div>
           )}
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Controls which workspaces can pick this host for their environments. Workspace-owned hosts are private and aren't listed here.
-          </p>
+          </Hint>
         </div>
       )}
 

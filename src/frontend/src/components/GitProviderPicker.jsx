@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspaceGitProviders, createWorkspaceGitProvider } from '../lib/api'
+import { Hint } from './ui'
 
 // GitProviderPicker selects the workspace Git provider used to clone a PRIVATE
 // source repo (sets the project's git_provider_id). It can inline-create a provider
@@ -45,7 +46,7 @@ export default function GitProviderPicker({ workspace, value, onChange }) {
           {adding ? 'Cancel' : '＋ New'}
         </button>
       </div>
-      <p className="text-xs text-content-subtle mt-1">For a private repository, pick (or add) a Git provider. Manage them in Workspace → Git.</p>
+      <Hint>For a private repository, pick (or add) a Git provider. Manage them in Workspace → Git.</Hint>
 
       {adding && (
         <InlineCreate
@@ -92,7 +93,7 @@ function InlineCreate({ onCreate, saving, error }) {
       <input className={inp} value={host} onChange={e => setHost(e.target.value)} placeholder="Host (optional, e.g. github.com)" />
       {kind === 'token'
         ? <input className={inp} type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder="Access token (read access to the repo)" />
-        : <p className="text-[11px] text-content-faint">Rigger generates a deploy keypair; the public key shows after saving — add it to your provider as a read-only deploy key.</p>}
+        : <Hint tone="faint" className="text-[11px]">Rigger generates a deploy keypair; the public key shows after saving — add it to your provider as a read-only deploy key.</Hint>}
       {error && <p className="text-xs text-danger-fg">{error}</p>}
       <div className="flex justify-end">
         <button type="button" disabled={!canSave || saving}

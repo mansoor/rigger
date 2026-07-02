@@ -7,6 +7,7 @@ import {
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
   suggestPipeline, fetchWorkspaceNotificationChannels,
 } from '../lib/api'
+import { Hint } from './ui'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
 // ordered list of stages; each stage maps to a deploy/build/restart/backup action
@@ -89,7 +90,7 @@ export default function PipelinesTab({ workspace, name, envNames = [], serviceNa
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Pipelines</h2>
-          <p className="text-xs text-content-subtle">Chain deploy, build, test and backup steps into a one-click run.</p>
+          <Hint>Chain deploy, build, test and backup steps into a one-click run.</Hint>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -287,7 +288,7 @@ function Webhooks({ workspace, name, pipelineId }) {
   return (
     <div className="mt-2 space-y-2 border-t border-border pt-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-content-subtle">POST to a webhook URL to trigger this pipeline (e.g. from GitHub/Gitea on push).</p>
+        <Hint>POST to a webhook URL to trigger this pipeline (e.g. from GitHub/Gitea on push).</Hint>
         <button onClick={() => addMut.mutate()} disabled={addMut.isPending} className="text-xs font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-40">+ Add webhook</button>
       </div>
 
@@ -738,9 +739,9 @@ function NotifySection({ draft, workspace, onChange }) {
   return (
     <div className="border-t border-border pt-4">
       <label className="block text-[11px] font-semibold uppercase tracking-wide text-content-muted mb-1">Notifications</label>
-      <p className="text-xs text-content-subtle mb-3">
+      <Hint className="mb-3">
         Alert a notification channel on run events. Every alert includes the workspace, project, environment and pipeline name.
-      </p>
+      </Hint>
 
       <div className="flex flex-wrap gap-x-5 gap-y-2 mb-3">
         {EVENTS.map(([key, label]) => (
@@ -756,7 +757,7 @@ function NotifySection({ draft, workspace, onChange }) {
           <p className="text-xs text-warning-fg">No notification channels available in this workspace. Add one under Manage Workspace → Notifications first.</p>
         ) : (
           <div>
-            <p className="text-[11px] text-content-faint mb-1.5">Send to channels:</p>
+            <Hint tone="faint" className="text-[11px] mb-1.5">Send to channels:</Hint>
             <div className="flex flex-wrap gap-2">
               {channels.map(c => (
                 <label key={c.id} className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg border cursor-pointer transition-colors ${ids.includes(c.id) ? 'border-brand-500 bg-brand-500/10 text-content-strong' : 'border-border-strong text-content-muted hover:bg-surface-raised'}`}>
@@ -885,7 +886,7 @@ function StageRow({ idx, count, stage, envNames, serviceNames = [], onChange, on
         <div className="mt-2 pl-7 space-y-2">
           <input value={stage.image || ''} onChange={e => onChange({ image: e.target.value })} placeholder="tool image, e.g. aquasec/trivy:latest" className={`${inputCls} w-full font-mono`} />
           <input value={stage.command || ''} onChange={e => onChange({ command: e.target.value })} placeholder='command (sh -c), e.g. trivy image $RIGGER_IMAGES' className={`${inputCls} w-full font-mono`} />
-          <p className="text-[11px] text-content-faint">Injected: <code className="font-mono">$RIGGER_ENV $RIGGER_APP_URL $RIGGER_STACK $RIGGER_IMAGES $RIGGER_IMAGE_&lt;SVC&gt;</code>. Secrets (e.g. a Sonar token) are inlined here and stored in the pipeline — treat with care.</p>
+          <Hint tone="faint" className="text-[11px]">Injected: <code className="font-mono">$RIGGER_ENV $RIGGER_APP_URL $RIGGER_STACK $RIGGER_IMAGES $RIGGER_IMAGE_&lt;SVC&gt;</code>. Secrets (e.g. a Sonar token) are inlined here and stored in the pipeline — treat with care.</Hint>
         </div>
       )}
     </div>
@@ -952,11 +953,11 @@ function GeneratePipelineDialog({ workspace, name, envNames = [], target = null,
       <div className="w-full max-w-md bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-content-strong">{target ? 'Regenerate pipeline' : 'Generate pipeline'}</h2>
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             {target
               ? <>Re-seeds <span className="font-medium text-content">{target.name}</span> from the current environments — replaces its stages. You can review before saving.</>
               : 'Seeded from your environments (in deploy-tier order). Review and edit before saving.'}
-          </p>
+          </Hint>
         </div>
         <div className="px-5 py-4 space-y-4">
           <div>

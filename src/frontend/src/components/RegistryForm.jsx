@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Hint } from './ui'
 
 // Shared Docker Registry add/edit form, used by both the admin Settings page
 // (global registries, with a workspace allowlist) and Manage Workspace
@@ -64,7 +65,7 @@ export default function RegistryForm({ initial, onSave, onCancel, saving, showGr
         <div>
           <Label required>Registry URL</Label>
           <Input value={url} onChange={setUrl} placeholder="registry.example.com" />
-          <p className="text-xs text-content-faint mt-1">e.g. docker.io, ghcr.io, registry.example.com</p>
+          <Hint tone="faint">e.g. docker.io, ghcr.io, registry.example.com</Hint>
         </div>
         <div>
           <Label required>Username</Label>
@@ -73,7 +74,7 @@ export default function RegistryForm({ initial, onSave, onCancel, saving, showGr
         <div>
           <Label required={!isEdit}>Password / Token</Label>
           <Input value={password} onChange={setPassword} type="password" placeholder={isEdit ? '(unchanged)' : '••••••••'} />
-          {isEdit && <p className="text-xs text-content-faint mt-1">Leave blank to keep existing password</p>}
+          {isEdit && <Hint tone="faint">Leave blank to keep existing password</Hint>}
         </div>
       </div>
 
@@ -102,9 +103,9 @@ export default function RegistryForm({ initial, onSave, onCancel, saving, showGr
               ))}
             </div>
           )}
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Controls which workspaces can pick this registry for their projects. Workspace-owned registries are private and aren't listed here.
-          </p>
+          </Hint>
         </div>
       )}
 

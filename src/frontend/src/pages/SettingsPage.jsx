@@ -34,6 +34,7 @@ import {
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
+import { Hint } from '../components/ui'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ function BackupTargetsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Backup Targets</h2>
-          <p className="text-sm text-content-subtle mt-0.5">S3-compatible object storage and SFTP destinations for workspace backups.</p>
+          <Hint className="text-sm mt-0.5">S3-compatible object storage and SFTP destinations for workspace backups.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add target</Btn>
       </div>
@@ -289,15 +290,15 @@ function ManagedRegistryCard({ onChanged }) {
               ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">running</span>
               : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">stopped</span>}
           </div>
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             {running
               ? <>Serving at <code className="text-content-muted">{st.url}</code>{st.https ? ' over HTTPS' : ' (local HTTP)'}{st.system ? ' · system registry' : ''}{st.disk_usage ? ` · ${st.disk_usage}` : ''}.</>
               : <>Run a registry:2 container on this host with one click. Build pushes here; deploys (and Swarm nodes) pull from it.</>}
-          </p>
+          </Hint>
           {noBaseDomain ? (
             <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">No apps base domain set — the registry will be local HTTP (<code>localhost:5000</code>), usable only for single-node compose deploys. Set a base domain (Settings → General) for an HTTPS <code>registry.&#123;base&#125;</code> a Swarm can pull from.</p>
           ) : (
-            <p className="text-xs text-content-faint mt-1">Will be fronted by Traefik over HTTPS at <code>registry.{st.base_domain}</code>{st.https ? '' : ' once running'} — pullable by every Swarm node.</p>
+            <Hint tone="faint">Will be fronted by Traefik over HTTPS at <code>registry.{st.base_domain}</code>{st.https ? '' : ' once running'} — pullable by every Swarm node.</Hint>
           )}
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
@@ -349,12 +350,12 @@ function ManagedMetricsCard() {
               ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100/70 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">running</span>
               : <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-raised border border-border-strong text-content-faint">stopped</span>}
           </div>
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             {running
               ? <>Storing Rigger's metrics at <code className="text-content-muted">{st.url}</code> · {st.retention}-month retention{st.disk_usage ? ` · ${st.disk_usage}` : ''}.</>
               : <>Run a VictoriaMetrics container on this host to keep long-term history of Rigger's own metrics. Internal-only; env-card charts keep using the built-in store.</>}
-          </p>
-          <p className="text-xs text-content-faint mt-1">Numeric metrics only (CPU / memory / disk / network) — not logs. Queryable via PromQL; Grafana-ready.</p>
+          </Hint>
+          <Hint tone="faint">Numeric metrics only (CPU / memory / disk / network) — not logs. Queryable via PromQL; Grafana-ready.</Hint>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
           {!running
@@ -415,7 +416,7 @@ function RegistriesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Docker Registries</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Pre-authenticated registries available when creating new workspaces. Mark one <span className="text-content-muted font-medium">system</span> to use it wherever a project sets no registry — required to deploy built images to a Swarm or remote host.</p>
+          <Hint className="text-sm mt-0.5">Pre-authenticated registries available when creating new workspaces. Mark one <span className="text-content-muted font-medium">system</span> to use it wherever a project sets no registry — required to deploy built images to a Swarm or remote host.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add registry</Btn>
       </div>
@@ -555,7 +556,7 @@ function HostsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Remote Hosts</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Manage Docker workloads on other servers over SSH. Hosts need only Docker + SSH.</p>
+          <Hint className="text-sm mt-0.5">Manage Docker workloads on other servers over SSH. Hosts need only Docker + SSH.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add host</Btn>
       </div>
@@ -786,7 +787,7 @@ function ScanHostModal({ host, onClose, onImported }) {
             <div className="py-8 text-center text-content-subtle text-sm">No workspaces found in the remote workspaces directory.</div>
           ) : (
             <>
-              <p className="text-xs text-content-subtle mb-3">Select workspaces to import. Already-imported workspaces are disabled.</p>
+              <Hint className="mb-3">Select workspaces to import. Already-imported workspaces are disabled.</Hint>
               <div className="space-y-1.5 max-h-72 overflow-y-auto">
                 {rows.map(w => (
                   <label key={w.name} className={`flex items-center gap-3 p-3 rounded-lg border ${w.imported ? 'border-border bg-surface/50 opacity-60' : 'border-border bg-surface cursor-pointer hover:border-border-strong'}`}>
@@ -895,19 +896,19 @@ function DomainsTab() {
       {/* SSL / Let's Encrypt */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">SSL Certificates — Let's Encrypt</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           Traefik automatically issues and renews certificates via Let's Encrypt. Set your email
           below — it is sent to Let's Encrypt for cert expiry notifications and account recovery.
-        </p>
+        </Hint>
         <div className="space-y-4 p-4 bg-surface border border-border rounded-xl">
           <div>
             <Label required>ACME email address</Label>
             <Input value={acmeEmail} onChange={setAcmeEmail} placeholder="admin@example.com" type="email" />
-            <p className="text-xs text-content-subtle mt-1">
+            <Hint>
               Must match the <code className="font-mono text-xs">ACME_EMAIL</code> value in{' '}
               <code className="font-mono text-xs">src/.env</code>. Traefik reads it from there;
               this field stores it for reference and future automation.
-            </p>
+            </Hint>
           </div>
           <div className="px-4 py-3 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
             <p className="text-xs text-warning-fg font-semibold mb-1">Requirements for SSL to work</p>
@@ -923,31 +924,31 @@ function DomainsTab() {
       {/* Rigger domain */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Rigger UI Domain</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           Optionally expose the Rigger UI itself through Traefik with an SSL cert at the
           domain below. Leave blank to keep reaching Rigger on its port only.
-        </p>
+        </Hint>
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Rigger UI domain</Label>
           <Input value={riggerDomain} onChange={setRiggerDomain} placeholder="rigger.example.com" />
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             Leave blank to access Rigger UI on port{' '}
             <code className="font-mono text-xs">RIGGER_PORT</code> only.
-          </p>
+          </Hint>
         </div>
       </div>
 
       {/* App host / IP — the local Docker host's address */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">App host / IP</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           The address users reach this host's apps at (the Docker host's IP or hostname). Drives
           both the <strong>Open app</strong> port links AND the auto-URL (sslip/nip) hostnames for
           <strong> locally-deployed</strong> environments. Seeded from the host IP at install; the
           server runs in a container so it can't re-detect this itself.{' '}
           <strong>Remote-host envs always use their own host's address</strong> — this only applies
           to the local host.
-        </p>
+        </Hint>
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Host address</Label>
           <div className="flex gap-2">
@@ -968,35 +969,35 @@ function DomainsTab() {
             )}
           </div>
           {detectErr && <p className="text-xs text-warning-fg mt-1">{detectErr}</p>}
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             Usually set automatically from the host IP at install time. To change it:{' '}
             <strong>Detect</strong> asks the Docker host for its outbound IP (works on a native Linux
             host; on <strong>Docker Desktop</strong> it returns the internal VM IP, not your machine's
             LAN IP — enter it by hand there). <strong>Use {'{hostname}'}</strong> takes the address
             your browser reached Rigger at — correct when you browse to Rigger by IP. Needs an IP for
             sslip/nip auto-URLs. Blank ⇒ browser hostname for port links, <code className="font-mono text-xs">*.localhost</code> for auto-URLs.
-          </p>
+          </Hint>
         </div>
       </div>
 
       {/* Application domains — the Render-style auto-URL base */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Application domains</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           The base domain every deployed app gets a URL under —
           <code className="font-mono text-xs"> {'{workspace}-{app}-{env}'}.{appsBaseDomain || 'onrigger.com'}</code>.
           Workspaces can override this in <strong>Manage Workspace → SSL &amp; domain</strong>; an env can set
           its own custom domain. When no base domain is set, apps fall back to the auto-URL below so
           they're still reachable across machines.
-        </p>
+        </Hint>
         <div className="space-y-4 p-4 bg-surface border border-border rounded-xl">
           <div>
             <Label>Apps base domain</Label>
             <Input value={appsBaseDomain} onChange={setAppsBaseDomain} placeholder="onrigger.com" />
-            <p className="text-xs text-content-subtle mt-1">
+            <Hint>
               Point a wildcard DNS record <code className="font-mono text-xs">*.{appsBaseDomain || 'onrigger.com'}</code> at
               this server. Leave blank to use the auto-URL fallback instead.
-            </p>
+            </Hint>
           </div>
           {appsBaseDomain.trim() && (
             <div>
@@ -1008,38 +1009,38 @@ function DomainsTab() {
               </select>
               {dnsProvider === 'cloudflare' ? (
                 <div className="mt-3 space-y-2">
-                  <p className="text-xs text-content-subtle">
+                  <Hint>
                     Traefik issues a single <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> cert via DNS-01
                     (no port-80 challenge, no per-app rate limits).
-                  </p>
+                  </Hint>
                   <div>
                     <Label>Cloudflare API token</Label>
                     <Input type="password" value={dnsToken} onChange={setDnsToken}
                       placeholder="paste a Zone:DNS:Edit + Zone:Read token" />
-                    <p className="text-xs text-content-subtle mt-1">
+                    <Hint>
                       Create at Cloudflare → My Profile → API Tokens with <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>,
                       scoped to <code className="font-mono text-xs">{appsBaseDomain.trim()}</code>. Stored encrypted-at-rest and
                       never shown again; saving applies it and briefly restarts the proxy. Leave the
                       masked value to keep the current token.
-                    </p>
+                    </Hint>
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-content-subtle mt-1">
+                <Hint>
                   Per-host: Traefik gets a separate Let&apos;s Encrypt cert for each{' '}
                   <code className="font-mono text-xs">{'{label}'}.{appsBaseDomain.trim()}</code> on first request via the
                   HTTP-01 challenge — needs <strong>port 80 publicly reachable</strong> and is subject to Let&apos;s Encrypt
                   rate limits. No API token required.
-                </p>
+                </Hint>
               )}
             </div>
           )}
           {appsBaseDomain.trim() ? (
-            <p className="text-xs text-content-subtle">
+            <Hint>
               A base domain is set, so every app routes under{' '}
               <code className="font-mono text-xs">*.{appsBaseDomain.trim()}</code> and the auto-URL
               (sslip/nip) fallback isn&apos;t used. Clear the base domain above to switch back to it.
-            </p>
+            </Hint>
           ) : (
           <div>
             <Label>Auto-URL fallback (when no base domain)</Label>
@@ -1052,12 +1053,12 @@ function DomainsTab() {
               <option value="off">off</option>
             </select>
             {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && (
-              <p className="text-xs text-content-subtle mt-2">
+              <Hint className="mt-2">
                 The host embedded in the magic-DNS name comes from <strong>App host / IP</strong> above
                 (for local envs) or each env's own remote host — e.g.{' '}
                 <code className="font-mono text-xs">myws-myapp-dev.{(appHost.trim() || '10.10.10.111')}.{autoUrlMode === 'nip' ? 'nip.io' : autoUrlMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>.
                 {!appHost.trim() && <span className="text-warning-fg"> Set App host above for this to work across machines.</span>}
-              </p>
+              </Hint>
             )}
             {autoUrlMode !== 'localhost' && autoUrlMode !== 'off' && appHost.trim() &&
              !IPV4_RE.test(appHost.trim()) && (
@@ -1134,11 +1135,11 @@ function GeneralTab() {
       {/* Naming — key length */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Naming — resource keys</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           Workspaces and projects are identified by a short lowercase <strong>key</strong> used for
           folders, URLs and Docker artifact names. Keys are auto-derived from the display name; these
           bounds control their length. Changing them affects only <em>new</em> keys — existing keys are immutable.
-        </p>
+        </Hint>
         <div className="p-4 bg-surface border border-border rounded-xl grid grid-cols-2 gap-4 max-w-sm">
           <div>
             <Label>Min length</Label>
@@ -1148,32 +1149,32 @@ function GeneralTab() {
             <Label>Max length</Label>
             <Input type="number" value={String(keyMax)} onChange={v => setKeyMax(Math.min(12, Math.max(1, Number(v) || 1)))} />
           </div>
-          <p className="col-span-2 text-xs text-content-subtle">
+          <Hint className="col-span-2">
             1–12 characters. Collisions append a digit/letter within the max budget (e.g. <code className="font-mono">web → web2</code>).
             Larger setups may prefer 5–7 to reduce clashes.
-          </p>
+          </Hint>
         </div>
       </div>
 
       {/* Security — password policy */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Security — password policy</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           Rules enforced whenever a password is set — first-run setup, invite completion, admin
           reset, self-service change, and the forgot-password flow. Applies to <em>new</em> passwords;
           existing ones aren't re-checked until next change (or rotation, below).
-        </p>
+        </Hint>
         <div className="space-y-4 p-4 bg-surface border border-border rounded-xl max-w-2xl">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Minimum length</Label>
               <Input type="number" value={String(pwMin)} onChange={v => setPwMin(Math.min(128, Math.max(6, Number(v) || 6)))} />
-              <p className="text-xs text-content-subtle mt-1">At least 6.</p>
+              <Hint>At least 6.</Hint>
             </div>
             <div>
               <Label>Rotation (max age, days)</Label>
               <Input type="number" value={String(pwMaxAge)} onChange={v => setPwMaxAge(Math.max(0, Number(v) || 0))} />
-              <p className="text-xs text-content-subtle mt-1">0 = never expire. Users are forced to change an expired password at next sign-in.</p>
+              <Hint>0 = never expire. Users are forced to change an expired password at next sign-in.</Hint>
             </div>
           </div>
           <div className="space-y-2">
@@ -1198,11 +1199,11 @@ function GeneralTab() {
       {/* Metrics storage (Part C) — optional managed VictoriaMetrics for Rigger's own metrics. */}
       <div>
         <h2 className="text-base font-semibold text-content-strong mb-1">Metrics storage</h2>
-        <p className="text-sm text-content-subtle mb-4">
+        <Hint className="text-sm mb-4">
           Rigger records its own container metrics (CPU, memory, disk, network) in a built-in store that
           powers the env-card charts. Optionally also stream them to a managed VictoriaMetrics for
           long-term retention and PromQL/Grafana.
-        </p>
+        </Hint>
         <ManagedMetricsCard />
       </div>
     </div>
@@ -1328,12 +1329,12 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
               <Select value={env} onChange={setEnv} options={envOptions} disabled={!projectKey} />
             </div>
           </div>
-          <p className="text-xs text-content-faint mt-1">
+          <Hint tone="faint">
             {!wsKey ? 'Applies to all workspaces.'
               : !projectKey ? 'Applies to all projects in this workspace.'
               : !env ? 'Applies to all environments in this project.'
               : `Targets ${projectKey} / ${env}.`}
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -1341,7 +1342,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
         <div>
           <Label>Cooldown (minutes)</Label>
           <Input value={cooldown} onChange={v => setCooldown(v)} type="number" placeholder="15" />
-          <p className="text-xs text-content-faint mt-1">Minimum gap before re-firing for the same target.</p>
+          <Hint tone="faint">Minimum gap before re-firing for the same target.</Hint>
         </div>
         <div className="pb-2">
           <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
@@ -1352,9 +1353,9 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
       <div>
         <Label>Notify channels</Label>
         {channels.length === 0 ? (
-          <p className="text-xs text-content-faint mt-1">
+          <Hint tone="faint">
             No channels yet — add one on the <span className="text-content-muted">Notifications</span> tab to deliver this alert. The alert still shows in the inbox without a channel.
-          </p>
+          </Hint>
         ) : (
           <div className="flex flex-wrap gap-2 mt-1">
             {channels.map(ch => {
@@ -1432,7 +1433,7 @@ function RulesTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Alert Rules</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Conditions evaluated every 60s. Matches open an alert in the inbox; clearing auto-resolves it.</p>
+          <Hint className="text-sm mt-0.5">Conditions evaluated every 60s. Matches open an alert in the inbox; clearing auto-resolves it.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add rule</Btn>
       </div>
@@ -1553,7 +1554,7 @@ function NotificationsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Notification Channels</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Where alerts are delivered. Assign channels to rules on the Alert Rules tab.</p>
+          <Hint className="text-sm mt-0.5">Where alerts are delivered. Assign channels to rules on the Alert Rules tab.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add channel</Btn>
       </div>
@@ -1738,9 +1739,9 @@ export function AppearanceTab() {
           })}
         </div>
         {prefs.theme === 'system' && (
-          <p className="text-xs text-content-subtle mt-3">
+          <Hint className="mt-3">
             Following your system — currently showing <span className="text-content font-medium">{resolvedTheme}</span>.
-          </p>
+          </Hint>
         )}
       </SettingsSection>
 
@@ -1762,6 +1763,17 @@ export function AppearanceTab() {
             <Select value={prefs.density} onChange={v => setPrefs({ density: v })} options={opt(DENSITY_OPTIONS)} />
           </div>
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Help text"
+        description="Show the explanatory hints under fields and section descriptions across the app. Turn off for a denser interface once you know your way around — warnings and errors always stay visible. Also toggleable from the top bar."
+      >
+        <Toggle
+          checked={prefs.helpText !== false}
+          onChange={v => setPrefs({ helpText: v })}
+          label={prefs.helpText !== false ? 'Help text shown' : 'Help text hidden'}
+        />
       </SettingsSection>
 
       <div>
@@ -1895,7 +1907,7 @@ function InviteForm({ onSave, onCancel, saving }) {
       <div>
         <Label required>Email</Label>
         <Input value={email} onChange={setEmail} type="email" placeholder="jane@example.com" />
-        <p className="text-xs text-content-faint mt-1">An invite link is sent here; the user sets their own password.</p>
+        <Hint tone="faint">An invite link is sent here; the user sets their own password.</Hint>
       </div>
       <div>
         <Label>Display name <span className="font-normal normal-case">(optional)</span></Label>
@@ -1929,7 +1941,7 @@ function InviteForm({ onSave, onCancel, saving }) {
               </div>
             </>
           )}
-          {!workspace && <p className="text-xs text-content-faint">Leave empty to invite without access — they'll see a "request access" message until you add them to a workspace.</p>}
+          {!workspace && <Hint tone="faint">Leave empty to invite without access — they'll see a "request access" message until you add them to a workspace.</Hint>}
         </div>
       )}
 
@@ -2017,7 +2029,7 @@ function UsersTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Users</h2>
-          <p className="text-sm text-content-subtle mt-0.5">Invite users by email and set their global role. Per-workspace access is managed on each workspace's Members tab.</p>
+          <Hint className="text-sm mt-0.5">Invite users by email and set their global role. Per-workspace access is managed on each workspace's Members tab.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Invite user</Btn>
       </div>
@@ -2120,7 +2132,7 @@ function SystemEmailTab() {
     <div className="max-w-2xl">
       <div className="mb-6">
         <h2 className="text-base font-semibold text-content-strong">System email</h2>
-        <p className="text-sm text-content-subtle mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</p>
+        <Hint className="text-sm mt-0.5">SMTP Rigger uses to send invite &amp; verification links. Separate from alert notification channels. If left empty, links are surfaced in the UI instead of emailed.</Hint>
       </div>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
         <div className="grid grid-cols-2 gap-4">
@@ -2132,7 +2144,7 @@ function SystemEmailTab() {
           <div><Label>Public base URL</Label><Input value={f.base_url} onChange={v => set('base_url', v)} placeholder="https://rigger.example.com" /></div>
         </div>
         <Toggle checked={f.tls} onChange={v => set('tls', v)} label="Use STARTTLS (recommended; port 465 uses implicit TLS)" />
-        <p className="text-xs text-content-faint">Base URL is used to build links in emails; leave blank to derive from the request host.</p>
+        <Hint tone="faint">Base URL is used to build links in emails; leave blank to derive from the request host.</Hint>
         <div className="flex items-center gap-3">
           <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save'}</Btn>
           {saved && <span className="text-xs text-success-fg">✓ Saved</span>}
@@ -2143,7 +2155,7 @@ function SystemEmailTab() {
       <div className="bg-surface border border-border rounded-xl p-5 mt-4 space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-content-strong">Send a test email</h3>
-          <p className="text-xs text-content-subtle mt-0.5">Uses the saved SMTP settings above. Save any changes first. Leave the recipient blank to send to the From address.</p>
+          <Hint className="mt-0.5">Uses the saved SMTP settings above. Save any changes first. Leave the recipient blank to send to the From address.</Hint>
         </div>
         <div className="flex items-end gap-3">
           <div className="flex-1">
@@ -2156,7 +2168,7 @@ function SystemEmailTab() {
         </div>
         {testStatus?.ok && <p className="text-xs text-success-fg">✓ Test email sent to {testStatus.to}.</p>}
         {testStatus?.error && <p className="text-xs text-danger-fg">{testStatus.error}</p>}
-        {!cfg.host && <p className="text-xs text-content-faint">Configure and save the SMTP host first.</p>}
+        {!cfg.host && <Hint tone="faint">Configure and save the SMTP host first.</Hint>}
       </div>
     </div>
   )
@@ -2230,7 +2242,7 @@ function UpdatesTab() {
     <div className="max-w-2xl">
       <div className="mb-6">
         <h2 className="text-base font-semibold text-content-strong">Updates</h2>
-        <p className="text-sm text-content-subtle mt-0.5">Check for a newer Rigger release and see what changed.</p>
+        <Hint className="text-sm mt-0.5">Check for a newer Rigger release and see what changed.</Hint>
       </div>
 
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
@@ -2255,9 +2267,9 @@ function UpdatesTab() {
         </div>
 
         {isDev && (
-          <p className="text-xs text-content-faint border-t border-border pt-3">
+          <Hint tone="faint" className="border-t border-border pt-3">
             This is a source/dev build — version comparison only works for released images installed from GHCR.
-          </p>
+          </Hint>
         )}
 
         {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
@@ -2288,7 +2300,7 @@ function UpdatesTab() {
                   </button>
                   {info.html_url && <a href={info.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
                 </div>
-                <p className="text-[11px] text-content-faint">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></p>
+                <Hint tone="faint" className="text-[11px]">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></Hint>
               </>
             ) : (
               <p className="text-sm text-success-fg">✓ You’re on the latest release ({info.latest}).</p>
@@ -2301,7 +2313,7 @@ function UpdatesTab() {
             className="text-xs text-content-muted hover:text-content-strong disabled:opacity-50">
             ↩ Roll back to previous version
           </button>
-          <p className="text-[11px] text-content-faint mt-0.5">Re-runs the version that was active before the last update.</p>
+          <Hint tone="faint" className="text-[11px] mt-0.5">Re-runs the version that was active before the last update.</Hint>
         </div>
       </div>
     </div>
@@ -2336,7 +2348,7 @@ export default function SettingsPage() {
         {/* Page header */}
         <div className="mb-6">
           <h1 className="text-xl font-bold text-content-strong">Admin</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</p>
+          <Hint className="text-sm mt-0.5">Global settings — users, SSL, integrations, and shared resources for the whole control plane.</Hint>
         </div>
 
         <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>

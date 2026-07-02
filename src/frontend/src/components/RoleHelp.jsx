@@ -1,4 +1,5 @@
 import { WS_ROLES, GLOBAL_ROLES } from '../lib/roles'
+import { Hint } from './ui'
 
 // RoleHelp renders a compact legend explaining what each role can do, so the
 // person granting access knows what they're handing out. `scope` selects the
@@ -7,9 +8,9 @@ export default function RoleHelp({ scope = 'workspace', className = '' }) {
   const roles = scope === 'global' ? GLOBAL_ROLES : WS_ROLES
   return (
     <div className={`rounded-lg border border-border bg-surface/40 p-3 ${className}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-content-subtle mb-1.5">
+      <Hint className="text-[11px] font-semibold uppercase tracking-wider mb-1.5">
         What each role can do
-      </p>
+      </Hint>
       <dl className="space-y-1.5">
         {roles.map(r => (
           <div key={r.value} className="flex gap-2 text-xs leading-snug">

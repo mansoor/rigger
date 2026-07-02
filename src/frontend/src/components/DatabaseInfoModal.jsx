@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
+import { Hint } from './ui'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
 export function humanBytes(n) {
@@ -70,10 +71,10 @@ export function Row({ label, value, mono = true }) {
 // deployed web-entry URL (Adminer). Hidden/disabled with a hint otherwise.
 function ConnectBtn({ openAdminer, webSqlEnabled, adminerUrl, as = 'admin', label = 'Connect to database', compact = false }) {
   if (!webSqlEnabled) {
-    return compact ? null : <p className="text-[11px] text-content-faint">Enable <strong>Adminer</strong> in Edit Project → Services to use the web SQL console.</p>
+    return compact ? null : <Hint tone="faint" className="text-[11px]">Enable <strong>Adminer</strong> in Edit Project → Services to use the web SQL console.</Hint>
   }
   if (!adminerUrl) {
-    return compact ? null : <p className="text-[11px] text-content-faint">Deploy this environment to get a web SQL console URL.</p>
+    return compact ? null : <Hint tone="faint" className="text-[11px]">Deploy this environment to get a web SQL console URL.</Hint>
   }
   return (
     <button type="button" onClick={() => openAdminer(as)}
@@ -133,11 +134,11 @@ export function DatabasePanel({ workspace, name, env, canReveal = false, showAll
           openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} />
       ) : (
         <div className="space-y-5">
-          {info.note && <p className="text-xs text-content-subtle leading-relaxed">{info.note}</p>}
+          {info.note && <Hint className="leading-relaxed">{info.note}</Hint>}
           {/* One-click web SQL console (Adminer), auto-logged-in as admin. */}
           {canManage && (
             <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
-              <div className="text-xs text-content-subtle">Open a browser SQL console connected to this database.</div>
+              <Hint>Open a browser SQL console connected to this database.</Hint>
               <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" />
             </section>
           )}
@@ -168,7 +169,7 @@ export function DatabasePanel({ workspace, name, env, canReveal = false, showAll
                 <Row label="Port" value={String(info.external_port)} />
               </>
             ) : (
-              <p className="text-xs text-content-subtle">Not published. Enable “external access” on this database in Edit Project to expose a host port for outside clients.</p>
+              <Hint>Not published. Enable “external access” on this database in Edit Project to expose a host port for outside clients.</Hint>
             )}
           </section>
 
@@ -316,7 +317,7 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
     <div className="space-y-4">
       {canManage && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
-          <div className="text-xs text-content-subtle">Browser SQL console, auto-logged-in as the database admin.</div>
+          <Hint>Browser SQL console, auto-logged-in as the database admin.</Hint>
           <ConnectBtn openAdminer={openAdminer} webSqlEnabled={webSqlEnabled} adminerUrl={adminerUrl} as="admin" label="Connect as admin" />
         </div>
       )}
@@ -428,7 +429,7 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
             </div>
           )}
           {err && <p className="text-xs text-danger-fg">{err}</p>}
-          <p className="text-[11px] text-content-faint">Names: letters, digits and underscores (start with a letter or underscore). A blank password is auto-generated.</p>
+          <Hint tone="faint" className="text-[11px]">Names: letters, digits and underscores (start with a letter or underscore). A blank password is auto-generated.</Hint>
         </section>
       )}
     </div>

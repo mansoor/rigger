@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
@@ -8,9 +8,15 @@ import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, ch
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
 import ThemeToggle from './ThemeToggle'
+import HelpToggle from './HelpToggle'
 import KeyField from './KeyField'
 import RequestAccessModal from './RequestAccessModal'
+import { Hint } from './ui'
 import { AppearanceTab, LogsTerminalTab } from '../pages/SettingsPage'
+
+// Sidebar scroll position, preserved across Layout remounts (each page mounts its own
+// <Layout>) so navigating to a non-project page doesn't jump the project list to the top.
+let savedSidebarScroll = 0
 
 const STATUS_DOT = {
   running: 'bg-green-400',
@@ -48,6 +54,11 @@ function ProjectStatusDot({ workspace, name, envs }) {
 }
 
 function ProjectSidebarItem({ workspace, project, active }) {
+  const itemRef = useRef(null)
+  // Layout remounts on navigation (each page renders its own <Layout>), which resets
+  // the sidebar scroll. Keep the selected project scrolled into view so it stays visible
+  // and its highlight is obvious after you click it.
+  useEffect(() => { if (active) itemRef.current?.scrollIntoView({ block: 'nearest' }) }, [active])
   const cfg = project.config
   const type = cfg?.project?.type || 'custom'
   const envs = project.envs || []
@@ -64,6 +75,7 @@ function ProjectSidebarItem({ workspace, project, active }) {
 
   return (
     <Link
+      ref={itemRef}
       to={`/workspaces/${workspace}/projects/${project.name}`}
       className={`block px-3 py-2.5 rounded-lg transition-colors ${
         active
@@ -411,6 +423,13 @@ export default function Layout({ children }) {
   const [slidePanel, setSlidePanel] = useState(null) // 'activity' | 'backup' | 'version'
   const [newWsOpen, setNewWsOpen]   = useState(false)
 
+  // Restore the sidebar scroll on (re)mount for non-project pages; on a project page the
+  // active ProjectSidebarItem scrolls itself into view, so leave that to it.
+  const projScrollRef = useRef(null)
+  useLayoutEffect(() => {
+    if (!activeName && projScrollRef.current) projScrollRef.current.scrollTop = savedSidebarScroll
+  }, [activeName])
+
   useDockerEvents()
 
   // List the parent-tier workspaces (the selector's options).
@@ -474,9 +493,12 @@ export default function Layout({ children }) {
       {/* Top nav */}
       <nav className="border-b border-border bg-surface shrink-0 z-10">
         <div className="px-4 h-12 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Link to="/" className="flex items-center shrink-0">
+          <div className="flex items-center">
+            {/* Brand cluster spans the sidebar width (w-56) so the workspace dropdown
+                lines up with the sidebar's right divider / the content column. */}
+            <Link to="/" className="flex items-center gap-2 shrink-0 w-52">
               <img src="/rigger-icon.png" alt="Rigger" className="w-8 h-8 rounded-lg" />
+              <span className="text-lg font-bold text-content-strong tracking-tight">Rigger</span>
             </Link>
             <WorkspaceSelector
               current={current}
@@ -495,6 +517,7 @@ export default function Layout({ children }) {
             {isAdmin && <NavBtn to="/proxy" label="Proxy Service" />}
             {isAdmin && <NavBtn to="/settings" label="Admin" />}
             <div className="w-px h-4 bg-surface-overlay mx-1" />
+            <HelpToggle />
             <ThemeToggle />
             {hasAccess && <AlertBell active={slidePanel === 'alerts'} onClick={() => setSlidePanel(p => p === 'alerts' ? null : 'alerts')} />}
             <UserMenu user={user} onLogout={handleLogout} />
@@ -508,7 +531,8 @@ export default function Layout({ children }) {
           {/* Project list — scrolls internally so the actions below stay in view */}
           <div className="flex-1 min-h-0 flex flex-col p-3 border-b border-border">
             <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider px-1 mb-2 shrink-0">Projects</p>
-            <div className="space-y-0.5 overflow-y-auto min-h-0">
+            <div ref={projScrollRef} onScroll={e => { savedSidebarScroll = e.currentTarget.scrollTop }}
+              className="space-y-0.5 overflow-y-auto min-h-0">
               {!current ? (
                 <p className="text-xs text-content-subtle px-1 py-2">Select a workspace to see its projects.</p>
               ) : (projects || []).length === 0 ? (
@@ -636,13 +660,13 @@ function AccountModal({ user, tab, setTab, onClose }) {
         {tab === 'security'   && <AccountSecurity onDone={onClose} />}
         {tab === 'appearance' && (
           <div className="space-y-3">
-            <p className="text-sm text-content-subtle">Your personal appearance. It overrides the workspace and global defaults on every device you sign in to.</p>
+            <Hint className="text-sm">Your personal appearance. It overrides the workspace and global defaults on every device you sign in to.</Hint>
             <AppearanceTab />
           </div>
         )}
         {tab === 'logs' && (
           <div className="space-y-3">
-            <p className="text-sm text-content-subtle">Per-user log &amp; terminal preferences, applied on every device you sign in to.</p>
+            <Hint className="text-sm">Per-user log &amp; terminal preferences, applied on every device you sign in to.</Hint>
             <LogsTerminalTab />
           </div>
         )}
@@ -724,11 +748,11 @@ function AccountConfirmPref({ lbl, field }) {
         <option value="true">Always ask me to confirm</option>
         <option value="false">Never ask — skip confirmations</option>
       </select>
-      <p className="text-xs text-content-subtle mt-1">
+      <Hint>
         {canOverride
           ? 'Whether destructive actions (Inactivate, Down, Delete, …) prompt you first. "Use default" follows your workspace / instance setting.'
           : 'Locked by your administrator — confirmations are enforced for your account.'}
-      </p>
+      </Hint>
     </div>
   )
 }
@@ -909,7 +933,7 @@ function TwoFactorSection() {
       {enabled && regen && (
         <div className="space-y-2">
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to issue new recovery codes</label>
-          <p className="text-xs text-content-subtle">This invalidates your existing recovery codes.</p>
+          <Hint>This invalidates your existing recovery codes.</Hint>
           {codeInput}
           <div className="flex gap-2">
             <button onClick={() => regenMut.mutate()} disabled={regenMut.isPending || code.length < 6}

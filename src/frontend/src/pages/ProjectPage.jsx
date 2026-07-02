@@ -16,6 +16,7 @@ import RollbackModal from '../components/RollbackModal'
 import ServiceConsoleModal from '../components/ServiceConsoleModal'
 import MaintenanceModal from '../components/MaintenanceModal'
 import Sparkline from '../components/Sparkline'
+import { Hint } from '../components/ui'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
 
@@ -968,7 +969,7 @@ function ManualBackupModal({ name, envName, onClose, onRun }) {
           <h3 className="font-semibold text-content-strong">Back up {envName}</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl leading-none">×</button>
         </div>
-        <p className="text-xs text-content-subtle mb-3">Choose which services' data to include.</p>
+        <Hint className="mb-3">Choose which services' data to include.</Hint>
 
         {isLoading ? (
           <p className="text-sm text-content-subtle py-4">Loading services…</p>
@@ -1968,7 +1969,7 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
 
         {/* Reveal toggle */}
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-content-subtle">Click the lock to flag a value as a secret.</p>
+          <Hint>Click the lock to flag a value as a secret.</Hint>
           <label className="flex items-center gap-2 cursor-pointer shrink-0 ml-3">
             <input type="checkbox" checked={reveal} onChange={e => { setReveal(e.target.checked); setEdits({}) }}
               className="w-3.5 h-3.5 accent-brand-500" />

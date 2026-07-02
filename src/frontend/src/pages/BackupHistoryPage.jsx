@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchBackups, syncEnvBackup } from '../lib/api'
 import Layout from '../components/Layout'
 import { useWorkspaceStore } from '../store/workspace'
+import { Hint } from '../components/ui'
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -134,7 +135,7 @@ export default function BackupHistoryPage() {
         {!isLoading && items.length === 0 && (
           <div className="bg-surface border border-border rounded-xl p-8 text-center">
             <p className="text-content-subtle text-sm">No backups found.</p>
-            <p className="text-content-faint text-xs mt-1">Run a backup from any environment card to create one.</p>
+            <Hint tone="faint">Run a backup from any environment card to create one.</Hint>
           </div>
         )}
 

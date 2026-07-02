@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Hint } from './ui'
 
 // Sentinel category value for "templates with no categories".
 export const UNCATEGORIZED = '__uncat__'
@@ -78,7 +79,7 @@ export default function TemplateBrowserModal({ templates = [], selected, onSelec
         <div className="flex items-center justify-between px-5 py-4 border-b border-border gap-3">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-content-strong">{title} <span className="font-normal text-content-faint">({filtered.length})</span></h3>
-            {subtitle && <p className="text-xs text-content-subtle mt-0.5">{subtitle}</p>}
+            {subtitle && <Hint className="mt-0.5">{subtitle}</Hint>}
           </div>
           <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong transition-colors text-xl leading-none shrink-0">×</button>
         </div>

@@ -27,6 +27,7 @@ import {
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { WS_ROLES, wsRoleOptions } from '../lib/roles'
+import { Hint, Checkbox } from '../components/ui'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -157,13 +158,13 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">ACME email</label>
           <input value={acme} onChange={e => setAcme(e.target.value)} type="email" placeholder="ops@example.com"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Default Let's Encrypt registration email for this workspace's certificates. Overrides the instance-wide email (Settings → General); a project environment can override it again in its SSL settings. Blank inherits the global default.</p>
+          <Hint>Default Let's Encrypt registration email for this workspace's certificates. Overrides the instance-wide email (Settings → General); a project environment can override it again in its SSL settings. Blank inherits the global default.</Hint>
         </div>
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Apps base domain</label>
           <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="inherits the global default (Settings → General)"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</p>
+          <Hint>Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</Hint>
         </div>
         {/* Wildcard cert provider — shown when this workspace overrides the base domain
             (mirrors Admin → General). Cloudflare + a per-workspace token issues a
@@ -183,10 +184,10 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
                 <input type="password" value={dnsToken} onChange={e => setDnsToken(e.target.value)}
                   placeholder="paste a Zone:DNS:Edit + Zone:Read token"
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
-                <p className="text-xs text-content-subtle mt-1">Scoped to <code className="font-mono">{domain.trim()}</code> (Cloudflare → My Profile → API Tokens, <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>). Rigger issues a single <code className="font-mono">*.{domain.trim()}</code> cert under this workspace&apos;s own zone, out-of-band (no Traefik restart, no clash with the global token). Stored <strong>encrypted at rest</strong> and never shown again — leave the masked value to keep the current token. Leave blank to fall back to the global Cloudflare token.</p>
+                <Hint>Scoped to <code className="font-mono">{domain.trim()}</code> (Cloudflare → My Profile → API Tokens, <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>). Rigger issues a single <code className="font-mono">*.{domain.trim()}</code> cert under this workspace&apos;s own zone, out-of-band (no Traefik restart, no clash with the global token). Stored <strong>encrypted at rest</strong> and never shown again — leave the masked value to keep the current token. Leave blank to fall back to the global Cloudflare token.</Hint>
               </div>
             ) : (
-              <p className="text-xs text-content-subtle mt-1">Overrides the instance-wide DNS-01 provider for this workspace. <strong>Cloudflare</strong> issues a single <code className="font-mono">*.{domain.trim()}</code> cert (no port-80 challenge, no per-app rate limits).</p>
+              <Hint>Overrides the instance-wide DNS-01 provider for this workspace. <strong>Cloudflare</strong> issues a single <code className="font-mono">*.{domain.trim()}</code> cert (no port-80 challenge, no per-app rate limits).</Hint>
             )}
           </div>
         )}
@@ -208,23 +209,21 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
                 <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Auto-URL host / IP</label>
                 <input value={autoHost} onChange={e => setAutoHost(e.target.value)} placeholder="inherits global App host (Settings → General)"
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
-                <p className="text-xs text-content-subtle mt-1">The IP embedded in the magic-DNS name for this workspace&apos;s LOCAL envs — e.g. <code className="font-mono">myws-myapp-dev.{(autoHost.trim() || '10.10.10.111')}.{autoMode === 'nip' ? 'nip.io' : autoMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>. Blank inherits the global App host. (Remote-host envs always use their own host&apos;s address.)</p>
+                <Hint>The IP embedded in the magic-DNS name for this workspace&apos;s LOCAL envs — e.g. <code className="font-mono">myws-myapp-dev.{(autoHost.trim() || '10.10.10.111')}.{autoMode === 'nip' ? 'nip.io' : autoMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>. Blank inherits the global App host. (Remote-host envs always use their own host&apos;s address.)</Hint>
               </div>
             )}
-            <p className="text-xs text-content-subtle mt-1">How env URLs are built when no base domain is set. Blank inherits the instance default.</p>
+            <Hint>How env URLs are built when no base domain is set. Blank inherits the instance default.</Hint>
           </div>
         )}
-        <p className="text-xs text-content-faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</p>
+        <Hint tone="faint">Per-hostname certs are issued on demand via Let&apos;s Encrypt HTTP-01; Traefik uses the global <code className="font-mono">ACME_EMAIL</code>.</Hint>
         {/* Traefik routing: strip vs keep host ports (workspace default; per-env override in Edit Project). */}
         <div className="pt-3 border-t border-border/60">
-          <label className="flex items-start gap-2.5 cursor-pointer select-none">
-            <input type="checkbox" checked={keepPorts} onChange={e => setKeepPorts(e.target.checked)}
-              className="mt-0.5 rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500" />
-            <span>
-              <span className="text-sm text-content font-medium">Keep host ports under Traefik</span>
-              <p className="text-xs text-content-subtle mt-0.5">With Traefik routing on, an app is reached by its domain, so Rigger <strong>drops the redundant host-port mapping by default</strong> (this is what avoids host-port conflicts). Turn this on to also publish each web service&apos;s host port for direct <code className="font-mono">host:port</code> access. A single environment can override this either way in Edit Project → Environments. Applies on the next refresh/redeploy.</p>
-            </span>
-          </label>
+          <Checkbox
+            checked={keepPorts}
+            onChange={setKeepPorts}
+            label="Keep host ports under Traefik"
+            hint={<>With Traefik routing on, an app is reached by its domain, so Rigger <strong>drops the redundant host-port mapping by default</strong> (this is what avoids host-port conflicts). Turn this on to also publish each web service&apos;s host port for direct <code className="font-mono">host:port</code> access. A single environment can override this either way in Edit Project → Environments. Applies on the next refresh/redeploy.</>}
+          />
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
@@ -263,7 +262,7 @@ function WorkspaceTierOrder({ workspace, qc }) {
           <textarea value={tiers} onChange={e => setTiers(e.target.value)} rows={2}
             placeholder="dev, staging, qa, uat, preprod, prod"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
-          <p className="text-xs text-content-subtle mt-1">Tier names from lowest to highest (comma or newline). Used to auto-guess each project's deploy order (dev → prod) for the release pipeline. A project can override with an explicit order. Leave blank for the built-in default.</p>
+          <Hint>Tier names from lowest to highest (comma or newline). Used to auto-guess each project's deploy order (dev → prod) for the release pipeline. A project can override with an explicit order. Leave blank for the built-in default.</Hint>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
@@ -298,7 +297,7 @@ function WorkspaceAppearanceDefault({ workspace, qc }) {
   return (
     <section>
       <h2 className="text-sm font-semibold text-content mb-1">Default appearance</h2>
-      <p className="text-xs text-content-subtle mb-3">Applied to members who haven't set their own appearance (Profile → Appearance always overrides). Any field left to inherit falls back to the global default.</p>
+      <Hint className="mb-3">Applied to members who haven't set their own appearance (Profile → Appearance always overrides). Any field left to inherit falls back to the global default.</Hint>
       <div className="bg-surface border border-border rounded-xl p-5">
         <AppearanceDefaultEditor
           value={value}
@@ -331,7 +330,7 @@ function WorkspaceConfirmDefault({ workspace, qc }) {
   return (
     <section>
       <h2 className="text-sm font-semibold text-content mb-1">Confirmations</h2>
-      <p className="text-xs text-content-subtle mb-3">Default for destructive-action confirmations in this workspace. Inherits the global default unless set; a personal choice (Profile → General) overrides it unless you lock it.</p>
+      <Hint className="mb-3">Default for destructive-action confirmations in this workspace. Inherits the global default unless set; a personal choice (Profile → General) overrides it unless you lock it.</Hint>
       <div className="bg-surface border border-border rounded-xl p-5">
         <ConfirmDefaultEditor
           value={value}
@@ -371,7 +370,7 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
               value={name} onChange={e => setName(e.target.value)} maxLength={32}
               className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
             />
-            <p className="text-xs text-content-subtle mt-1">1–32 chars; editable anytime.</p>
+            <Hint>1–32 chars; editable anytime.</Hint>
           </div>
           <div className="sm:col-span-1">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Key <span className="font-normal normal-case text-content-faint">(fixed)</span></label>
@@ -379,7 +378,7 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
               value={workspace} readOnly disabled
               className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed"
             />
-            <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
+            <Hint>Fixed identity.</Hint>
           </div>
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
@@ -437,7 +436,7 @@ function MembersSection({ workspace, projects, qc }) {
     <section>
       <div className="mb-3">
         <h2 className="text-sm font-semibold text-content">Members</h2>
-        <p className="text-xs text-content-subtle mt-0.5">Who can access this workspace and at what level. Global admins always have full access. Roles take effect once access control is enforced.</p>
+        <Hint className="mt-0.5">Who can access this workspace and at what level. Global admins always have full access. Roles take effect once access control is enforced.</Hint>
       </div>
 
       <div className="bg-surface border border-border rounded-xl p-4 mb-4 flex items-center gap-2 flex-wrap">
@@ -569,7 +568,7 @@ function WorkspaceDefaults({ workspace, qc }) {
     <section>
       <h2 className="text-sm font-semibold text-content mb-3">Defaults for new projects</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <p className="text-xs text-content-subtle">New projects created in this workspace start with these selections. They can be changed per project in the create wizard.</p>
+        <Hint className="mt-0">New projects created in this workspace start with these selections. They can be changed per project in the create wizard.</Hint>
         <div>
           <label className={lbl}>Default registry</label>
           <select value={reg} onChange={e => setReg(e.target.value)} className={sel}>
@@ -598,7 +597,7 @@ function WorkspaceDefaults({ workspace, qc }) {
             <option value="">Inherit (build on each env's deploy host)</option>
             {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
           </select>
-          <p className="text-[11px] text-content-faint mt-1">Where image builds run for this workspace's projects (overridable per project). A dedicated builder must push to a registry the deploy targets can pull — set a system registry. Applies live, not just to new projects.</p>
+          <Hint tone="faint" className="text-[11px]">Where image builds run for this workspace's projects (overridable per project). A dedicated builder must push to a registry the deploy targets can pull — set a system registry. Applies live, not just to new projects.</Hint>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
@@ -648,7 +647,7 @@ function HostsSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Remote hosts</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Hosts this workspace can deploy to: its own plus any shared by an administrator.</p>
+          <Hint className="mt-0.5">Hosts this workspace can deploy to: its own plus any shared by an administrator.</Hint>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -780,7 +779,7 @@ function RegistriesSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Docker registries</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator. Mark one of your own <span className="text-content-muted font-medium">system</span> to use it for projects here that set no registry (overrides the global default).</p>
+          <Hint className="mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator. Mark one of your own <span className="text-content-muted font-medium">system</span> to use it for projects here that set no registry (overrides the global default).</Hint>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -950,7 +949,7 @@ function GitSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Git providers</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Credentials this workspace's projects use to clone <span className="text-content-muted font-medium">private</span> repositories — an HTTPS token, or an SSH deploy key Rigger generates for you. Select one on a project's source in New / Edit Project. Secrets are encrypted at rest and never shown again.</p>
+          <Hint className="mt-0.5">Credentials this workspace's projects use to clone <span className="text-content-muted font-medium">private</span> repositories — an HTTPS token, or an SSH deploy key Rigger generates for you. Select one on a project's source in New / Edit Project. Secrets are encrypted at rest and never shown again.</Hint>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={connectGitHub} disabled={connecting}
@@ -1159,7 +1158,7 @@ function GitProviderModal({ initial, onSave, onClose, saving, error }) {
             <div>
               <label className={lbl}>{svc.secretLabel}{!editing && <span className="text-danger-fg ml-0.5">*</span>}</label>
               <input className={inp} type="password" value={secret} onChange={e => setSecret(e.target.value)} placeholder={editing ? 'leave blank to keep current' : 'paste the token'} />
-              <p className="text-[11px] text-content-faint mt-1">{svc.hint} Stored encrypted; sent only via the git config header at clone time.</p>
+              <Hint tone="faint" className="text-[11px]">{svc.hint} Stored encrypted; sent only via the git config header at clone time.</Hint>
             </div>
           </>
         ) : (
@@ -1220,7 +1219,7 @@ function BackupTargetsSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Backup targets</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Off-site destinations this workspace's environments can back up to: its own plus any shared by an administrator.</p>
+          <Hint className="mt-0.5">Off-site destinations this workspace's environments can back up to: its own plus any shared by an administrator.</Hint>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -1358,7 +1357,7 @@ function NotificationsSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Notification channels</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Where this workspace's alerts are delivered: its own channels plus any shared by an administrator. Assign them to rules on the Alert Rules tab.</p>
+          <Hint className="mt-0.5">Where this workspace's alerts are delivered: its own channels plus any shared by an administrator. Assign them to rules on the Alert Rules tab.</Hint>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -1482,7 +1481,7 @@ function AccessListsSection({ workspace, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Access lists</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Reusable basic-auth users + IP allow/deny + GeoIP country policy, private to this workspace. Attach one to a project environment under Edit Project → Security.</p>
+          <Hint className="mt-0.5">Reusable basic-auth users + IP allow/deny + GeoIP country policy, private to this workspace. Attach one to a project environment under Edit Project → Security.</Hint>
         </div>
         <button onClick={() => setModal('new')} className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">＋ Add access list</button>
       </div>
@@ -1587,7 +1586,7 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
           </div>
           <div className="border-t border-border pt-3">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">IP rules</label>
-            <p className="text-[11px] text-content-faint mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted. A deny-only list can’t be enforced at the proxy.</p>
+            <Hint tone="faint" className="text-[11px] mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted. A deny-only list can’t be enforced at the proxy.</Hint>
             <div className="space-y-2">
               {f.rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -1609,7 +1608,7 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
               </select>
               <input value={f.countriesText} onChange={e => set('countriesText', e.target.value)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} className={aclInput} />
             </div>
-            <p className="text-[11px] text-content-faint mt-1">Two-letter ISO country codes, comma-separated.{!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}</p>
+            <Hint tone="faint" className="text-[11px]">Two-letter ISO country codes, comma-separated.{!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}</Hint>
           </div>
           {err && <p className="text-sm text-rose-600 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg px-3 py-2">{err}</p>}
         </div>
@@ -1709,7 +1708,7 @@ function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, savin
             <option value="">All environments</option>
             {(projObj?.envs || []).map(en => <option key={en} value={en}>{en}</option>)}
           </select>
-          {!project && <p className="text-xs text-content-faint mt-1">Applies to all projects in this workspace.</p>}
+          {!project && <Hint tone="faint">Applies to all projects in this workspace.</Hint>}
         </div>
       </div>
 
@@ -1727,7 +1726,7 @@ function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, savin
       <div>
         <label className={lbl}>Notify channels</label>
         {channels.length === 0 ? (
-          <p className="text-xs text-content-faint mt-1">No channels in this workspace yet — add one on the Notifications tab. The alert still shows in the inbox without a channel.</p>
+          <Hint tone="faint">No channels in this workspace yet — add one on the Notifications tab. The alert still shows in the inbox without a channel.</Hint>
         ) : (
           <div className="flex flex-wrap gap-2 mt-1">
             {channels.map(ch => {
@@ -1786,7 +1785,7 @@ function AlertRulesSection({ workspace, projects, qc }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-content">Alert rules</h2>
-          <p className="text-xs text-content-subtle mt-0.5">Per-project conditions for this workspace, evaluated every 60s. Host/infra rules are managed globally in Settings.</p>
+          <Hint className="mt-0.5">Per-project conditions for this workspace, evaluated every 60s. Host/infra rules are managed globally in Settings.</Hint>
         </div>
         <button onClick={() => setModal('new')}
           className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
@@ -1872,7 +1871,7 @@ function DangerZone({ workspace, ws, projects, others, qc, setCurrent, navigate 
         <div className="p-5 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-content-strong">Transfer projects to another workspace</p>
-            <p className="text-xs text-content-subtle mt-0.5">Move all (or selected) projects to another workspace, then remove this one. Containers keep running (their resource prefix is unchanged).</p>
+            <Hint className="mt-0.5">Move all (or selected) projects to another workspace, then remove this one. Containers keep running (their resource prefix is unchanged).</Hint>
           </div>
           <button onClick={() => setMode('transfer')} disabled={projects.length === 0 || others.length === 0}
             className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-40 transition-colors">
@@ -1882,7 +1881,7 @@ function DangerZone({ workspace, ws, projects, others, qc, setCurrent, navigate 
         <div className="p-5 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-content-strong">Delete this workspace</p>
-            <p className="text-xs text-content-subtle mt-0.5">Stops and removes every project, environment, container, network and volume in this workspace, then deletes it. Cannot be undone.</p>
+            <Hint className="mt-0.5">Stops and removes every project, environment, container, network and volume in this workspace, then deletes it. Cannot be undone.</Hint>
           </div>
           <button onClick={() => setMode('delete')}
             className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-red-800 hover:bg-red-700 text-white transition-colors">
@@ -1941,7 +1940,7 @@ function TransferModal({ workspace, projects, others, onClose, onDone }) {
               </label>
             ))}
           </div>
-          <p className="text-xs text-content-subtle mt-1">Keys are kept; on a name clash in the target the moved project's key is suffixed. Resource prefixes (and running containers) are unchanged.</p>
+          <Hint>Keys are kept; on a name clash in the target the moved project's key is suffixed. Resource prefixes (and running containers) are unchanged.</Hint>
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex gap-2 justify-end">

@@ -5,6 +5,7 @@ import {
   createPreviewWebhook, deletePreviewWebhook,
   redeployPreview, teardownPreview, setPreviewWritebackToken,
 } from '../lib/api'
+import { Hint } from './ui'
 
 // Preview / PR environments tab (inside Edit Project). Opt-in per project: a
 // signed webhook drives ephemeral pr{n} envs cloned from a template env, deployed
@@ -45,7 +46,7 @@ function Field({ label, hint, children }) {
     <label className="block">
       <span className="text-xs font-semibold text-content-subtle uppercase tracking-wider">{label}</span>
       <div className="mt-1">{children}</div>
-      {hint && <p className="text-xs text-content-subtle mt-1">{hint}</p>}
+      {hint && <Hint>{hint}</Hint>}
     </label>
   )
 }
@@ -110,10 +111,10 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
     <section className="mb-6 space-y-6">
       <div>
         <h2 className="text-sm font-semibold text-content">Preview Environments</h2>
-        <p className="text-xs text-content-subtle mt-1">
+        <Hint>
           Auto-deploy a short-lived environment for each pull request, cloned from a template
           environment and torn down when the PR closes. Opt-in: enable it, then add the webhook to your repo.
-        </p>
+        </Hint>
       </div>
 
       {/* ── Configuration ── */}
@@ -194,7 +195,7 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-content">Webhook</h3>
-            <p className="text-xs text-content-subtle">Add this URL as a <code className="font-mono">pull_request</code> webhook in your repo settings.</p>
+            <Hint>Add this URL as a <code className="font-mono">pull_request</code> webhook in your repo settings.</Hint>
           </div>
           <button onClick={() => addHook.mutate()} disabled={addHook.isPending}
             className="text-xs font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-40">+ Add webhook</button>
@@ -231,12 +232,12 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
         <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
           <div>
             <h3 className="text-sm font-semibold text-content">Write-back token</h3>
-            <p className="text-xs text-content-subtle">
+            <Hint>
               A GitHub token with <code className="font-mono">repo:status</code> + PR-comment scope. Stored
               encrypted; never shown again. {data?.has_writeback_token
                 ? <span className="text-success-fg">A token is configured.</span>
                 : <span className="text-warning-fg">No token set — write-back is inactive until you add one.</span>}
-            </p>
+            </Hint>
           </div>
           <div className="flex items-center gap-2">
             <input type="password" autoComplete="off" className={inputCls} placeholder={data?.has_writeback_token ? '•••••••• (leave blank to keep, type to replace)' : 'ghp_…'}

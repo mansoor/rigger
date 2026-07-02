@@ -331,6 +331,11 @@ export default function DashboardPage() {
   const allProjects = ws.workspaces || []
   // Scope the project table to the selected workspace tier.
   const workspaces = current ? allProjects.filter(w => w.workspace === current) : allProjects
+  // Stat cards count the SHOWN scope, not the global aggregate — with a workspace
+  // selected, "Projects"/"Environments" reflect that workspace only (ws.total is global).
+  const projImage = workspaces.filter(w => w.type === 'image').length
+  const projStats = { total: workspaces.length, image: projImage, custom: workspaces.length - projImage }
+  const envCount = workspaces.reduce((n, w) => n + (w.envs?.length || 0), 0)
 
   // Near-real-time per-project stats (cpu/mem/net/running/services). Polled fast
   // and invalidated by Docker events (useDockerEvents), so the table tracks
@@ -409,14 +414,14 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <StatCard
             label="Projects"
-            value={ws.total ?? '—'}
-            sub={`${ws.by_type?.image || 0} image · ${ws.by_type?.custom || 0} custom`}
+            value={projStats.total || '—'}
+            sub={`${projStats.image} image · ${projStats.custom} custom`}
             accent="blue"
           />
           <StatCard
             label="Environments"
-            value={workspaces.reduce((n, w) => n + (w.envs?.length || 0), 0) || '—'}
-            sub="across all workspaces"
+            value={envCount || '—'}
+            sub={current ? 'in this workspace' : 'across all workspaces'}
             accent="purple"
           />
           <StatCard

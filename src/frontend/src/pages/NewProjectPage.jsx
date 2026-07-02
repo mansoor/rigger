@@ -19,6 +19,7 @@ import { BackupScheduleEditor } from '../components/BackupSchedules'
 import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
+import { Hint } from '../components/ui'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ function Toggle({ label, checked, onChange, hint }) {
     <div className="flex items-center justify-between">
       <div>
         <p className="text-sm text-content">{label}</p>
-        {hint && <p className="text-xs text-content-subtle">{hint}</p>}
+        {hint && <Hint>{hint}</Hint>}
       </div>
       <button
         type="button" onClick={() => onChange(!checked)}
@@ -107,7 +108,7 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
           placeholder="My App" error={errors.name}
         />
         {!errors.name && (
-          <p className="text-xs text-content-subtle mt-1">A descriptive label — 1–32 chars, letters/digits/space/dash/underscore.</p>
+          <Hint>A descriptive label — 1–32 chars, letters/digits/space/dash/underscore.</Hint>
         )}
       </div>
 
@@ -117,9 +118,9 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
           onChange={(k, valid) => { onChange('key', k); onConflict(valid ? null : 'key') }}
         />
         {resourcePrefix && (
-          <p className="text-xs text-content-subtle mt-1">
+          <Hint>
             Docker resource prefix: <code className="font-mono text-content-muted">{resourcePrefix}</code> (immutable)
-          </p>
+          </Hint>
         )}
       </div>
 
@@ -135,12 +136,12 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
           {hosts.filter(h => !h.build_only).map(h => <option key={h.id} value={String(h.id)}>{h.name} — {h.address}</option>)}
         </select>
         {defaultHostId > 0 && data.default_host_id === defaultHostId && (
-          <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
+          <Hint tone="faint">Inherited from this workspace's default.</Hint>
         )}
-        <p className="text-xs text-content-subtle mt-1">
+        <Hint>
           Where environments run by default — override per environment on the next steps. Files are pushed
           and the stack starts on the host the first time you deploy that environment.
-        </p>
+        </Hint>
       </div>
     </div>
   )
@@ -244,7 +245,7 @@ function ScanStack({ data, onChange, workspace }) {
           {busy ? 'Scanning…' : 'Scan'}
         </button>
       </div>
-      <p className="text-xs text-content-subtle">Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</p>
+      <Hint>Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</Hint>
       <div>
         <Label>Git provider <span className="font-normal normal-case text-content-faint">(private repos)</span></Label>
         <GitProviderPicker workspace={workspace}
@@ -368,7 +369,7 @@ function ScanReview({ data, onChange }) {
           </div>
           <div className="space-y-1.5">
             {svcs.length > 0 && (
-              <p className="text-[11px] text-content-faint uppercase tracking-wide">Web entry — which service receives external traffic:</p>
+              <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Web entry — which service receives external traffic:</Hint>
             )}
             {svcs.map((s, i) => {
               const ports = [s.port, ...(s.extra_ports || []).map(p => String(p).split(':').pop())].filter(Boolean)
@@ -403,7 +404,7 @@ function ScanReview({ data, onChange }) {
                   ℹ This compose already runs <span className="font-mono">{draft.predeploy_service}</span> as a one-shot migrate/release step before the app starts, so Rigger won&apos;t add its own pre-deploy command.
                 </div>
               : <div className="space-y-2 border-t border-border pt-3">
-                  <p className="text-[11px] text-content-faint uppercase tracking-wide">Pre-deploy command (optional) — runs once, in the service&apos;s image, before the app starts:</p>
+                  <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Pre-deploy command (optional) — runs once, in the service&apos;s image, before the app starts:</Hint>
                   {svcs.map((s, i) => s.build ? (
                     <div key={i}>
                       <label className="block text-xs text-content-subtle mb-1 font-mono">{s.name}</label>
@@ -411,7 +412,7 @@ function ScanReview({ data, onChange }) {
                         onChange={e => setPreDeploy(i, e.target.value)} className={`w-full ${monoInput}`} />
                     </div>
                   ) : null)}
-                  <p className="text-xs text-content-faint">A non-zero exit aborts the deploy (the previous version keeps serving). Make it idempotent — it runs on every deploy. Compose only; Swarm environments skip it.</p>
+                  <Hint tone="faint">A non-zero exit aborts the deploy (the previous version keeps serving). Make it idempotent — it runs on every deploy. Compose only; Swarm environments skip it.</Hint>
                 </div>
           )}
           {(data.database !== 'none' || data.redis || (draft.object_storage && draft.object_storage !== 'none')) && (
@@ -419,7 +420,7 @@ function ScanReview({ data, onChange }) {
           )}
           {candidates.length > 0 && (
             <div className="space-y-2 border-t border-border pt-3">
-              <p className="text-[11px] text-content-faint uppercase tracking-wide">Detected dependencies — use a Rigger-managed service, or keep your own container:</p>
+              <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Detected dependencies — use a Rigger-managed service, or keep your own container:</Hint>
               {candidates.map((c, i) => {
                 const keepOwn = isKeepOwn(c)
                 return (
@@ -442,7 +443,7 @@ function ScanReview({ data, onChange }) {
           )}
           {omitted.length > 0 && (
             <div className="space-y-1.5 border-t border-border pt-3">
-              <p className="text-[11px] text-content-faint uppercase tracking-wide">Profile-gated services (not started by default) — include any you need:</p>
+              <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Profile-gated services (not started by default) — include any you need:</Hint>
               {omitted.map((o, i) => (
                 <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="checkbox" checked={isIncluded(o)} onChange={e => toggleInclude(o, e.target.checked)} className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
@@ -454,7 +455,7 @@ function ScanReview({ data, onChange }) {
           )}
           {showSeed && (
             <div className="space-y-2 border-t border-border pt-3">
-              <p className="text-[11px] text-content-faint uppercase tracking-wide">Database seed — found a bundled SQL dump; import it into the managed {data.database}:</p>
+              <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Database seed — found a bundled SQL dump; import it into the managed {data.database}:</Hint>
               <div className="flex flex-col gap-1 pl-2 text-xs">
                 {seedCands.map((c, i) => (
                   <label key={i} className="flex items-center gap-2 cursor-pointer">
@@ -484,7 +485,7 @@ function ScanReview({ data, onChange }) {
               {draft.notes.map((n, i) => <li key={i}>{n}</li>)}
             </ul>
           )}
-          <p className="text-xs text-content-faint">Review here, then fine-tune every service in <strong>Edit Project → Services</strong> after creation.</p>
+          <Hint tone="faint">Review here, then fine-tune every service in <strong>Edit Project → Services</strong> after creation.</Hint>
         </div>
   )
 }
@@ -518,11 +519,11 @@ function CustomStack({ data, onChange, error }) {
         hint={data.sourceFileName
           ? `↻ ${data.sourceFileName} uploaded — drop another to replace`
           : '↑ Drop your app source (.zip / .tar.gz) here, or click to browse'} />
-      <p className="text-xs text-content-subtle">
+      <Hint>
         Upload your application source — Rigger extracts it, detects the stack (framework, ports, a Dockerfile if present),
         and seeds env from its <code className="font-mono text-xs">.env.example</code>. No git repo or Dockerfile required;
         Rigger scaffolds one for the detected framework when missing.
-      </p>
+      </Hint>
       {(err || error) && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err || error}</p>}
       <ScanReview data={data} onChange={onChange} />
     </div>
@@ -667,7 +668,7 @@ function ComposeImportModal({ images, onApply, onClose }) {
       <div className="bg-surface-raised border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
           <h3 className="text-base font-semibold text-content-strong">Paste / edit docker-compose</h3>
-          <p className="text-xs text-content-subtle mt-0.5">Paste a compose file to fill the services, or edit the YAML below. Parsing replaces the service list.</p>
+          <Hint className="mt-0.5">Paste a compose file to fill the services, or edit the YAML below. Parsing replaces the service list.</Hint>
         </div>
         <div className="px-5 py-4 overflow-y-auto space-y-3">
           <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} spellCheck={false}
@@ -733,7 +734,7 @@ function ImageEditor({ images, onChange }) {
               <Input value={img.tag} onChange={v => update(i, 'tag', v)} placeholder="latest" />
             </div>
           </div>
-          <p className="text-xs text-content-faint">Port mappings, volumes and healthcheck configured in the Services step.</p>
+          <Hint tone="faint">Port mappings, volumes and healthcheck configured in the Services step.</Hint>
         </div>
       ))}
       <button
@@ -888,12 +889,12 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
           onSelect={handleSelect}
           onClose={() => setModalOpen(false)}
           footer={
-            <p className="text-xs text-content-subtle">
+            <Hint>
               Can't find what you're looking for? Build your own in{' '}
               <strong className="text-content">Tools → Template Manager</strong> — convert a
               <span className="font-mono text-content-muted"> docker-compose.yml</span> to a template, import a
               template file, or generate one from an existing image stack.
-            </p>
+            </Hint>
           }
         />
       )}
@@ -911,7 +912,7 @@ function RegistryField({ data, onChange, errors, workspace, defaultRegistryId })
   return (
     <div>
       <Label>Container registry</Label>
-      <p className="text-xs text-content-subtle mb-2">Optional — only needed so remote hosts can pull built images. Leave as "Local" to build &amp; run images on the deploy host.</p>
+      <Hint className="mb-2">Optional — only needed so remote hosts can pull built images. Leave as "Local" to build &amp; run images on the deploy host.</Hint>
       <RegistryPicker
         workspace={workspace}
         value={data.registry}
@@ -961,12 +962,12 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       {/* Managed service hosting: managed services on their own (no app code). The
           engines + tooling are chosen on the next step (Managed services). */}
       {data.stackType === 'database' && (
-        <p className="text-xs text-content-subtle">
+        <Hint>
           Standalone managed services with auto-generated credentials — a database, Redis cache,
           object storage, search or metrics engine. Pick what to run on the next step (Managed
           services). Connect from other projects (shared network), from outside (enable external
           access per-environment in Edit Project), or browse a SQL database via Adminer.
-        </p>
+        </Hint>
       )}
 
       {/* Image stack: custom image list + env vars */}
@@ -974,12 +975,12 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
         <div className="space-y-5">
           <div>
             <Label>Services</Label>
-            <p className="text-xs text-content-subtle mb-2">Add each Docker image you want to deploy.</p>
+            <Hint className="mb-2">Add each Docker image you want to deploy.</Hint>
             <ImageEditor images={data.images} onChange={v => onChange('images', v)} />
           </div>
           <div>
             <Label>Environment variables</Label>
-            <p className="text-xs text-content-subtle mb-2">These will be written to <code className="font-mono text-xs">.env</code>. Secrets can be set now or edited after creation.</p>
+            <Hint className="mb-2">These will be written to <code className="font-mono text-xs">.env</code>. Secrets can be set now or edited after creation.</Hint>
             <EnvVarEditor envVars={data.customEnvVars} onChange={v => onChange('customEnvVars', v)} />
           </div>
         </div>
@@ -1112,7 +1113,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
           <div>
             <Label>HTTP port</Label>
             <Input type="number" value={env.http_port} onChange={v => upd('http_port', parseInt(v) || 8080)} placeholder="8080" />
-            <p className="text-xs text-content-subtle mt-1">Host port Nginx binds to — access your app at <code className="font-mono text-xs">host:{env.http_port || 8080}</code></p>
+            <Hint>Host port Nginx binds to — access your app at <code className="font-mono text-xs">host:{env.http_port || 8080}</code></Hint>
           </div>
         )}
         <div>
@@ -1126,7 +1127,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
             onChange={v => upd('host_id', Number(v))}
             options={hostOptions}
           />
-          <p className="text-xs text-content-subtle mt-1">Where this environment runs.</p>
+          <Hint>Where this environment runs.</Hint>
         </div>
       </div>
 
@@ -1189,12 +1190,12 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
               </div>
             </div>
             {!env.domain && (
-              <p className="text-xs text-content-subtle mt-1">
+              <Hint>
                 Blank → an automatic URL (base domain if the admin set one, else the sslip/nip auto-URL, else <code className="font-mono text-xs">*.localhost</code>). Set a value only for your own custom domain.
-              </p>
+              </Hint>
             )}
             {sslBlocked && (
-              <p className="text-xs text-content-faint mt-1">SSL isn&apos;t available for localhost or IP addresses — use a public domain.</p>
+              <Hint tone="faint">SSL isn&apos;t available for localhost or IP addresses — use a public domain.</Hint>
             )}
           </div>
         )}
@@ -1216,7 +1217,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
                 <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a></span>
               </label>
             </div>
-            <p className="text-[11px] text-content-faint">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Port 80 must be reachable for the HTTP-01 challenge.</p>
+            <Hint tone="faint" className="text-[11px]">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Port 80 must be reachable for the HTTP-01 challenge.</Hint>
           </div>
         )}
         {/* Git sync only applies to source-code projects (built from a repo) — not
@@ -1391,9 +1392,9 @@ function VolumeEditor({ volumes, onChange }) {
           <button type="button" onClick={() => remove(i)} className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
         </div>
       ))}
-      <p className="text-xs text-content-faint">
+      <Hint tone="faint">
         Paths starting with <code className="font-mono">./</code> or <code className="font-mono">/</code> = bind mount (scoped to workspace). Plain names = Docker named volume.
-      </p>
+      </Hint>
       <button
         type="button" onClick={add}
         className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
@@ -1498,10 +1499,10 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
       {/* Port mappings */}
       <div>
         <Label>Port mappings</Label>
-        <p className="text-xs text-content-subtle mb-2">
+        <Hint className="mb-2">
           HOST : CONTAINER — leave host blank to expose internally only.
           <span className="ml-2 text-content-faint">🔗 = show as link on env card</span>
-        </p>
+        </Hint>
         <div className="space-y-1.5">
           {portRows.map((row, ri) => (
             <div key={ri} className="flex items-center gap-2">
@@ -1538,7 +1539,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
       {/* Volume mappings */}
       <div>
         <Label>Volume mappings</Label>
-        <p className="text-xs text-content-subtle mb-2">SOURCE (named vol or path) : CONTAINER PATH</p>
+        <Hint className="mb-2">SOURCE (named vol or path) : CONTAINER PATH</Hint>
         <div className="space-y-1.5">
           {volRows.map((row, ri) => (
             <div key={ri} className="flex items-center gap-2">
@@ -1588,7 +1589,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
       {/* Environment variables (per service) */}
       <div>
         <Label>Environment variables</Label>
-        <p className="text-xs text-content-subtle mb-2">KEY : VALUE — passed to this service. <code className="font-mono">${'{VAR}'}</code> values resolve from the env&apos;s .env at deploy.</p>
+        <Hint className="mb-2">KEY : VALUE — passed to this service. <code className="font-mono">${'{VAR}'}</code> values resolve from the env&apos;s .env at deploy.</Hint>
         <div className="space-y-1.5">
           {envRows.map((row, ri) => (
             <div key={ri} className="flex items-center gap-2">
@@ -1614,7 +1615,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
       <div className="space-y-2">
         <div>
           <Label>Healthcheck command</Label>
-          <p className="text-xs text-content-subtle mb-1">Shell command to test container health. Leave blank to disable.</p>
+          <Hint className="mb-1">Shell command to test container health. Leave blank to disable.</Hint>
           <input type="text" value={img.healthcheck || ''} placeholder="curl -sf http://localhost/health || exit 1"
             onChange={e => upd('healthcheck', e.target.value)} className={`w-full ${monoInput}`} />
         </div>
@@ -1792,7 +1793,7 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
               for multi-service stacks (a lone image is always the entry). */}
           {serviceImages.length >= 2 && (
             <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
-              <p className="text-[11px] text-content-faint uppercase tracking-wide">Web entry — which service receives external traffic (the env&apos;s domain / Traefik route):</p>
+              <Hint tone="faint" className="text-[11px] uppercase tracking-wide">Web entry — which service receives external traffic (the env&apos;s domain / Traefik route):</Hint>
               {data.images.map((img, i) => (img.name && img.image) ? (
                 <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="radio" name="img-webentry" checked={!!img.web_routed} onChange={() => pickWebEntry(i)}
@@ -1820,10 +1821,10 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
       {data.stackType === 'custom' && (
         <div className="px-4 py-3 bg-surface-raised/40 border border-border-strong/50 rounded-xl">
           <p className="text-sm text-content font-medium mb-1">Custom application stack</p>
-          <p className="text-xs text-content-subtle">
+          <Hint>
             App services are seeded from your backend/frontend choice. After creation, use
             <strong> Edit Project → Services</strong> to add workers and adjust each service.
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -1831,10 +1832,10 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
       {data.stackType === 'scan' && (
         <div className="px-4 py-3 bg-surface-raised/40 border border-border-strong/50 rounded-xl">
           <p className="text-sm text-content font-medium mb-1">{(data.scanDraft?.services || []).length} service{(data.scanDraft?.services || []).length !== 1 ? 's' : ''} detected from your repository</p>
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Reviewed in the <strong>Stack</strong> step. After creation, fine-tune each service
             (ports, healthchecks, workers) in <strong>Edit Project → Services</strong>.
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -1842,10 +1843,10 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
       {data.stackType === 'blueprint' && (
         <div className="px-4 py-3 bg-surface-raised/40 border border-border-strong/50 rounded-xl">
           <p className="text-sm text-content font-medium mb-1">{(data.blueprintServices || []).length} service{(data.blueprintServices || []).length !== 1 ? 's' : ''} seeded from the <span className="font-mono">{data.blueprintId}</span> template</p>
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Rigger scaffolds a starter Dockerfile per build service — replace it with your code,
             then fine-tune each service in <strong>Edit Project → Services</strong>.
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -1857,11 +1858,11 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
           <span className="ml-2 text-content-faint font-normal">shared Docker volumes across services</span>
         </summary>
         <div className="mt-3">
-          <p className="text-xs text-content-subtle mb-3">
+          <Hint className="mb-3">
             Only for named Docker volumes that need to be shared between multiple services
             and aren't already declared in a service's volume list above.
             Bind mounts are defined per-service and don't need declaring here.
-          </p>
+          </Hint>
           <NamedVolumeEditor volumes={data.volumes} onChange={v => onChange('volumes', v)} />
         </div>
       </details>
@@ -1932,7 +1933,7 @@ function Step5({ data, onChange, workspace, defaultTargetId }) {
       )}
 
       {defaultTargetName && (
-        <p className="text-xs text-content-faint">New schedules default to this workspace's backup target (<span className="text-content-muted">{defaultTargetName}</span>); change it per schedule.</p>
+        <Hint tone="faint">New schedules default to this workspace's backup target (<span className="text-content-muted">{defaultTargetName}</span>); change it per schedule.</Hint>
       )}
 
       {namedEnvs.map(env => (

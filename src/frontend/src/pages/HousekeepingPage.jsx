@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
+import { Hint } from '../components/ui'
 import {
   fetchHousekeepingStatus, fetchHousekeepingLog,
   fetchHousekeepingImages, fetchStoppedContainers, fetchDanglingVolumes,
@@ -162,7 +163,7 @@ function DashboardTab({ status, onQuickAction }) {
             <span className="text-2xl">🌐</span>
             <div>
               <p className="text-sm font-semibold text-content-strong">Prune Unused Networks</p>
-              <p className="text-xs text-content-subtle">Remove leftover bridge/overlay networks</p>
+              <Hint>Remove leftover bridge/overlay networks</Hint>
             </div>
             {networkMut.isPending && <span className="ml-auto text-xs text-content-subtle">Running…</span>}
           </button>
@@ -174,7 +175,7 @@ function DashboardTab({ status, onQuickAction }) {
             <span className="text-2xl">🗑</span>
             <div>
               <p className="text-sm font-semibold text-content-strong">Prune Dangling Images</p>
-              <p className="text-xs text-content-subtle">Remove {'<none>:<none>'} build layers</p>
+              <Hint>Remove {'<none>:<none>'} build layers</Hint>
             </div>
             {danglingMut.isPending && <span className="ml-auto text-xs text-content-subtle">Running…</span>}
           </button>
@@ -238,7 +239,7 @@ function UnusedImagesSection() {
           <span className="text-xl">🐳</span>
           <div className="text-left">
             <p className="text-sm font-semibold text-content-strong">Unused Image Pruning</p>
-            <p className="text-xs text-content-subtle">Remove old image versions not used by any container</p>
+            <Hint>Remove old image versions not used by any container</Hint>
           </div>
         </div>
         <span className="text-xs bg-warning-subtle/50 text-warning-fg px-2 py-0.5 rounded-full">Approval Required</span>
@@ -319,7 +320,7 @@ function StoppedContainersSection() {
           <span className="text-xl">📦</span>
           <div className="text-left">
             <p className="text-sm font-semibold text-content-strong">Stopped Container Removal</p>
-            <p className="text-xs text-content-subtle">Remove exited/dead containers from the namespace</p>
+            <Hint>Remove exited/dead containers from the namespace</Hint>
           </div>
         </div>
         <span className="text-xs bg-warning-subtle/50 text-warning-fg px-2 py-0.5 rounded-full">Approval Required</span>
@@ -543,7 +544,7 @@ function BuildCacheSection({ docker }) {
           <span className="text-xl">⚙</span>
           <div className="text-left">
             <p className="text-sm font-semibold text-content-strong">System-Wide Cache & Build Overhaul</p>
-            <p className="text-xs text-content-subtle">Reclaim BuildKit cache — slows next build but frees large disk space</p>
+            <Hint>Reclaim BuildKit cache — slows next build but frees large disk space</Hint>
           </div>
         </div>
         <span className="text-xs bg-warning-subtle/50 text-warning-fg px-2 py-0.5 rounded-full">Approval Required</span>
@@ -615,7 +616,7 @@ function KernelCleanupSection() {
   if (!kernelData?.available && !isLoading && open) {
     return (
       <div className="bg-surface border border-border rounded-xl p-4">
-        <p className="text-xs text-content-subtle">Kernel cleanup requires host OS access (privileged mode). See the Automation tab for setup instructions.</p>
+        <Hint>Kernel cleanup requires host OS access (privileged mode). See the Automation tab for setup instructions.</Hint>
       </div>
     )
   }
@@ -630,7 +631,7 @@ function KernelCleanupSection() {
           <span className="text-xl">🐧</span>
           <div className="text-left">
             <p className="text-sm font-semibold text-content-strong">Old Kernel Cleanup</p>
-            <p className="text-xs text-content-subtle">Remove obsolete kernel images to free /boot space</p>
+            <Hint>Remove obsolete kernel images to free /boot space</Hint>
           </div>
         </div>
         <span className="text-xs bg-warning-subtle/50 text-warning-fg px-2 py-0.5 rounded-full">Approval Required</span>
@@ -769,7 +770,7 @@ function AutomationTab({ hostPrivileged }) {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-content-strong">APT Package Cache Cleanup</h3>
-            <p className="text-xs text-content-subtle mt-0.5">apt-get autoremove && apt-get clean</p>
+            <Hint className="mt-0.5">apt-get autoremove && apt-get clean</Hint>
           </div>
           <span className="text-xs text-success-fg bg-success-subtle/30 px-2 py-0.5 rounded-full">Auto-safe</span>
         </div>
@@ -784,7 +785,7 @@ function AutomationTab({ hostPrivileged }) {
       <div className="p-4 bg-surface border border-border rounded-xl space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-content-strong">Systemd Journal Rotation</h3>
-          <p className="text-xs text-content-subtle mt-0.5">journalctl --vacuum-time or --vacuum-size</p>
+          <Hint className="mt-0.5">journalctl --vacuum-time or --vacuum-size</Hint>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -810,7 +811,7 @@ function AutomationTab({ hostPrivileged }) {
       <div className="p-4 bg-surface border border-border rounded-xl space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-content-strong">Temporary Directory Cleanup</h3>
-          <p className="text-xs text-content-subtle mt-0.5">find /tmp -type f -atime +N -delete</p>
+          <Hint className="mt-0.5">find /tmp -type f -atime +N -delete</Hint>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -925,11 +926,11 @@ function MigrationLeftoversTab() {
 
   return (
     <div>
-      <p className="text-sm text-content-subtle mb-4">
+      <Hint className="text-sm mb-4">
         When an environment is migrated to another host, its data, volumes and files (including
         <code className="font-mono text-xs"> .env</code> secrets) are left on the <strong>source</strong> host.
         Wipe them here before decommissioning a host so they can't be recovered by whoever gets the machine.
-      </p>
+      </Hint>
 
       {items.length === 0 ? (
         <div className="py-12 text-center text-content-subtle text-sm border border-border rounded-xl">
@@ -1001,7 +1002,7 @@ export default function HousekeepingPage() {
         <div className="mb-6 flex items-start justify-between">
           <div>
             <h1 className="text-xl font-bold text-content-strong">Housekeeping</h1>
-            <p className="text-sm text-content-subtle mt-0.5">Docker and host OS maintenance — automated and approval-gated.</p>
+            <Hint className="text-sm mt-0.5">Docker and host OS maintenance — automated and approval-gated.</Hint>
           </div>
           {!isLoading && status && <StatusBadge status={status.health_status} />}
         </div>

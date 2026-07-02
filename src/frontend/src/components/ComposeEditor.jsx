@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCompose } from '../lib/api'
+import { Hint } from './ui'
 
 // ── Clipboard helper — works on HTTP (no secure context required) ─────────────
 
@@ -135,12 +136,12 @@ export default function ComposeEditor({ workspace, name, env, onClose, onRefresh
 
         {/* Footer */}
         <div className="px-5 py-2.5 border-t border-border bg-surface/80 shrink-0">
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Generated from <code className="font-mono text-content-muted">config.json</code>.
             Use <strong className="text-content-muted">Edit Workspace</strong> to change configuration,
             then the <strong className="text-content-muted">Refresh</strong> (↻) action on the env card to regenerate.
             Select text in the viewer then click Copy to copy only the selection.
-          </p>
+          </Hint>
         </div>
       </div>
     </div>

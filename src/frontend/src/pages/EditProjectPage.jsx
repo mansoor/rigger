@@ -20,60 +20,7 @@ import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 import { useConfirm } from '../context/ConfirmContext'
-
-// ── Shared primitives ─────────────────────────────────────────────────────────
-
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
-
-function Input({ value, onChange, placeholder, type = 'text', ...rest }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
-      {...rest}
-    />
-  )
-}
-
-// Toggle: label + switch. Default spreads them (justify-between) for full-width
-// setting rows; `inline` packs the switch right after the label (compact, for
-// grid/aligned layouts).
-function Toggle({ label, hint, checked, onChange, disabled = false, inline = false }) {
-  return (
-    <div className={`flex items-center ${inline ? 'gap-2.5' : 'justify-between'} ${disabled ? 'opacity-50' : ''}`}>
-      <div>
-        <p className="text-sm text-content">{label}</p>
-        {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
-      </div>
-      <button
-        type="button"
-        onClick={() => !disabled && onChange(!checked)}
-        disabled={disabled}
-        className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${
-          checked && !disabled ? 'bg-brand-600' : checked ? 'bg-brand-800' : 'bg-surface-overlay'
-        }`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
-      </button>
-    </div>
-  )
-}
-
-function Select({ value, onChange, options }) {
-  return (
-    <select value={value ?? ''} onChange={e => onChange(e.target.value)}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  )
-}
+import { Label, Input, Toggle, Select, Hint } from '../components/ui'
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
@@ -398,7 +345,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Dockerfile template</Label>
             <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={BUILD_TEMPLATES} />
-            <p className="text-xs text-content-subtle mt-1">Scaffolds a starter Dockerfile; replace with your own via repo sync.</p></div>
+            <Hint>Scaffolds a starter Dockerfile; replace with your own via repo sync.</Hint></div>
           <div><Label>Build context</Label>
             <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
         </div>
@@ -406,12 +353,12 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         {/* Build args — passed as --build-arg KEY=VALUE at image build time. */}
         <div>
           <Label>Build args</Label>
-          <p className="text-xs text-content-subtle mb-2">
+          <Hint className="mb-2">
             Passed to <code className="font-mono text-xs">docker build --build-arg</code> (for values baked at build time, e.g. a Next.js
             <code className="font-mono text-xs"> next.config</code> rewrite target). Values may use{' '}
             <code className="font-mono text-xs">${'{ENV}'}</code>, <code className="font-mono text-xs">${'{VERSION}'}</code>, and{' '}
             <code className="font-mono text-xs">${'{ROUTE_URL}'}</code> (the env's public URL).
-          </p>
+          </Hint>
           <div className="space-y-1.5">
             {argRows.map((row, ri) => (
               <div key={ri} className="flex items-center gap-2">
@@ -438,7 +385,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           <Label required>Reuse image of</Label>
           <Select value={img.image_from || ''} onChange={v => upd('image_from', v)}
             options={[{ value: '', label: '— pick a service —' }, ...otherNames.map(n => ({ value: n, label: n }))]} />
-          <p className="text-xs text-content-subtle mt-1">A worker/scheduler that runs another service's built image with a custom command.</p>
+          <Hint>A worker/scheduler that runs another service's built image with a custom command.</Hint>
         </div>
       )}
 
@@ -466,12 +413,12 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               <Toggle inline label="App owns .env (writable)"
                 checked={!!img.env_file_writable}
                 onChange={v => upd('env_file_writable', v)} />
-              <p className="text-xs text-content-subtle self-center">
+              <Hint className="self-center">
                 Bind the .env writable (not read-only) and skip process-env injection, so an app
                 that writes its own <code className="font-mono text-xs">.env</code> at runtime — a
                 CodeCanyon installer setting <code className="font-mono text-xs">INSTALLED=true</code> —
                 persists. Rigger still re-asserts managed DB/Redis/storage keys on redeploy.
-              </p>
+              </Hint>
             </>
           : null}
 
@@ -495,9 +442,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           ? <Input value={img.subdomain} onChange={v => upd('subdomain', v)} placeholder="subdomain (blank = apex domain)" />
           : <div />}
       </div>
-      <p className="text-xs text-content-subtle">
+      <Hint>
         <strong className="text-content-muted">Override command</strong> replaces the image/build default. <strong className="text-content-muted">Mount .env as a file</strong> also writes the env to disk for apps that read a physical <code className="font-mono text-xs">.env</code> (e.g. Laravel <code className="font-mono text-xs">php artisan serve</code>).
-      </p>
+      </Hint>
 
       {/* Pre-deploy (release / migrate) command — build services only. Rigger runs it
           once, before the app starts, in this service's image; a non-zero exit aborts
@@ -511,20 +458,20 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               <Label>Pre-deploy command</Label>
               <Input value={img.pre_deploy || ''} onChange={v => upd('pre_deploy', v)}
                 placeholder="php artisan migrate --force" />
-              <p className="text-xs text-content-subtle mt-1">
+              <Hint>
                 Runs once before the app starts, in this service's image (e.g. database migrations); a non-zero exit aborts the deploy and the previous version keeps serving. Make it idempotent — it runs on every deploy.
                 <span className="block text-content-faint mt-0.5">Applies to Compose environments. Swarm environments skip it (Docker Swarm can't gate startup on a one-shot job).</span>
-              </p>
+              </Hint>
             </div>
       )}
 
       {/* Port mappings */}
       <div>
         <Label>Port mappings</Label>
-        <p className="text-xs text-content-subtle mb-2">
+        <Hint className="mb-2">
           <code className="font-mono text-xs">HOST PORT</code> : <code className="font-mono text-xs">CONTAINER PORT</code> — leave host blank to expose internally only.
           <span className="ml-2 text-content-faint">🔗 = show as link on env card</span>
-        </p>
+        </Hint>
         <div className="space-y-1.5">
           {portRows.map((row, ri) => (
             <div key={ri} className="flex items-center gap-2">
@@ -562,10 +509,10 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
       {/* Volume mappings */}
       <div>
         <Label>Volume mappings</Label>
-        <p className="text-xs text-content-subtle mb-2">
+        <Hint className="mb-2">
           <code className="font-mono text-xs">SOURCE</code> : <code className="font-mono text-xs">CONTAINER PATH</code> —
           use <code className="font-mono text-xs">./volumes/name</code> for a bind mount scoped to this env, or a plain name for a Docker named volume.
-        </p>
+        </Hint>
         <div className="space-y-1.5">
           {volumeRows.map((row, ri) => {
             const isBind = row.source.startsWith('./') || row.source.startsWith('/')
@@ -604,10 +551,10 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
       <div className="space-y-3">
         <div>
           <Label>Healthcheck command</Label>
-          <p className="text-xs text-content-subtle mb-2">
+          <Hint className="mb-2">
             Shell command Docker runs to test container health. Leave blank to disable.
             Example: <code className="font-mono text-xs">curl -sf http://localhost/health || exit 1</code>
-          </p>
+          </Hint>
           <input
             type="text"
             value={img.healthcheck || ''}
@@ -619,9 +566,9 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         {/* Time parameters — only shown when a command is set */}
         {img.healthcheck && (
           <div>
-            <p className="text-xs text-content-subtle mb-2">
+            <Hint className="mb-2">
               Timing parameters — enter seconds only (numbers). <code className="font-mono text-xs">start_interval</code> requires Docker Engine 25+.
-            </p>
+            </Hint>
             <div className="grid grid-cols-5 gap-2">
               {[
                 { key: 'interval',       label: 'Interval',        placeholder: '30' },
@@ -670,10 +617,10 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         return (
         <div>
           <Label>Depends on</Label>
-          <p className="text-xs text-content-subtle mb-2">
+          <Hint className="mb-2">
             This service waits for selected services (and enabled managed dependencies)
             before starting. Compose waits for healthy status when available.
-          </p>
+          </Hint>
           <div className="flex flex-wrap gap-3">
             {depCheckboxes.map(svcName => {
               const checked = (img.depends_on || []).includes(svcName)
@@ -702,14 +649,14 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
       {/* Service links — wire an env var to another service's in-network URL. */}
       <div>
         <Label>Service links</Label>
-        <p className="text-xs text-content-subtle mb-2">
+        <Hint className="mb-2">
           Inject another service's in-network URL as an environment variable, e.g. a
           frontend reaching its API. Rigger emits{' '}
           <code className="font-mono text-xs">ENV_VAR=http://{'{service}'}:{'{port}'}{'{path}'}</code>{' '}
           (the value overrides any matching <code className="font-mono text-xs">.env</code> key). Optional — you can also set the URL by hand as an env var.
-        </p>
+        </Hint>
         {depOptions.length === 0
-          ? <p className="text-xs text-content-faint">Add another service or managed dependency first to link to it.</p>
+          ? <Hint tone="faint">Add another service or managed dependency first to link to it.</Hint>
           : (<div className="space-y-1.5">
           {linkRows.map((row, ri) => {
             const targetPort = (allImages.find(m => m.name === row.service)?.port) || MANAGED_LINK_PORT[row.service] || ''
@@ -749,13 +696,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           differ per environment, use ${KEY} here + a value in the Environment Variables tab. */}
       <div>
         <Label>Environment variables</Label>
-        <p className="text-xs text-content-subtle mb-2">
+        <Hint className="mb-2">
           Set on <strong className="text-content-muted">this service only</strong> — overrides the shared{' '}
           <code className="font-mono text-xs">.env</code> for matching keys. Use a literal for a project-wide
           constant, or <code className="font-mono text-xs">${'{KEY}'}</code> here plus a per-environment value
           in the <strong className="text-content-muted">Environment Variables</strong> tab when the value must
           differ by environment.
-        </p>
+        </Hint>
         <div className="space-y-1.5">
           {envRows.map((row, ri) => (
             <div key={ri} className="flex items-center gap-2">
@@ -783,14 +730,14 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           Advanced YAML overrides
         </summary>
         <div className="mt-2 space-y-1">
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Raw YAML appended to this service in the generated compose file.
             Use for: <code className="font-mono text-xs">mem_limit</code>,{' '}
             <code className="font-mono text-xs">cpus</code>,{' '}
             <code className="font-mono text-xs">logging</code>,{' '}
             <code className="font-mono text-xs">command</code>, etc.
             Run <strong>Refresh</strong> after saving to apply.
-          </p>
+          </Hint>
           <textarea
             value={img.extra_compose || ''}
             onChange={e => upd('extra_compose', e.target.value)}
@@ -852,11 +799,11 @@ function ReplaceSourceCard({ workspace, name }) {
   return (
     <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4 space-y-2">
       <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Application source (uploaded)</p>
-      <p className="text-xs text-content-subtle">
+      <Hint>
         This project builds from an uploaded archive. Replace it with a new
         <code className="font-mono text-xs"> .zip</code>/<code className="font-mono text-xs">.tar.gz</code>, then <strong>Build</strong> each
         environment to apply.
-      </p>
+      </Hint>
       <DropZone onFile={upload} accept=".zip,.tar,.tar.gz,.tgz,.gz" busy={busy}
         busyLabel="Uploading & validating…"
         hint="↑ Drop a new source archive here, or click to browse" />
@@ -894,10 +841,10 @@ function SeedDatabaseCard({ workspace, name, seed, database, envNames, onToggleA
   return (
     <div className="mb-5 rounded-xl border border-border bg-surface-raised/40 p-4 space-y-3">
       <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Database seed</p>
-      <p className="text-xs text-content-subtle">
+      <Hint>
         A bundled SQL dump (<code className="font-mono text-xs">{seed?.file || 'seed.sql'}</code>) imports into the managed {database}.
         Import only runs into an empty database unless you confirm an overwrite; the dump is loaded as-is.
-      </p>
+      </Hint>
       <label className="flex items-center gap-2 text-xs cursor-pointer">
         <input type="checkbox" checked={!!seed?.auto} onChange={e => onToggleAuto(e.target.checked)}
           className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
@@ -1074,7 +1021,7 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch, gitProviderId = 0,
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-content-subtle">Containers that make up the stack — click one to expand.</p>
+        <Hint>Containers that make up the stack — click one to expand.</Hint>
         <div className="flex items-center gap-2 shrink-0">
           {gitRepo && (
             <button type="button" onClick={() => setScanning(true)} title="Re-detect the stack from the source repository"
@@ -1180,7 +1127,7 @@ function SwarmSettings({ cfg, onChange, projectType, imageNames = [], managedDep
             </div>
           )
         })}
-        <p className="text-[11px] text-content-faint">replicas · placement constraints (comma-separated). Managed services (db / redis / object storage) run single-instance — pin them with placement; scale your own stateless services.</p>
+        <Hint tone="faint" className="text-[11px]">replicas · placement constraints (comma-separated). Managed services (db / redis / object storage) run single-instance — pin them with placement; scale your own stateless services.</Hint>
       </div>
 
       <div>
@@ -1252,9 +1199,9 @@ function ProcessesSettings({ cfg, onChange }) {
       </p>
 
       {procs.length === 0 && (
-        <p className="text-xs text-content-subtle">
+        <Hint>
           No extra processes. Add a queue worker, scheduler, or job processor — each runs your built image with a different command (no web port).
-        </p>
+        </Hint>
       )}
 
       {procs.map((p, i) => (
@@ -1341,7 +1288,7 @@ function TriOverride({ label, hint, projectDefault, value, onChange }) {
     <div className="flex items-center justify-between gap-3">
       <div>
         <p className="text-sm text-content">{label}</p>
-        {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
+        {hint && <Hint className="mt-0.5">{hint}</Hint>}
       </div>
       <div className="inline-flex rounded-lg border border-border overflow-hidden text-xs shrink-0">
         {opts.map(([k, lbl]) => (
@@ -1497,7 +1444,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               onChange={v => upd('_host_id', Number(v))}
               options={[{ value: '0', label: 'Local Docker' }, ...hosts.filter(h => !h.build_only).map(h => ({ value: String(h.id), label: `${h.name} — ${h.address}` }))]}
             />
-            <p className="text-xs text-content-subtle mt-1">The stack starts here the first time you deploy this environment.</p>
+            <Hint>The stack starts here the first time you deploy this environment.</Hint>
           </div>
         )}
         {/* HTTP port — the published host port for "Public — host port" mode (custom stacks). */}
@@ -1505,7 +1452,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <div>
             <Label>HTTP port</Label>
             <Input type="number" value={cfg.http_port} onChange={v => upd('http_port', parseInt(v) || 80)} />
-            <p className="text-xs text-content-subtle mt-1">Host port the app binds to — reach it (or point your own proxy) at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></p>
+            <Hint>Host port the app binds to — reach it (or point your own proxy) at <code className="font-mono text-xs">host:{cfg.http_port || 80}</code></Hint>
           </div>
         )}
       </div>
@@ -1572,7 +1519,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                   </label>
                 )}
               </div>
-              <p className="text-xs text-content-faint mt-1">
+              <Hint tone="faint">
                 {!route.auto
                   ? <>On the base domain — publicly reachable. TLS is issued automatically (wildcard or per-host).</>
                   : isLocalhost
@@ -1580,7 +1527,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                     : magicPublic
                       ? <>Magic-DNS at this host&apos;s <strong>public</strong> IP (<code className="font-mono text-xs">{host}</code>) — reachable on the internet. Served over plain HTTP; enable self-signed HTTPS, or add a custom domain / set a base domain for an automatic Let&apos;s Encrypt cert.</>
                       : <>Magic-DNS at this host&apos;s private IP (<code className="font-mono text-xs">{host || 'localhost'}</code>) — reachable on this network/LAN, not the public internet. Point the App host at a public IP, set a base domain, or add a custom domain for a public URL.</>}
-              </p>
+              </Hint>
             </div>
           )
         })()}
@@ -1596,7 +1543,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
 
         {/* Custom domains — per-env extra hostnames + their own TLS (verify flow). */}
         {exMode === 'traefik' && (isNew
-          ? <p className="text-xs text-content-faint">Save this environment to attach custom domains.</p>
+          ? <Hint tone="faint">Save this environment to attach custom domains.</Hint>
           : <CustomDomainsPanel workspaceName={workspaceName} envName={envName} />)}
 
         {/* Let's Encrypt account email — inherits the workspace / instance default; the
@@ -1607,14 +1554,14 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           return (
             <div>
               <Label>Let&apos;s Encrypt email</Label>
-              <p className="text-xs text-content-subtle mb-1">
+              <Hint className="mb-1">
                 From {acmeDefault ? 'workspace / admin' : 'instance default'}: <code className="font-mono text-xs">{acmeDefault || 'set in admin Settings'}</code>
-              </p>
+              </Hint>
               <Input type="email" value={cfg.acme_email || ''} onChange={v => upd('acme_email', v)}
                 placeholder={acmeDefault ? `Override — blank inherits ${acmeDefault}` : 'Override — blank inherits instance email'} />
               {emailBad
                 ? <p className="text-xs text-danger-fg mt-1">Enter a valid email address, or leave blank to inherit.</p>
-                : <p className="text-xs text-content-subtle mt-1">Account/recovery contact for this env&apos;s certs — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Only set this to use a different LE account for this environment.</p>}
+                : <Hint>Account/recovery contact for this env&apos;s certs — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Only set this to use a different LE account for this environment.</Hint>}
             </div>
           )
         })()}
@@ -1646,9 +1593,9 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             {accessMode === 'basic' && (
               <div>
                 <Label>Require sign-in (auth gate)</Label>
-                <p className="text-xs text-content-subtle">
+                <Hint>
                   A shared password is generated on deploy — view it in this env&apos;s <strong>Env Vars</strong> (<code className="font-mono text-xs">APP_AUTH_USER</code> / <code className="font-mono text-xs">APP_AUTH_PASSWORD</code>). Good for &quot;just me&quot;; for a team, use SSO (coming via Authentik).
-                </p>
+                </Hint>
                 <p className="text-xs text-warning-fg mt-1">
                   ⚠ Use it for static sites / apps without their own login. For token-based apps (Activepieces, Grafana, most SPAs), use Cloudflare Tunnel + Access.
                 </p>
@@ -1673,9 +1620,9 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                         <span className="text-xs text-content-subtle shrink-0">IP / CIDR:</span>
                         <Input value={cfg.ip_cidrs || ''} onChange={v => upd('ip_cidrs', v)} placeholder="203.0.113.0/24, 198.51.100.7" />
                       </div>
-                      <p className="text-[11px] text-content-faint mt-1">
+                      <Hint tone="faint" className="text-[11px]">
                         Allow-list — only these IPs / CIDRs reach the app (comma / space separated). Traefik has no native deny-list; block specific IPs at your edge firewall or with the WAF.
-                      </p>
+                      </Hint>
                     </div>
                   )}
                 </div>
@@ -1706,14 +1653,14 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                             <Input value={cfg.geo_countries || ''} onChange={v => upd('geo_countries', v)} placeholder="US, CA, GB" />
                           </div>
                         </div>
-                        <p className="text-[11px] text-content-faint mt-1">
+                        <Hint tone="faint" className="text-[11px]">
                           ISO 3166-1 alpha-2 codes. <strong>Allow</strong> = only these countries; <strong>Deny</strong> = block these (allow the rest). Offline geolocation (IP2Location LITE); behind a fronting proxy set Traefik trustedIPs.
-                        </p>
+                        </Hint>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <p className="text-xs text-content-faint">GeoIP — enable the plugin on the Proxy Service page to use it here.</p>
+                  <Hint tone="faint">GeoIP — enable the plugin on the Proxy Service page to use it here.</Hint>
                 )}
               </>
             )}
@@ -1724,11 +1671,11 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                 <Label>Access list</Label>
                 <Select value={String(cfg.access_list_id || 0)} onChange={v => upd('access_list_id', Number(v))}
                   options={[{ value: '0', label: accessLists.length ? 'Select a list…' : 'No lists available' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
-                <p className="text-[11px] text-content-faint mt-1">
+                <Hint tone="faint" className="text-[11px]">
                   {accessLists.length === 0
                     ? 'No workspace access lists yet — create them in Manage Workspace → Access Lists.'
                     : 'Basic-auth + IP allow/deny + GeoIP applied at the edge before this env’s app. Manage lists in Manage Workspace → Access Lists.'}
-                </p>
+                </Hint>
               </div>
             )}
 
@@ -1740,10 +1687,10 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
                 checked={!!cfg.block_exploits} onChange={v => upd('block_exploits', v)} />
               {proxyPlugins?.waf_enabled
                 ? <Toggle label="Web application firewall (WAF)" checked={!!cfg.waf} onChange={v => upd('waf', v)} />
-                : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page to use it here.</p>}
+                : <Hint tone="faint">WAF — enable the plugin on the Proxy Service page to use it here.</Hint>}
               {proxyPlugins?.cache_enabled
                 ? <Toggle label="Cache assets" checked={!!cfg.cache} onChange={v => upd('cache', v)} />
-                : <p className="text-xs text-content-faint">Cache assets — enable the plugin on the Proxy Service page to use it here.</p>}
+                : <Hint tone="faint">Cache assets — enable the plugin on the Proxy Service page to use it here.</Hint>}
             </div>
           </div>
         )}
@@ -1756,10 +1703,10 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               <div>
                 <Label>Traefik network</Label>
                 <Input value={cfg.traefik_network} onChange={v => upd('traefik_network', v)} placeholder="traefik_net" />
-                <p className="text-xs text-content-subtle mt-1">
+                <Hint>
                   The shared proxy network. Leave as <code className="font-mono text-xs">traefik_net</code> unless you run a
                   differently-named Traefik — a mismatch means the proxy can&apos;t reach this env and routing 404s.
-                </p>
+                </Hint>
               </div>
             </div>
           </details>
@@ -1770,12 +1717,12 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           const port = projectType === 'image' ? '<service host port>' : (cfg.http_port || 80)
           return (
             <div className="space-y-1">
-              <p className="text-xs text-content-subtle">
+              <Hint>
                 Reachable at <span className="font-mono text-brand-600">http://{host}:{port}</span> — point your own reverse proxy / DNS here; that proxy owns the domain and TLS. Rigger does no routing in this mode.
-              </p>
-              <p className="text-xs text-content-faint">Want Rigger to serve HTTPS itself? Use <strong>Routed by domain</strong> with <strong>Enable local HTTPS</strong> (Traefik self-signed cert). Host-port mode stays plain HTTP — TLS is your proxy&apos;s job.</p>
+              </Hint>
+              <Hint tone="faint">Want Rigger to serve HTTPS itself? Use <strong>Routed by domain</strong> with <strong>Enable local HTTPS</strong> (Traefik self-signed cert). Host-port mode stays plain HTTP — TLS is your proxy&apos;s job.</Hint>
               {projectType === 'image' && (
-                <p className="text-xs text-content-faint">Image stacks publish each web service on its own host port (set per service in the Services tab).</p>
+                <Hint tone="faint">Image stacks publish each web service on its own host port (set per service in the Services tab).</Hint>
               )}
             </div>
           )
@@ -1790,21 +1737,21 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               <li>Copy the tunnel token and add it to this env&apos;s <strong>Env Vars</strong> as <code className="font-mono text-xs">CF_TUNNEL_TOKEN</code> (flag it secret), then deploy.</li>
               <li>Add a Cloudflare Access policy to limit who can reach it (auth is Cloudflare&apos;s job in this mode).</li>
             </ol>
-            <p className="text-xs text-content-faint">Note: Cloudflare terminates TLS at its edge. Fine for reaching a dashboard remotely; for highly sensitive data prefer a mesh VPN.</p>
+            <Hint tone="faint">Note: Cloudflare terminates TLS at its edge. Fine for reaching a dashboard remotely; for highly sensitive data prefer a mesh VPN.</Hint>
           </div>
         )}
 
         {exMode === 'none' && (
           <>
-            <p className="text-xs text-content-subtle">
+            <Hint>
               Reachable only inside this environment&apos;s Docker network (other services by name). Nothing is published to the host.
-            </p>
+            </Hint>
             <div>
               <Label>Attach to network <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
               <Input value={cfg.attach_network || ''} onChange={v => upd('attach_network', v)} placeholder="e.g. my-proxy-net" />
-              <p className="text-xs text-content-subtle mt-1">
+              <Hint>
                 Also join the web service to an <strong>existing</strong> Docker network so a container on it (your own reverse proxy, or another stack) can reach this app by service name — no host port. The network must already exist on the host (Rigger joins it as <code className="font-mono text-xs">external</code>). Leave blank to stay fully internal.
-              </p>
+              </Hint>
             </div>
           </>
         )}
@@ -1821,10 +1768,10 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
             checked={!!cfg.db_external}
             onChange={v => upd('db_external', v)}
           />
-          <p className="text-xs text-content-subtle">
+          <Hint>
             The managed {projectDatabase} (and any Redis / object storage) is provisioned project-wide — configure it in the{' '}
             <strong>Services</strong> tab → <em>Project dependencies</em>.
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -1840,7 +1787,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           <TriOverride label="MinIO console" projectDefault={projectStorageUi} value={cfg.storage_ui} onChange={v => upd('storage_ui', v)} />
         )}
         <TriOverride label="Mailpit (test SMTP)" projectDefault={projectMailpit} value={cfg.mailpit} onChange={v => upd('mailpit', v)} />
-        <p className="text-xs text-content-faint"><strong>Inherit</strong> uses the project default; override to run a dev/admin sidecar in this environment only (e.g. Mailpit on in dev/stage, off in prod).</p>
+        <Hint tone="faint"><strong>Inherit</strong> uses the project default; override to run a dev/admin sidecar in this environment only (e.g. Mailpit on in dev/stage, off in prod).</Hint>
       </div>
 
       {/* Security — per-env protection for the admin sidecars (Adminer / MinIO console).
@@ -1877,9 +1824,9 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               <Input value={cfg.git?.branch} onChange={v => updGit('branch', v)} placeholder={gitBranch || 'main'} />
             </div>
           </div>
-          <p className="text-xs text-content-subtle">
+          <Hint>
             This environment builds from the project repo at branch <code className="font-mono text-xs">{cfg.git?.branch || gitBranch || 'main'}</code>. Leave blank to inherit the project default (<code className="font-mono text-xs">{gitBranch || 'main'}</code>).
-          </p>
+          </Hint>
         </div>
       ) : null}
 
@@ -1926,10 +1873,10 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
 
       {open && (
         <div className="mt-3 space-y-4">
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Env-specific YAML appended to each service after the base config. Use for resource limits, logging drivers, replica counts, etc.
             Keys defined here override the service-level Advanced YAML for this environment only.
-          </p>
+          </Hint>
           {imageNames.map(svcName => {
             const yaml = overrides[svcName]?.extra_compose || ''
             return (
@@ -2105,11 +2052,11 @@ function CustomDomainsPanel({ workspaceName, envName }) {
   return (
     <div className="mt-3 pt-3 border-t border-border/60">
       <Label>Custom domains <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
-      <p className="text-xs text-content-subtle mb-2">
+      <Hint className="mb-2">
         Serve this env on your own domain in addition to its automatic URL. Add a domain,
         prove you own it (DNS or a file), then point it here. Verified domains get their own
         Let&apos;s Encrypt cert (needs port 80 reachable for the challenge).
-      </p>
+      </Hint>
 
       <div className="flex gap-2">
         <div className="flex-1"><Input value={newDomain} onChange={setNewDomain} placeholder="app.example.com" /></div>
@@ -2275,9 +2222,9 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
         <div className="mt-3 space-y-3">
           {/* Reveal + hint */}
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-content-subtle">
+            <Hint>
               After saving, <strong className="text-content-muted">Refresh</strong> the environment from its card to apply.
-            </p>
+            </Hint>
             <label className="flex items-center gap-1.5 cursor-pointer shrink-0">
               <input type="checkbox" checked={reveal}
                 onChange={e => { setReveal(e.target.checked); setEdits({}) }}
@@ -2287,7 +2234,7 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
           </div>
           {swarm
             ? <p className="text-[11px] text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) on the next deploy.</p>
-            : <p className="text-[11px] text-content-faint">🔒 Flag secrets here; deploy with Swarm to store them as encrypted Docker secrets (Compose keeps them in <code className="font-mono">.env</code>).</p>}
+            : <Hint tone="faint" className="text-[11px]">🔒 Flag secrets here; deploy with Swarm to store them as encrypted Docker secrets (Compose keeps them in <code className="font-mono">.env</code>).</Hint>}
 
           {/* Existing vars — grouped Application vs System (Rigger-managed) when both present */}
           {isLoading
@@ -2424,12 +2371,12 @@ function RoutesTab({ routes, images, baseDomain = '', onChange }) {
     <div className="space-y-4">
       <div>
         <h2 className="text-sm font-semibold text-content">Routing</h2>
-        <p className="text-xs text-content-subtle mt-1 max-w-2xl">
+        <Hint className="max-w-2xl">
           Maps public paths and subdomains on each environment's domain to a service. A path rule like
           <code className="font-mono mx-1">/api</code> sends that prefix (and everything under it) to the
           chosen service; the <code className="font-mono mx-1">/</code> catch-all takes everything else.
           Leave this empty to send all traffic to <span className="font-mono">{webEntry}</span>.
-        </p>
+        </Hint>
       </div>
 
       {rows.length === 0 ? (
@@ -2497,13 +2444,13 @@ function RoutesTab({ routes, images, baseDomain = '', onChange }) {
       )}
 
       {rows.some(r => (r.type || 'path') === 'path' && !(!(r.match || '').trim() || (r.match || '').trim() === '/')) && (
-        <p className="text-xs text-content-subtle max-w-2xl">
+        <Hint className="max-w-2xl">
           <span className="font-medium">Target path</span> rewrites the matched prefix before the request reaches the
           service; the rest of the path and the query string are kept. Blank (or same as Match) forwards unchanged,
           <code className="font-mono mx-1">/</code> strips the prefix, and <code className="font-mono mx-1">/api/v1</code>{' '}
           sends <code className="font-mono mx-1">/api/x</code> as <code className="font-mono mx-1">/api/v1/x</code> (handy
           for version aliasing).
-        </p>
+        </Hint>
       )}
 
       {catchAlls > 1 && <div className="text-xs text-danger-fg">Only one catch-all route (path “/”) is allowed.</div>}
@@ -2755,7 +2702,7 @@ export default function EditProjectPage() {
                 {/* Editable display label — reusable across workspaces. The key and
                     resource prefix (below) are the immutable identity. */}
                 <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
-                <p className="text-xs text-content-subtle mt-1">A display label — editable; may repeat across workspaces.</p>
+                <Hint>A display label — editable; may repeat across workspaces.</Hint>
               </div>
               <div className="sm:col-span-1">
                 <Label>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></Label>
@@ -2765,7 +2712,7 @@ export default function EditProjectPage() {
                 >
                   {name}
                 </div>
-                <p className="text-xs text-content-subtle mt-1">Fixed identity.</p>
+                <Hint>Fixed identity.</Hint>
               </div>
             </div>
             {/* Registry only applies to stacks that BUILD images. Pull-only stacks
@@ -2773,7 +2720,7 @@ export default function EditProjectPage() {
             {(images || []).some(s => s.build) && (
               <div className="sm:max-w-[60%]">
                 <Label>Registry</Label>
-                <p className="text-xs text-content-subtle mb-2">Built images are tagged and pushed here. Pick a saved registry or add one with credentials so the build can authenticate.</p>
+                <Hint className="mb-2">Built images are tagged and pushed here. Pick a saved registry or add one with credentials so the build can authenticate.</Hint>
                 <RegistryPicker
                   workspace={workspace}
                   value={project?.registry}
@@ -2788,7 +2735,7 @@ export default function EditProjectPage() {
               <div>
                 <Label>Source repository <span className="font-normal normal-case text-content-faint">(for build services)</span></Label>
                 <Input value={project?.git_repo} onChange={v => setProject(p => ({ ...p, git_repo: v }))} placeholder="https://github.com/org/repo.git" />
-                <p className="text-xs text-content-subtle mt-1">One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL.</p>
+                <Hint>One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL.</Hint>
               </div>
               <div className="sm:w-40">
                 <Label>Default branch</Label>
@@ -2816,7 +2763,7 @@ export default function EditProjectPage() {
               >
                 {project?.resource_prefix || `${workspace}_${name}`}
               </div>
-              <p className="text-xs text-content-subtle mt-1">Fixed after creation — the Docker stack, container, volume and network name prefix.</p>
+              <Hint>Fixed after creation — the Docker stack, container, volume and network name prefix.</Hint>
             </div>
 
             {/* Workspace folder — read-only. Prefer the host-side path (the bind-
@@ -2829,11 +2776,11 @@ export default function EditProjectPage() {
               >
                 {ws?.host_path || ws?.path || '—'}
               </div>
-              <p className="text-xs text-content-subtle mt-1">
+              <Hint>
                 {ws?.host_path
                   ? 'Location on the host — holds config, compose files and bind-mounted volumes.'
                   : 'Path inside the Rigger container. Set HOST_WORKSPACES_DIR to show the host path.'}
-              </p>
+              </Hint>
             </div>
           </div>
         </section>
@@ -2872,7 +2819,7 @@ export default function EditProjectPage() {
               gitProviderId={project?.git_provider_id || 0}
               managedDeps={enabledDependsOnTargets({ database: project?.database, redis: project?.redis_enabled, storageMinio: !!project?.storage_minio || project?.object_storage === 'minio' })} />
             <PortWarnings warnings={hostWarnings} />
-            <p className="text-xs text-content-subtle mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</p>
+            <Hint className="mt-2">After saving, <strong>Refresh</strong> then redeploy each environment to apply service changes.</Hint>
           </section>
         )}
 
@@ -2902,12 +2849,12 @@ export default function EditProjectPage() {
               onSaved={() => { qc.invalidateQueries({ queryKey: ['workspace', workspace, name] }); qc.invalidateQueries({ queryKey: ['config', workspace, name] }) }}
             />
           )}
-          <p className="text-xs text-content-subtle mb-3">
+          <Hint className="mb-3">
             {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
             {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
               <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
             )}
-          </p>
+          </Hint>
 
           <div className="space-y-3">
             {Object.entries(envs || {}).map(([envName, cfg], i) => (
@@ -3128,11 +3075,11 @@ function EnvHostsSection({ name }) {
       <div className="border border-border rounded-xl overflow-hidden">
         <div className="px-5 py-3 bg-surface/60 border-b border-border">
           <h2 className="text-sm font-semibold text-content">Environment hosts</h2>
-          <p className="text-xs text-content-subtle mt-0.5">
+          <Hint className="mt-0.5">
             Run each environment on a different host. Changing a <strong>deployed</strong> environment's
             host migrates its data (and stops the old copy, keeping its data); an undeployed one just
             repoints and provisions on next deploy.
-          </p>
+          </Hint>
         </div>
         <div className="px-5 py-4 space-y-2">
           {envs.map(env => {
@@ -3216,7 +3163,7 @@ function BuildHostSection({ name }) {
     <section className="mt-8">
       <h2 className="text-sm font-semibold text-content mb-3">Build host</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
-        <p className="text-xs text-content-subtle">Where this project's images are built. The default builds on each environment's own deploy host. Choosing a dedicated builder offloads the work (e.g. a fast Linux machine) — its image is pushed to the system registry and the deploy targets pull it, so a registry must be configured.</p>
+        <Hint>Where this project's images are built. The default builds on each environment's own deploy host. Choosing a dedicated builder offloads the work (e.g. a fast Linux machine) — its image is pushed to the system registry and the deploy targets pull it, so a registry must be configured.</Hint>
         <select value={val} onChange={e => setVal(e.target.value)} className={sel}>
           <option value="">{inheritLabel}</option>
           {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
@@ -3284,11 +3231,11 @@ function MigrateSection({ name }) {
       <div className="border border-border rounded-xl overflow-hidden">
         <div className="px-5 py-3 bg-surface/60 border-b border-border">
           <h2 className="text-sm font-semibold text-content">Move the whole project</h2>
-          <p className="text-xs text-content-subtle mt-0.5">
+          <Hint className="mt-0.5">
             {mixed
               ? 'Environments are on different hosts — move them individually above.'
               : <>Currently on <strong className="text-content-muted">{currentLabel}</strong>. Moves every environment together (back up → ship → restore). Source data is left intact.</>}
-          </p>
+          </Hint>
         </div>
         {!mixed && (
           <div className="px-5 py-4 space-y-3">
@@ -3360,11 +3307,11 @@ function BackupSection({ workspaceName, envs, updateEnv }) {
     <div className="space-y-3">
       <div>
         <h2 className="text-sm font-semibold text-content-strong">Backups</h2>
-        <p className="text-xs text-content-subtle mt-0.5">
+        <Hint className="mt-0.5">
           Each environment can have its own schedules — back up specific services more or less often,
           to local or remote storage. Snapshots run on the interval; older ones beyond a schedule's keep
           count are pruned. Changes are saved with the project.
-        </p>
+        </Hint>
       </div>
       {envNames.map(env => (
         <EnvBackupSchedules
@@ -3413,7 +3360,7 @@ function DangerZone({ name }) {
         <div className="px-5 py-4 flex items-center justify-between">
           <div>
             <p className="text-sm text-content">Delete this project</p>
-            <p className="text-xs text-content-subtle mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</p>
+            <Hint className="mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</Hint>
           </div>
           <button
             onClick={() => { setOpen(true); setConfirm(''); setError('') }}

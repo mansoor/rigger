@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import DatabaseSelect from './DatabaseSelect'
+import { Hint } from './ui'
 
 // ManagedServices is the shared editor for a project's managed services (database,
 // Redis, object/file storage). They are PROJECT-level — consistent across every
@@ -74,7 +75,7 @@ function MiniToggle({ label, hint, checked, onChange }) {
     <div className="flex items-center justify-between gap-3">
       <div>
         <p className="text-sm text-content">{label}</p>
-        {hint && <p className="text-xs text-content-subtle mt-0.5">{hint}</p>}
+        {hint && <Hint className="mt-0.5">{hint}</Hint>}
       </div>
       <button type="button" onClick={() => onChange(!checked)}
         className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}>
@@ -113,9 +114,9 @@ function ServiceRow({ row, resourcePrefix }) {
             </div>
           )}
           {meta.creds && (
-            <p className="text-content-faint">Database name &amp; credentials are generated per environment — view/reveal them on the project’s <strong>Database</strong> tab.</p>
+            <Hint tone="faint">Database name &amp; credentials are generated per environment — view/reveal them on the project’s <strong>Database</strong> tab.</Hint>
           )}
-          {meta.note && <p className="text-content-faint">{meta.note}</p>}
+          {meta.note && <Hint tone="faint">{meta.note}</Hint>}
         </div>
       )}
     </div>
@@ -133,13 +134,13 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
     <div className="rounded-xl border border-border bg-surface-raised/40 p-4 space-y-4">
       <div>
         <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-1">Managed services</p>
-        <p className="text-xs text-content-subtle">
+        <Hint>
           Databases, caches and object storage Rigger runs for you — consistent across every
           environment. They appear as services below and are wired into your app via env vars +
           <code className="font-mono"> depends_on</code>. Remove one by setting it back to <em>None</em> / off.
           Adminer &amp; the MinIO console are <strong>defaults</strong> — each environment can override
           them (e.g. on in dev/stage, off in prod) in Edit Project → Environments → Tooling.
-        </p>
+        </Hint>
       </div>
 
       {/* ── Database group: engine + Redis cache + the web SQL client ── */}
@@ -170,7 +171,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
           />
         )}
         {!isSql && (v.database && v.database !== 'none') && (
-          <p className="text-xs text-content-faint">{SERVICE_META[v.database]?.label || v.database} is not SQL — Adminer doesn’t apply. Connection details are on the Database tab.</p>
+          <Hint tone="faint">{SERVICE_META[v.database]?.label || v.database} is not SQL — Adminer doesn’t apply. Connection details are on the Database tab.</Hint>
         )}
       </Group>
 
@@ -182,7 +183,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         </div>
 
         {localOn && minioOn && (
-          <p className="text-xs text-content-subtle">Both backends are on — the local volume is mounted <em>and</em> MinIO runs; <code className="font-mono">FILESYSTEM_DISK</code> defaults to <code className="font-mono">s3</code> (override in the app’s env if you want local primary).</p>
+          <Hint>Both backends are on — the local volume is mounted <em>and</em> MinIO runs; <code className="font-mono">FILESYSTEM_DISK</code> defaults to <code className="font-mono">s3</code> (override in the app’s env if you want local primary).</Hint>
         )}
 
         {localOn && (
@@ -195,7 +196,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
               onChange={e => set({ storagePath: e.target.value })}
               className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
             />
-            <p className="text-xs text-content-subtle mt-1">A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</p>
+            <Hint>A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</Hint>
           </div>
         )}
 
@@ -210,7 +211,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
                 onChange={e => set({ storageBucket: e.target.value })}
                 className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
               />
-              <p className="text-xs text-content-subtle mt-1">Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</p>
+              <Hint>Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</Hint>
             </div>
             <MiniToggle
               label="MinIO admin console"

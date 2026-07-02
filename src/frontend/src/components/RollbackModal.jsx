@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchDeployHistory, rollbackEnv } from '../lib/api'
+import { Hint } from './ui'
 
 // Phase 9e — Rollback dialog. For custom stacks it lists the env's deploy history
 // and pins a chosen prior image set on confirm. For image stacks (no per-env image
@@ -43,7 +44,7 @@ export default function RollbackModal({ workspace, name, envName, isImage, onClo
         ) : (
           <>
             <div className="flex-1 overflow-y-auto p-5 space-y-3">
-              <p className="text-xs text-content-subtle">Pick a previous deploy to redeploy. The old image must still exist locally or in the registry. <strong className="text-warning-fg">Database changes from the newer version are NOT reverted</strong> — run your app's down-migrations or restore a data backup separately.</p>
+              <Hint>Pick a previous deploy to redeploy. The old image must still exist locally or in the registry. <strong className="text-warning-fg">Database changes from the newer version are NOT reverted</strong> — run your app's down-migrations or restore a data backup separately.</Hint>
 
               {isLoading ? (
                 <p className="text-sm text-content-subtle">Loading…</p>

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Hint } from './ui'
 
 // Shared Backup Target add/edit form (S3 / SFTP), used by both the admin Settings
 // page (global targets, with a workspace allowlist) and Manage Workspace
@@ -103,7 +104,7 @@ export default function BackupTargetForm({ initial, onSave, onCancel, saving, sh
             <div>
               <Label required>Endpoint</Label>
               <Input value={cfg.endpoint} onChange={v => setField('endpoint', v)} placeholder="s3.amazonaws.com" />
-              <p className="text-xs text-content-faint mt-1">Use custom endpoint for MinIO / Wasabi / R2</p>
+              <Hint tone="faint">Use custom endpoint for MinIO / Wasabi / R2</Hint>
             </div>
             <div>
               <Label required>Bucket</Label>
@@ -201,9 +202,9 @@ export default function BackupTargetForm({ initial, onSave, onCancel, saving, sh
               ))}
             </div>
           )}
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Controls which workspaces can pick this target for their backups. Workspace-owned targets are private and aren't listed here.
-          </p>
+          </Hint>
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Hint } from './ui'
 
 // Shared Notification Channel add/edit form (Apprise / Email), used by both the
 // admin Settings page (global channels, with a workspace allowlist) and Manage
@@ -109,11 +110,11 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
             placeholder={APPRISE_EXAMPLES} rows={4}
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-xs font-mono focus:outline-none focus:border-brand-500 resize-y"
           />
-          <p className="text-xs text-content-subtle">
+          <Hint>
             One Apprise URL per line. Delivered via the Apprise sidecar — see the{' '}
             <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Apprise wiki</a>{' '}
             for the URL format of each service.
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -128,7 +129,7 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
             <div>
               <Label required>Port</Label>
               <Input value={cfg.port} onChange={v => setField('port', parseInt(v) || 0)} type="number" placeholder="587" />
-              <p className="text-xs text-content-faint mt-1">465 = implicit TLS; 587/25 = STARTTLS</p>
+              <Hint tone="faint">465 = implicit TLS; 587/25 = STARTTLS</Hint>
             </div>
             <div>
               <Label>Username</Label>
@@ -178,9 +179,9 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
               ))}
             </div>
           )}
-          <p className="text-xs text-content-subtle">
+          <Hint>
             Controls which workspaces can pick this channel for their alert rules. Workspace-owned channels are private and aren't listed here.
-          </p>
+          </Hint>
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspaceRegistries, createWorkspaceRegistry, testRegistryCredentials } from '../lib/api'
+import { Hint } from './ui'
 
 // RegistryPicker — the container-registry selector shared by the New Project
 // wizard and Edit Project. It lists the workspace's saved registries in a
@@ -135,10 +136,10 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
         </select>
       )}
       {hasRegistries && selectValue === LOCAL && (
-        <p className="text-xs text-content-faint mt-1">Uses the system registry configured for this workspace (or the global default). If none is set, images stay local — fine for a single-node compose deploy, but a Swarm or remote-host deploy will be blocked until a system registry is configured.</p>
+        <Hint tone="faint">Uses the system registry configured for this workspace (or the global default). If none is set, images stay local — fine for a single-node compose deploy, but a Swarm or remote-host deploy will be blocked until a system registry is configured.</Hint>
       )}
       {hasRegistries && wsDefault && value === wsDefault.url && (
-        <p className="text-xs text-content-faint mt-1">Inherited from this workspace's default.</p>
+        <Hint tone="faint">Inherited from this workspace's default.</Hint>
       )}
 
       {showManual && (
@@ -153,9 +154,9 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
               <FieldLabel>Registry URL</FieldLabel>
               <input value={url} onChange={e => { setUrl(e.target.value); onChange(e.target.value) }}
                 placeholder="localhost:5000" className={inputCls} />
-              <p className="text-xs text-content-faint mt-1">
+              <Hint tone="faint">
                 Stored as a plain URL with no credentials — only works for registries that allow anonymous push (e.g. a local/insecure registry).
-              </p>
+              </Hint>
             </div>
           ) : (
             <>
@@ -177,9 +178,9 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
                   <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className={inputCls} />
                 </div>
               </div>
-              <p className="text-xs text-content-faint">
+              <Hint tone="faint">
                 Saved to this workspace so the build can authenticate and push. The password field accepts a token / API key.
-              </p>
+              </Hint>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={doTest} disabled={!canTest}
                   className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-50 transition-colors">

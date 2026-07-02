@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Hint } from './ui'
 
 // Reusable per-environment backup schedule editor (Phase 11 per-env redesign).
 // Used in the New Workspace wizard and Edit Workspace. Schedules use the same
@@ -71,11 +72,11 @@ function ScheduleForm({ initial, services, targets, onSave, onCancel }) {
           })}
           {services.length === 0 && <span className="text-xs text-content-subtle">No services detected for this environment yet.</span>}
         </div>
-        <p className="text-[11px] text-content-faint mt-1.5">
+        <Hint tone="faint" className="text-[11px] mt-1.5">
           {allData
             ? 'Every data-bearing service is backed up.'
             : `${s.services.length} selected. Databases are SQL-dumped; other services have their volumes archived.`}
-        </p>
+        </Hint>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

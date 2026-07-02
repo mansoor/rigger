@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchMaintenance, setMaintenance } from '../lib/api'
+import { Hint } from './ui'
 
 // unix seconds → value for <input type="datetime-local"> (local time), and back.
 function toLocalInput(unix) {
@@ -121,10 +122,10 @@ export default function MaintenanceModal({ workspace, name, envName, canOp, onCl
                 onChange={e => setMessage(e.target.value)} />
             </div>
 
-            <p className="text-xs text-content-subtle">
+            <Hint>
               Served by Rigger's proxy and returns HTTP 503 — it works even while this environment is
               stopped. Disabling maintenance also clears any scheduled window.
-            </p>
+            </Hint>
             {err && <div className="text-xs text-danger-fg">{err}</div>}
           </div>
         )}

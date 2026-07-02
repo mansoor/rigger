@@ -6,6 +6,7 @@ import {
   setWorkspaceApiKeyEnabled, deleteWorkspaceApiKey,
   fetchWorkspaces, fetchProjects,
 } from '../lib/api'
+import { Hint } from './ui'
 
 // ApiKeysManager renders the API-key list + create flow. Used in two places:
 //   • Admin → API Keys      (workspace = null) — global keys, any-workspace project scope.
@@ -48,12 +49,12 @@ export default function ApiKeysManager({ workspace = null }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">API Keys</h2>
-          <p className="text-sm text-content-subtle mt-0.5">
+          <Hint className="text-sm mt-0.5">
             {ws
               ? <>Programmatic access to <strong>this workspace’s</strong> projects via the <code className="font-mono text-xs">/api/v1</code> REST API.</>
               : <>Programmatic access to the <code className="font-mono text-xs">/api/v1</code> REST API — scoped, project-restricted, rate-limited.</>}
             {' '}<a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300">View API docs ↗</a>
-          </p>
+          </Hint>
         </div>
         <button onClick={() => setModal(true)} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white">＋ New API key</button>
       </div>
@@ -62,7 +63,7 @@ export default function ApiKeysManager({ workspace = null }) {
         <div className="bg-surface border border-border rounded-xl p-8 text-center">
           <div className="text-3xl mb-2">🔑</div>
           <p className="text-sm font-medium text-content-strong">No API keys</p>
-          <p className="text-sm text-content-subtle mt-1">Create a key to call the Rigger REST API from scripts or CI.</p>
+          <Hint className="text-sm">Create a key to call the Rigger REST API from scripts or CI.</Hint>
         </div>
       ) : (
         <div className="space-y-2">
@@ -262,12 +263,12 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
             <div>
               <label className="block text-xs font-medium text-content-muted mb-1">Rate limit (req/min/project)</label>
               <input type="number" min="0" value={rateLimit} onChange={e => setRateLimit(e.target.value)} className={inputCls} />
-              <p className="text-[11px] text-content-faint mt-1">0 = unlimited</p>
+              <Hint tone="faint" className="text-[11px]">0 = unlimited</Hint>
             </div>
             <div>
               <label className="block text-xs font-medium text-content-muted mb-1">Expires in (days)</label>
               <input type="number" min="0" value={expiresDays} onChange={e => setExpires(e.target.value)} className={inputCls} />
-              <p className="text-[11px] text-content-faint mt-1">0 = never</p>
+              <Hint tone="faint" className="text-[11px]">0 = never</Hint>
             </div>
           </div>
 

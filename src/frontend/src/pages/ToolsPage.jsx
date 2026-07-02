@@ -3,6 +3,7 @@ import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import DropZone from '../components/DropZone'
 import TemplateBrowserModal from '../components/TemplateBrowserModal'
+import { Hint } from '../components/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
@@ -427,9 +428,9 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
           <h3 className="font-semibold text-content-strong">Select an image project</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
-        <p className="text-sm text-content-subtle">
+        <Hint className="text-sm">
           Pulls the stack's images and environment-variable defaults (secrets masked) into the editor as a draft template.
-        </p>
+        </Hint>
 
         {workspaces.length === 0 ? (
           <p className="text-sm text-content-muted bg-surface-raised/50 border border-border-strong/60 rounded-lg px-3 py-3">
@@ -534,10 +535,10 @@ function ComposeModal({ onLoad, onClose }) {
           <h3 className="font-semibold text-content-strong">Convert Docker Compose</h3>
           <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
-        <p className="text-sm text-content-subtle">
+        <Hint className="text-sm">
           Paste or import a <code className="font-mono text-xs">docker-compose.yml</code>; converting turns its services
           into a Rigger template and loads it into the editor for review.
-        </p>
+        </Hint>
 
         <div className="flex items-center justify-between">
           <label className="text-sm font-semibold text-content">docker-compose.yml</label>
@@ -1472,7 +1473,7 @@ function WorkspaceBackup() {
           <option value="">— select project —</option>
           {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.config?.project?.name || ws.name} ({ws.name})</option>)}
         </select>
-        <p className="text-xs text-content-faint mt-2">Applies to both <strong className="text-content-subtle">Take snapshot</strong> and <strong className="text-content-subtle">Start backup</strong> below.</p>
+        <Hint tone="faint" className="mt-2">Applies to both <strong className="text-content-subtle">Take snapshot</strong> and <strong className="text-content-subtle">Start backup</strong> below.</Hint>
       </div>
 
       {/* Two consistent panels */}
@@ -1481,10 +1482,10 @@ function WorkspaceBackup() {
         <section className="space-y-3">
           <div>
             <h3 className="text-base font-semibold text-content-strong">Configuration snapshot <span className="text-xs font-normal text-content-faint">.rws</span></h3>
-            <p className="text-sm text-content-subtle mt-1">
+            <Hint className="text-sm mt-1">
               Just <code className="font-mono text-xs">config.json</code> and each env's{' '}
               <code className="font-mono text-xs">.env</code> (secrets included). No volume data — fast to take, easy to roll back.
-            </p>
+            </Hint>
           </div>
 
           <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
@@ -1547,10 +1548,10 @@ function WorkspaceBackup() {
         <section className="space-y-3">
           <div>
             <h3 className="text-base font-semibold text-content-strong">Full backup <span className="text-xs font-normal text-content-faint">.rwb</span></h3>
-            <p className="text-sm text-content-subtle mt-1">
+            <Hint className="text-sm mt-1">
               Config + env files + the <strong className="text-content-muted">most recent backup snapshot per env</strong> (older snapshots excluded).
               Larger than a config snapshot; restoring re-creates the whole workspace.
-            </p>
+            </Hint>
           </div>
 
           <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
@@ -1600,7 +1601,7 @@ function WorkspaceBackup() {
               </div>
             )}
             {!activeJob && !backupErr && (
-              <p className="text-xs text-content-faint px-1">Stored on the server; download to keep a copy off-box.</p>
+              <Hint tone="faint" className="px-1">Stored on the server; download to keep a copy off-box.</Hint>
             )}
           </div>
 
@@ -1794,7 +1795,7 @@ function MigrateData() {
             <pre className="text-[11px] text-content-subtle bg-canvas/60 border border-border-strong/40 rounded-lg p-3 max-h-72 overflow-auto whitespace-pre-wrap font-mono">{job.log}</pre>
           )}
           {job.status === 'completed' && (
-            <p className="text-xs text-content-subtle mt-2">Deploy / refresh <code className="font-mono">{targetEnv}</code> to bring services up on the migrated data.</p>
+            <Hint className="mt-2">Deploy / refresh <code className="font-mono">{targetEnv}</code> to bring services up on the migrated data.</Hint>
           )}
         </div>
       )}
@@ -1837,7 +1838,7 @@ export default function ToolsPage() {
       <div className="p-6 max-w-[1400px] mx-auto">
         <div className="mb-6">
           <h1 className="text-xl font-bold text-content-strong">Tools</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Utilities for working with Rigger projects and templates.</p>
+          <Hint className="text-sm mt-0.5">Utilities for working with Rigger projects and templates.</Hint>
         </div>
 
         <VerticalTabs tabs={TOOLS} active={activeTool} onChange={setActiveTool}>

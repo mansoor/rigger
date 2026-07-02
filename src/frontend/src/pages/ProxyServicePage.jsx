@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
+import { Hint } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -141,7 +142,7 @@ export default function ProxyServicePage() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-5">
         <div>
           <h1 className="text-lg font-semibold text-content-strong">Proxy service</h1>
-          <p className="text-sm text-content-subtle mt-0.5">Route public hostnames to any service — on Rigger, your LAN, or a remote host.</p>
+          <Hint className="text-sm mt-0.5">Route public hostnames to any service — on Rigger, your LAN, or a remote host.</Hint>
         </div>
 
         <div className="flex items-start gap-2 bg-info-subtle/40 border border-info-border/50 rounded-lg px-3 py-2 text-xs text-info-fg">
@@ -264,7 +265,7 @@ function PluginsCard({ plugins }) {
         <span className="text-sm font-semibold text-content-strong">Plugins</span>
         <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">advanced</span>
       </div>
-      <p className="text-xs text-content-subtle mb-1">Optional WAF, asset cache, and GeoIP country blocking — attachable per route / access list / hosted env once enabled. Managed from here; no docker-compose edit.</p>
+      <Hint className="mb-1">Optional WAF, asset cache, and GeoIP country blocking — attachable per route / access list / hosted env once enabled. Managed from here; no docker-compose edit.</Hint>
       <p className="text-[11px] text-warning-fg mb-3">⚠ Enabling or disabling a plugin restarts the reverse proxy — a few seconds of downtime for ALL routed apps. Per-route attach afterwards is instant.{mut.isPending && ' · applying…'}</p>
       <div className="flex gap-6 flex-wrap items-center">
         <Toggle checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
@@ -273,17 +274,17 @@ function PluginsCard({ plugins }) {
           : <span className="inline-flex items-center gap-1.5 text-sm text-content-faint" title="Souin is incompatible with Traefik's Yaegi plugin interpreter">🚫 Cache assets <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-overlay/50 text-content-muted">unavailable</span></span>}
         <Toggle checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
       </div>
-      <p className="text-[11px] text-content-faint mt-2">Pinned: Coraza {plugins.waf_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working.{!plugins.cache_supported && <> <span className="text-warning-fg">Asset cache (Souin) is disabled — it panics under Traefik&apos;s plugin interpreter (Yaegi), which would drop every routed app. For caching, put a CDN (e.g. Cloudflare) in front, or run a dedicated cache sidecar (Varnish / Nginx).</span></>}</p>
+      <Hint tone="faint" className="text-[11px] mt-2">Pinned: Coraza {plugins.waf_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working.{!plugins.cache_supported && <> <span className="text-warning-fg">Asset cache (Souin) is disabled — it panics under Traefik&apos;s plugin interpreter (Yaegi), which would drop every routed app. For caching, put a CDN (e.g. Cloudflare) in front, or run a dedicated cache sidecar (Varnish / Nginx).</span></>}</Hint>
 
       {plugins.geoip_enabled && (
         <div className="mt-3 border-t border-border pt-3">
           <p className="text-xs font-semibold text-content-strong mb-1">GeoIP database (IP2Location LITE)</p>
-          <p className="text-[11px] text-content-faint mb-2">
+          <Hint tone="faint" className="text-[11px] mb-2">
             {db.present
               ? <>Installed — {(db.size / 1e6).toFixed(1)} MB, updated {new Date(db.mod_time).toLocaleDateString()}.</>
               : <>Not downloaded yet — GeoIP rules won&apos;t match until a database is installed.</>}
             {' '}Get a free token at ip2location.com (LITE, DB1, IPv6 BIN); refresh monthly.
-          </p>
+          </Hint>
           <div className="flex items-center gap-2">
             <input type="password" value={geoToken} onChange={e => { setGeoToken(e.target.value); setGeoMsg(null) }}
               placeholder={plugins.geoip_token_set ? 'token saved — paste to replace, or just refresh' : 'IP2Location LITE download token'}
@@ -296,7 +297,7 @@ function PluginsCard({ plugins }) {
           </div>
           {geoMsg?.ok && <p className="text-[11px] text-brand-400 mt-1">Database updated.</p>}
           {geoMsg?.error && <p className="text-[11px] text-danger-fg mt-1">{geoMsg.error}</p>}
-          <p className="text-[11px] text-content-faint mt-1">Behind another proxy (NPM / Cloudflare)? GeoIP needs the real client IP — set Traefik forwardedHeaders trust for your proxy.</p>
+          <Hint tone="faint" className="text-[11px] mt-1">Behind another proxy (NPM / Cloudflare)? GeoIP needs the real client IP — set Traefik forwardedHeaders trust for your proxy.</Hint>
         </div>
       )}
     </div>
@@ -321,7 +322,7 @@ function DefaultRouteCard({ route }) {
         <span className="text-sm font-semibold text-content-strong">Default route</span>
         <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">catch-all · lowest priority</span>
       </div>
-      <p className="text-xs text-content-subtle mb-3">What a request gets when its host matches no project URL and no proxy route. Project URLs and configured routes always take priority.</p>
+      <Hint className="mb-3">What a request gets when its host matches no project URL and no proxy route. Project URLs and configured routes always take priority.</Hint>
       <div className="grid grid-cols-2 gap-3 items-end">
         <div>
           <Label>When unmatched</Label>
@@ -468,7 +469,7 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
 
           <div className="border-t border-border pt-3">
             <Label>IP rules</Label>
-            <p className="text-[11px] text-content-faint mt-1 mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted (everything else denied). Deny rules document exclusions; a deny-only list can’t be enforced at the proxy.</p>
+            <Hint tone="faint" className="text-[11px] mt-1 mb-2">Traefik enforces an allow-list: if any Allow rules exist, only those ranges are permitted (everything else denied). Deny rules document exclusions; a deny-only list can’t be enforced at the proxy.</Hint>
             <div className="space-y-2">
               {f.rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -494,10 +495,10 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
               ]} />
               <Input value={f.countriesText} onChange={v => set('countriesText', v)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} />
             </div>
-            <p className="text-[11px] text-content-faint mt-1">
+            <Hint tone="faint" className="text-[11px] mt-1">
               Two-letter <a href="https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" target="_blank" rel="noreferrer" className="text-brand-400 underline">ISO country codes</a>, comma-separated.
               {!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}
-            </p>
+            </Hint>
           </div>
 
           {err && (
@@ -666,7 +667,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
             <div>
               <Label>Domain(s)</Label>
               <Input value={f.host} onChange={v => set('host', v)} placeholder="media.example.com, www.example.com" />
-              <p className="text-[11px] text-content-faint mt-1">One or more, separated by space or comma.</p>
+              <Hint tone="faint" className="text-[11px] mt-1">One or more, separated by space or comma.</Hint>
             </div>
             <div><Label>Path prefix</Label><Input value={f.path_prefix} onChange={v => set('path_prefix', v)} placeholder="/ (optional)" /></div>
           </div>
@@ -727,12 +728,12 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                     <Select value={String(f.access_list_id || 0)} onChange={v => set('access_list_id', Number(v))}
                       options={[{ value: '0', label: accessLists.length ? 'Select a list…' : 'No lists available' }, ...accessLists.map(a => ({ value: String(a.id), label: a.name }))]} />
                     {accessLists.length === 0
-                      ? <p className="text-[11px] text-content-faint mt-1">No global access lists yet — create them in the Access lists section below.</p>
+                      ? <Hint tone="faint" className="text-[11px] mt-1">No global access lists yet — create them in the Access lists section below.</Hint>
                       : al ? (() => {
                           const allow = (al.rules || []).filter(r => r.action === 'allow').length
                           const deny = (al.rules || []).filter(r => r.action === 'deny').length
                           const geo = al.geo_mode && al.geo_mode !== 'off' ? `, GeoIP ${al.geo_mode} ${(al.countries || []).length}` : ''
-                          return <p className="text-[11px] text-content-subtle mt-1">{(al.users || []).length} user{(al.users || []).length === 1 ? '' : 's'}, {allow} allow{deny ? `, ${deny} deny` : ''}{geo}{al.pass_auth ? '' : ' · strips auth header'}. Edit it in the Access lists section below.</p>
+                          return <Hint className="text-[11px] mt-1">{(al.users || []).length} user{(al.users || []).length === 1 ? '' : 's'}, {allow} allow{deny ? `, ${deny} deny` : ''}{geo}{al.pass_auth ? '' : ' · strips auth header'}. Edit it in the Access lists section below.</Hint>
                         })()
                       : <p className="text-xs text-danger-fg mt-1">Selected access list no longer exists — pick another.</p>}
                   </div>
@@ -771,7 +772,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                           <span className="text-xs text-content-subtle shrink-0">IP / CIDR:</span>
                           <Input value={f.ip_allow} onChange={v => set('ip_allow', v)} placeholder="192.168.0.0/16, 203.0.113.7" />
                         </div>
-                        <p className="text-[11px] text-content-faint mt-1">Allow-list — only these IPs / CIDRs may reach the route (comma-separated). Traefik has no native deny-list.</p>
+                        <Hint tone="faint" className="text-[11px] mt-1">Allow-list — only these IPs / CIDRs may reach the route (comma-separated). Traefik has no native deny-list.</Hint>
                       </div>
                     )}
                   </div>
@@ -785,7 +786,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                       Enable GeoIP country policy
                     </label>
                     {!plugins?.geoip_enabled
-                      ? <p className="flex-1 text-[11px] text-content-faint pt-2">Enable the GeoIP plugin (Plugins card) to use this.</p>
+                      ? <Hint tone="faint" className="flex-1 text-[11px] pt-2">Enable the GeoIP plugin (Plugins card) to use this.</Hint>
                       : (f.geo_mode === 'allow' || f.geo_mode === 'block') && (
                         <div className="flex-1 min-w-0 max-w-md">
                           <div className="flex items-center gap-3 flex-wrap">
@@ -803,7 +804,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                               <Input value={f.countriesText} onChange={v => set('countriesText', v)} placeholder="US, DE, GB" />
                             </div>
                           </div>
-                          <p className="text-[11px] text-content-faint mt-1">ISO 3166-1 alpha-2 codes. <span className="text-content-subtle">Allow</span> = only these; <span className="text-content-subtle">Deny</span> = block these (allow the rest).</p>
+                          <Hint tone="faint" className="text-[11px] mt-1">ISO 3166-1 alpha-2 codes. <span className="text-content-subtle">Allow</span> = only these; <span className="text-content-subtle">Deny</span> = block these (allow the rest).</Hint>
                         </div>
                       )}
                   </div>
@@ -818,7 +819,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
           {/* ── Locations (custom locations, NPM parity) ──────────────────── */}
           {activeTab === 'locations' && !isRedirect && (
             <div>
-              <p className="text-[11px] text-content-faint mb-3">Forward sub-paths on this host to different services. Each inherits this route's TLS, auth and headers. Add more than one upstream to load-balance that path.</p>
+              <Hint tone="faint" className="text-[11px] mb-3">Forward sub-paths on this host to different services. Each inherits this route's TLS, auth and headers. Add more than one upstream to load-balance that path.</Hint>
               <div className="space-y-3">
                 {(f.locations || []).map((l, i) => (
                   <div key={i} className="border border-border rounded-lg p-3 space-y-2 bg-surface-raised/30">
@@ -850,7 +851,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 ))}
                 <button onClick={() => set('locations', [...(f.locations || []), blankLocation()])}
                   className="text-xs text-brand-400 hover:text-brand-300">＋ Add location</button>
-                {(!f.locations || f.locations.length === 0) && <p className="text-xs text-content-subtle">No custom locations — all traffic goes to the upstreams on the Basics tab.</p>}
+                {(!f.locations || f.locations.length === 0) && <Hint>No custom locations — all traffic goes to the upstreams on the Basics tab.</Hint>}
               </div>
             </div>
           )}
@@ -888,7 +889,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 <div>
                   <Label>Override (optional)</Label>
                   <Input value={f.acme_email} onChange={v => set('acme_email', v)} placeholder="leave blank to inherit" />
-                  <p className="text-[11px] text-content-faint mt-1">An override issues the cert under this email via DNS-01 (needs a Cloudflare DNS token).</p>
+                  <Hint tone="faint" className="text-[11px] mt-1">An override issues the cert under this email via DNS-01 (needs a Cloudflare DNS token).</Hint>
                 </div>
                 <label className="flex items-start gap-2 cursor-pointer text-xs text-content pt-1">
                   <input type="checkbox" checked={!!f.accept_tos} onChange={e => set('accept_tos', e.target.checked)} className="mt-0.5" />
@@ -896,7 +897,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 </label>
               </div>
             )}
-            <p className="text-[11px] text-content-faint">✓ Reuse serves a stored cert matching the host (nothing re-issued). HTTP/2 and WebSocket are automatic.</p>
+            <Hint tone="faint" className="text-[11px]">✓ Reuse serves a stored cert matching the host (nothing re-issued). HTTP/2 and WebSocket are automatic.</Hint>
           </div>
           )}
 
@@ -917,12 +918,12 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 <div className="space-y-1.5">
                   {plugins?.waf_enabled
                     ? <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
-                    : <p className="text-xs text-content-faint">WAF — enable the plugin on the Proxy Service page first to use it here.</p>}
+                    : <Hint tone="faint">WAF — enable the plugin on the Proxy Service page first to use it here.</Hint>}
                   {plugins?.cache_enabled
                     ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
-                    : <p className="text-xs text-content-faint">{plugins?.cache_supported === false
+                    : <Hint tone="faint">{plugins?.cache_supported === false
                         ? 'Cache assets — unavailable (Souin is incompatible with Traefik’s plugin interpreter). Use a CDN or cache sidecar instead.'
-                        : 'Cache assets — enable the plugin on the Proxy Service page first to use it here.'}</p>}
+                        : 'Cache assets — enable the plugin on the Proxy Service page first to use it here.'}</Hint>}
                 </div>
               </div>
             </div>

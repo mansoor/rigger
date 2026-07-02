@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { putEnvOrder } from '../lib/api'
+import { Hint } from './ui'
 
 // EnvReorderModal lets an operator set the explicit deploy-tier order of a
 // project's environments (low → high), which drives the release pipeline and the
@@ -39,7 +40,7 @@ export default function EnvReorderModal({ workspace, name, envNames = [], onClos
       <div className="w-full max-w-md bg-surface border border-border rounded-xl shadow-xl" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-content-strong">Reorder environments</h2>
-          <p className="text-xs text-content-subtle mt-1">Lowest tier at the top → highest at the bottom. Drives the release pipeline's promote order.</p>
+          <Hint>Lowest tier at the top → highest at the bottom. Drives the release pipeline's promote order.</Hint>
         </div>
 
         <ul className="px-5 py-4 space-y-1.5 max-h-80 overflow-y-auto">

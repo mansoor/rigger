@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchServiceConsole, fetchStorageBuckets, createStorageBucket } from '../lib/api'
 import { DatabasePanel, CopyBtn, SecretValue } from './DatabaseInfoModal'
+import { Hint } from './ui'
 
 // ServiceConsoleModal — per-env Managed Service Console (P4). A tabbed view over every
 // managed service enabled for the environment: the database (rich Connection/Manage
@@ -105,20 +106,20 @@ function ServicePanel({ workspace, name, env, svc, apexUrl, canManage, canReveal
   const secretKeys = new Set(svc.secret_keys || [])
   return (
     <div className="space-y-5">
-      {svc.note && <p className="text-xs text-content-subtle leading-relaxed">{svc.note}</p>}
+      {svc.note && <Hint className="leading-relaxed">{svc.note}</Hint>}
 
       {svc.subdomain && (
         <section className="flex items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-raised/40 px-3 py-2">
-          <div className="text-xs text-content-subtle">
+          <Hint>
             {svc.kind === 'mailpit' ? 'Open the Mailpit web inbox.' : 'Open the storage console.'}
-          </div>
+          </Hint>
           {uiUrl ? (
             <a href={uiUrl} target="_blank" rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg font-semibold text-white bg-brand-600 hover:bg-brand-700 px-3 py-1.5 text-xs">
               ↗ Open {svc.kind === 'mailpit' ? 'inbox' : 'console'}
             </a>
           ) : (
-            <span className="text-[11px] text-content-faint">Deploy with a domain to get a web URL.</span>
+            <Hint tone="faint" className="text-[11px]">Deploy with a domain to get a web URL.</Hint>
           )}
         </section>
       )}
@@ -213,7 +214,7 @@ function BucketManager({ workspace, name, env, canManage }) {
           </button>
         </div>
       )}
-      {canManage && <p className="text-[11px] text-content-faint">Names: 3–63 chars, lowercase letters, digits, dots and hyphens (S3 naming).</p>}
+      {canManage && <Hint tone="faint" className="text-[11px]">Names: 3–63 chars, lowercase letters, digits, dots and hyphens (S3 naming).</Hint>}
       {err && <p className="text-xs text-danger-fg">{err}</p>}
     </section>
   )

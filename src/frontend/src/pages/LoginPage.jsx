@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import api from '../lib/api'
+import { Hint } from '../components/ui'
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
@@ -93,7 +94,7 @@ export default function LoginPage() {
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong tracking-widest placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
                   autoFocus required
                 />
-                <p className="text-xs text-content-subtle mt-1">Enter the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+                <Hint>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</Hint>
               </div>
             )}
             <button

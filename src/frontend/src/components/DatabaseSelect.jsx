@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchDatabases } from '../lib/api'
+import { Hint } from './ui'
 
 // DatabaseSelect — catalog-driven managed-database picker shared by the New Project
 // wizard and Edit Project, so the engine + version choices stay in sync everywhere.
@@ -32,7 +33,7 @@ export default function DatabaseSelect({ engine, version, onChange, caption = tr
         )}
       </div>
       {caption && sel && (
-        <p className="text-xs text-content-subtle mt-1">{sel.label} {version || sel.default_version} — managed, with auto-generated credentials.</p>
+        <Hint>{sel.label} {version || sel.default_version} — managed, with auto-generated credentials.</Hint>
       )}
     </div>
   )
