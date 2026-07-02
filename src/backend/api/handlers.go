@@ -821,7 +821,7 @@ func (h *Handler) DeleteWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 		// Capture each project's prefix before the dir is removed so its project-scoped
 		// DB rows can be purged (else they leak to a same-key workspace recreated later).
 		prefix := h.resourcePrefix(wsName, pk)
-		h.teardownProjectStacks(wsName, pk)
+		h.teardownProjectStacks(wsName, pk, true)
 		h.purgeProjectData(prefix, wsName, pk)
 	}
 	if err := workspace.DeleteWorkspace(h.workspacesDir, wsName); err != nil {
@@ -2102,7 +2102,9 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	prefix := h.resourcePrefix(wsName, name)
 
 	// Tear down each env's stack first so containers/networks/volumes aren't orphaned.
-	h.teardownProjectStacks(wsName, name)
+	// purge volumes: a permanent project delete must also drop its data volumes, else a
+	// later same-key project reuses the stale DB volume and hits password drift (P1000).
+	h.teardownProjectStacks(wsName, name, true)
 
 	if err := os.RemoveAll(wsPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete project: " + err.Error()})

@@ -36,8 +36,18 @@ func (h *Handler) RenameWorkspaceTier(w http.ResponseWriter, r *http.Request) {
 }
 
 // teardownProjectStacks brings down every environment of a project (best-effort)
-// so deleting/relocating it doesn't orphan running containers/networks/volumes.
-func (h *Handler) teardownProjectStacks(wsKey, projKey string) {
+// so deleting it doesn't orphan running containers/networks/volumes.
+//
+// purgeVolumes=true also destroys each env's named data volumes (pg_data,
+// minio_data, storage, …). Both current callers are PERMANENT deletes (single
+// project + whole workspace tier) and pass true: without it the DB data volume
+// survives the delete, and a later project reusing the same workspace/project
+// keys — hence the same resource_prefix and volume names — reuses that stale
+// volume. Postgres then finds an existing data dir, SKIPS init, and keeps the
+// old password while the freshly generated .env carries a new one, so every
+// networked connection fails scram auth (P1000 / 28P01). A future relocate/
+// transfer caller that must KEEP data would pass false.
+func (h *Handler) teardownProjectStacks(wsKey, projKey string, purgeVolumes bool) {
 	raw, err := os.ReadFile(wspath.ConfigPath(h.workspacesDir, wsKey, projKey))
 	if err != nil {
 		return
@@ -46,7 +56,8 @@ func (h *Handler) teardownProjectStacks(wsKey, projKey string) {
 		var out bytes.Buffer
 		if derr := h.bridge.Run(shell.RunOptions{
 			Workspace: wsKey, Project: projKey, Command: "down", Env: env,
-			Stdout: &out, Stderr: &out,
+			PurgeVolumes: purgeVolumes,
+			Stdout:       &out, Stderr: &out,
 		}); derr != nil {
 			fmt.Fprintf(os.Stderr, "teardown %s/%s/%s: %v\n%s", wsKey, projKey, env, derr, out.String())
 		}
