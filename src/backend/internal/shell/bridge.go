@@ -1612,6 +1612,14 @@ func (b *Bridge) Run(opts RunOptions) error {
 	}
 
 	if dockerops.Handles(opts.Command) {
+		// Rigger-managed sidecar files (Adminer's auto-login plugin) are bind-mounted by
+		// synthesized services but written only by bootstrap. A plain deploy/start (not a
+		// Refresh) re-runs composegen alone, so enabling web_sql then deploying would emit
+		// the bind with no file behind it → the bind-file pre-flight blocks the deploy.
+		// Materialize them (write-if-absent) before every deploy so the bind always resolves.
+		if err := workspace.EnsureSidecarFiles(b.workspacesDir, opts.Workspace, opts.Project, opts.Env); err != nil {
+			return fmt.Errorf("ensure sidecar files: %w", err)
+		}
 		dopts := dockerops.Options{
 			WorkspacesDir:             b.workspacesDir,
 			Workspace:                 opts.Workspace,

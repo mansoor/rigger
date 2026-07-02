@@ -155,6 +155,44 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 	return nil
 }
 
+// EnsureSidecarFiles writes the Rigger-managed files that SYNTHESIZED services bind-mount
+// — currently Adminer's auto-login plugin (adminer-login.php) — WRITE-IF-ABSENT, without
+// touching .env or docker-compose.yml. bootstrap writes these during create/refresh; a
+// plain deploy/start only re-runs composegen, so enabling web_sql then deploying (without
+// a Refresh) would emit the bind with no file behind it — which fails the deploy's
+// bind-file pre-flight. This fills that gap idempotently before every deploy.
+func EnsureSidecarFiles(workspacesDir, workspaceName, name, env string) error {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(workspacesDir, workspaceName, name))
+	if err != nil {
+		return err
+	}
+	ec, ok := cfg.Environments[env]
+	if !ok {
+		return nil
+	}
+	// Adminer's auto-login plugin is bind-mounted only when the effective (per-env) web-SQL
+	// console is on AND the engine is SQL — Mongo gets mongo-express (inline env, no bind
+	// file). Mirrors composegen.buildAdminer's gate so the file exists exactly when the
+	// bind does (incl. a per-env web_sql override that the project-level flag wouldn't catch).
+	if !cfg.EffWebSQL(ec) {
+		return nil
+	}
+	switch cfg.EffDatabase(ec) {
+	case "postgres", "mysql", "mariadb":
+	default:
+		return nil // non-SQL (mongodb) → no Adminer bind
+	}
+	outDir := filepath.Join(wspath.ProjectDir(workspacesDir, workspaceName, name), "envs", env)
+	dest := filepath.Join(outDir, "adminer-login.php")
+	if _, statErr := os.Stat(dest); statErr == nil {
+		return nil // already present (bootstrap/refresh wrote it) — don't clobber
+	}
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dest, []byte(adminerLoginPHP()), 0o644)
+}
+
 // writeSeedFiles materializes cfg.Project.SeedFiles into the env dir, write-if-absent.
 func writeSeedFiles(cfg *wsconfig.Config, outDir string, out io.Writer) error {
 	for relPath, contents := range cfg.Project.SeedFiles {
