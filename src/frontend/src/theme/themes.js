@@ -45,6 +45,7 @@ export const DEFAULT_PREFS = {
   logLineHeight: 1.5,        // unitless
   logWrap: false,            // log viewer: wrap long lines (per-user)
   logRowNumbers: false,      // log viewer: show row numbers (per-user)
+  helpText: true,            // show field hints + section descriptions (gates every <Hint>)
 }
 
 const SYS_SANS = 'ui-sans-serif, system-ui, sans-serif'
@@ -70,6 +71,7 @@ export function normalizePrefs(raw) {
   p.logLineHeight = Number(p.logLineHeight) || DEFAULT_PREFS.logLineHeight
   p.logWrap = !!p.logWrap
   p.logRowNumbers = !!p.logRowNumbers
+  p.helpText = p.helpText !== false // default ON; only an explicit false hides help
   return p
 }
 

@@ -27,9 +27,9 @@
   /* Text hierarchy. */
   --content-strong:   255 255 255;   /* white  */
   --content:          243 244 246;   /* gray-100 */
-  --content-muted:    156 163 175;   /* gray-400 */
-  --content-subtle:   107 114 128;   /* gray-500 */
-  --content-faint:    75 85 99;      /* gray-600 */
+  --content-muted:    178 186 200;   /* lifted above subtle to keep the tier order */
+  --content-subtle:   156 163 175;   /* was gray-500 — now ~gray-400, clears AA on dark surfaces */
+  --content-faint:    140 152 172;   /* was gray-600 (~2:1, unreadable) — dimmest still-legible tier */
 
   /* Borders. */
   --border:           31 41 55;      /* gray-800 */
