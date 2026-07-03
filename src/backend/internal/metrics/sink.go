@@ -37,19 +37,39 @@ type SQLiteSink struct{ db *db.DB }
 // NewSQLiteSink builds the default SQLite sink.
 func NewSQLiteSink(d *db.DB) *SQLiteSink { return &SQLiteSink{db: d} }
 
-// Write inserts one row per sample (recorded_at defaults to CURRENT_TIMESTAMP).
+// Write inserts the whole batch in ONE transaction (recorded_at defaults to
+// CURRENT_TIMESTAMP). A cycle emits a row per project/env; committing them
+// individually made each insert its own implicit transaction — N WAL commits per
+// tick on the single-writer connection. Wrapping the batch collapses that to one
+// commit (a prepared statement reused across rows), which is the whole point.
+// The batch is atomic: a failure rolls the tick back rather than leaving a partial
+// snapshot, and the caller logs it (best-effort) so the next cycle just retries.
 func (s *SQLiteSink) Write(samples []Sample) error {
-	var firstErr error
+	if len(samples) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(
+		`INSERT INTO metrics_snapshots (project, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+	)
+	if err != nil {
+		tx.Rollback() //nolint:errcheck
+		return err
+	}
+	defer stmt.Close()
 	for _, m := range samples {
-		if _, err := s.db.Exec(
-			`INSERT INTO metrics_snapshots (project, env, cpu_pct, memory_bytes, disk_bytes, net_rx_bytes, net_tx_bytes)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		if _, err := stmt.Exec(
 			m.Project, m.Env, m.CPUPct, m.MemoryBytes, m.DiskBytes, m.NetRxBytes, m.NetTxBytes,
-		); err != nil && firstErr == nil {
-			firstErr = err
+		); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return err
 		}
 	}
-	return firstErr
+	return tx.Commit()
 }
 
 // TSDBSink remote-writes snapshots to a VictoriaMetrics instance via its plain-text
