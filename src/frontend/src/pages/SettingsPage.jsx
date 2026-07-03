@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
@@ -2340,7 +2341,15 @@ const TABS = [
 ]
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState('general')
+  // Tab lives in the URL (?tab=) so the command palette can deep-link straight to a
+  // specific setting (e.g. API Keys, Domains & TLS) and the tab survives a reload.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') || 'general'
+  const setTab = (id) => setParams(p => {
+    const n = new URLSearchParams(p)
+    if (id === 'general') n.delete('tab'); else n.set('tab', id)
+    return n
+  }, { replace: true })
 
   return (
     <Layout>

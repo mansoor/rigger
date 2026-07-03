@@ -7,6 +7,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { fetchWorkspaces, fetchProjects, createWorkspaceTier, fetchEnvStatus, changePassword, fetchAlertUnread, updateProfile, fetchProfile, resendVerification, fetchVersion, fetch2FAStatus, begin2FA, enable2FA, disable2FA, regen2FACodes, fetchConfirmSettings, saveUserConfirm } from '../lib/api'
 import { useDockerEvents } from '../hooks/useDockerEvents'
 import SlideOutPanel from './SlideOutPanel'
+import CommandPalette from './CommandPalette'
 import ThemeToggle from './ThemeToggle'
 import HelpToggle from './HelpToggle'
 import KeyField from './KeyField'
@@ -422,6 +423,19 @@ export default function Layout({ children }) {
   const setCurrent = useWorkspaceStore((s) => s.setCurrent)
   const [slidePanel, setSlidePanel] = useState(null) // 'activity' | 'backup' | 'version'
   const [newWsOpen, setNewWsOpen]   = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Global Ctrl/Cmd-K opens the command palette (quick-jump within the workspace).
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setPaletteOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Restore the sidebar scroll on (re)mount for non-project pages; on a project page the
   // active ProjectSidebarItem scrolls itself into view, so leave that to it.
@@ -509,6 +523,17 @@ export default function Layout({ children }) {
               canManage={canAdminWs}
               canCreate={isAdmin}
             />
+            <button
+              onClick={() => setPaletteOpen(true)}
+              title="Search (Ctrl/Cmd K)"
+              className="flex items-center gap-2 ml-2 px-3 py-2 w-64 text-sm text-content-subtle rounded-lg border border-border-strong hover:bg-surface-raised hover:text-content transition-colors"
+            >
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
+              </svg>
+              <span>Search…</span>
+              <kbd className="ml-auto text-[10px] text-content-faint border border-border-strong rounded px-1 py-0.5">⌘K</kbd>
+            </button>
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
@@ -577,6 +602,9 @@ export default function Layout({ children }) {
           {!isAdmin && Array.isArray(workspaces) && workspaces.length === 0 ? <NoAccess /> : children}
         </main>
       </div>
+
+      {/* Command palette (Ctrl/Cmd-K) — quick-jump within the current workspace */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} isAdmin={isAdmin} canAdminWs={canAdminWs} />
 
       {/* Slide-out panels (Activity / Backup / Version) */}
       {slidePanel && (

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
@@ -991,7 +992,14 @@ function MigrationLeftoversTab() {
 }
 
 export default function HousekeepingPage() {
-  const [tab, setTab] = useState('dashboard')
+  // Tab lives in the URL (?tab=) so the command palette can deep-link to a section.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get('tab') || 'dashboard'
+  const setTab = (id) => setParams(p => {
+    const n = new URLSearchParams(p)
+    if (id === 'dashboard') n.delete('tab'); else n.set('tab', id)
+    return n
+  }, { replace: true })
   const { data: status, isLoading } = useQuery({
     queryKey: ['hk-status'], queryFn: fetchHousekeepingStatus, refetchInterval: 60_000,
   })
