@@ -710,3 +710,48 @@ func TestComposeTranslatesTraefikRoutes(t *testing.T) {
 		}
 	}
 }
+
+// TestComposeRewritesLocalhostBuildArgs: a frontend that bakes its API base URL at build
+// time via a hardcoded localhost URL is rewritten to ${ROUTE_URL} (path preserved), while
+// an already-tokenized arg and an in-network service-name URL are left untouched.
+func TestComposeRewritesLocalhostBuildArgs(t *testing.T) {
+	yml := "services:\n" +
+		"  frontend:\n" +
+		"    build:\n" +
+		"      context: ./frontend\n" +
+		"      args:\n" +
+		"        NEXT_PUBLIC_API_URL: http://localhost/api\n" +
+		"        NEXT_PUBLIC_WS_URL: http://127.0.0.1:8000\n" +
+		"        NEXT_PUBLIC_KEEP: http://backend:8000\n" +
+		"        NEXT_PUBLIC_TOKENIZED: ${ROUTE_URL}/v2\n" +
+		"    ports: [\"3000:3000\"]\n"
+	d, err := DetectComposeBytes([]byte(yml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fe *Service
+	for i := range d.Services {
+		if d.Services[i].Name == "frontend" {
+			fe = &d.Services[i]
+		}
+	}
+	if fe == nil || fe.Build == nil {
+		t.Fatalf("frontend build service missing: %+v", d.Services)
+	}
+	args := fe.Build.Args
+	if got := args["NEXT_PUBLIC_API_URL"]; got != "${ROUTE_URL}/api" {
+		t.Errorf("API_URL: want ${ROUTE_URL}/api, got %q", got)
+	}
+	if got := args["NEXT_PUBLIC_WS_URL"]; got != "${ROUTE_URL}" {
+		t.Errorf("WS_URL (no path): want ${ROUTE_URL}, got %q", got)
+	}
+	if got := args["NEXT_PUBLIC_KEEP"]; got != "http://backend:8000" {
+		t.Errorf("in-network service URL must be untouched, got %q", got)
+	}
+	if got := args["NEXT_PUBLIC_TOKENIZED"]; got != "${ROUTE_URL}/v2" {
+		t.Errorf("already-tokenized arg must be untouched, got %q", got)
+	}
+	if joined := strings.Join(d.Notes, " | "); !strings.Contains(joined, "${ROUTE_URL}") {
+		t.Errorf("expected a build-arg rewrite note; got: %s", joined)
+	}
+}

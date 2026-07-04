@@ -594,6 +594,12 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool
 		d.Routes = rts
 		d.Notes = append(d.Notes, fmt.Sprintf("Translated %d path route(s) from the compose's Traefik labels into the routing table (e.g. %q → %s).", len(rts), rts[0].Match, rts[0].Service))
 	}
+	// Rewrite build-args that bake a hardcoded localhost URL (a frontend's API base URL)
+	// into ${ROUTE_URL}, so the built image targets the deployed domain, not the author's
+	// laptop — the class of bug where an app deploys but the browser calls the wrong host.
+	if changed := rewriteURLBuildArgs(d); len(changed) > 0 {
+		d.Notes = append(d.Notes, fmt.Sprintf("Rewrote %d build-arg(s) from a hardcoded localhost URL to ${ROUTE_URL} so the app targets its deployed domain at build time: %s. Adjust on the next step if a value should stay fixed.", len(changed), strings.Join(changed, ", ")))
+	}
 	// Repoint hardcoded DB/cache host references onto the managed service names.
 	if n := rebaseManagedHosts(d, renames); n > 0 {
 		var pairs []string
@@ -1378,6 +1384,42 @@ func extractProxyRoutes(cf composeFile, onlyServices map[string]bool) []Route {
 		}
 	}
 	return routes
+}
+
+// localhostURLRE matches a build-arg value that is a self-referencing local URL — a
+// dev-time placeholder like http://localhost:8000 or http://localhost/api. Captures the
+// path (group 1, "" or "/...") so it survives when the value is rewritten to ${ROUTE_URL}.
+var localhostURLRE = regexp.MustCompile(`(?i)^https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(/[^\s]*)?$`)
+
+// rewriteURLBuildArgs finds build-args whose value is a hardcoded localhost URL and
+// rewrites them to Rigger's ${ROUTE_URL} token (preserving the original path), so a
+// frontend that bakes its API base URL at BUILD time (Next.js NEXT_PUBLIC_*, Vite
+// VITE_*, CRA REACT_APP_*) targets the deployed domain instead of the author's laptop.
+// The token is resolved to the env's public route at build time (see builder.expandArgs).
+// Values already carrying a ${...} token are left untouched. Returns "service.KEY" for
+// each rewritten arg (sorted), for a review note.
+func rewriteURLBuildArgs(d *Draft) []string {
+	var changed []string
+	for i := range d.Services {
+		s := &d.Services[i]
+		if s.Build == nil || len(s.Build.Args) == 0 {
+			continue
+		}
+		for k, v := range s.Build.Args {
+			val := strings.TrimSpace(v)
+			if strings.Contains(val, "${") {
+				continue // already tokenized — respect the author's choice
+			}
+			m := localhostURLRE.FindStringSubmatch(val)
+			if m == nil {
+				continue
+			}
+			s.Build.Args[k] = "${ROUTE_URL}" + m[1]
+			changed = append(changed, s.Name+"."+k)
+		}
+	}
+	sort.Strings(changed)
+	return changed
 }
 
 // routerNames returns the sorted Traefik router names a service's labels declare.
