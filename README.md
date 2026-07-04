@@ -69,7 +69,7 @@ git clone https://github.com/mansoor/rigger.git
 cd rigger/src
 cp .env.example .env
 # Edit .env: set JWT_SECRET (openssl rand -hex 32) and ACME_EMAIL
-docker network create traefik_net 2>/dev/null || true
+docker network create traefik_net 2>/dev/null || true   # Swarm manager? use: docker network create -d overlay --attachable traefik_net
 docker compose up --build -d
 ```
 
@@ -686,7 +686,10 @@ No host port binding. Traefik routes by domain name using Docker labels. SSL cer
 
 **One-time setup:**
 ```bash
+# Compose install (default):
 docker network create traefik_net
+# On a Swarm manager instead (so compose + swarm stacks share it):
+docker network create -d overlay --attachable traefik_net
 ```
 
 **SSL requirements:** Port 80 open, DNS A record pointing to this server, `ACME_EMAIL` set in `src/.env`.
@@ -750,7 +753,7 @@ cd rigger/src
 cp .env.example .env
 # Set JWT_SECRET: openssl rand -hex 32
 # Set ACME_EMAIL for SSL
-docker network create traefik_net 2>/dev/null || true
+docker network create traefik_net 2>/dev/null || true   # Swarm manager? use: docker network create -d overlay --attachable traefik_net
 docker compose up --build -d
 # → http://localhost:9999
 ```

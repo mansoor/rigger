@@ -367,8 +367,18 @@ fi
 step "Ensuring traefik_net network exists"
 
 if ! $DOCKER_CMD network inspect traefik_net &>/dev/null; then
-  $DOCKER_CMD network create traefik_net
-  success "Created traefik_net network"
+  # A Swarm manager needs traefik_net as an OVERLAY/attachable network so BOTH compose
+  # stacks (standalone, via --attachable) and swarm services can share it — a bridge
+  # network is rejected by `docker stack deploy` ("not in the right scope"). Overlay
+  # requires an active Swarm, so only choose it when this host is a manager; otherwise
+  # the default bridge is correct for a compose-only install.
+  if $DOCKER_CMD info --format '{{.Swarm.ControlAvailable}}' 2>/dev/null | grep -q true; then
+    $DOCKER_CMD network create -d overlay --attachable traefik_net
+    success "Created traefik_net network (overlay/attachable — Swarm manager detected)"
+  else
+    $DOCKER_CMD network create traefik_net
+    success "Created traefik_net network (bridge)"
+  fi
 else
   success "traefik_net network already exists"
 fi
