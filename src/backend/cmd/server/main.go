@@ -1113,6 +1113,9 @@ func main() {
 
 	// Phase 9: deployment pipelines (project-scoped). REST CRUD + run history are
 	// JWT-authed via middleware (per-project RBAC enforced in the handlers); the run
+	// Command-palette deep search: env-var keys, routes, custom domains, pipelines
+	// for the workspace (RBAC-filtered, keys-only). On-demand — no persistent index.
+	mux.Handle("GET /api/workspaces/{workspace}/search-index", authSvc.Middleware(http.HandlerFunc(handler.SearchIndex)))
 	// endpoint is a WebSocket authed by a token in its first message (like /action).
 	// Release-pipeline #4: explicit env deploy-tier order (drives auto-seeded pipelines).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.GetEnvOrder)))

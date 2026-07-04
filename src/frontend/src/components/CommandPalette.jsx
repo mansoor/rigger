@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceStore } from '../store/workspace'
-import { fetchProjects } from '../lib/api'
+import { fetchProjects, fetchSearchIndex } from '../lib/api'
 import { buildEntries, rank } from '../lib/commandPalette'
 
 // CommandPalette — a Ctrl/Cmd-K quick-jump over the current workspace's projects
@@ -27,9 +27,22 @@ export default function CommandPalette({ open, onClose, isAdmin, canAdminWs }) {
     staleTime: 30_000,
   })
 
+  // Phase 2 "deep" entries — env-var keys, routes, custom domains, pipelines — that
+  // aren't in the projects payload. On-demand endpoint, cached briefly; the palette
+  // stays usable (nav + projects from cache) if this hasn't resolved yet.
+  const { data: deep } = useQuery({
+    queryKey: ['search-index', current],
+    queryFn: () => fetchSearchIndex(current),
+    enabled: !!current && open,
+    staleTime: 60_000,
+  })
+
   const entries = useMemo(
-    () => buildEntries({ projects: projects || [], currentWs: current, isAdmin, canAdminWs }),
-    [projects, current, isAdmin, canAdminWs],
+    () => [
+      ...buildEntries({ projects: projects || [], currentWs: current, isAdmin, canAdminWs }),
+      ...(Array.isArray(deep) ? deep : []),
+    ],
+    [projects, deep, current, isAdmin, canAdminWs],
   )
   const results = useMemo(() => rank(entries, query), [entries, query])
 

@@ -79,6 +79,8 @@ export const checkKey   = (type, key, workspace = '') =>
   api.get('/keys/check', { params: { type, key, workspace } }).then(r => r.data)
 // Projects within a workspace.
 export const fetchProjects        = (ws)    => api.get(`/workspaces/${ws}/projects`).then(r => r.data)
+// Command-palette deep search: env-var keys, routes, custom domains, pipelines.
+export const fetchSearchIndex     = (ws)    => api.get(`/workspaces/${ws}/search-index`).then(r => r.data)
 export const fetchWorkspace    = (ws, name)      => api.get(projBase(ws, name)).then(r => r.data)
 export const fetchEnvVars      = (ws, name, env, reveal = false) => api.get(`${projBase(ws, name)}/envs/${env}/vars${reveal ? '?reveal=true' : ''}`).then(r => r.data)
 // Managed-database connection info for an env (Phase 5). reveal=true (operator+) returns the password.
