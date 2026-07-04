@@ -190,6 +190,8 @@ workspaces/<project>/
 
 > The Rigger engine runs entirely inside the container as a single Go binary — the host needs no `bash`, `jq`, `openssl`, or `git`. All build steps happen inside Docker.
 
+> **Planning to use Docker Swarm?** Run `docker swarm init` **before** installing Rigger. The installer then creates the shared `traefik_net` as an `overlay --attachable` network from the start, so compose and swarm projects coexist with no later network migration. Installing compose-first and enabling Swarm afterward works too, but needs a one-time `traefik_net` overlay conversion (Rigger warns you at startup when it's pending — see [Docker Swarm](#docker-swarm)).
+
 ---
 
 ## 5. Quick Start
@@ -433,6 +435,14 @@ Best for dev and single-host stage/prod.
 ```
 
 Enables replica scaling via `docker stack deploy`. Requires `docker swarm init`.
+
+The shared `traefik_net` must be an **overlay/attachable** network for swarm stacks — a bridge network is rejected with *"network not in the right scope"*. The installer picks the right driver automatically when Swarm is already active, so the smoothest path is to **`docker swarm init` before installing Rigger** (compose and swarm projects then run side-by-side on the one network). If you enable Swarm on an existing compose install, recreate the network once:
+
+```bash
+docker network rm traefik_net && docker network create -d overlay --attachable traefik_net
+```
+
+then reconnect/redeploy your stacks. Rigger logs a startup reminder while this is pending. Your running compose apps are unaffected until you deploy the first swarm stack.
 
 ---
 
