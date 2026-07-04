@@ -34,6 +34,7 @@ type CreateRequest struct {
 	DBSeedFile   string            `json:"db_seed_file"`  // chosen bundled SQL dump (path relative to source); copied to _source/seed.sql on create
 	DBSeedAuto   bool              `json:"db_seed_auto"`  // auto-import the dump on first deploy of an empty DB
 	Services     []map[string]any  `json:"services"`      // unified services[] (repo-scan path); else seeded from legacy fields
+	Routes       []map[string]any  `json:"routes"`        // project routing table (repo-scan: translated from the app's Traefik labels)
 	Type         string            `json:"type"`         // "image" or "custom"
 	Template     string            `json:"template"`     // pre-built template name (image type)
 	Images       []ImageDef        `json:"images"`       // populated from template or manual entry
@@ -441,6 +442,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 		"services":     services,
 		"versions":     versions,
 		"environments": environments,
+	}
+
+	// Project routing table translated from an imported compose's Traefik labels
+	// (repo-scan). Empty ⇒ omit (legacy single-web-entry parity).
+	if len(req.Routes) > 0 {
+		cfg["routes"] = req.Routes
 	}
 
 	// Additional named volumes declared in the wizard

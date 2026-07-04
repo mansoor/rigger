@@ -96,6 +96,16 @@ type Build struct {
 	Args       map[string]string `json:"args,omitempty"`
 }
 
+// Route mirrors composegen.Route (config.json's project-level routing table): a path
+// prefix routed to a service. Populated when the imported compose declared its ingress
+// via Traefik router labels (translated on import); flows straight into config.json.
+type Route struct {
+	Service string `json:"service"`
+	Type    string `json:"type"` // "path" (only path routes are translated from labels)
+	Match   string `json:"match"`
+	Target  string `json:"target,omitempty"` // "/" when a stripprefix middleware was applied
+}
+
 // Draft is the detection result the wizard pre-fills from.
 type Draft struct {
 	Services      []Service         `json:"services"`
@@ -105,6 +115,14 @@ type Draft struct {
 	ObjectStorage string            `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
 	Detected      string            `json:"detected"`                 // primary stack label, for display
 	Notes         []string          `json:"notes"`                    // human-readable detection notes
+	// SourceSubdir is the path (relative to the repo root) where the deployable stack
+	// was found when it isn't at the root — a monorepo package or a nested app. Build
+	// contexts are already prefixed with it; surfaced so the UI can show/persist it.
+	SourceSubdir  string            `json:"source_subdir,omitempty"`
+	// Routes is the project-level routing table translated from the imported compose's
+	// Traefik router labels (path prefixes → services), so multi-service ingress
+	// (/ → frontend, /api → backend) carries over after the app's own proxy is dropped.
+	Routes        []Route           `json:"routes,omitempty"`
 	EnvVars       map[string]string `json:"env_vars,omitempty"`       // seeded from .env.example for the env's .env
 	// ManagedCandidates lists detected containers Rigger CAN manage (postgres/mysql/
 	// redis). The default draft above already chose "managed" (dropped the container,
@@ -171,6 +189,147 @@ type OmittedService struct {
 }
 
 // Detect scans a repo directory and returns a draft service graph.
+// DetectRepo is the repo-scan entry point that adds nested-source support on top of
+// Detect: when an explicit subdir is given, or the repo ROOT holds no deployable stack
+// but a subdirectory does (a monorepo package / nested app), detection runs in that
+// subdirectory and every build context is prefixed with it — so contexts still resolve
+// from the repo root that gitsync checks out. subdir "" ⇒ auto-discover.
+func DetectRepo(repoDir, subdir string) Draft {
+	subdir = cleanSubdir(subdir)
+	if subdir != "" {
+		d := Detect(filepath.Join(repoDir, filepath.FromSlash(subdir)))
+		applySubdir(&d, subdir, true)
+		return d
+	}
+	d := Detect(repoDir)
+	if len(d.Services) > 0 {
+		return d // a stack at the root — use it as-is
+	}
+	// Root had nothing deployable; look a few levels down for an app root.
+	if sub, ok := findAppSubdir(repoDir); ok {
+		nd := Detect(filepath.Join(repoDir, filepath.FromSlash(sub)))
+		if len(nd.Services) > 0 {
+			applySubdir(&nd, sub, false)
+			return nd
+		}
+	}
+	return d
+}
+
+// cleanSubdir normalizes a subdir to a forward-slash relative path (or "" for the root),
+// rejecting absolute paths and `..` traversal.
+func cleanSubdir(sub string) string {
+	sub = strings.Trim(strings.ReplaceAll(sub, "\\", "/"), "/ ")
+	if sub == "" || sub == "." {
+		return ""
+	}
+	for _, seg := range strings.Split(sub, "/") {
+		if seg == "" || seg == ".." || seg == "." {
+			return "" // reject traversal / malformed
+		}
+	}
+	return sub
+}
+
+// slashJoin joins two forward-slash path fragments (build contexts are always
+// forward-slash, unlike filepath which is OS-specific).
+func slashJoin(a, b string) string {
+	a, b = strings.Trim(a, "/"), strings.Trim(b, "/")
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "/" + b
+}
+
+// applySubdir records the source subdir, prefixes every build context with it, and notes it.
+func applySubdir(d *Draft, subdir string, explicit bool) {
+	d.SourceSubdir = subdir
+	for i := range d.Services {
+		b := d.Services[i].Build
+		if b == nil {
+			continue
+		}
+		ctx := strings.TrimPrefix(strings.TrimSpace(b.Context), "./")
+		if ctx == "." {
+			ctx = ""
+		}
+		b.Context = "./" + slashJoin(subdir, ctx)
+	}
+	if explicit {
+		d.Notes = append([]string{"Scanned the '" + subdir + "' subdirectory as the source root."}, d.Notes...)
+	} else {
+		d.Notes = append([]string{"No stack at the repo root — mapped the app found in '" + subdir + "'. Confirm this is the right source subdirectory."}, d.Notes...)
+	}
+}
+
+// findAppSubdir returns the shallowest subdirectory that looks like a deployable app
+// root (a compose file, a Dockerfile, or a framework manifest) — used when the repo
+// root has none (a monorepo, or a nested app dir). Junk/example dirs are skipped so a
+// docs sample never wins; depth-limited. Breadth-first ⇒ closest-to-root wins.
+func findAppSubdir(repoDir string) (string, bool) {
+	const maxDepth = 3
+	type node struct {
+		rel   string
+		depth int
+	}
+	var queue []node
+	enqueue := func(rel string, depth int) {
+		entries, err := os.ReadDir(filepath.Join(repoDir, filepath.FromSlash(rel)))
+		if err != nil {
+			return
+		}
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			if e.IsDir() && !skipScanDir(e.Name()) {
+				names = append(names, e.Name())
+			}
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			queue = append(queue, node{rel: slashJoin(rel, n), depth: depth + 1})
+		}
+	}
+	enqueue("", 0)
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if dirHasStack(filepath.Join(repoDir, filepath.FromSlash(cur.rel))) {
+			return cur.rel, true
+		}
+		if cur.depth < maxDepth {
+			enqueue(cur.rel, cur.depth)
+		}
+	}
+	return "", false
+}
+
+// dirHasStack reports whether a directory looks like a deployable app root.
+func dirHasStack(dir string) bool {
+	if findFirst(dir, "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml") != "" {
+		return true
+	}
+	if fileExists(filepath.Join(dir, "Dockerfile")) {
+		return true
+	}
+	_, ok := identify(dir)
+	return ok
+}
+
+// skipScanDir excludes vendored, VCS, build-output, test and docs/sample dirs from the
+// nested-app search so a fixture or example compose never masquerades as the app root.
+func skipScanDir(name string) bool {
+	switch strings.ToLower(name) {
+	case "node_modules", "vendor", ".git", ".github", ".idea", ".vscode",
+		"tests", "test", "__tests__", "examples", "example", "docs", "doc",
+		"dist", "build", "bin", "obj", "target", "coverage", ".devcontainer":
+		return true
+	}
+	return strings.HasPrefix(name, ".")
+}
+
 func Detect(repoDir string) Draft {
 	d := Draft{Services: []Service{}, Database: "none", Notes: []string{}}
 	// Seed env vars from .env.example so the env's .env carries the app's expected
@@ -323,6 +482,7 @@ type composeSvc struct {
 	Healthcheck yaml.Node `yaml:"healthcheck"`
 	Profiles    []string  `yaml:"profiles"`
 	Restart     string    `yaml:"restart"`
+	Labels      yaml.Node `yaml:"labels"` // Traefik router rules are translated to Routes
 }
 
 // DetectComposeBytes parses pasted docker-compose.yml content (no repo on disk) into a
@@ -362,6 +522,7 @@ func fromCompose(repoDir, path string, d *Draft) bool {
 // for the image stack, foldManaged=false → every service stays a plain image entry).
 func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool) {
 	var skippedProfiles []string
+	var droppedProxies []string
 	// renames maps a dropped DB/cache service's compose name (e.g. "db") to the
 	// managed service's name in Rigger's generated compose (e.g. "postgres"), so we
 	// can repoint hardcoded host references in other services' env (e.g. a
@@ -378,6 +539,13 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool
 			d.ProfileOmitted = append(d.ProfileOmitted, OmittedService{
 				Name: dnsName(name), Profiles: cs.Profiles, Service: composeToService(repoDir, name, cs, cf.Services),
 			})
+			continue
+		}
+		// The app's OWN edge/reverse proxy (Traefik / nginx-proxy / …) is replaced by
+		// Rigger's shared Traefik — importing it conflicts on host :80/:443. Drop it and
+		// route the real web service through Rigger instead (pickWebEntry, below).
+		if isEdgeProxy(cs) {
+			droppedProxies = append(droppedProxies, dnsName(name))
 			continue
 		}
 		// Recognised data services CAN become a managed dependency. Default to that
@@ -411,6 +579,20 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool
 	}
 	if len(skippedProfiles) > 0 {
 		d.Notes = append(d.Notes, "Skipped profile-gated service(s): "+strings.Join(skippedProfiles, ", ")+" (not started by default — include them in the review if you want them).")
+	}
+	if len(droppedProxies) > 0 {
+		d.Notes = append(d.Notes, "Removed the app's bundled reverse proxy ("+strings.Join(droppedProxies, ", ")+") — Rigger's Traefik handles ingress.")
+	}
+	// Translate the app's Traefik router labels (path prefixes → services) into Rigger's
+	// routing table, so multi-service ingress (/ → frontend, /api → backend) carries over
+	// after the app's own proxy is dropped. Scoped to services that survived the import.
+	surviving := map[string]bool{}
+	for _, s := range d.Services {
+		surviving[s.Name] = true
+	}
+	if rts := extractProxyRoutes(cf, surviving); len(rts) > 0 {
+		d.Routes = rts
+		d.Notes = append(d.Notes, fmt.Sprintf("Translated %d path route(s) from the compose's Traefik labels into the routing table (e.g. %q → %s).", len(rts), rts[0].Match, rts[0].Service))
 	}
 	// Repoint hardcoded DB/cache host references onto the managed service names.
 	if n := rebaseManagedHosts(d, renames); n > 0 {
@@ -1071,6 +1253,144 @@ func splitColonOutsideBraces(s string) []string {
 }
 
 var ingressImageRE = regexp.MustCompile(`nginx|caddy|traefik|httpd|haproxy`)
+
+// isEdgeProxy reports whether a compose service is the app's OWN edge/reverse proxy —
+// the ingress layer a self-contained stack ships (Traefik, nginx-proxy, caddy-docker-
+// proxy) to route to its frontend/backend. Rigger already provides that layer (its
+// shared Traefik), and the app's proxy binds host :80/:443 (which Rigger's Traefik
+// owns) and usually watches the Docker socket — so importing it conflicts and the
+// deploy fails. Such services are dropped on import; the real web service is routed
+// through Rigger instead. Two signals: a known proxy image, OR a generic Docker-
+// discovery proxy (binds host :80/:443 AND mounts /var/run/docker.sock).
+func isEdgeProxy(cs composeSvc) bool {
+	if isEdgeProxyImage(cs.Image) {
+		return true
+	}
+	return mountsDockerSocket(cs) && bindsHostHTTPPort(cs)
+}
+
+// isEdgeProxyImage matches images that ONLY exist to reverse-proxy: the traefik image
+// (by base name, so `traefik`/`library/traefik` match but `acme/traefik-config` won't),
+// plus the well-known auto-discovery proxies. Bare nginx/caddy are NOT matched — they
+// have legitimate non-proxy uses (static serving, php-fpm front), caught (only when
+// they're actually a discovery proxy) by the docker-socket heuristic in isEdgeProxy.
+func isEdgeProxyImage(image string) bool {
+	img := strings.ToLower(strings.TrimSpace(image))
+	if img == "" {
+		return false
+	}
+	if i := strings.LastIndex(img, ":"); i > strings.LastIndex(img, "/") {
+		img = img[:i] // strip tag
+	}
+	base := img
+	if i := strings.LastIndex(img, "/"); i >= 0 {
+		base = img[i+1:]
+	}
+	return base == "traefik" || strings.Contains(img, "nginx-proxy") || strings.Contains(img, "caddy-docker-proxy")
+}
+
+func mountsDockerSocket(cs composeSvc) bool {
+	for _, v := range cs.Volumes {
+		if strings.Contains(v, "/var/run/docker.sock") {
+			return true
+		}
+	}
+	return false
+}
+
+// bindsHostHTTPPort reports whether the service publishes host port 80 or 443 (the
+// ports the shared Traefik already owns). The host side is the segment before the
+// container port: "80:80", "443:443", "0.0.0.0:80:80".
+func bindsHostHTTPPort(cs composeSvc) bool {
+	for _, p := range cs.Ports {
+		seg := strings.Split(strings.Trim(p, `"' `), ":")
+		if len(seg) >= 2 {
+			host := seg[len(seg)-2]
+			if host == "80" || host == "443" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var (
+	routerRuleRE = regexp.MustCompile(`^traefik\.http\.routers\.([^.]+)\.rule$`)
+	stripMwRE    = regexp.MustCompile(`^traefik\.http\.middlewares\.([^.]+)\.stripprefix\.prefixes`)
+	// PathPrefix(`/api`) / Path(`/x`) — Traefik uses backticks; tolerate quotes too.
+	pathRuleRE = regexp.MustCompile("(?:PathPrefix|Path)\\(\\s*[`'\"]([^`'\"]+)[`'\"]\\s*\\)")
+)
+
+// extractProxyRoutes translates a compose's Traefik ROUTER LABELS into Rigger's project
+// routing table. Each `traefik.http.routers.<r>.rule` contributes a path route per
+// PathPrefix(...)/Path(...) it declares, targeting the service the label sits on;
+// Host(...) is ignored (Rigger owns the host). A router that references a stripprefix
+// middleware gets Target="/" (the prefix is stripped before the backend sees it) — the
+// standard /api → backend wiring. onlyServices limits routes to services that survived
+// import (the dropped proxy isn't a valid target). Returns nil when the app used no
+// Traefik router labels, so non-Traefik imports are unchanged.
+func extractProxyRoutes(cf composeFile, onlyServices map[string]bool) []Route {
+	stripByMw := map[string][]string{} // stripprefix middleware name → the prefixes it strips
+	labelsByService := map[string]map[string]string{}
+	for name, cs := range cf.Services {
+		labels := nodeToEnvMap(cs.Labels)
+		labelsByService[name] = labels
+		for k, v := range labels {
+			if m := stripMwRE.FindStringSubmatch(k); m != nil {
+				stripByMw[m[1]] = append(stripByMw[m[1]], strings.TrimSpace(v))
+			}
+		}
+	}
+	var routes []Route
+	seen := map[string]bool{}
+	for _, name := range sortedKeys(cf.Services) {
+		svc := dnsName(name)
+		if onlyServices != nil && !onlyServices[svc] {
+			continue
+		}
+		labels := labelsByService[name]
+		for _, router := range routerNames(labels) {
+			matches := pathRuleRE.FindAllStringSubmatch(labels["traefik.http.routers."+router+".rule"], -1)
+			if len(matches) == 0 {
+				continue
+			}
+			mws := strings.Split(labels["traefik.http.routers."+router+".middlewares"], ",")
+			for _, m := range matches {
+				match := strings.TrimSpace(m[1])
+				key := svc + "|" + match
+				if match == "" || seen[key] {
+					continue
+				}
+				seen[key] = true
+				// Target="/" only when a stripprefix middleware on this router strips THIS
+				// exact prefix — Traefik strips /api but not /docs on the same router.
+				target := ""
+				for _, mw := range mws {
+					mw = strings.SplitN(strings.TrimSpace(mw), "@", 2)[0]
+					for _, pfx := range stripByMw[mw] {
+						if pfx == match {
+							target = "/"
+						}
+					}
+				}
+				routes = append(routes, Route{Service: svc, Type: "path", Match: match, Target: target})
+			}
+		}
+	}
+	return routes
+}
+
+// routerNames returns the sorted Traefik router names a service's labels declare.
+func routerNames(labels map[string]string) []string {
+	var out []string
+	for k := range labels {
+		if m := routerRuleRE.FindStringSubmatch(k); m != nil {
+			out = append(out, m[1])
+		}
+	}
+	sort.Strings(out)
+	return out
+}
 
 // pickWebEntry chooses a web entry when none was already marked (compose imports
 // rarely set one): the service publishing 80/443, else an ingress-like image, else

@@ -232,8 +232,8 @@ export const fetchTemplateDraft = (ws, name, env) =>
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
-export const scanRepo          = (repo, branch, providerId = 0) =>
-  api.post('/scan-repo', { repo, branch, provider_id: Number(providerId) || 0 }).then(r => r.data)
+export const scanRepo          = (repo, branch, providerId = 0, subdir = '') =>
+  api.post('/scan-repo', { repo, branch, subdir, provider_id: Number(providerId) || 0 }).then(r => r.data)
 // Parse pasted docker-compose.yml content into a draft service graph (no clone).
 export const parseCompose      = (content) =>
   api.post('/parse-compose', { content }).then(r => r.data)

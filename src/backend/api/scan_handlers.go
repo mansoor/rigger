@@ -21,6 +21,7 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Repo       string `json:"repo"`
 		Branch     string `json:"branch"`
+		Subdir     string `json:"subdir"`      // optional: app lives in this subdir (monorepo/nested); "" = auto-discover
 		ProviderID int64  `json:"provider_id"` // optional git provider for private repos
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Repo) == "" {
@@ -62,7 +63,7 @@ func (h *Handler) ScanRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, detect.Detect(src))
+	writeJSON(w, http.StatusOK, detect.DetectRepo(src, strings.TrimSpace(body.Subdir)))
 }
 
 // ParseCompose parses pasted docker-compose.yml content into the same draft service

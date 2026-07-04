@@ -222,7 +222,7 @@ function ScanStack({ data, onChange, workspace }) {
   async function scan() {
     setErr(''); setBusy(true)
     try {
-      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim(), data.git_provider_id || 0)
+      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim(), data.git_provider_id || 0, (data.source_subdir || '').trim())
       applyDraft(onChange, d)
     } catch (e) {
       onChange('scanDraft', null)
@@ -247,6 +247,11 @@ function ScanStack({ data, onChange, workspace }) {
       </div>
       <Hint>Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</Hint>
       <div>
+        <Label>Source subdirectory <span className="font-normal normal-case text-content-faint">(optional)</span></Label>
+        <Input value={data.source_subdir || ''} onChange={v => onChange('source_subdir', v)} placeholder="e.g. packages/web — blank to auto-detect" />
+        <Hint>Where the app lives when it isn't at the repo root (monorepo / nested). Leave blank to auto-detect; a scan may fill this in.</Hint>
+      </div>
+      <div>
         <Label>Git provider <span className="font-normal normal-case text-content-faint">(private repos)</span></Label>
         <GitProviderPicker workspace={workspace}
           value={data.git_provider_id || 0}
@@ -263,6 +268,9 @@ function ScanStack({ data, onChange, workspace }) {
 // them up. The default draft has managed deps chosen; the review can flip them.
 function applyDraft(onChange, d) {
   onChange('scanDraft', d)
+  // Surface an auto-detected source subdirectory so the user sees where the app was
+  // found and a re-scan reuses it (the draft's build contexts are already prefixed).
+  if (d.source_subdir) onChange('source_subdir', d.source_subdir)
   onChange('database', d.database || 'none')
   onChange('dbVersion', d.db_version || '')
   onChange('redis', !!d.redis)
@@ -2348,6 +2356,8 @@ export default function NewProjectPage() {
       // Repo-scan sends the detected graph; blueprint sends the seeded graph.
       // Blueprint has no repo — Dockerfiles scaffold from the template on bootstrap.
       services: detected ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
+      // Routing table translated from the imported compose's Traefik labels (repo scan).
+      routes: detected ? (data.scanDraft?.routes || []) : [],
       source_repo: isScan ? (data.source_repo || '').trim() : '',
       source_branch: isScan ? (data.source_branch || '').trim() : '',
       git_provider_id: isScan ? (Number(data.git_provider_id) || 0) : 0,

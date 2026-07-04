@@ -528,3 +528,185 @@ func TestParseDotenvValueInlineComments(t *testing.T) {
 		}
 	}
 }
+
+// TestComposeDropsEdgeProxy: an imported compose that ships its own Traefik/edge
+// proxy has it removed (Rigger's Traefik replaces it), a note explains, and a real
+// service becomes the web entry.
+func TestComposeDropsEdgeProxy(t *testing.T) {
+	yml := `
+services:
+  proxy:
+    image: traefik:v3.0
+    ports: ["80:80", "443:443", "8080:8080"]
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+  db:
+    image: mongo:7
+`
+	d, err := DetectComposeBytes([]byte(yml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range d.Services {
+		if s.Name == "proxy" {
+			t.Fatalf("edge proxy 'proxy' must be dropped; services: %+v", d.Services)
+		}
+	}
+	if joined := strings.Join(d.Notes, " | "); !strings.Contains(joined, "Removed the app's bundled reverse proxy") {
+		t.Errorf("expected proxy-removal note; got: %s", joined)
+	}
+	web := ""
+	for _, s := range d.Services {
+		if s.WebRouted {
+			web = s.Name
+		}
+	}
+	if web == "" || web == "proxy" {
+		t.Errorf("expected a real web entry after dropping the proxy, got %q", web)
+	}
+}
+
+// TestComposeKeepsStaticNginx: a plain nginx serving static files (publishes :80 but
+// does NOT watch the docker socket) is NOT an edge proxy — it must be kept.
+func TestComposeKeepsStaticNginx(t *testing.T) {
+	yml := `
+services:
+  web:
+    image: nginx:alpine
+    ports: ["80:80"]
+    volumes: ["./site:/usr/share/nginx/html:ro"]
+  api:
+    build: ./api
+`
+	d, err := DetectComposeBytes([]byte(yml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range d.Services {
+		if s.Name == "web" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("plain static nginx (no docker.sock) must be kept, not dropped; services: %+v", d.Services)
+	}
+}
+
+// TestDetectRepoNestedCompose: no stack at the repo root, but an app with a
+// docker-compose.yml lives in a subdir → auto-discovered, and build contexts are
+// prefixed with the subdir so they resolve from the repo root at build time.
+func TestDetectRepoNestedCompose(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"README.md": "x",
+		"myapp/docker-compose.yml": "services:\n  web:\n    build: ./frontend\n    ports: [\"3000:3000\"]\n  api:\n    build: ./backend\n    ports: [\"8000:8000\"]\n",
+		"myapp/frontend/Dockerfile": "FROM node",
+		"myapp/backend/Dockerfile":  "FROM python",
+	})
+	d := DetectRepo(dir, "")
+	if d.SourceSubdir != "myapp" {
+		t.Fatalf("expected SourceSubdir=myapp; got %q (detected=%q, %d svcs)", d.SourceSubdir, d.Detected, len(d.Services))
+	}
+	for _, s := range d.Services {
+		if s.Build != nil && !strings.HasPrefix(s.Build.Context, "./myapp/") {
+			t.Errorf("service %s build context %q must be prefixed with ./myapp/", s.Name, s.Build.Context)
+		}
+	}
+}
+
+// TestDetectRepoRootWins: a stack at the root is used as-is (no subdir).
+func TestDetectRepoRootWins(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"docker-compose.yml": "services:\n  app:\n    build: .\n    ports: [\"8080:80\"]\n",
+	})
+	d := DetectRepo(dir, "")
+	if d.SourceSubdir != "" {
+		t.Errorf("root stack must have empty SourceSubdir; got %q", d.SourceSubdir)
+	}
+}
+
+// TestDetectRepoExplicitSubdir: an explicit subdir scans there and prefixes contexts.
+func TestDetectRepoExplicitSubdir(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"packages/web/Dockerfile":   "FROM node\nEXPOSE 3000",
+		"packages/web/package.json": `{"dependencies":{"next":"14"}}`,
+	})
+	d := DetectRepo(dir, "packages/web")
+	if d.SourceSubdir != "packages/web" {
+		t.Fatalf("expected SourceSubdir=packages/web; got %q", d.SourceSubdir)
+	}
+	if len(d.Services) == 0 {
+		t.Fatal("expected a build service")
+	}
+	for _, s := range d.Services {
+		if s.Build != nil && !strings.HasPrefix(s.Build.Context, "./packages/web") {
+			t.Errorf("build context %q must be under ./packages/web", s.Build.Context)
+		}
+	}
+}
+
+// TestDetectRepoSkipsJunkDirs: a compose only under examples/ or node_modules/ must
+// NOT be picked as the app root.
+func TestDetectRepoSkipsJunkDirs(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"README.md":                           "x",
+		"examples/docker-compose.yml":          "services:\n  x:\n    image: nginx\n",
+		"node_modules/foo/docker-compose.yml":  "services:\n  y:\n    image: nginx\n",
+	})
+	d := DetectRepo(dir, "")
+	if d.SourceSubdir != "" {
+		t.Errorf("compose under examples/node_modules must be skipped; got subdir %q", d.SourceSubdir)
+	}
+}
+
+// TestComposeTranslatesTraefikRoutes: the app's Traefik router labels become Rigger
+// routes — / → frontend, /api → backend (stripped), /docs → backend (NOT stripped,
+// since api-strip only strips /api). The proxy is not a route target.
+func TestComposeTranslatesTraefikRoutes(t *testing.T) {
+	yml := "services:\n" +
+		"  proxy:\n" +
+		"    image: traefik:v3.0\n" +
+		"    ports: [\"80:80\"]\n" +
+		"    volumes: [\"/var/run/docker.sock:/var/run/docker.sock:ro\"]\n" +
+		"  backend:\n" +
+		"    build: ./backend\n" +
+		"    labels:\n" +
+		"      - \"traefik.http.routers.backend.rule=PathPrefix(`/api`) || PathPrefix(`/docs`)\"\n" +
+		"      - \"traefik.http.routers.backend.middlewares=api-strip\"\n" +
+		"      - \"traefik.http.middlewares.api-strip.stripprefix.prefixes=/api\"\n" +
+		"  frontend:\n" +
+		"    build: ./frontend\n" +
+		"    labels:\n" +
+		"      - \"traefik.http.routers.frontend.rule=PathPrefix(`/`)\"\n"
+	d, err := DetectComposeBytes([]byte(yml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(svc, match string) (Route, bool) {
+		for _, r := range d.Routes {
+			if r.Service == svc && r.Match == match {
+				return r, true
+			}
+		}
+		return Route{}, false
+	}
+	if r, ok := get("frontend", "/"); !ok || r.Target != "" {
+		t.Errorf("frontend '/' route missing or wrongly stripped: %+v ok=%v", r, ok)
+	}
+	if r, ok := get("backend", "/api"); !ok || r.Target != "/" {
+		t.Errorf("backend '/api' must strip (Target=/): %+v ok=%v", r, ok)
+	}
+	if r, ok := get("backend", "/docs"); !ok || r.Target != "" {
+		t.Errorf("backend '/docs' must NOT strip: %+v ok=%v", r, ok)
+	}
+	for _, r := range d.Routes {
+		if r.Service == "proxy" {
+			t.Errorf("dropped proxy must not be a route target: %+v", r)
+		}
+	}
+}
