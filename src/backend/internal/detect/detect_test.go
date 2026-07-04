@@ -598,6 +598,58 @@ services:
 	}
 }
 
+// TestComposeFoldsMongo: a mongo data service is folded into the managed MongoDB engine
+// (dropped as a plain service, database set, version captured), and a hardcoded host
+// reference in the app's env is repointed onto the managed "mongodb" service name. A
+// mongo-express console in the same file must NOT be mistaken for the data service.
+func TestComposeFoldsMongo(t *testing.T) {
+	// Managed-dep folding is the repo-scan behaviour (foldManaged=true), so drive it
+	// through DetectRepo with a compose at the root — the paste path keeps everything.
+	dir := repo(t, map[string]string{
+		"api/Dockerfile": "FROM python\nEXPOSE 8000",
+		"docker-compose.yml": "services:\n" +
+			"  api:\n" +
+			"    build: ./api\n" +
+			"    environment:\n" +
+			"      MONGODB_URL: mongodb://root:pass@mongo:27017/app?authSource=admin\n" +
+			"  mongo:\n" +
+			"    image: mongo:6\n" +
+			"  mongo-express:\n" +
+			"    image: mongo-express:1.0\n" +
+			"    ports: [\"8081:8081\"]\n",
+	})
+	d := DetectRepo(dir, "")
+	if d.Database != "mongodb" {
+		t.Errorf("mongo must fold into the managed engine: database=%q", d.Database)
+	}
+	if d.DBVersion != "6" {
+		t.Errorf("mongo version must be captured from the image tag: db_version=%q", d.DBVersion)
+	}
+	for _, s := range d.Services {
+		if s.Name == "mongo" {
+			t.Errorf("mongo data service must be dropped (folded), not kept: %+v", d.Services)
+		}
+	}
+	// The console is NOT a data service — it must survive as a plain service.
+	foundConsole := false
+	for _, s := range d.Services {
+		if s.Name == "mongo-express" {
+			foundConsole = true
+		}
+	}
+	if !foundConsole {
+		t.Errorf("mongo-express console must NOT be folded as a DB; services: %+v", d.Services)
+	}
+	// The app's MONGODB_URL host (mongo) is repointed onto the managed "mongodb" host.
+	for _, s := range d.Services {
+		if s.Name == "api" {
+			if got := s.EnvVars["MONGODB_URL"]; !strings.Contains(got, "@mongodb:27017/") {
+				t.Errorf("MONGODB_URL host must be rebased onto managed 'mongodb': %q", got)
+			}
+		}
+	}
+}
+
 // TestDetectRepoNestedCompose: no stack at the repo root, but an app with a
 // docker-compose.yml lives in a subdir → auto-discovered, and build contexts are
 // prefixed with the subdir so they resolve from the repo root at build time.

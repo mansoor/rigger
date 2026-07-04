@@ -109,7 +109,7 @@ type Route struct {
 // Draft is the detection result the wizard pre-fills from.
 type Draft struct {
 	Services      []Service         `json:"services"`
-	Database      string            `json:"database"`             // none | postgres | mysql
+	Database      string            `json:"database"`             // none | postgres | mysql | mariadb | mongodb
 	DBVersion     string            `json:"db_version,omitempty"` // image tag captured from compose (e.g. 16-alpine)
 	Redis         bool              `json:"redis"`
 	ObjectStorage string            `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
@@ -125,7 +125,7 @@ type Draft struct {
 	Routes        []Route           `json:"routes,omitempty"`
 	EnvVars       map[string]string `json:"env_vars,omitempty"`       // seeded from .env.example for the env's .env
 	// ManagedCandidates lists detected containers Rigger CAN manage (postgres/mysql/
-	// redis). The default draft above already chose "managed" (dropped the container,
+	// mongodb/redis). The default draft above already chose "managed" (dropped the container,
 	// set the flag, rebased host refs); each candidate carries the verbatim raw
 	// service + the per-env-var rewrites so the wizard can offer "keep your own
 	// container" and reverse the managed choice without re-deriving anything.
@@ -895,7 +895,7 @@ func detectManagedDeps(repoDir string, d *Draft) {
 
 func applyManagedDep(role string, d *Draft) {
 	switch role {
-	case "postgres", "mysql":
+	case "postgres", "mysql", "mongodb":
 		if d.Database == "none" {
 			d.Database = role
 		}
@@ -916,6 +916,8 @@ func managedServiceName(role string, d *Draft) string {
 			return "mariadb"
 		}
 		return "mysql"
+	case "mongodb":
+		return "mongodb"
 	case "redis":
 		return "redis"
 	}
@@ -1001,6 +1003,10 @@ func dbRole(image string) string {
 		return "postgres"
 	case strings.Contains(l, "mysql"), strings.Contains(l, "mariadb"):
 		return "mysql"
+	// Mongo document store — but not its web console (mongo-express) or a metrics
+	// exporter, which merely have "mongo" in the name and aren't the data service.
+	case strings.Contains(l, "mongo") && !strings.Contains(l, "mongo-express") && !strings.Contains(l, "exporter"):
+		return "mongodb"
 	case strings.Contains(l, "redis"):
 		return "redis"
 	}
