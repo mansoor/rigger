@@ -202,6 +202,10 @@ func Write(d *db.DB) error {
 	return nil
 }
 
+// SwarmManager reports whether the Rigger host is a Swarm manager (exported for the
+// startup traefik_net scope check in cmd/server).
+func SwarmManager() bool { return localSwarmManager() }
+
 // localSwarmManager reports whether the Rigger host is a Swarm manager (active node with
 // control available), so Traefik's swarm provider can reach the service API. Best-effort:
 // any error ⇒ false, so a plain single-node compose install never emits an unusable

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -101,6 +102,27 @@ func seedMaintenanceService() {
 func seedTraefikStatic(d *db.DB) {
 	if err := traefikcfg.Write(d); err != nil {
 		log.Printf("traefik-static: %v (skipping)", err)
+	}
+}
+
+// warnTraefikNetScope logs a loud nudge when this host is a Swarm manager but the shared
+// traefik_net is still a bridge network. `docker stack deploy` rejects a bridge external
+// network ("not in the right scope"), so a swarm deploy would fail until traefik_net is
+// recreated as overlay/attachable. Fresh installs get this right (install.sh is
+// swarm-aware); this catches installs that predate that or enabled Swarm later. Purely
+// advisory — best-effort, never blocks startup.
+func warnTraefikNetScope() {
+	if !traefikcfg.SwarmManager() {
+		return
+	}
+	out, err := exec.Command("docker", "network", "inspect", "traefik_net", "--format", "{{.Driver}}").Output()
+	if err != nil {
+		return // network missing/unreadable — install.sh or first deploy will create it
+	}
+	if strings.TrimSpace(string(out)) == "bridge" {
+		log.Printf("⚠ traefik_net is a BRIDGE network but this host is a Swarm manager — swarm stack deploys will fail " +
+			"(\"network not in the right scope\"). Recreate it as overlay: `docker network rm traefik_net && " +
+			"docker network create -d overlay --attachable traefik_net`, then reconnect/redeploy stacks.")
 	}
 }
 
@@ -238,6 +260,7 @@ func main() {
 	seedLoadingMiddleware()
 	seedMaintenanceService() // shared rigger-maint@file service for per-env maintenance routers
 	seedTraefikStatic(database) // UI-managed Traefik static config (entrypoints/resolvers + enabled plugins)
+	warnTraefikNetScope()       // nudge if a Swarm manager still has a bridge traefik_net
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
 
