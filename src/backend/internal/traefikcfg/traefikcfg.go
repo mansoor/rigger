@@ -14,7 +14,9 @@ package traefikcfg
 
 import (
 	"fmt"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -77,6 +79,10 @@ type Options struct {
 	ACMEEmail                       string
 	WAF, Cache, GeoIP               bool
 	CorazaVer, SouinVer, GeoblockVer string
+	// Swarm enables the Traefik `providers.swarm` block (service discovery via the
+	// Swarm API) alongside providers.docker. Set only when the Rigger host is a Swarm
+	// manager, so single-node compose installs never emit an unusable provider.
+	Swarm bool
 }
 
 // acmeEmail returns the instance ACME account email — the same value the compose passed
@@ -127,6 +133,17 @@ func Generate(o Options) string {
 	b.WriteString("    endpoint: \"tcp://socket-proxy:2375\"\n")
 	b.WriteString("    network: \"traefik_net\"\n")
 	b.WriteString("    exposedByDefault: false\n")
+	// Swarm services are discovered via a SEPARATE provider (Traefik v3 split docker vs
+	// swarm). It reads router labels from each service's deploy.labels and routes over
+	// the shared (now overlay) traefik_net. Only emitted on a Swarm manager so a compose
+	// install doesn't log unreachable-API errors.
+	if o.Swarm {
+		b.WriteString("  swarm:\n")
+		b.WriteString("    endpoint: \"tcp://socket-proxy:2375\"\n")
+		b.WriteString("    network: \"traefik_net\"\n")
+		b.WriteString("    exposedByDefault: false\n")
+		b.WriteString("    watch: true\n")
+	}
 	b.WriteString("  file:\n")
 	b.WriteString("    directory: \"/dynamic\"\n")
 	b.WriteString("    watch: true\n\n")
@@ -177,8 +194,30 @@ func Write(d *db.DB) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("traefikcfg: ensure %s: %w", dir, err)
 	}
-	if err := os.WriteFile(ConfigPath(), []byte(Generate(FromSettings(d))), 0o644); err != nil {
+	o := FromSettings(d)
+	o.Swarm = localSwarmManager()
+	if err := os.WriteFile(ConfigPath(), []byte(Generate(o)), 0o644); err != nil {
 		return fmt.Errorf("traefikcfg: write %s: %w", ConfigPath(), err)
 	}
 	return nil
+}
+
+// localSwarmManager reports whether the Rigger host is a Swarm manager (active node with
+// control available), so Traefik's swarm provider can reach the service API. Best-effort:
+// any error ⇒ false, so a plain single-node compose install never emits an unusable
+// providers.swarm block. Rigger already runs `docker info` locally (stats), so the CLI +
+// socket are available here too.
+func localSwarmManager() bool {
+	out, err := exec.Command("docker", "info", "--format", "{{json .Swarm}}").Output()
+	if err != nil {
+		return false
+	}
+	var s struct {
+		LocalNodeState   string `json:"LocalNodeState"`
+		ControlAvailable bool   `json:"ControlAvailable"`
+	}
+	if json.Unmarshal(out, &s) != nil {
+		return false
+	}
+	return s.LocalNodeState == "active" && s.ControlAvailable
 }

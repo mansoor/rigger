@@ -293,6 +293,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	if restart == "" {
 		restart = "unless-stopped"
 	}
+	g.swarmLabels = "" // reset per-service; set by emitServicePorts when swarm-routed
 
 	g.line(sectionComment(svc.Name+" ("+serviceLabel(svc)+")", dashService))
 	g.line("  " + key + ":")
@@ -309,7 +310,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 	if svc.Build != nil && registry == "" {
 		g.line("    pull_policy: never")
 	}
-	g.line("    container_name: " + cname)
+	g.containerName(isSwarm, cname)
 	if svc.Command != "" {
 		// Single-quoted YAML scalar; escape embedded single quotes ('' is the YAML
 		// escape) so commands like `sh -c 'echo hi'` stay valid.
@@ -408,7 +409,7 @@ func (g *gen) buildService(prefix, rp, registry, tag string, svc Service, isSwar
 
 	// Traefik router id must stay globally unique across the shared rigger-traefik
 	// (it routes every project), so pass the long {prefix}_{env}_{name} — NOT the short key.
-	g.emitServicePorts(cname, svc)
+	g.emitServicePorts(cname, svc, isSwarm)
 
 	if svc.Healthcheck != "" {
 		hc := svc.HealthcheckConfig
@@ -449,7 +450,7 @@ func (g *gen) traefikRouted(svc Service) bool {
 // the service's own host_port if set, else the env HTTP port (so editing the
 // service port just changes the published port, not adds a second one). Non-web
 // services publish host_port/extra_ports, or expose the container port.
-func (g *gen) emitServicePorts(router string, svc Service) {
+func (g *gen) emitServicePorts(router string, svc Service, isSwarm bool) {
 	e := g.e
 	port := string(svc.Port)
 	mode := g.exposeMode()
@@ -489,40 +490,50 @@ func (g *gen) emitServicePorts(router string, svc Service) {
 		if !svc.AuthProtect {
 			g.appMW = e.RouterMiddlewares
 		}
-		if viaRouteTable {
-			// Labels come from the project routing table — one path-group router (Host &&
-			// PathPrefix||…) plus a router per subdomain route. The legacy single-host path is
-			// bypassed; web_routed/subdomain on the service are ignored in route mode.
-			g.emitRouteLabels(router, svc, routes)
+		// Capture the service's Traefik label block so swarm can relocate it under
+		// deploy.labels (the swarm provider reads router config there — it ignores
+		// container labels). Compose emits it inline at the container level, unchanged.
+		labelBlock := g.captureLabels(func() {
+			if viaRouteTable {
+				// Labels come from the project routing table — one path-group router (Host &&
+				// PathPrefix||…) plus a router per subdomain route. The legacy single-host path is
+				// bypassed; web_routed/subdomain on the service are ignored in route mode.
+				g.emitRouteLabels(router, svc, routes)
+			} else {
+				host := e.Domain
+				if svc.Subdomain != "" && e.Domain != "" {
+					host = svc.Subdomain + "." + e.Domain
+				}
+				// Basic-auth middleware: admin sidecars when the env protects them (uses
+				// ${ADMIN_UI_USERS}); real app web services when the env's auth_gate is "basic"
+				// (uses ${APP_AUTH_USERS}). Empty usersVar ⇒ no auth middleware (today's default).
+				usersVar := ""
+				switch {
+				case svc.AuthProtect && e.ProtectAdminUIs:
+					usersVar = "ADMIN_UI_USERS"
+				case !svc.AuthProtect && g.authGate() == "basic":
+					usersVar = "APP_AUTH_USERS"
+				}
+				// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
+				// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
+				wildcard := ""
+				if e.wildcardBase != "" && svc.Subdomain == "" {
+					wildcard = e.wildcardBase
+				}
+				g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
+				// Verified custom domains (Render-style): the apex web service also answers on
+				// each external domain via its own HTTPS router with a per-host Let's Encrypt
+				// (HTTP-01) cert — the wildcard/DNS cert only covers the base domain. Subdomain
+				// web services keep just their primary route.
+				if svc.Subdomain == "" {
+					g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
+				}
+			}
+		})
+		if isSwarm {
+			g.swarmLabels = indentBlock(labelBlock, "  ") // nest under deploy: (2 spaces deeper)
 		} else {
-			host := e.Domain
-			if svc.Subdomain != "" && e.Domain != "" {
-				host = svc.Subdomain + "." + e.Domain
-			}
-			// Basic-auth middleware: admin sidecars when the env protects them (uses
-			// ${ADMIN_UI_USERS}); real app web services when the env's auth_gate is "basic"
-			// (uses ${APP_AUTH_USERS}). Empty usersVar ⇒ no auth middleware (today's default).
-			usersVar := ""
-			switch {
-			case svc.AuthProtect && e.ProtectAdminUIs:
-				usersVar = "ADMIN_UI_USERS"
-			case !svc.AuthProtect && g.authGate() == "basic":
-				usersVar = "APP_AUTH_USERS"
-			}
-			// Wildcard cert: only the apex web entry (no subdomain) requests *.{base};
-			// sidecars on deeper subdomains fall back to per-host issuance via the same resolver.
-			wildcard := ""
-			if e.wildcardBase != "" && svc.Subdomain == "" {
-				wildcard = e.wildcardBase
-			}
-			g.traefikLabels(router, host, port, usersVar, e.certResolver, wildcard)
-			// Verified custom domains (Render-style): the apex web service also answers on
-			// each external domain via its own HTTPS router with a per-host Let's Encrypt
-			// (HTTP-01) cert — the wildcard/DNS cert only covers the base domain. Subdomain
-			// web services keep just their primary route.
-			if svc.Subdomain == "" {
-				g.traefikCustomDomains(router, port, usersVar, e.CustomDomains)
-			}
+			g.raw(labelBlock)
 		}
 		// An explicit host-port mapping on an APP service can be published even under
 		// Traefik routing so a user-run reverse proxy / DNS can target host:port directly
@@ -765,7 +776,7 @@ func (g *gen) buildCloudflared(prefix string, isSwarm bool) {
 	g.line(sectionComment("Cloudflare Tunnel connector", dashService))
 	g.line("  cloudflared:")
 	g.line("    image: cloudflare/cloudflared:" + ver)
-	g.line("    container_name: " + prefix + "_cloudflared")
+	g.containerName(isSwarm, prefix + "_cloudflared")
 	g.line("    command: tunnel --no-autoupdate run")
 	g.line("    environment:")
 	g.line("      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}")
@@ -829,7 +840,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("PostgreSQL "+ver, dashPostgres))
 		g.line("  postgres:")
 		g.line("    image: postgres:" + ver)
-		g.line("    container_name: " + prefix + "_postgres")
+		g.containerName(isSwarm, prefix + "_postgres")
 		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line(g.dbEnvLine("POSTGRES_DB"))
@@ -852,7 +863,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment(eng.Label+" "+ver, dashMySQL))
 		g.line("  " + engine + ":")
 		g.line("    image: " + eng.Image + ":" + ver)
-		g.line("    container_name: " + prefix + "_" + engine)
+		g.containerName(isSwarm, prefix + "_" + engine)
 		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line(g.dbEnvLine("MYSQL_DATABASE"))
@@ -886,7 +897,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("MongoDB "+ver, dashMongo))
 		g.line("  mongodb:")
 		g.line("    image: mongo:" + ver)
-		g.line("    container_name: " + prefix + "_mongodb")
+		g.containerName(isSwarm, prefix + "_mongodb")
 		g.dbExternalPorts(eng)
 		g.line("    environment:")
 		g.line("      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}")
@@ -912,7 +923,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("OpenSearch "+ver, dashSearch))
 		g.line("  opensearch:")
 		g.line("    image: opensearchproject/opensearch:" + ver)
-		g.line("    container_name: " + prefix + "_opensearch")
+		g.containerName(isSwarm, prefix + "_opensearch")
 		// Auxiliary services are internal-only in v1 (no dbExternalPorts — that's the DB's toggle).
 		g.line("    environment:")
 		g.line("      discovery.type: single-node")
@@ -939,7 +950,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("VictoriaMetrics "+ver, dashTSDB))
 		g.line("  victoriametrics:")
 		g.line("    image: victoriametrics/victoria-metrics:" + ver)
-		g.line("    container_name: " + prefix + "_victoriametrics")
+		g.containerName(isSwarm, prefix + "_victoriametrics")
 		g.line("    command: -storageDataPath=/victoria-metrics-data -retentionPeriod=1")
 		// Auxiliary services are internal-only in v1 (no dbExternalPorts).
 		g.line("    volumes:")
@@ -953,7 +964,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  redis:")
 		g.line("    image: redis:" + verRedis)
-		g.line("    container_name: " + prefix + "_redis")
+		g.containerName(isSwarm, prefix + "_redis")
 		g.line("    command: [\"redis-server\", \"--appendonly\", \"yes\"]")
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_redis_data:/data")
@@ -969,7 +980,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("MinIO "+verMinIO+" (S3-compatible)", dashStorage))
 		g.line("  minio:")
 		g.line("    image: minio/minio:" + verMinIO)
-		g.line("    container_name: " + prefix + "_minio")
+		g.containerName(isSwarm, prefix + "_minio")
 		// S3 API on :9000, built-in console on :9001 (the rich admin UI is the opt-in
 		// opens3/console sidecar; this stock one is fine for a quick look).
 		g.line("    command: server /data --console-address \":9001\"")
@@ -991,7 +1002,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line(sectionComment("MinIO bucket init (one-shot)", dashStorage))
 		g.line("  minio_init:")
 		g.line("    image: minio/mc:" + verMC)
-		g.line("    container_name: " + prefix + "_minio_init")
+		g.containerName(isSwarm, prefix + "_minio_init")
 		g.emitDependsOn(prefix, []string{"minio"}, nil, isSwarm)
 		g.managedNet(prefix, "minio_init")
 		g.line("    env_file: .env")

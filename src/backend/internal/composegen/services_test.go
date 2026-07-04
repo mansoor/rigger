@@ -1192,6 +1192,85 @@ func TestServicesEnvFileMount(t *testing.T) {
 	}
 }
 
+// EnvFileMount under SWARM must NOT use inline `content:` — `docker stack deploy`
+// rejects it ("Additional property content is not allowed"). It uses `file: ./.env`
+// with a content-addressed config name (swarm configs are immutable).
+func TestServicesEnvFileMountSwarm(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"backend","build":{},"env_file":true,"env_file_mount":"/var/www/html/.env"}],
+		"environments": {"dev": {"deployment":"swarm"}}
+	}`
+	out, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{EnvFile: "DB_HOST=mysql\nDB_PORT=3306\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "content: |") {
+		t.Errorf("swarm config must not use inline content: (rejected by stack deploy)\n%s", s)
+	}
+	for _, want := range []string{"configs:\n  app_dev_dotenv:", "file: ./.env", "name: app_dev_dotenv_"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("swarm top-level config missing %q\n---\n%s", want, s)
+		}
+	}
+	// The service still references the stable compose key (not the hashed swarm name).
+	if app := svcBlock(t, s, "backend"); !strings.Contains(app, "- source: app_dev_dotenv") {
+		t.Errorf("service must reference the dotenv config by its compose key\n%s", app)
+	}
+}
+
+// Under SWARM, Traefik router labels must sit under deploy.labels (where the swarm
+// provider reads them) — never at the container level — and container_name is omitted.
+func TestSwarmTraefikLabelsUnderDeploy(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"web","build":{},"web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"swarm","traefik_enabled":true,"domain":"app.example.com","http_port":8080}}
+	}`
+	out, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "container_name:") {
+		t.Errorf("swarm must not emit container_name (unsupported)\n%s", s)
+	}
+	// Labels nested under deploy: (6-space `labels:`, 8-space entries).
+	if !strings.Contains(s, "      labels:\n        - \"traefik.enable=true\"") {
+		t.Errorf("expected Traefik labels under deploy.labels\n---\n%s", s)
+	}
+	// NOT at the container level (4-space `labels:`, 6-space entries) — the swarm
+	// provider ignores those, which was the routing bug.
+	if strings.Contains(s, "    labels:\n      - \"traefik.enable=true\"") {
+		t.Errorf("Traefik labels must not be at container level for swarm\n---\n%s", s)
+	}
+}
+
+// Swarm Traefik labels must be scoped to the routed service only — a managed dep
+// (mysql/redis/…) built after it must NOT inherit them, else Traefik adds the DB's
+// internal-network IP to the app's server pool → intermittent 502/timeouts.
+func TestSwarmLabelsDoNotLeakToManagedDeps(t *testing.T) {
+	cfg := `{
+		"project": {"name":"app","registry":"reg","database":"mysql","version":{"major":1,"minor":0,"patch":0,"build":0}},
+		"services": [{"name":"web","build":{},"web_routed":true,"port":"80"}],
+		"environments": {"dev": {"deployment":"swarm","traefik_enabled":true,"domain":"app.example.com","http_port":8080}}
+	}`
+	out, err := GenerateRouted([]byte(cfg), "dev", RouteOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	// The web service carries the router labels…
+	if web := svcBlock(t, s, "web"); !strings.Contains(web, "traefik.enable=true") {
+		t.Errorf("web service should carry Traefik labels\n%s", web)
+	}
+	// …the managed mysql must NOT.
+	if mysql := svcBlock(t, s, "mysql"); strings.Contains(mysql, "traefik") {
+		t.Errorf("managed mysql must NOT inherit the app's Traefik labels\n---\n%s", mysql)
+	}
+}
+
 // Service links emit {ENV_VAR}={scheme}://{prefix}_{target}:{port}{path} into the
 // service's environment block: port defaults to the target service's own port (or a
 // managed-dep default when the target has no service entry), and a link wins over an

@@ -1,6 +1,8 @@
 package composegen
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -452,13 +454,72 @@ type gen struct {
 	// sidecars — and prepended to their middleware chain. See
 	// docs/design/workspace-plugins-and-access-lists.md.
 	appMW []string
+	// capture, when non-nil, redirects line/raw into it instead of b — used to grab a
+	// service's Traefik `labels:` block so swarm can re-emit it under `deploy.labels`
+	// (the swarm provider reads router labels there, not from the container labels).
+	capture *strings.Builder
+	// swarmLabels holds the current service's captured+reindented label block awaiting
+	// emission inside its deploy: section (swarm only). Reset per service.
+	swarmLabels string
 }
 
 // line appends s followed by a newline (echo "s").
-func (g *gen) line(s string) { g.b.WriteString(s); g.b.WriteByte('\n') }
+func (g *gen) line(s string) {
+	if g.capture != nil {
+		g.capture.WriteString(s)
+		g.capture.WriteByte('\n')
+		return
+	}
+	g.b.WriteString(s)
+	g.b.WriteByte('\n')
+}
 
 // raw appends s verbatim (already contains its own newlines).
-func (g *gen) raw(s string) { g.b.WriteString(s) }
+func (g *gen) raw(s string) {
+	if g.capture != nil {
+		g.capture.WriteString(s)
+		return
+	}
+	g.b.WriteString(s)
+}
+
+// captureLabels runs fn with line/raw redirected into a scratch buffer and returns
+// what it wrote — so a service's Traefik label block can be relocated (swarm) rather
+// than emitted inline. Not reentrant (one service is built at a time).
+func (g *gen) captureLabels(fn func()) string {
+	var buf strings.Builder
+	g.capture = &buf
+	fn()
+	g.capture = nil
+	return buf.String()
+}
+
+// containerName emits container_name for compose only. `docker stack deploy` warns and
+// ignores it ("Ignoring deprecated options"), and a swarm service already has a stable
+// name ({stack}_{key}); the prefixed network alias keeps {prefix}_{name} resolvable.
+func (g *gen) containerName(isSwarm bool, name string) {
+	if !isSwarm {
+		g.line("    container_name: " + name)
+	}
+}
+
+// indentBlock prefixes every non-empty line of s with pad — used to push a captured
+// container-level `labels:` block two spaces deeper so it nests under `deploy:`.
+func indentBlock(s, pad string) string {
+	if s == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, ln := range strings.SplitAfter(s, "\n") {
+		if ln == "" || ln == "\n" {
+			b.WriteString(ln)
+			continue
+		}
+		b.WriteString(pad)
+		b.WriteString(ln)
+	}
+	return b.String()
+}
 
 func (g *gen) build() {
 	c := g.cfg
@@ -520,11 +581,32 @@ func (g *gen) build() {
 		g.line("")
 		g.line("configs:")
 		g.line("  " + prefix + "_dotenv:")
-		g.line("    content: |")
-		for _, ln := range strings.Split(strings.TrimRight(g.envFile, "\n"), "\n") {
-			g.line("      " + ln)
+		if isSwarm {
+			// `docker stack deploy` uses the legacy Compose schema: a config may only
+			// carry `file:`/`external:` — inline `content:` (Compose-v2) is rejected with
+			// "Additional property content is not allowed". Swarm configs are also
+			// IMMUTABLE, so a same-named config with changed content fails on redeploy.
+			// Reference the on-disk .env via `file:` and content-address the config NAME
+			// so a changed .env rolls to a fresh config the services pick up (old,
+			// now-unreferenced configs linger harmlessly). The service still references
+			// the stable compose key (prefix_dotenv); `name:` sets the swarm object name.
+			g.line("    name: " + prefix + "_dotenv_" + shortHash(g.envFile))
+			g.line("    file: ./.env")
+		} else {
+			g.line("    content: |")
+			for _, ln := range strings.Split(strings.TrimRight(g.envFile, "\n"), "\n") {
+				g.line("      " + ln)
+			}
 		}
 	}
+}
+
+// shortHash content-addresses the swarm .env config (8 hex chars of SHA-256) so a
+// changed .env produces a new immutable config name instead of a rejected in-place
+// update. Not security-sensitive — collision resistance for one env's .env only.
+func shortHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 // ── Shared emit helpers (mirror lib.sh / compose-gen.sh helpers) ─────────────────
@@ -575,6 +657,17 @@ func (g *gen) deployBlock(isSwarm bool, svc, replicas, restart string, singleIns
 		for _, c := range placement {
 			g.raw("          - " + c + "\n")
 		}
+	}
+	// Traefik router labels belong under deploy for swarm (the swarm provider reads them
+	// here). Captured + reindented by emitServicePorts. CONSUME-and-reset: managed deps
+	// (mysql/redis/…) call deployBlock without going through buildService, so a leftover
+	// value would leak the previous app service's router labels onto them — Traefik would
+	// then add the DB/redis task IPs (on the internal net, unreachable) to the app's
+	// server pool, causing intermittent 502/timeouts. Clearing here scopes labels to the
+	// one service that set them.
+	if g.swarmLabels != "" {
+		g.raw(g.swarmLabels)
+		g.swarmLabels = ""
 	}
 
 	// restart_policy (defaults match the historical block).

@@ -22,6 +22,19 @@ func TestGenerate(t *testing.T) {
 	if strings.Contains(stock, "experimental:") {
 		t.Errorf("stock config must not declare plugins:\n%s", stock)
 	}
+	// No swarm provider by default (single-node compose install).
+	if strings.Contains(stock, "swarm:") {
+		t.Errorf("stock config must not emit providers.swarm:\n%s", stock)
+	}
+
+	// Swarm manager: providers.swarm appears alongside providers.docker.
+	sw := Generate(Options{ACMEEmail: "ops@acme.io", Swarm: true})
+	if !strings.Contains(sw, "  swarm:\n    endpoint: \"tcp://socket-proxy:2375\"") {
+		t.Errorf("swarm-manager config must emit providers.swarm:\n%s", sw)
+	}
+	if !strings.Contains(sw, "  docker:\n") {
+		t.Errorf("providers.docker must remain for compose stacks:\n%s", sw)
+	}
 
 	// WAF + GeoIP enabled (cache off): only those two plugins, with their versions.
 	on := Generate(Options{ACMEEmail: "x@y.z", WAF: true, GeoIP: true,
