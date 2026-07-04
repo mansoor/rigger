@@ -14,11 +14,11 @@
   "images": [
     {
       "name": "db",
-      "image": "tensorchord/pgvecto-rs",
-      "tag": "pg15-v0.2.0",
+      "image": "ghcr.io/immich-app/postgres",
+      "tag": "15-vectorchord0.4.3-pgvectors0.2.0",
       "port": 5432,
       "host_port": "",
-      "command": "postgres -c shared_preload_libraries=vectors.so -c 'search_path=\"$$user\", public, vectors' -c logging_collector=on -c max_wal_size=2GB -c shared_buffers=512MB -c wal_compression=lz4",
+      "command": "",
       "healthcheck": "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE_NAME}",
       "healthcheck_config": {
         "interval": "10s",
