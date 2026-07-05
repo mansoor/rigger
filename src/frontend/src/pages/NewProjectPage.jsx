@@ -369,6 +369,16 @@ function ScanReview({ data, onChange }) {
   const fmtBytes = n => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
 
   if (!draft) return null
+  // A project-scaffolding template (Cookiecutter / Copier / Yeoman) has nothing to
+  // deploy — it generates a project. Show the explanation and block progression (the
+  // validator flags it too); no service review to render.
+  if (draft.template_only) return (
+        <div className="bg-warning-subtle/40 border border-warning-border/60 rounded-xl p-4 space-y-2">
+          <div className="text-sm font-semibold text-content-strong">Nothing to deploy — this is a {draft.template_only} project template</div>
+          {(draft.notes || []).map((n, i) => <p key={i} className="text-xs text-content-subtle">{n}</p>)}
+          <p className="text-xs text-content-faint">Generate the project locally, push the generated output to its own repository, then scan that repository instead.</p>
+        </div>
+  )
   return (
         <div className="bg-surface border border-border rounded-xl p-4 space-y-3">
           <div className="flex items-center gap-2">
@@ -2310,9 +2320,11 @@ export default function NewProjectPage() {
     if (step === 2 && data.stackType === 'scan') {
       if (!(data.source_repo || '').trim()) e.source_repo = 'Enter a repository URL'
       else if (!data.scanDraft) e.source_repo = 'Click Scan to detect the stack first'
+      else if (data.scanDraft.template_only) e.source_repo = `This repo is a ${data.scanDraft.template_only} template — generate a project from it first, then scan that`
     }
     if (step === 2 && data.stackType === 'custom') {
       if (!data.sourceUploadToken || !data.scanDraft) e.source_upload = 'Upload your application source to continue'
+      else if (data.scanDraft.template_only) e.source_upload = `This is a ${data.scanDraft.template_only} template — generate a project from it first, then upload that`
     }
     if (step === 2 && data.stackType === 'blueprint') {
       if (!data.blueprintId) e.blueprint = 'Pick a stack template'

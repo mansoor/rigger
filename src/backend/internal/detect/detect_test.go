@@ -598,6 +598,54 @@ services:
 	}
 }
 
+// TestDetectCookiecutterTemplate: a cookiecutter repo (cookiecutter.json + a
+// {{cookiecutter.*}} dir that itself contains a compose) is flagged TemplateOnly with no
+// services — the templated compose inside must NOT be mapped into a bogus stack.
+func TestDetectCookiecutterTemplate(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"cookiecutter.json": `{"project_slug":"my_app"}`,
+		"{{cookiecutter.project_slug}}/docker-compose.yml": "services:\n  web:\n    build: .\n    ports: [\"8000:8000\"]\n",
+		"{{cookiecutter.project_slug}}/Dockerfile":         "FROM python",
+	})
+	d := DetectRepo(dir, "")
+	if d.TemplateOnly != "Cookiecutter" {
+		t.Errorf("expected TemplateOnly=Cookiecutter; got %q (detected=%q)", d.TemplateOnly, d.Detected)
+	}
+	if len(d.Services) != 0 {
+		t.Errorf("a template must yield NO services; got %+v", d.Services)
+	}
+	if joined := strings.Join(d.Notes, " | "); !strings.Contains(joined, "project template") {
+		t.Errorf("expected an explanatory template note; got: %s", joined)
+	}
+}
+
+// TestDetectCopierTemplate: a copier.yml at the root flags the repo as a template.
+func TestDetectCopierTemplate(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"copier.yml":            "project_name:\n  type: str\n",
+		"template/Dockerfile.jinja": "FROM node",
+	})
+	d := DetectRepo(dir, "")
+	if d.TemplateOnly != "Copier" {
+		t.Errorf("expected TemplateOnly=Copier; got %q", d.TemplateOnly)
+	}
+}
+
+// TestDetectNotATemplate: a real app that merely has a normal compose is NOT flagged —
+// the guard must not swallow ordinary repos.
+func TestDetectNotATemplate(t *testing.T) {
+	dir := repo(t, map[string]string{
+		"docker-compose.yml": "services:\n  app:\n    build: .\n    ports: [\"8080:80\"]\n",
+	})
+	d := DetectRepo(dir, "")
+	if d.TemplateOnly != "" {
+		t.Errorf("a normal repo must not be flagged as a template; got %q", d.TemplateOnly)
+	}
+	if len(d.Services) == 0 {
+		t.Errorf("a normal repo must still map its services")
+	}
+}
+
 // TestComposeFoldsMongo: a mongo data service is folded into the managed MongoDB engine
 // (dropped as a plain service, database set, version captured), and a hardcoded host
 // reference in the app's env is repointed onto the managed "mongodb" service name. A

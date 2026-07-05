@@ -114,6 +114,11 @@ type Draft struct {
 	Redis         bool              `json:"redis"`
 	ObjectStorage string            `json:"object_storage,omitempty"` // ""/none | local | minio (detected)
 	Detected      string            `json:"detected"`                 // primary stack label, for display
+	// TemplateOnly is set (to a human label like "Cookiecutter") when the repo is a
+	// project-scaffolding TEMPLATE — boilerplate that GENERATES a project, not a
+	// deployable app. When set, Services is empty and the wizard blocks creation with
+	// the explanatory Note: there is nothing to deploy until the template is rendered.
+	TemplateOnly  string            `json:"template_only,omitempty"`
 	Notes         []string          `json:"notes"`                    // human-readable detection notes
 	// SourceSubdir is the path (relative to the repo root) where the deployable stack
 	// was found when it isn't at the root — a monorepo package or a nested app. Build
@@ -202,6 +207,9 @@ func DetectRepo(repoDir, subdir string) Draft {
 		return d
 	}
 	d := Detect(repoDir)
+	if d.TemplateOnly != "" {
+		return d // a scaffolding template — nothing to deploy; don't dig into {{templated}} dirs
+	}
 	if len(d.Services) > 0 {
 		return d // a stack at the root — use it as-is
 	}
@@ -332,6 +340,15 @@ func skipScanDir(name string) bool {
 
 func Detect(repoDir string) Draft {
 	d := Draft{Services: []Service{}, Database: "none", Notes: []string{}}
+	// A project-scaffolding template (Cookiecutter / Copier / Yeoman generator) is a
+	// generator, not a deployable app — its compose/Dockerfile only exists in
+	// {{templated}} form. Flag it and stop before trying to map that boilerplate.
+	if kind, ok := scaffoldTemplate(repoDir); ok {
+		d.TemplateOnly = kind
+		d.Detected = kind + " template"
+		d.Notes = append(d.Notes, "This repository is a "+kind+" project template — it holds boilerplate to GENERATE a project, not a deployable app. Render it locally first (e.g. `cookiecutter <repo>`), then point Rigger at the generated project.")
+		return d
+	}
 	// Seed env vars from .env.example so the env's .env carries the app's expected
 	// keys (and ${VAR:-default} refs in compose `environment:` resolve at deploy).
 	d.EnvVars = parseDotenv(repoDir)
@@ -993,6 +1010,58 @@ func rebaseHost(v, old, neu string) string {
 		v = strings.ReplaceAll(v, sep+old+"/", sep+neu+"/")
 	}
 	return v
+}
+
+// scaffoldTemplate reports whether repoDir is a project-scaffolding TEMPLATE — a
+// generator that produces a project rather than a deployable app — and a human label for
+// it. Covers the common standards: Cookiecutter, Copier, and Yeoman generators. These
+// have no app to deploy until they're rendered, so detection stops early on them.
+func scaffoldTemplate(repoDir string) (string, bool) {
+	// Cookiecutter: a cookiecutter.json at the root (the definitive marker), or a
+	// templated dir literally named with a {{cookiecutter.*}} placeholder.
+	if fileExists(filepath.Join(repoDir, "cookiecutter.json")) || hasTemplatedDir(repoDir, "cookiecutter") {
+		return "Cookiecutter", true
+	}
+	// Copier: a copier.yml/.yaml at the root. The answers file (.copier-answers.yml)
+	// lives in GENERATED projects — which ARE deployable — so it is deliberately not a
+	// marker here.
+	if findFirst(repoDir, "copier.yml", "copier.yaml") != "" {
+		return "Copier", true
+	}
+	// Yeoman generator: an npm package that depends on yeoman-generator and ships the
+	// conventional generators/ tree.
+	if isYeomanGenerator(repoDir) {
+		return "Yeoman generator", true
+	}
+	return "", false
+}
+
+// hasTemplatedDir reports whether repoDir has a direct child DIRECTORY whose name is a
+// Jinja placeholder (contains "{{") and also contains must (e.g. "cookiecutter") — how
+// Cookiecutter names its templated project root, e.g. {{cookiecutter.project_slug}}.
+func hasTemplatedDir(repoDir, must string) bool {
+	entries, err := os.ReadDir(repoDir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() && strings.Contains(e.Name(), "{{") && strings.Contains(e.Name(), must) {
+			return true
+		}
+	}
+	return false
+}
+
+// isYeomanGenerator reports whether repoDir is a Yeoman generator package — an npm
+// package depending on yeoman-generator that ships the conventional generators/ tree —
+// as opposed to an app that merely mentions Yeoman.
+func isYeomanGenerator(repoDir string) bool {
+	pj := filepath.Join(repoDir, "package.json")
+	if !fileExists(pj) || !strings.Contains(readFile(pj), "yeoman-generator") {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(repoDir, "generators"))
+	return err == nil && fi.IsDir()
 }
 
 // dbRole classifies a compose service image as a managed dependency, or "".
