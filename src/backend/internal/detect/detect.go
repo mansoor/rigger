@@ -796,8 +796,79 @@ func composeIntoDraft(d *Draft, repoDir string, cf composeFile, foldManaged bool
 		sort.Strings(pairs)
 		d.Notes = append(d.Notes, fmt.Sprintf("Repointed %d host reference(s) onto managed service name(s): %s.", n, strings.Join(pairs, ", ")))
 	}
+	// Recognize background workers (Celery/Sidekiq/RQ/…) — a service with no web port
+	// and a queue-worker command. Fold one that builds the same context as an app into
+	// image reuse (image_from) so it doesn't build the image twice, and keep it out of
+	// the web-entry choice (a worker must never be routed traffic).
+	if workers := recognizeWorkers(d); len(workers) > 0 {
+		d.Notes = append(d.Notes, "Recognized background worker service(s): "+strings.Join(workers, ", ")+" (no web port; excluded from the web entry).")
+	}
 	pickWebEntry(d)
 	detectPreDeploy(d)
+}
+
+// looksLikeWorker reports whether a command resembles a background queue worker /
+// scheduler (Celery, Sidekiq, RQ, Resque, Dramatiq, Huey, Faktory, Bull, …).
+func looksLikeWorker(cmd string) bool {
+	c := strings.ToLower(cmd)
+	if c == "" {
+		return false
+	}
+	for _, kw := range []string{"celery", "sidekiq", "rq worker", "rqworker", "resque", "dramatiq", "huey", "faktory", "bull", "worker", "scheduler", "consumer"} {
+		if strings.Contains(c, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// isWorker reports whether a service is a background worker: it either already reuses
+// another service's image (image_from), or publishes no port and runs a worker command.
+func isWorker(s Service) bool {
+	if s.ImageFrom != "" {
+		return true
+	}
+	return s.Port == "" && len(s.ExtraPorts) == 0 && looksLikeWorker(s.Command)
+}
+
+// normBuildCtx normalizes a build context + dockerfile into a comparison key.
+func normBuildCtx(b *Build) string {
+	ctx := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(b.Context), "./"), "/")
+	if ctx == "" {
+		ctx = "."
+	}
+	return ctx + "|" + strings.TrimSpace(b.Dockerfile)
+}
+
+// recognizeWorkers finds worker services and, when a worker builds the same context as a
+// non-worker (app) service, rewrites it to reuse that service's image (image_from) instead
+// of building the same image again. Returns the worker service names (for a note).
+func recognizeWorkers(d *Draft) []string {
+	// The app that builds each context (first non-worker build service wins).
+	appByCtx := map[string]string{}
+	for i := range d.Services {
+		s := &d.Services[i]
+		if s.Build != nil && !isWorker(*s) {
+			if k := normBuildCtx(s.Build); appByCtx[k] == "" {
+				appByCtx[k] = s.Name
+			}
+		}
+	}
+	var workers []string
+	for i := range d.Services {
+		s := &d.Services[i]
+		if !isWorker(*s) {
+			continue
+		}
+		workers = append(workers, s.Name)
+		if s.Build != nil {
+			if app := appByCtx[normBuildCtx(s.Build)]; app != "" && app != s.Name {
+				s.ImageFrom = app // reuse the app image; no second build
+				s.Build = nil
+			}
+		}
+	}
+	return workers
 }
 
 // detectPreDeploy flags an imported compose that ALREADY implements a pre-deploy /
@@ -1707,7 +1778,7 @@ func pickWebEntry(d *Draft) {
 	}
 	if idx < 0 {
 		for i, s := range d.Services {
-			if s.Build != nil {
+			if s.Build != nil && !isWorker(s) { // never route a background worker
 				idx = i
 				break
 			}

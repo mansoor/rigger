@@ -744,6 +744,39 @@ func TestComposeSkipsDevOverride(t *testing.T) {
 	}
 }
 
+// TestComposeRecognizesWorker: a Celery-style worker (no web port, worker command, same
+// build context as the app) folds to reuse the app image (image_from) and is kept out of
+// the web-entry choice — the app that publishes a port is routed instead.
+func TestComposeRecognizesWorker(t *testing.T) {
+	yml := "services:\n" +
+		"  backend:\n" +
+		"    build: ./backend\n" +
+		"    ports: [\"8000:8000\"]\n" +
+		"  worker:\n" +
+		"    build: ./backend\n" +
+		"    command: celery -A app worker -l info\n"
+	d, err := DetectComposeBytes([]byte(yml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := svcByName(d, "worker")
+	if w == nil {
+		t.Fatalf("worker service missing: %+v", d.Services)
+	}
+	if w.ImageFrom != "backend" || w.Build != nil {
+		t.Errorf("worker should reuse the backend image (image_from), not build again: %+v", w)
+	}
+	if w.WebRouted {
+		t.Errorf("a worker must never be the web entry: %+v", w)
+	}
+	if be := svcByName(d, "backend"); be == nil || !be.WebRouted {
+		t.Errorf("backend (publishes a port) should be the web entry: %+v", be)
+	}
+	if joined := strings.Join(d.Notes, " | "); !strings.Contains(joined, "worker") {
+		t.Errorf("expected a worker-recognition note; got %s", joined)
+	}
+}
+
 // TestComposeFoldsMongo: a mongo data service is folded into the managed MongoDB engine
 // (dropped as a plain service, database set, version captured), and a hardcoded host
 // reference in the app's env is repointed onto the managed "mongodb" service name. A
