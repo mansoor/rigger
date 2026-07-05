@@ -363,6 +363,22 @@ func TestDetectSpringBuildTool(t *testing.T) {
 	}
 }
 
+// TestDetectFrameworkTemplateIds: the scaffold ids must match a templates/dockerfiles
+// folder AND a blueprint key. Guards the drift where a Vite SPA scaffolded as "static"
+// (no such folder) and Rails had a blueprint but no Dockerfile.
+func TestDetectFrameworkTemplateIds(t *testing.T) {
+	cases := []struct{ file, content, want string }{
+		{"package.json", `{"devDependencies":{"vite":"5"}}`, "react"},
+		{"Gemfile", "source 'https://rubygems.org'\ngem 'rails'", "rails"},
+	}
+	for _, c := range cases {
+		app := svcByName(Detect(repo(t, map[string]string{c.file: c.content}), nil), "app")
+		if app == nil || app.Build == nil || app.Build.Template != c.want {
+			t.Errorf("%s should scaffold template %q, got %+v", c.file, c.want, app)
+		}
+	}
+}
+
 // TestDetectNextjsHostnameEnv guards the Next.js standalone footgun: the service
 // must be seeded with HOSTNAME=0.0.0.0 (Docker otherwise sets HOSTNAME to the
 // container id and Next's standalone server fails to bind). Covers both the

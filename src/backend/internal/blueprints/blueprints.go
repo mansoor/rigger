@@ -257,8 +257,11 @@ var registry = map[string]Blueprint{
 		// container id; force 0.0.0.0 so the server starts.
 		ServiceEnv: map[string]string{"HOSTNAME": "0.0.0.0"},
 	},
-	"static": {
-		ID: "static", Label: "Static SPA", Language: "static",
+	// Static SPA (React / Vite / Vue / Angular). Keyed "react" so the blueprint ID,
+	// the Build.Template, and the templates/dockerfiles/react folder all match (envgen
+	// looks up Get(Build.Template); the builder scaffolds dockerfiles/<Build.Template>).
+	"react": {
+		ID: "react", Label: "Static SPA (React / Vite)", Language: "static",
 		Port: "80", Healthcheck: httpHealth("80", "/"),
 		WebRouted: true, Template: "react",
 		// Static SPAs have no server-side DB access; nothing to wire.
@@ -303,8 +306,15 @@ var registry = map[string]Blueprint{
 	},
 }
 
+// aliases maps legacy blueprint ids to their current key, so config written before a
+// rename still resolves. "static" was the old id for the React/Vite SPA blueprint.
+var aliases = map[string]string{"static": "react"}
+
 // Get returns the blueprint for id, and whether it exists.
 func Get(id string) (Blueprint, bool) {
+	if canonical, ok := aliases[id]; ok {
+		id = canonical
+	}
 	b, ok := registry[id]
 	return b, ok
 }

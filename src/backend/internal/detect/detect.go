@@ -1265,7 +1265,7 @@ func identify(dir string) (string, bool) {
 			return "nextjs", true
 		case (strings.Contains(pkg, "vite") || strings.Contains(pkg, "react-scripts") || strings.Contains(pkg, "@angular/core") || strings.Contains(pkg, `"vue"`)) &&
 			!strings.Contains(pkg, "express") && !strings.Contains(pkg, "fastify") && !strings.Contains(pkg, "@nestjs"):
-			return "static", true
+			return "react", true // static SPA — the "react" blueprint scaffolds an nginx-served build
 		default:
 			return "nodejs", true
 		}

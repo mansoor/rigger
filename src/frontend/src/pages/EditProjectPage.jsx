@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain, fetchWorkspaceAccessLists, fetchProxyPlugins } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain, fetchWorkspaceAccessLists, fetchProxyPlugins, fetchBlueprints } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -31,13 +31,25 @@ const SERVICE_SOURCE = [
   { value: 'build', label: 'Build from source' },
   { value: 'image_from', label: 'Reuse a service’s image (worker)' },
 ]
+// Fallback only. The live list is fetched from /api/blueprints (the same registry the
+// New Project "start from a stack" picker uses) so both stay in sync as frameworks are
+// added; this constant is used before the fetch resolves or if it fails.
 const BUILD_TEMPLATES = [
   { value: '', label: 'Custom Dockerfile (no scaffold)' },
-  { value: 'laravel', label: 'Laravel (PHP-FPM)' },
+  { value: 'laravel', label: 'Laravel (PHP)' },
   { value: 'nodejs', label: 'Node.js' },
   { value: 'nextjs', label: 'Next.js' },
   { value: 'react', label: 'React / Vite' },
 ]
+
+// buildTemplateOptions turns the blueprint registry into the Dockerfile-template select
+// options, prepended with the "no scaffold" (custom Dockerfile) choice. Falls back to the
+// static list until the fetch resolves.
+function buildTemplateOptions(blueprints) {
+  if (!blueprints?.length) return BUILD_TEMPLATES
+  return [{ value: '', label: 'Custom Dockerfile (no scaffold)' },
+    ...blueprints.map(b => ({ value: b.id, label: b.label }))]
+}
 // Managed-dependency service names a service may depend_on.
 const MANAGED_DEPS = ['postgres', 'mysql', 'mariadb', 'redis', 'minio']
 
@@ -245,7 +257,7 @@ function graphHasOwnPredeploy(services) {
   return false
 }
 
-function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = [] }) {
+function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = [], buildTemplates = BUILD_TEMPLATES }) {
   const confirm = useConfirm()
   const [open, setOpen] = useState(idx === 0) // collapsible — first service open
   const [portRows,   setPortRows]   = useState(() => imgToPortRows(img))
@@ -344,7 +356,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         <>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Dockerfile template</Label>
-            <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={BUILD_TEMPLATES} />
+            <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={buildTemplates} />
             <Hint>Scaffolds a starter Dockerfile; replace with your own via repo sync.</Hint></div>
           <div><Label>Build context</Label>
             <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
@@ -1013,6 +1025,10 @@ function svcKindLabel(s) {
 
 function ImagesEditor({ images, onChange, gitRepo, gitBranch, gitProviderId = 0, managedDeps = [] }) {
   const [scanning, setScanning] = useState(false)
+  // Dockerfile-template options come from the blueprint registry (same source as the
+  // New Project stack picker), so this stays in sync as frameworks are added.
+  const { data: blueprints } = useQuery({ queryKey: ['blueprints'], queryFn: fetchBlueprints, staleTime: Infinity })
+  const buildTemplates = buildTemplateOptions(blueprints)
   const addService = () => onChange([...images, {
     name: '', image: '', tag: 'latest', port: 0, host_port: '',
     volumes: [], depends_on: [], extra_ports: [],
@@ -1046,6 +1062,7 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch, gitProviderId = 0,
           idx={i}
           allImages={images}
           managedDeps={managedDeps}
+          buildTemplates={buildTemplates}
           onUpdate={(idx, updated) => {
             const oldName = images[idx]?.name
             const newName = updated.name

@@ -1,0 +1,18 @@
+# Ruby/Rails local cruft — keep the build context lean.
+.git
+.gitignore
+*.md
+Dockerfile*
+.dockerignore*
+log/*
+tmp/*
+storage/*
+.bundle/
+vendor/bundle/
+node_modules/
+public/assets/
+public/packs/
+.env
+.env.*
+.idea/
+.vscode/
