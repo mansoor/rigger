@@ -1269,8 +1269,10 @@ func identify(dir string) (string, bool) {
 		default:
 			return "nodejs", true
 		}
-	case fileExists(filepath.Join(dir, "pom.xml")) || fileExists(filepath.Join(dir, "build.gradle")) || fileExists(filepath.Join(dir, "build.gradle.kts")):
-		return "spring", true
+	case fileExists(filepath.Join(dir, "pom.xml")):
+		return "spring", true // Maven (pom.xml wins if a repo somehow has both)
+	case fileExists(filepath.Join(dir, "build.gradle")) || fileExists(filepath.Join(dir, "build.gradle.kts")):
+		return "spring-gradle", true
 	case fileExists(filepath.Join(dir, "manage.py")) || fileExists(filepath.Join(dir, "pyproject.toml")) || fileExists(filepath.Join(dir, "requirements.txt")):
 		return "django", true
 	case fileExists(filepath.Join(dir, "go.mod")):

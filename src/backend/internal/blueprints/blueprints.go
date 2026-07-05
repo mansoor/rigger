@@ -264,9 +264,17 @@ var registry = map[string]Blueprint{
 		// Static SPAs have no server-side DB access; nothing to wire.
 	},
 	"spring": {
-		ID: "spring", Label: "Spring Boot (Java)", Language: "java",
+		ID: "spring", Label: "Spring Boot (Maven)", Language: "java",
 		Port: "8080", Healthcheck: httpHealth("8080", "/actuator/health"),
 		WebRouted: true, Template: "spring",
+		EnvVars: envSpring,
+	},
+	// Gradle Spring Boot: same runtime contract as Maven, only the build tool (and
+	// thus the scaffolded Dockerfile's build stage) differs.
+	"spring-gradle": {
+		ID: "spring-gradle", Label: "Spring Boot (Gradle)", Language: "java",
+		Port: "8080", Healthcheck: httpHealth("8080", "/actuator/health"),
+		WebRouted: true, Template: "spring-gradle",
 		EnvVars: envSpring,
 	},
 	"django": {

@@ -1,0 +1,14 @@
+# Java/Gradle local cruft — keep the build context lean.
+.git
+.gitignore
+*.md
+Dockerfile*
+.dockerignore*
+target/
+build/
+.gradle/
+*.class
+.idea/
+.vscode/
+.env
+.env.*

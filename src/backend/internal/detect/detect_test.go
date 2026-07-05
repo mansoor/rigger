@@ -347,6 +347,22 @@ func TestDetectLaravelSelfContained(t *testing.T) {
 	}
 }
 
+// TestDetectSpringBuildTool: a Maven project (pom.xml) scaffolds the "spring" template
+// (mvn build); a Gradle project (build.gradle / .kts) scaffolds "spring-gradle" (gradle
+// bootJar). Both share the Spring Boot runtime contract; only the build tool differs.
+func TestDetectSpringBuildTool(t *testing.T) {
+	mvn := svcByName(Detect(repo(t, map[string]string{"pom.xml": "<project/>"}), nil), "app")
+	if mvn == nil || mvn.Build == nil || mvn.Build.Template != "spring" {
+		t.Errorf("pom.xml should scaffold the Maven 'spring' template, got %+v", mvn)
+	}
+	for _, f := range []string{"build.gradle", "build.gradle.kts"} {
+		gr := svcByName(Detect(repo(t, map[string]string{f: "plugins {}"}), nil), "app")
+		if gr == nil || gr.Build == nil || gr.Build.Template != "spring-gradle" {
+			t.Errorf("%s should scaffold the 'spring-gradle' template, got %+v", f, gr)
+		}
+	}
+}
+
 // TestDetectNextjsHostnameEnv guards the Next.js standalone footgun: the service
 // must be seeded with HOSTNAME=0.0.0.0 (Docker otherwise sets HOSTNAME to the
 // container id and Next's standalone server fails to bind). Covers both the
