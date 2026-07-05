@@ -139,6 +139,10 @@ type Draft struct {
 	// `profiles:` (not started by a default `up`). Surfaced so the user can opt to
 	// include them.
 	ProfileOmitted []OmittedService `json:"profile_omitted,omitempty"`
+	// ComposeOverlays lists additional compose files found beside the base (override /
+	// env-specific). The applied ones are merged into this draft; the rest are offered
+	// for opt-in (the user re-scans with the chosen files). Empty for single-file repos.
+	ComposeOverlays []ComposeOverlay `json:"compose_overlays,omitempty"`
 	// SeedCandidates lists bundled SQL dumps found in the source (e.g. a CodeCanyon
 	// app's database.sql + demo variants). The user picks one in the wizard to import
 	// into the managed database on first deploy (see the v3 DB-seed hook). Advisory:
@@ -193,20 +197,38 @@ type OmittedService struct {
 	Service  Service  `json:"service"`
 }
 
+// ComposeOverlay is an additional compose file found beside the base one — either the
+// implicit `docker-compose.override.yml` or an env-specific overlay like
+// `docker-compose.prod.yml`. These are merged onto the base with Docker Compose's
+// override semantics. Applied reports whether this overlay was merged into the draft;
+// DevScoped flags an override that bind-mounts host source (dev config a deploy usually
+// doesn't want); Recommended marks a safe override auto-applied when no explicit choice
+// was made. The wizard offers the unapplied ones for opt-in (re-scan with the picks).
+type ComposeOverlay struct {
+	File        string `json:"file"`  // filename relative to the base compose dir
+	Kind        string `json:"kind"`  // "override" | "environment"
+	Applied     bool   `json:"applied"`
+	DevScoped   bool   `json:"dev_scoped,omitempty"`
+	Recommended bool   `json:"recommended,omitempty"`
+}
+
 // Detect scans a repo directory and returns a draft service graph.
 // DetectRepo is the repo-scan entry point that adds nested-source support on top of
 // Detect: when an explicit subdir is given, or the repo ROOT holds no deployable stack
 // but a subdirectory does (a monorepo package / nested app), detection runs in that
 // subdirectory and every build context is prefixed with it — so contexts still resolve
 // from the repo root that gitsync checks out. subdir "" ⇒ auto-discover.
-func DetectRepo(repoDir, subdir string) Draft {
+// overlays selects which sibling compose overlays to merge onto the base file (filenames
+// relative to the compose dir): nil ⇒ auto (apply a safe, non-dev override, leave
+// env-specific files opt-in); non-nil (even empty) ⇒ apply exactly those. See fromCompose.
+func DetectRepo(repoDir, subdir string, overlays []string) Draft {
 	subdir = cleanSubdir(subdir)
 	if subdir != "" {
-		d := Detect(filepath.Join(repoDir, filepath.FromSlash(subdir)))
+		d := Detect(filepath.Join(repoDir, filepath.FromSlash(subdir)), overlays)
 		applySubdir(&d, subdir, true)
 		return d
 	}
-	d := Detect(repoDir)
+	d := Detect(repoDir, overlays)
 	if d.TemplateOnly != "" {
 		return d // a scaffolding template — nothing to deploy; don't dig into {{templated}} dirs
 	}
@@ -215,7 +237,7 @@ func DetectRepo(repoDir, subdir string) Draft {
 	}
 	// Root had nothing deployable; look a few levels down for an app root.
 	if sub, ok := findAppSubdir(repoDir); ok {
-		nd := Detect(filepath.Join(repoDir, filepath.FromSlash(sub)))
+		nd := Detect(filepath.Join(repoDir, filepath.FromSlash(sub)), overlays)
 		if len(nd.Services) > 0 {
 			applySubdir(&nd, sub, false)
 			return nd
@@ -338,7 +360,9 @@ func skipScanDir(name string) bool {
 	return strings.HasPrefix(name, ".")
 }
 
-func Detect(repoDir string) Draft {
+// Detect scans repoDir and returns a draft. overlays picks which sibling compose
+// overlays to merge (see DetectRepo / fromCompose); nil ⇒ auto-apply a safe override.
+func Detect(repoDir string, overlays []string) Draft {
 	d := Draft{Services: []Service{}, Database: "none", Notes: []string{}}
 	// A project-scaffolding template (Cookiecutter / Copier / Yeoman generator) is a
 	// generator, not a deployable app — its compose/Dockerfile only exists in
@@ -355,7 +379,7 @@ func Detect(repoDir string) Draft {
 
 	// 1. An existing compose file is authoritative.
 	if cf := findFirst(repoDir, "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"); cf != "" {
-		if fromCompose(repoDir, cf, &d) {
+		if fromCompose(repoDir, cf, overlays, &d) {
 			d.Detected = "docker-compose"
 			d.Notes = append([]string{"Detected " + filepath.Base(cf) + " — mapped its services."}, d.Notes...)
 			detectManagedDeps(repoDir, &d)
@@ -520,17 +544,163 @@ func DetectComposeBytes(data []byte) (Draft, error) {
 	return d, nil
 }
 
-func fromCompose(repoDir, path string, d *Draft) bool {
+// fromCompose reads the base compose file at path, merges the selected sibling overlays
+// (Docker Compose multi-file: docker-compose.override.yml and env-specific overlays like
+// docker-compose.prod.yml), and maps the result into the draft. `overlays` selects which
+// to apply: nil ⇒ auto (apply a safe, non-dev override; leave env-specific files opt-in);
+// non-nil (even empty) ⇒ apply exactly those files. All discovered overlays are recorded
+// on d.ComposeOverlays so the wizard can offer the unapplied ones.
+func fromCompose(repoDir, path string, overlays []string, d *Draft) bool {
+	dir, baseName := filepath.Dir(path), filepath.Base(path)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
+	var baseMap map[string]any
+	if yaml.Unmarshal(raw, &baseMap) != nil || baseMap == nil {
+		return false
+	}
+
+	discovered := discoverComposeOverlays(dir, baseName)
+	// Decide the applied set. nil overlays ⇒ auto-apply safe (non-dev) overrides; an
+	// explicit (non-nil) list ⇒ apply exactly those files (empty = base only).
+	applySet := map[string]bool{}
+	if overlays == nil {
+		for _, o := range discovered {
+			if o.Kind == "override" && !o.DevScoped {
+				applySet[o.File] = true
+			}
+		}
+	} else {
+		for _, f := range overlays {
+			applySet[f] = true
+		}
+	}
+
+	var applied []string
+	for i := range discovered {
+		if o := &discovered[i]; o.Kind == "override" && !o.DevScoped {
+			o.Recommended = true // a safe override is what `docker compose up` applies by default
+		}
+		if !applySet[discovered[i].File] {
+			continue
+		}
+		ob, rerr := os.ReadFile(filepath.Join(dir, discovered[i].File))
+		if rerr != nil {
+			continue
+		}
+		var om map[string]any
+		if yaml.Unmarshal(ob, &om) != nil || om == nil {
+			continue
+		}
+		baseMap = mergeComposeMaps(baseMap, om)
+		discovered[i].Applied = true
+		applied = append(applied, discovered[i].File)
+	}
+	d.ComposeOverlays = discovered
+
+	// Re-encode the merged map and decode it into composeFile, reusing the normal path.
+	merged, err := yaml.Marshal(baseMap)
+	if err != nil {
+		return false
+	}
 	var cf composeFile
-	if yaml.Unmarshal(raw, &cf) != nil || len(cf.Services) == 0 {
+	if yaml.Unmarshal(merged, &cf) != nil || len(cf.Services) == 0 {
 		return false
 	}
 	composeIntoDraft(d, repoDir, cf, true)
+
+	if len(applied) > 0 {
+		d.Notes = append(d.Notes, "Merged compose overlay(s) onto "+baseName+": "+strings.Join(applied, ", ")+".")
+	}
+	if unapplied := countUnappliedOverlays(discovered); unapplied > 0 {
+		d.Notes = append(d.Notes, fmt.Sprintf("Found %d more env-specific compose file(s) beside %s — pick which represents your deployment and re-scan. Per-environment differences are otherwise managed by Rigger's own environments.", unapplied, baseName))
+	}
 	return len(d.Services) > 0
+}
+
+var composeOverlayRE = regexp.MustCompile(`(?i)^(?:docker-compose|compose)\.([a-z0-9_-]+)\.ya?ml$`)
+
+// discoverComposeOverlays returns the override + env-specific compose files sitting beside
+// the base file in dir (the base itself excluded), sorted with the override(s) first.
+func discoverComposeOverlays(dir, baseName string) []ComposeOverlay {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []ComposeOverlay
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == baseName {
+			continue
+		}
+		m := composeOverlayRE.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		kind := "environment"
+		if strings.EqualFold(m[1], "override") {
+			kind = "override"
+		}
+		out = append(out, ComposeOverlay{
+			File: e.Name(), Kind: kind, DevScoped: kind == "override" && overlayDevScoped(dir, e.Name()),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if (out[i].Kind == "override") != (out[j].Kind == "override") {
+			return out[i].Kind == "override" // overrides first
+		}
+		return out[i].File < out[j].File
+	})
+	return out
+}
+
+// overlayDevScoped reports whether an override file bind-mounts host source into a service
+// (a `./x:/y` or `/abs:/y` volume) — the hallmark of dev config a deployment shouldn't
+// inherit. Named-volume mounts (data:/path) don't count.
+func overlayDevScoped(dir, file string) bool {
+	var cf composeFile
+	if b, err := os.ReadFile(filepath.Join(dir, file)); err != nil || yaml.Unmarshal(b, &cf) != nil {
+		return false
+	}
+	for _, s := range cf.Services {
+		for _, v := range s.Volumes {
+			left := strings.SplitN(strings.Trim(v, `"' `), ":", 2)[0]
+			if strings.HasPrefix(left, ".") || strings.HasPrefix(left, "/") || strings.HasPrefix(left, "~") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// mergeComposeMaps deep-merges an override compose map onto base using Docker Compose's
+// override semantics: mappings are merged key-by-key, scalars and sequences are replaced
+// by the override. This mirrors `docker compose -f base -f override` for the fields
+// detection reads (the spec's occasional list-append cases are rare in real files).
+func mergeComposeMaps(base, over map[string]any) map[string]any {
+	for k, ov := range over {
+		if bv, ok := base[k]; ok {
+			if bm, ok1 := bv.(map[string]any); ok1 {
+				if om, ok2 := ov.(map[string]any); ok2 {
+					base[k] = mergeComposeMaps(bm, om)
+					continue
+				}
+			}
+		}
+		base[k] = ov
+	}
+	return base
+}
+
+// countUnappliedOverlays counts discovered overlays that were not merged in.
+func countUnappliedOverlays(o []ComposeOverlay) int {
+	n := 0
+	for _, x := range o {
+		if !x.Applied {
+			n++
+		}
+	}
+	return n
 }
 
 // composeIntoDraft maps a parsed compose file into the draft: managed-dep candidates,

@@ -232,8 +232,10 @@ export const fetchTemplateDraft = (ws, name, env) =>
 export const saveToolTemplate  = (name, content, force = false) =>
   api.post('/tools/save-template', { name, content, force }).then(r => r.data)
 // Repo scanner (Phase 2b): clone + statically detect a stack into a draft service graph.
-export const scanRepo          = (repo, branch, providerId = 0, subdir = '') =>
-  api.post('/scan-repo', { repo, branch, subdir, provider_id: Number(providerId) || 0 }).then(r => r.data)
+// overlays: undefined = auto (server applies a safe override); an array (even []) selects
+// exactly which multi-file compose overlays to merge (empty = base only).
+export const scanRepo          = (repo, branch, providerId = 0, subdir = '', overlays) =>
+  api.post('/scan-repo', { repo, branch, subdir, provider_id: Number(providerId) || 0, ...(overlays !== undefined && { compose_overlays: overlays }) }).then(r => r.data)
 // Parse pasted docker-compose.yml content into a draft service graph (no clone).
 export const parseCompose      = (content) =>
   api.post('/parse-compose', { content }).then(r => r.data)

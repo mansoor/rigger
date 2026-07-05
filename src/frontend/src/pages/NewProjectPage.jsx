@@ -219,15 +219,32 @@ function BlueprintStack({ data, onChange }) {
 function ScanStack({ data, onChange, workspace }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  async function scan() {
+  // overlays: undefined = auto (server applies a safe override); an array = explicit
+  // multi-file compose selection. A fresh Scan resets to auto; the overlay picker re-scans
+  // with an explicit list.
+  async function scan(overlays) {
     setErr(''); setBusy(true)
     try {
-      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim(), data.git_provider_id || 0, (data.source_subdir || '').trim())
+      const d = await scanRepo((data.source_repo || '').trim(), (data.source_branch || '').trim(), data.git_provider_id || 0, (data.source_subdir || '').trim(), overlays)
+      if (overlays === undefined) onChange('composeOverlays', undefined)
       applyDraft(onChange, d)
     } catch (e) {
       onChange('scanDraft', null)
       setErr(e?.response?.data?.error || 'Scan failed')
     } finally { setBusy(false) }
+  }
+  // The current selected overlay files: the explicit list once the user has touched it,
+  // else the set the server applied (the auto-applied safe override).
+  const overlayList = data.scanDraft?.compose_overlays || []
+  const selectedOverlays = () => data.composeOverlays
+    ? data.composeOverlays
+    : overlayList.filter(o => o.applied).map(o => o.file)
+  function toggleOverlay(file, on) {
+    const cur = new Set(selectedOverlays())
+    on ? cur.add(file) : cur.delete(file)
+    const list = [...cur]
+    onChange('composeOverlays', list)
+    scan(list)
   }
   return (
     <div className="space-y-4">
@@ -240,7 +257,7 @@ function ScanStack({ data, onChange, workspace }) {
           <Label>Branch</Label>
           <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="default branch" />
         </div>
-        <button type="button" onClick={scan} disabled={busy || !(data.source_repo || '').trim()}
+        <button type="button" onClick={() => scan()} disabled={busy || !(data.source_repo || '').trim()}
           className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
           {busy ? 'Scanning…' : 'Scan'}
         </button>
@@ -258,6 +275,28 @@ function ScanStack({ data, onChange, workspace }) {
           onChange={(id) => onChange('git_provider_id', id)} />
       </div>
       {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+      {overlayList.length > 0 && (
+        <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
+          <Label>Environment-specific compose files</Label>
+          <Hint tone="faint">This repo splits its compose config across files. Pick the overlay that matches what you&apos;re deploying — per-environment differences are otherwise managed by Rigger&apos;s environments. Toggling re-scans.</Hint>
+          {overlayList.map(o => {
+            const checked = data.composeOverlays ? data.composeOverlays.includes(o.file) : o.applied
+            return (
+              <label key={o.file} className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" checked={checked} disabled={busy}
+                  onChange={e => toggleOverlay(o.file, e.target.checked)}
+                  className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
+                <span className="font-mono text-content">{o.file}</span>
+                <span className="text-content-faint">
+                  {o.kind === 'override'
+                    ? (o.dev_scoped ? 'override · looks dev-scoped (source mounts)' : o.recommended ? 'override · recommended' : 'override')
+                    : 'environment overlay'}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      )}
       <ScanReview data={data} onChange={onChange} />
     </div>
   )

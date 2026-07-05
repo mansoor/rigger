@@ -32,6 +32,15 @@ func svcByName(d Draft, name string) *Service {
 	return nil
 }
 
+func overlayByFile(d Draft, file string) *ComposeOverlay {
+	for i := range d.ComposeOverlays {
+		if d.ComposeOverlays[i].File == file {
+			return &d.ComposeOverlays[i]
+		}
+	}
+	return nil
+}
+
 func TestDetectCompose(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"docker-compose.yml": `
@@ -47,7 +56,7 @@ services:
     image: postgres:16-alpine
 `,
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	if d.Detected != "docker-compose" {
 		t.Fatalf("expected compose detection, got %q (notes %v)", d.Detected, d.Notes)
 	}
@@ -122,7 +131,7 @@ services:
       - geocoder
 `,
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 
 	// DB → managed dep with version captured from the image tag.
 	if d.Database != "postgres" || d.DBVersion != "16-alpine" {
@@ -260,7 +269,7 @@ services:
       - '.:/var/www/html'
 `,
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	if len(d.Services) != 1 {
 		t.Fatalf("want 1 service, got %d: %+v", len(d.Services), d.Services)
 	}
@@ -285,7 +294,7 @@ func TestDetectDockerfileMonorepo(t *testing.T) {
 		"apps/web/Dockerfile":   "FROM node:20\nEXPOSE 3000\n",
 		"apps/web/package.json": `{"dependencies":{"next":"14"}}`,
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	api, web := svcByName(d, "api"), svcByName(d, "web")
 	if api == nil || api.Build == nil || api.Build.Context != "apps/api" {
 		t.Fatalf("api service wrong: %+v", api)
@@ -303,7 +312,7 @@ func TestDetectDockerfileMonorepo(t *testing.T) {
 
 func TestDetectManifestGo(t *testing.T) {
 	dir := repo(t, map[string]string{"go.mod": "module example.com/app\n\ngo 1.25\n"})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	app := svcByName(d, "app")
 	if app == nil || app.Build == nil || app.Build.Template != "go" {
 		t.Fatalf("expected a Go build service, got %+v (detected %q)", app, d.Detected)
@@ -322,7 +331,7 @@ func TestDetectLaravelSelfContained(t *testing.T) {
 		"composer.json": `{"require":{"laravel/framework":"^11","doctrine/dbal":"*"},"name":"app"}`,
 		".env.example":  "DB_CONNECTION=pgsql\nDATABASE_URL=postgres://...\n",
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	app := svcByName(d, "app")
 	if app == nil || app.Build == nil || app.Build.Template != "laravel" {
 		t.Fatalf("expected laravel app service, got %+v", app)
@@ -347,7 +356,7 @@ func TestDetectNextjsHostnameEnv(t *testing.T) {
 		"apps/web/Dockerfile":   "FROM node:20\nEXPOSE 3000\n",
 		"apps/web/package.json": `{"dependencies":{"next":"14.2.5"}}`,
 	})
-	web := svcByName(Detect(manifest), "web")
+	web := svcByName(Detect(manifest, nil), "web")
 	if web == nil || web.Build == nil || web.Build.Template != "nextjs" {
 		t.Fatalf("expected a nextjs web service, got %+v", web)
 	}
@@ -364,7 +373,7 @@ func TestDetectNextjsHostnameEnv(t *testing.T) {
 		"web/Dockerfile":     "FROM node:20\n",
 		"web/package.json":   `{"dependencies":{"next":"14.2.5"}}`,
 	})
-	cweb := svcByName(Detect(compose), "web")
+	cweb := svcByName(Detect(compose, nil), "web")
 	if cweb == nil || cweb.Build == nil || cweb.Build.Template != "nextjs" {
 		t.Fatalf("compose path: expected nextjs web service, got %+v", cweb)
 	}
@@ -378,7 +387,7 @@ func TestDetectProcfileWorkers(t *testing.T) {
 		"package.json": `{"dependencies":{"express":"4","ioredis":"5"}}`,
 		"Procfile":     "web: node server.js\nworker: node worker.js\nscheduler: node cron.js\n",
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	worker := svcByName(d, "worker")
 	if worker == nil || worker.ImageFrom != "app" || worker.Command != "node worker.js" {
 		t.Fatalf("expected worker reusing app image, got %+v", worker)
@@ -426,7 +435,7 @@ services:
         condition: service_completed_successfully
 `,
 	})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	app := svcByName(d, "app")
 	if app == nil {
 		t.Fatalf("app service not detected: %+v", d.Services)
@@ -446,7 +455,7 @@ services:
 
 func TestDetectUnknown(t *testing.T) {
 	dir := repo(t, map[string]string{"README.md": "# nothing to see"})
-	d := Detect(dir)
+	d := Detect(dir, nil)
 	if len(d.Services) != 0 {
 		t.Errorf("expected no services for an unrecognised repo, got %+v", d.Services)
 	}
@@ -470,7 +479,7 @@ func TestDetectSeedDumps(t *testing.T) {
 		"database/migrations/0001_create.php": "<?php",
 		"stub.sql":                            "SELECT 1;", // excluded: below size floor
 		"app/Models/User.php":                 "<?php",
-	}))
+	}), nil)
 	got := map[string]bool{}
 	for _, c := range d.SeedCandidates {
 		got[c.Path] = true
@@ -607,7 +616,7 @@ func TestDetectCookiecutterTemplate(t *testing.T) {
 		"{{cookiecutter.project_slug}}/docker-compose.yml": "services:\n  web:\n    build: .\n    ports: [\"8000:8000\"]\n",
 		"{{cookiecutter.project_slug}}/Dockerfile":         "FROM python",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.TemplateOnly != "Cookiecutter" {
 		t.Errorf("expected TemplateOnly=Cookiecutter; got %q (detected=%q)", d.TemplateOnly, d.Detected)
 	}
@@ -625,7 +634,7 @@ func TestDetectCopierTemplate(t *testing.T) {
 		"copier.yml":            "project_name:\n  type: str\n",
 		"template/Dockerfile.jinja": "FROM node",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.TemplateOnly != "Copier" {
 		t.Errorf("expected TemplateOnly=Copier; got %q", d.TemplateOnly)
 	}
@@ -637,12 +646,69 @@ func TestDetectNotATemplate(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"docker-compose.yml": "services:\n  app:\n    build: .\n    ports: [\"8080:80\"]\n",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.TemplateOnly != "" {
 		t.Errorf("a normal repo must not be flagged as a template; got %q", d.TemplateOnly)
 	}
 	if len(d.Services) == 0 {
 		t.Errorf("a normal repo must still map its services")
+	}
+}
+
+// TestComposeMergesSafeOverrideAndEnvOverlay: a repo with base + a safe override +
+// an env-specific overlay. With no selection (nil), the safe override auto-applies and
+// the env overlay is discovered-but-unapplied; with an explicit selection, exactly the
+// chosen file merges (Compose override semantics: scalars replaced, maps merged).
+func TestComposeMergesSafeOverrideAndEnvOverlay(t *testing.T) {
+	files := map[string]string{
+		"docker-compose.yml":          "services:\n  app:\n    image: myapp:latest\n    environment:\n      FOO: base\n",
+		"docker-compose.override.yml": "services:\n  app:\n    environment:\n      OVR: \"yes\"\n", // no host binds → safe
+		"docker-compose.prod.yml":     "services:\n  app:\n    image: myapp:1.2.3\n",
+	}
+	// Auto (nil): safe override merged, env overlay offered but not applied.
+	d := DetectRepo(repo(t, files), "", nil)
+	app := svcByName(d, "app")
+	if app == nil {
+		t.Fatalf("app service missing: %+v", d.Services)
+	}
+	if app.EnvVars["FOO"] != "base" || app.EnvVars["OVR"] != "yes" {
+		t.Errorf("safe override should be auto-merged (maps merged): %v", app.EnvVars)
+	}
+	if app.Tag != "latest" {
+		t.Errorf("env overlay must NOT be auto-applied; tag=%q want latest", app.Tag)
+	}
+	ov := overlayByFile(d, "docker-compose.override.yml")
+	if ov == nil || !ov.Applied || !ov.Recommended {
+		t.Errorf("safe override should be applied+recommended: %+v", ov)
+	}
+	if pv := overlayByFile(d, "docker-compose.prod.yml"); pv == nil || pv.Applied || pv.Kind != "environment" {
+		t.Errorf("prod overlay should be discovered, unapplied, kind=environment: %+v", pv)
+	}
+
+	// Explicit selection: merge only prod; the override is left out.
+	d2 := DetectRepo(repo(t, files), "", []string{"docker-compose.prod.yml"})
+	app2 := svcByName(d2, "app")
+	if app2 == nil || app2.Tag != "1.2.3" {
+		t.Errorf("explicit prod overlay should replace the image tag: %+v", app2)
+	}
+	if _, ok := app2.EnvVars["OVR"]; ok {
+		t.Errorf("override must NOT be applied under an explicit selection that omits it: %v", app2.EnvVars)
+	}
+}
+
+// TestComposeSkipsDevOverride: an override that bind-mounts host source is dev-scoped and
+// must NOT auto-apply (nil selection) — it's offered for opt-in instead.
+func TestComposeSkipsDevOverride(t *testing.T) {
+	d := DetectRepo(repo(t, map[string]string{
+		"docker-compose.yml":          "services:\n  app:\n    image: myapp:latest\n",
+		"docker-compose.override.yml": "services:\n  app:\n    volumes:\n      - ./:/app\n", // host bind → dev-scoped
+	}), "", nil)
+	ov := overlayByFile(d, "docker-compose.override.yml")
+	if ov == nil || !ov.DevScoped {
+		t.Fatalf("override with a host bind should be flagged DevScoped: %+v", ov)
+	}
+	if ov.Applied || ov.Recommended {
+		t.Errorf("a dev-scoped override must not auto-apply / be recommended: %+v", ov)
 	}
 }
 
@@ -666,7 +732,7 @@ func TestComposeFoldsMongo(t *testing.T) {
 			"    image: mongo-express:1.0\n" +
 			"    ports: [\"8081:8081\"]\n",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.Database != "mongodb" {
 		t.Errorf("mongo must fold into the managed engine: database=%q", d.Database)
 	}
@@ -708,7 +774,7 @@ func TestDetectRepoNestedCompose(t *testing.T) {
 		"myapp/frontend/Dockerfile": "FROM node",
 		"myapp/backend/Dockerfile":  "FROM python",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.SourceSubdir != "myapp" {
 		t.Fatalf("expected SourceSubdir=myapp; got %q (detected=%q, %d svcs)", d.SourceSubdir, d.Detected, len(d.Services))
 	}
@@ -724,7 +790,7 @@ func TestDetectRepoRootWins(t *testing.T) {
 	dir := repo(t, map[string]string{
 		"docker-compose.yml": "services:\n  app:\n    build: .\n    ports: [\"8080:80\"]\n",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.SourceSubdir != "" {
 		t.Errorf("root stack must have empty SourceSubdir; got %q", d.SourceSubdir)
 	}
@@ -736,7 +802,7 @@ func TestDetectRepoExplicitSubdir(t *testing.T) {
 		"packages/web/Dockerfile":   "FROM node\nEXPOSE 3000",
 		"packages/web/package.json": `{"dependencies":{"next":"14"}}`,
 	})
-	d := DetectRepo(dir, "packages/web")
+	d := DetectRepo(dir, "packages/web", nil)
 	if d.SourceSubdir != "packages/web" {
 		t.Fatalf("expected SourceSubdir=packages/web; got %q", d.SourceSubdir)
 	}
@@ -758,7 +824,7 @@ func TestDetectRepoSkipsJunkDirs(t *testing.T) {
 		"examples/docker-compose.yml":          "services:\n  x:\n    image: nginx\n",
 		"node_modules/foo/docker-compose.yml":  "services:\n  y:\n    image: nginx\n",
 	})
-	d := DetectRepo(dir, "")
+	d := DetectRepo(dir, "", nil)
 	if d.SourceSubdir != "" {
 		t.Errorf("compose under examples/node_modules must be skipped; got subdir %q", d.SourceSubdir)
 	}

@@ -85,7 +85,7 @@ func (h *Handler) UploadSource(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"draft":        detect.Detect(srcDir),
+		"draft":        detect.Detect(srcDir, nil),
 		"upload_token": token,
 	})
 }
