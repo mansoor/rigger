@@ -200,6 +200,10 @@ type Project struct {
 	TSDBVersion   string `json:"tsdb_version,omitempty"`
 	Queue         string `json:"queue,omitempty"`
 	QueueVersion  string `json:"queue_version,omitempty"`
+	// QueueConsole routes the managed broker's built-in web UI (RabbitMQ's management
+	// plugin on :15672) through Traefik on a "rabbitmq" subdomain. The UI has its own
+	// login (the managed user + password), so no edge basic-auth is layered on.
+	QueueConsole  bool   `json:"queue_console,omitempty"`
 	// WebSQL adds an Adminer web-SQL client to the project (the unified flag, like
 	// Redis). composegen synthesizes the service from it for any stack with a
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
@@ -335,6 +339,10 @@ func (c *Config) EffTSDB(_ Env) string          { return c.Project.TSDB }
 func (c *Config) EffTSDBVersion(_ Env) string   { return c.Project.TSDBVersion }
 func (c *Config) EffQueue(_ Env) string          { return c.Project.Queue }
 func (c *Config) EffQueueVersion(_ Env) string   { return c.Project.QueueVersion }
+
+// EffQueueConsole reports whether the managed broker's web console is routed. Only
+// meaningful when a queue engine is selected.
+func (c *Config) EffQueueConsole(_ Env) bool { return c.Project.QueueConsole }
 
 // MinIOOn / LocalStorageOn report the active object-storage backends (project-level,
 // independent — both may be on). New flags OR the legacy ObjectStorage enum. The Env

@@ -233,10 +233,18 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 	if cfg.EffQueue(ec) == "rabbitmq" {
 		host := prefix + "_rabbitmq"
 		pass := dotenv["RABBITMQ_PASSWORD"]
+		note := "AMQP broker on :5672 with a managed user (RabbitMQ's built-in guest is loopback-only). Apps read AMQP_URL / RABBITMQ_URL."
+		sub := ""
+		if cfg.EffQueueConsole(ec) {
+			sub = "rabbitmq" // the :15672 management UI is routed on this subdomain
+			note += " The management web UI is routed — open it and log in with the user/password below."
+		} else {
+			note += " The management web UI (:15672) is not exposed; enable the queue console to route it."
+		}
 		resp.Services = append(resp.Services, consoleService{
-			Kind: "queue", Label: "Message queue", Product: "RabbitMQ",
+			Kind: "queue", Label: "Message queue", Product: "RabbitMQ", Subdomain: sub,
 			Version: databases.ResolveVersion("rabbitmq", cfg.EffQueueVersion(ec)),
-			Note:    "AMQP broker on :5672 with a managed user (RabbitMQ's built-in guest is loopback-only). The management web UI is on :15672 (internal in v1 — reach it via a port-forward for now). Apps read AMQP_URL / RABBITMQ_URL.",
+			Note:    note,
 			Rows: []consoleRow{
 				{Label: "Host", Value: host},
 				{Label: "Port", Value: "5672"},

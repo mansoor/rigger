@@ -716,7 +716,8 @@ func (g *gen) dbEngine() string {
 // ("" = none). Kept separate from dbEngine so their compose blocks emit in addition to it.
 func (g *gen) searchEngine() string { return g.cfg.Project.Search }
 func (g *gen) tsdbEngine() string   { return g.cfg.Project.TSDB }
-func (g *gen) queueEngine() string  { return g.cfg.Project.Queue }
+func (g *gen) queueEngine() string     { return g.cfg.Project.Queue }
+func (g *gen) queueConsoleOn() bool    { return g.cfg.Project.QueueConsole }
 
 // redisOn reports whether Redis is enabled (project OR legacy env).
 func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
@@ -967,11 +968,15 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 
 	// RabbitMQ — AMQP message broker. The `-management` image tag bundles the web UI on
 	// :15672. A network-reachable user is provisioned via RABBITMQ_DEFAULT_USER/PASS
-	// (RabbitMQ's built-in `guest` is loopback-only). Internal-only in v1 (no host-port /
-	// route). Data persists in a named volume; rabbitmq-diagnostics ping is the healthcheck.
+	// (RabbitMQ's built-in `guest` is loopback-only). Data persists in a named volume;
+	// rabbitmq-diagnostics ping is the healthcheck. When queue_console is on, the :15672
+	// management UI is routed on the "rabbitmq" subdomain (it has its own login — the
+	// managed user/password — so no edge basic-auth is layered on).
 	if g.queueEngine() == "rabbitmq" {
 		eng, _ := databases.Get("rabbitmq")
 		ver := databases.ResolveVersion(eng.ID, g.cfg.Project.QueueVersion)
+		// Route the mgmt UI when the console is on AND the env has public Traefik ingress.
+		consoleRouted := g.queueConsoleOn() && g.e.TraefikEnabled && g.exposeMode() == "traefik" && g.e.Domain != ""
 		g.line(sectionComment("RabbitMQ "+ver, dashQueue))
 		g.line("  rabbitmq:")
 		g.line("    image: rabbitmq:" + ver)
@@ -983,7 +988,25 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_rabbitmq_data:/var/lib/rabbitmq")
 		g.managedNet(prefix, "rabbitmq")
+		if consoleRouted {
+			g.line("      traefik_net: {}") // join the shared proxy net so Traefik can reach :15672
+		} else if g.queueConsoleOn() {
+			// No Traefik/domain — publish the management UI on the host for dev access.
+			g.line("    ports:")
+			g.line("      - \"15672:15672\"")
+		}
 		g.healthcheck("rabbitmq-diagnostics -q ping", "15s", "10s", "10", "40s", "")
+		if consoleRouted {
+			// Standard subdomain router → :15672. No usersVar: RabbitMQ's own login gates it.
+			labelBlock := g.captureLabels(func() {
+				g.traefikLabels(prefix+"_rabbitmq", "rabbitmq."+g.e.Domain, "15672", "", g.e.certResolver, "")
+			})
+			if isSwarm {
+				g.swarmLabels = indentBlock(labelBlock, "  ") // relocate under deploy.labels for the swarm provider
+			} else {
+				g.raw(labelBlock)
+			}
+		}
 		g.deployBlock(isSwarm, "rabbitmq", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 	}

@@ -93,6 +93,7 @@ type Project struct {
 	TSDBVersion   string `json:"tsdb_version,omitempty"`
 	Queue         string `json:"queue,omitempty"`
 	QueueVersion  string `json:"queue_version,omitempty"`
+	QueueConsole  bool   `json:"queue_console,omitempty"` // route RabbitMQ's :15672 mgmt UI
 	// WebSQL synthesizes an Adminer web-SQL service (see buildAdminer) — the unified
 	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.

@@ -964,6 +964,34 @@ func TestManagedRabbitMQ(t *testing.T) {
 	}
 }
 
+func TestManagedRabbitMQConsole(t *testing.T) {
+	// queue_console routes the :15672 management UI on the rabbitmq subdomain.
+	cfg := []byte(`{
+		"project": {"name":"broker","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0},"queue":"rabbitmq","queue_console":true},
+		"services": [],
+		"environments": {"prod": {"deployment":"compose","domain":"example.com","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	out, err := GenerateAt(cfg, "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"traefik.enable=true",
+		"routers.broker_prod_rabbitmq.rule=Host(`rabbitmq.example.com`)",
+		"loadbalancer.server.port=15672",
+		"traefik_net: {}", // rabbitmq joins the shared proxy net
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+	// No edge basic-auth middleware — RabbitMQ's own login gates the UI.
+	if strings.Contains(s, "rabbitmq.middlewares") && strings.Contains(s, "basicauth") {
+		t.Errorf("console should not layer edge basic-auth:\n%s", s)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

@@ -226,7 +226,12 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
             />
           </div>
         </div>
-        <Hint tone="faint">Optional engines that run <strong>alongside</strong> your database — OpenSearch for full-text search, VictoriaMetrics for time-series/metrics, RabbitMQ for message queues. Internal-only; connection details appear on their own <strong>Search</strong> / <strong>Metrics</strong> / <strong>Message queue</strong> tabs.</Hint>
+        {v.queue === 'rabbitmq' && (
+          <MiniToggle label="RabbitMQ management console"
+            hint="route the :15672 web UI (log in with the managed user shown on the Message queue tab)"
+            checked={!!v.queueConsole} onChange={x => set({ queueConsole: x })} />
+        )}
+        <Hint tone="faint">Optional engines that run <strong>alongside</strong> your database — OpenSearch for full-text search, VictoriaMetrics for time-series/metrics, RabbitMQ for message queues. Search/metrics are internal-only; connection details appear on their own <strong>Search</strong> / <strong>Metrics</strong> / <strong>Message queue</strong> tabs.</Hint>
       </Group>
 
       {/* ── Storage group: local volume and/or MinIO (S3) + its admin console ── */}
