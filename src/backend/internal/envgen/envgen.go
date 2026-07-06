@@ -172,6 +172,11 @@ func managedContractKeys(cfg *wsconfig.Config, e wsconfig.Env, fe map[string]str
 			out[k] = true
 		}
 	}
+	if cfg.EffQueue(e) == "rabbitmq" {
+		for _, k := range []string{"RABBITMQ_HOST", "RABBITMQ_PORT", "RABBITMQ_USER", "RABBITMQ_PASSWORD", "RABBITMQ_VHOST", "RABBITMQ_URL", "AMQP_URL"} {
+			out[k] = true
+		}
+	}
 	if cfg.EffRedis(e) {
 		for _, k := range []string{"REDIS_ENABLED", "REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_URL"} {
 			out[k] = true
@@ -377,7 +382,7 @@ func imageEnvVar(name string) string {
 // — which would break against an already-initialized DB / data volume.
 var ManagedSecretKeys = []string{
 	"MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "MONGO_PASSWORD", "DB_PASSWORD",
-	"OPENSEARCH_PASSWORD",
+	"OPENSEARCH_PASSWORD", "RABBITMQ_PASSWORD",
 	"APP_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
 	"MINIO_CONSOLE_PASSPHRASE", "MINIO_CONSOLE_SALT",
 }
@@ -450,6 +455,9 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	// OpenSearch needs a complexity-meeting admin password (its own default — the shared
 	// "changeme_…" wouldn't pass), preserved across regen like every managed-DB secret.
 	osPassword := getOut(strongPw(r), "OPENSEARCH_PASSWORD")
+	// RabbitMQ's managed user password — alphanumeric strongPw so it embeds cleanly in the
+	// amqp:// URL (no URL-encoding needed), preserved across regen.
+	rmqPassword := getOut(strongPw(r), "RABBITMQ_PASSWORD")
 	appKey := getOut("base64:"+base64N(r, 32), "APP_KEY")
 	// MinIO root credentials double as the app's S3 access key/secret (AWS_*). They
 	// must be preserved across regen — the bucket/data volume is provisioned with them.
@@ -558,6 +566,20 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 		p("VICTORIA_HOST=%s\n", host)
 		p("VICTORIA_PORT=8428\n")
 		p("VICTORIA_URL=http://%s:8428\n", host)
+	}
+	if cfg.EffQueue(e) == "rabbitmq" {
+		// AMQP broker. RabbitMQ's built-in `guest` is loopback-only, so we provision a
+		// real network-reachable user (RABBITMQ_DEFAULT_USER, see composegen). AMQP_URL is
+		// the de-facto var most clients read (Celery broker_url, amqplib); RABBITMQ_URL is
+		// an alias. Default vhost "/". Management UI is on :15672 (internal in v1).
+		host := prefix + "_rabbitmq"
+		p("RABBITMQ_HOST=%s\n", host)
+		p("RABBITMQ_PORT=5672\n")
+		p("RABBITMQ_USER=rigger\n")
+		p("RABBITMQ_PASSWORD=%s\n", rmqPassword)
+		p("RABBITMQ_VHOST=/\n")
+		p("RABBITMQ_URL=amqp://rigger:%s@%s:5672/\n", rmqPassword, host)
+		p("AMQP_URL=amqp://rigger:%s@%s:5672/\n", rmqPassword, host)
 	}
 	// When the DB is published externally, expose the host port (overridable) so the
 	// generated compose's ${DB_EXTERNAL_PORT} resolves and the info tab can show it.

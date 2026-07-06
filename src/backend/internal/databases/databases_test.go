@@ -26,6 +26,21 @@ func TestGetAndKnown(t *testing.T) {
 	}
 }
 
+func TestQueueEngine(t *testing.T) {
+	e, ok := Get("rabbitmq")
+	if !ok || e.Category != "queue" || e.EnvPrefix != "RABBITMQ" || e.Port != 5672 {
+		t.Fatalf("rabbitmq engine wrong: %+v (ok=%v)", e, ok)
+	}
+	q := CatalogByCategory("queue")
+	if len(q) != 1 || q[0].ID != "rabbitmq" {
+		t.Fatalf("queue category should hold exactly rabbitmq: %+v", q)
+	}
+	// The default version must carry the -management tag (bundles the :15672 web UI).
+	if got := DefaultVersion("rabbitmq"); got != "3.13-management" {
+		t.Errorf("rabbitmq default = %q, want 3.13-management", got)
+	}
+}
+
 func TestResolveVersion(t *testing.T) {
 	if got := ResolveVersion("postgres", "16-alpine"); got != "16-alpine" {
 		t.Errorf("known version not preserved: %q", got)

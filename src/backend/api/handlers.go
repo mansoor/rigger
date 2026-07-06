@@ -1305,6 +1305,7 @@ func validateManagedEngines(content []byte) string {
 			Database string `json:"database"`
 			Search   string `json:"search"`
 			TSDB     string `json:"tsdb"`
+			Queue    string `json:"queue"`
 		} `json:"project"`
 	}
 	if err := json.Unmarshal(content, &doc); err != nil {
@@ -1327,6 +1328,9 @@ func validateManagedEngines(content []byte) string {
 		return m
 	}
 	if m := check(doc.Project.TSDB, "tsdb", "TSDB"); m != "" {
+		return m
+	}
+	if m := check(doc.Project.Queue, "queue", "message queue"); m != "" {
 		return m
 	}
 	return ""

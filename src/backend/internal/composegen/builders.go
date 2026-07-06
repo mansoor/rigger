@@ -19,6 +19,7 @@ const (
 	dashMongo    = 51
 	dashSearch   = 49
 	dashTSDB     = 44
+	dashQueue    = 44
 )
 
 // buildStack emits the volumes + services blocks for the unified service graph:
@@ -250,6 +251,9 @@ func (g *gen) emitVolumes(prefix string) {
 	}
 	if g.tsdbEngine() == "victoriametrics" {
 		add(prefix + "_victoriametrics_data")
+	}
+	if g.queueEngine() == "rabbitmq" {
+		add(prefix + "_rabbitmq_data")
 	}
 	if g.redisOn() {
 		add(prefix + "_redis_data")
@@ -636,7 +640,7 @@ func (g *gen) depHasHealthcheck(name string) bool {
 		}
 	}
 	switch name {
-	case "postgres", "mysql", "mariadb", "mongodb", "opensearch", "redis":
+	case "postgres", "mysql", "mariadb", "mongodb", "opensearch", "rabbitmq", "redis":
 		return true // these managed deps carry a healthcheck (see buildManagedDeps)
 	}
 	// minio (and its mc-init) intentionally have NO healthcheck — see buildManagedDeps.
@@ -712,6 +716,7 @@ func (g *gen) dbEngine() string {
 // ("" = none). Kept separate from dbEngine so their compose blocks emit in addition to it.
 func (g *gen) searchEngine() string { return g.cfg.Project.Search }
 func (g *gen) tsdbEngine() string   { return g.cfg.Project.TSDB }
+func (g *gen) queueEngine() string  { return g.cfg.Project.Queue }
 
 // redisOn reports whether Redis is enabled (project OR legacy env).
 func (g *gen) redisOn() bool { return g.cfg.Project.Redis || g.e.RedisEnabled }
@@ -960,6 +965,29 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("")
 	}
 
+	// RabbitMQ — AMQP message broker. The `-management` image tag bundles the web UI on
+	// :15672. A network-reachable user is provisioned via RABBITMQ_DEFAULT_USER/PASS
+	// (RabbitMQ's built-in `guest` is loopback-only). Internal-only in v1 (no host-port /
+	// route). Data persists in a named volume; rabbitmq-diagnostics ping is the healthcheck.
+	if g.queueEngine() == "rabbitmq" {
+		eng, _ := databases.Get("rabbitmq")
+		ver := databases.ResolveVersion(eng.ID, g.cfg.Project.QueueVersion)
+		g.line(sectionComment("RabbitMQ "+ver, dashQueue))
+		g.line("  rabbitmq:")
+		g.line("    image: rabbitmq:" + ver)
+		g.containerName(isSwarm, prefix + "_rabbitmq")
+		g.line("    environment:")
+		g.line("      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}")
+		g.line("      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}")
+		g.line("      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}")
+		g.line("    volumes:")
+		g.line("      - " + prefix + "_rabbitmq_data:/var/lib/rabbitmq")
+		g.managedNet(prefix, "rabbitmq")
+		g.healthcheck("rabbitmq-diagnostics -q ping", "15s", "10s", "10", "40s", "")
+		g.deployBlock(isSwarm, "rabbitmq", "1", "unless-stopped", true) // managed stateful — single-instance
+		g.line("")
+	}
+
 	if g.redisOn() {
 		g.line(sectionComment("Redis "+verRedis, dashRedis))
 		g.line("  redis:")
@@ -1129,6 +1157,8 @@ func managedDepPort(name string) string {
 		return "9200"
 	case "victoriametrics":
 		return "8428"
+	case "rabbitmq":
+		return "5672"
 	case "redis":
 		return "6379"
 	case "minio":

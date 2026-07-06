@@ -229,6 +229,32 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// ── Message queue (RabbitMQ) — auxiliary engine, alongside the primary DB ────
+	if cfg.EffQueue(ec) == "rabbitmq" {
+		host := prefix + "_rabbitmq"
+		pass := dotenv["RABBITMQ_PASSWORD"]
+		resp.Services = append(resp.Services, consoleService{
+			Kind: "queue", Label: "Message queue", Product: "RabbitMQ",
+			Version: databases.ResolveVersion("rabbitmq", cfg.EffQueueVersion(ec)),
+			Note:    "AMQP broker on :5672 with a managed user (RabbitMQ's built-in guest is loopback-only). The management web UI is on :15672 (internal in v1 — reach it via a port-forward for now). Apps read AMQP_URL / RABBITMQ_URL.",
+			Rows: []consoleRow{
+				{Label: "Host", Value: host},
+				{Label: "Port", Value: "5672"},
+				{Label: "User", Value: "rigger"},
+				{Label: "VHost", Value: "/"},
+				{Label: "Management UI", Value: "http://" + host + ":15672"},
+				{Label: "Password", Value: mask(pass), Secret: true},
+			},
+			EnvKeys: map[string]string{
+				"RABBITMQ_HOST": host, "RABBITMQ_PORT": "5672", "RABBITMQ_USER": "rigger", "RABBITMQ_VHOST": "/",
+				"RABBITMQ_URL": "amqp://rigger:" + mask(pass) + "@" + host + ":5672/",
+				"AMQP_URL":     "amqp://rigger:" + mask(pass) + "@" + host + ":5672/",
+				"RABBITMQ_PASSWORD": mask(pass),
+			},
+			SecretKeys: []string{"RABBITMQ_PASSWORD"},
+		})
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

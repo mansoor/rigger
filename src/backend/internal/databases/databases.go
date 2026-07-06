@@ -24,8 +24,9 @@ type Engine struct {
 	Schemas        bool     `json:"schemas"`         // management: list/create schema or database
 	Users          bool     `json:"users"`           // management: user / grant administration
 	// Category groups the engine by role: "database" (the single primary DB slot),
-	// "search" (OpenSearch), or "tsdb" (VictoriaMetrics). Search/tsdb engines run as
-	// opt-in AUXILIARY services ALONGSIDE a primary database, not in the DB slot.
+	// "search" (OpenSearch), "tsdb" (VictoriaMetrics), or "queue" (RabbitMQ). The
+	// search/tsdb/queue engines run as opt-in AUXILIARY services ALONGSIDE a primary
+	// database, each in its own project slot — not in the DB slot.
 	Category string `json:"category"`
 }
 
@@ -87,6 +88,18 @@ var catalog = []Engine{
 		DefaultVersion: "v1.102.0",
 		Port:           8428, VolumePath: "/victoria-metrics-data",
 		Driver: "victoriametrics", EnvPrefix: "VICTORIA", Schemas: false, Users: false, Category: "tsdb",
+	},
+	{
+		// RabbitMQ — AMQP message broker (auxiliary "queue" engine, alongside the DB).
+		// NOT SQL (Schemas/Users false → connection info only). The `-management` image
+		// tag bundles the web UI on :15672. RabbitMQ's default `guest` user is
+		// loopback-only, so envgen provisions a real network-reachable user via
+		// RABBITMQ_DEFAULT_USER (see envgen). Single-node; rabbitmq-diagnostics healthcheck.
+		ID: "rabbitmq", Label: "RabbitMQ", Image: "rabbitmq",
+		Versions:       []string{"4-management", "3.13-management", "3.12-management"},
+		DefaultVersion: "3.13-management",
+		Port:           5672, VolumePath: "/var/lib/rabbitmq",
+		Driver: "rabbitmq", EnvPrefix: "RABBITMQ", Schemas: false, Users: false, Category: "queue",
 	},
 }
 

@@ -84,12 +84,15 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
-	// Search / TSDB are opt-in auxiliary engines (opensearch / victoriametrics) emitted
-	// ALONGSIDE the primary DB (internal-only in v1). See gen.searchEngine/tsdbEngine.
+	// Search / TSDB / Queue are opt-in auxiliary engines (opensearch / victoriametrics /
+	// rabbitmq) emitted ALONGSIDE the primary DB (internal-only in v1). See
+	// gen.searchEngine/tsdbEngine/queueEngine.
 	Search        string `json:"search,omitempty"`
 	SearchVersion string `json:"search_version,omitempty"`
 	TSDB          string `json:"tsdb,omitempty"`
 	TSDBVersion   string `json:"tsdb_version,omitempty"`
+	Queue         string `json:"queue,omitempty"`
+	QueueVersion  string `json:"queue_version,omitempty"`
 	// WebSQL synthesizes an Adminer web-SQL service (see buildAdminer) — the unified
 	// flag, like Redis. Legacy projects carry a literal "adminer" service in
 	// Services instead; buildAdminer skips synthesis when one already exists.
@@ -386,6 +389,11 @@ func (c *Config) normalizeAux() {
 	case "tsdb":
 		if c.Project.TSDB == "" {
 			c.Project.TSDB, c.Project.TSDBVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	case "queue":
+		if c.Project.Queue == "" {
+			c.Project.Queue, c.Project.QueueVersion = c.Project.Database, c.Project.DBVersion
 		}
 		c.Project.Database, c.Project.DBVersion = "", ""
 	}

@@ -189,14 +189,17 @@ type Project struct {
 	Database  string `json:"database,omitempty"`
 	DBVersion string `json:"db_version,omitempty"`
 	Redis     bool   `json:"redis_enabled,omitempty"`
-	// Search / TSDB are opt-in AUXILIARY managed engines that run ALONGSIDE the primary
-	// Database (not in its slot): Search = "" | "opensearch"; TSDB = "" | "victoriametrics".
-	// Internal-only in v1 (no external host-port exposure). See EffSearch / EffTSDB and
+	// Search / TSDB / Queue are opt-in AUXILIARY managed engines that run ALONGSIDE the
+	// primary Database (not in its slot): Search = "" | "opensearch"; TSDB = "" |
+	// "victoriametrics"; Queue = "" | "rabbitmq" (a message broker). Internal-only in v1
+	// (no external host-port exposure). See EffSearch / EffTSDB / EffQueue and
 	// databases.CatalogByCategory.
 	Search        string `json:"search,omitempty"`
 	SearchVersion string `json:"search_version,omitempty"`
 	TSDB          string `json:"tsdb,omitempty"`
 	TSDBVersion   string `json:"tsdb_version,omitempty"`
+	Queue         string `json:"queue,omitempty"`
+	QueueVersion  string `json:"queue_version,omitempty"`
 	// WebSQL adds an Adminer web-SQL client to the project (the unified flag, like
 	// Redis). composegen synthesizes the service from it for any stack with a
 	// database. Legacy projects instead carry a literal "adminer" service — HasAdminer
@@ -323,13 +326,15 @@ func (c *Config) EffDBVersion(e Env) string {
 // EffRedis reports whether Redis is enabled (project-level OR legacy per-env).
 func (c *Config) EffRedis(e Env) bool { return c.Project.Redis || e.RedisEnabled }
 
-// EffSearch / EffTSDB return the project's auxiliary search / time-series engine
-// ("" = none). The Env param is kept for signature parity with the other Eff* helpers
-// (and a possible future per-env override); today they are strictly project-level.
+// EffSearch / EffTSDB / EffQueue return the project's auxiliary search / time-series /
+// message-queue engine ("" = none). The Env param is kept for signature parity with the
+// other Eff* helpers (and a possible future per-env override); today they're project-level.
 func (c *Config) EffSearch(_ Env) string        { return c.Project.Search }
 func (c *Config) EffSearchVersion(_ Env) string { return c.Project.SearchVersion }
 func (c *Config) EffTSDB(_ Env) string          { return c.Project.TSDB }
 func (c *Config) EffTSDBVersion(_ Env) string   { return c.Project.TSDBVersion }
+func (c *Config) EffQueue(_ Env) string          { return c.Project.Queue }
+func (c *Config) EffQueueVersion(_ Env) string   { return c.Project.QueueVersion }
 
 // MinIOOn / LocalStorageOn report the active object-storage backends (project-level,
 // independent — both may be on). New flags OR the legacy ObjectStorage enum. The Env
@@ -542,6 +547,11 @@ func (c *Config) Normalize() {
 	case "tsdb":
 		if c.Project.TSDB == "" {
 			c.Project.TSDB, c.Project.TSDBVersion = c.Project.Database, c.Project.DBVersion
+		}
+		c.Project.Database, c.Project.DBVersion = "", ""
+	case "queue":
+		if c.Project.Queue == "" {
+			c.Project.Queue, c.Project.QueueVersion = c.Project.Database, c.Project.DBVersion
 		}
 		c.Project.Database, c.Project.DBVersion = "", ""
 	}

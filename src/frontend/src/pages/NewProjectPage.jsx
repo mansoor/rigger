@@ -1825,10 +1825,11 @@ function Step4({ data, onChange, errors = {}, workspace = '' }) {
           stacks bring their own data services as images so it's hidden for them. */}
       {managedApplies && (
         <ManagedServices
-          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, search: data.search, searchVersion: data.searchVersion, tsdb: data.tsdb, tsdbVersion: data.tsdbVersion, storageLocal: data.storageLocal, storageMinio: data.storageMinio, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql, mailpit: data.mailpit }}
+          value={{ database: data.database, dbVersion: data.dbVersion, redis: data.redis, search: data.search, searchVersion: data.searchVersion, tsdb: data.tsdb, tsdbVersion: data.tsdbVersion, queue: data.queue, queueVersion: data.queueVersion, storageLocal: data.storageLocal, storageMinio: data.storageMinio, storageBucket: data.storageBucket, storagePath: data.storagePath, storageUi: data.storageUi, webSql: data.webSql, mailpit: data.mailpit }}
           onChange={v => {
             onChange('database', v.database); onChange('dbVersion', v.dbVersion)
             onChange('search', v.search || ''); onChange('searchVersion', v.searchVersion || ''); onChange('tsdb', v.tsdb || ''); onChange('tsdbVersion', v.tsdbVersion || '')
+            onChange('queue', v.queue || ''); onChange('queueVersion', v.queueVersion || '')
             onChange('redis', !!v.redis); onChange('webSql', !!v.webSql); onChange('mailpit', !!v.mailpit)
             onChange('storageLocal', !!v.storageLocal); onChange('storageMinio', !!v.storageMinio); onChange('storageBucket', v.storageBucket || ''); onChange('storagePath', v.storagePath || ''); onChange('storageUi', !!v.storageUi)
           }}
@@ -2465,6 +2466,8 @@ export default function NewProjectPage() {
       search_version: (isImage || !data.search) ? '' : (data.searchVersion || ''),
       tsdb: isImage ? '' : (data.tsdb || ''),
       tsdb_version: (isImage || !data.tsdb) ? '' : (data.tsdbVersion || ''),
+      queue: isImage ? '' : (data.queue || ''),
+      queue_version: (isImage || !data.queue) ? '' : (data.queueVersion || ''),
       storage_local: (isImage || isDatabase) ? false : !!data.storageLocal,
       storage_minio: (isImage || isDatabase) ? false : !!data.storageMinio,
       storage_bucket: (isImage || isDatabase) ? '' : (data.storageMinio ? (data.storageBucket || '') : ''),

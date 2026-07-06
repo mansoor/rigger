@@ -11,7 +11,7 @@ import { Hint } from './ui'
 // MinIO — bucket list/create. One shared secret-reveal toggle (operator+) unmasks
 // credentials across all tabs.
 
-const KIND_ICON = { database: '🗄', redis: '⚡', s3: '🪣', storage_local: '📁', mailpit: '✉️', search: '🔍', tsdb: '📈' }
+const KIND_ICON = { database: '🗄', redis: '⚡', s3: '🪣', storage_local: '📁', mailpit: '✉️', search: '🔍', tsdb: '📈', queue: '🐇' }
 
 // uiURLFor builds a sidecar's web-UI URL from the env's apex URL by prefixing the
 // service subdomain (storage./mail.). Mirrors composegen's subdomain routing. Returns

@@ -47,6 +47,8 @@ type CreateRequest struct {
 	SearchVersion string           `json:"search_version"` // chosen OpenSearch tag ("" → default)
 	TSDB          string           `json:"tsdb"`           // "" | victoriametrics — auxiliary TSDB (alongside the DB)
 	TSDBVersion   string           `json:"tsdb_version"`   // chosen VictoriaMetrics tag ("" → default)
+	Queue         string           `json:"queue"`          // "" | rabbitmq — auxiliary message broker (alongside the DB)
+	QueueVersion  string           `json:"queue_version"`  // chosen RabbitMQ tag ("" → default)
 	WebSQL       bool              `json:"web_sql"`      // database stack: add an Adminer web SQL client (becomes the web entry)
 	Cloudbeaver  bool              `json:"cloudbeaver"`  // legacy alias for WebSQL (older clients)
 	Mailpit      bool              `json:"mailpit"`      // add the Mailpit test-SMTP sidecar (project default)
@@ -370,6 +372,12 @@ func buildConfig(req CreateRequest) (map[string]any, error) {
 			project["tsdb"] = req.TSDB
 			if req.TSDBVersion != "" {
 				project["tsdb_version"] = req.TSDBVersion
+			}
+		}
+		if req.Queue != "" {
+			project["queue"] = req.Queue
+			if req.QueueVersion != "" {
+				project["queue_version"] = req.QueueVersion
 			}
 		}
 		// Object storage backends are independent — both may be selected.

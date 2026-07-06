@@ -23,6 +23,7 @@ const SERVICE_META = {
   redis:           { label: 'Redis',         port: '6379',      vars: ['REDIS_HOST', 'REDIS_PORT'], note: 'No password by default.' },
   opensearch:      { label: 'OpenSearch',    port: '9200',      vars: ['OPENSEARCH_HOST', 'OPENSEARCH_PORT', 'OPENSEARCH_USER', 'OPENSEARCH_PASSWORD', 'OPENSEARCH_URL'], creds: true, note: 'Search/analytics engine. HTTPS on :9200 with the security plugin (self-signed demo cert; user admin). Runs alongside your database. Host needs vm.max_map_count=262144. Connection details on the Search tab.' },
   victoriametrics: { label: 'VictoriaMetrics', port: '8428',    vars: ['VICTORIA_HOST', 'VICTORIA_PORT', 'VICTORIA_URL'], note: 'Time-series DB (Prometheus-compatible). No auth on :8428. Push via remote-write; query with PromQL. Runs alongside your database. Connection details on the Metrics tab.' },
+  rabbitmq:        { label: 'RabbitMQ',      port: '5672',      vars: ['RABBITMQ_HOST', 'RABBITMQ_PORT', 'RABBITMQ_USER', 'RABBITMQ_PASSWORD', 'RABBITMQ_URL', 'AMQP_URL'], creds: true, note: 'AMQP message broker on :5672 with a managed user (the built-in guest is loopback-only). Management UI on :15672 (internal in v1). Apps read AMQP_URL / RABBITMQ_URL. Connection details on the Message queue tab.' },
   minio:           { label: 'MinIO (S3)',    port: '9000',      vars: ['AWS_ENDPOINT', 'AWS_BUCKET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_USE_PATH_STYLE_ENDPOINT'], note: 'S3-compatible object store. The bucket is auto-created on first deploy; AWS_* credentials are the MinIO root user/password (revealable on the Database/Storage tab).' },
   storage_console: { label: 'MinIO Console', port: '9090',      vars: [], note: 'Browser admin UI for MinIO (opens3/console) — routed at the storage subdomain. Log in with the MinIO root credentials. Not used directly by your app.' },
   storage:         { label: 'Local volume',  volume: true,      vars: [], note: 'Uploads persist to a local named volume mounted at the app’s storage path — no S3 container. FILESYSTEM_DISK=local.' },
@@ -32,13 +33,14 @@ const SERVICE_META = {
 
 // managedServiceList derives the synthetic service rows from the picker value
 // (mirrors backend workspace.managedDepServices).
-export function managedServiceList({ database, redis, search, tsdb, storageLocal, storageMinio, storageUi, webSql, cloudbeaver } = {}) {
+export function managedServiceList({ database, redis, search, tsdb, queue, storageLocal, storageMinio, storageUi, webSql, cloudbeaver } = {}) {
   const out = []
   if (database && database !== 'none') out.push({ name: database, kind: database })
   if (redis) out.push({ name: 'redis', kind: 'redis' })
-  // Auxiliary search / time-series engines run alongside the primary database.
+  // Auxiliary search / time-series / message-queue engines run alongside the primary DB.
   if (search && search !== 'none') out.push({ name: search, kind: search })
   if (tsdb && tsdb !== 'none') out.push({ name: tsdb, kind: tsdb })
+  if (queue && queue !== 'none') out.push({ name: queue, kind: queue })
   // Object storage backends are independent — both may be on.
   if (storageMinio) {
     out.push({ name: 'minio', kind: 'minio' })
@@ -51,11 +53,12 @@ export function managedServiceList({ database, redis, search, tsdb, storageLocal
 
 // enabledDependsOnTargets returns the managed-service names a real service may
 // depend_on (excludes UI-only sidecars / the local-volume pseudo-service).
-export function enabledDependsOnTargets({ database, redis, storageMinio, search, tsdb } = {}) {
+export function enabledDependsOnTargets({ database, redis, storageMinio, search, tsdb, queue } = {}) {
   const out = []
   if (database && database !== 'none') out.push(database)
   if (search && search !== 'none') out.push(search)
   if (tsdb && tsdb !== 'none') out.push(tsdb)
+  if (queue && queue !== 'none') out.push(queue)
   if (redis) out.push('redis')
   if (storageMinio) out.push('minio')
   return out
@@ -189,8 +192,8 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
         )}
       </Group>
 
-      {/* ── Search & metrics group: optional aux engines running alongside the DB ── */}
-      <Group title="Search & metrics">
+      {/* ── Search, metrics & queues: optional aux engines running alongside the DB ── */}
+      <Group title="Search, metrics & queues">
         <div className="grid grid-cols-2 gap-3 items-end">
           <div>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Search engine</label>
@@ -212,8 +215,18 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
               caption={false}
             />
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Message queue</label>
+            <DatabaseSelect
+              category="queue"
+              engine={v.queue || 'none'}
+              version={v.queueVersion}
+              onChange={(eng, ver) => set({ queue: eng === 'none' ? '' : eng, queueVersion: ver })}
+              caption={false}
+            />
+          </div>
         </div>
-        <Hint tone="faint">Optional engines that run <strong>alongside</strong> your database — OpenSearch for full-text search, VictoriaMetrics for time-series/metrics. Internal-only; connection details appear on their own <strong>Search</strong> / <strong>Metrics</strong> tabs.</Hint>
+        <Hint tone="faint">Optional engines that run <strong>alongside</strong> your database — OpenSearch for full-text search, VictoriaMetrics for time-series/metrics, RabbitMQ for message queues. Internal-only; connection details appear on their own <strong>Search</strong> / <strong>Metrics</strong> / <strong>Message queue</strong> tabs.</Hint>
       </Group>
 
       {/* ── Storage group: local volume and/or MinIO (S3) + its admin console ── */}

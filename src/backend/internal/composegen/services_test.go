@@ -930,6 +930,40 @@ func TestManagedVictoriaMetrics(t *testing.T) {
 	}
 }
 
+func TestManagedRabbitMQ(t *testing.T) {
+	cfg := []byte(`{
+		"project": {"name":"broker","registry":"reg","version":{"major":1,"minor":0,"patch":0,"build":0},"queue":"rabbitmq"},
+		"services": [{"name":"app","build":{},"web_routed":true,"port":"3000","env_file":true,"depends_on":["rabbitmq"]}],
+		"environments": {"prod": {"deployment":"compose","domain":"example.com","traefik_enabled":true,"traefik_network":"traefik_net"}}
+	}`)
+	out, err := GenerateAt(cfg, "prod", time.Unix(0, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"  rabbitmq:",
+		"image: rabbitmq:3.13-management",
+		"container_name: broker_prod_rabbitmq",
+		"RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}",
+		"RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}",
+		"RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}",
+		"broker_prod_rabbitmq_data:/var/lib/rabbitmq",
+		"rabbitmq-diagnostics -q ping",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+	// Managed broker carries a healthcheck, so the app's depends_on can gate on healthy.
+	if !strings.Contains(s, "healthcheck:") {
+		t.Errorf("RabbitMQ must carry a healthcheck:\n%s", s)
+	}
+	if !strings.Contains(s, "condition: service_healthy") {
+		t.Errorf("app depends_on rabbitmq should be service_healthy:\n%s", s)
+	}
+}
+
 func boolStr(b bool) string {
 	if b {
 		return "true"

@@ -357,6 +357,33 @@ func TestVictoriaMetricsEnv(t *testing.T) {
 	}
 }
 
+func TestRabbitMQEnv(t *testing.T) {
+	// RabbitMQ is an AUXILIARY engine (Project.Queue), not the primary DB. It provisions
+	// a real network-reachable user (not the loopback-only guest) + AMQP/RABBITMQ URLs.
+	c := cfg(t, `{
+      "project": { "name": "broker", "version": { "major": 1, "minor": 0, "patch": 0, "build": 0 }, "queue": "rabbitmq" },
+      "services": [{"name":"app","build":{},"port":"3000","env_file":true}],
+      "environments": { "dev": { "http_port": 8080, "deployment": "compose" } }
+    }`)
+	env, _, err := Generate(c, "dev", nil, fixedRand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := ParseEnv([]byte(env))
+	host := "broker_dev_rabbitmq"
+	if m["RABBITMQ_HOST"] != host || m["RABBITMQ_PORT"] != "5672" || m["RABBITMQ_USER"] != "rigger" || m["RABBITMQ_VHOST"] != "/" {
+		t.Errorf("rabbitmq base env wrong: %v", m)
+	}
+	pw := m["RABBITMQ_PASSWORD"]
+	if pw == "" || strings.Contains(pw, "guest") {
+		t.Errorf("RABBITMQ_PASSWORD should be a generated secret, got %q", pw)
+	}
+	wantURL := "amqp://rigger:" + pw + "@" + host + ":5672/"
+	if m["RABBITMQ_URL"] != wantURL || m["AMQP_URL"] != wantURL {
+		t.Errorf("amqp url wrong: RABBITMQ_URL=%q AMQP_URL=%q want %q", m["RABBITMQ_URL"], m["AMQP_URL"], wantURL)
+	}
+}
+
 // TestAppURLNoDomain guards the empty-domain case: APP_URL must stay a valid
 // absolute URI (not the malformed "http://", which crashes Laravel artisan with
 // "Invalid URI"). With no domain it falls back to localhost + the HTTP port.
