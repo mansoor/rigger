@@ -694,6 +694,8 @@ function ComposeImportModal({ images, onApply, onClose }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [preview, setPreview] = useState(null) // { mapped:{imgs,skipped}, draft }
+  const [url, setUrl] = useState('')
+  const [fetching, setFetching] = useState(false)
 
   async function parse() {
     setBusy(true); setErr(''); setPreview(null)
@@ -711,6 +713,32 @@ function ComposeImportModal({ images, onApply, onClose }) {
       setBusy(false)
     }
   }
+  async function pasteClipboard() {
+    setErr('')
+    try {
+      const t = await navigator.clipboard.readText()
+      if (t?.trim()) { setText(t); setPreview(null) }
+      else setErr('Clipboard is empty.')
+    } catch {
+      setErr('Couldn’t read the clipboard — paste into the editor with Ctrl/Cmd-V instead.')
+    }
+  }
+  async function fetchUrl() {
+    const u = url.trim()
+    if (!u) return
+    setFetching(true); setErr(''); setPreview(null)
+    try {
+      const r = await fetch(u)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const t = await r.text()
+      if (!t.trim()) throw new Error('empty response')
+      setText(t)
+    } catch (e) {
+      setErr(`Couldn’t fetch that URL (${e.message || 'error'}). The host may block cross-origin requests — try a raw URL (e.g. raw.githubusercontent.com), or paste the content instead.`)
+    } finally {
+      setFetching(false)
+    }
+  }
   function apply() {
     if (!preview) return
     onApply(preview.mapped.imgs)
@@ -722,14 +750,30 @@ function ComposeImportModal({ images, onApply, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-surface-raised border border-border rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface-raised border border-border rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-border">
           <h3 className="text-base font-semibold text-content-strong">Paste / edit docker-compose</h3>
-          <Hint className="mt-0.5">Paste a compose file to fill the services, or edit the YAML below. Parsing replaces the service list.</Hint>
+          <Hint className="mt-0.5">Paste, fetch, or edit a compose file to fill the services. Parsing replaces the service list.</Hint>
         </div>
-        <div className="px-5 py-4 overflow-y-auto space-y-3">
+        <div className="px-5 py-4 overflow-y-auto flex-1 flex flex-col space-y-3">
+          {/* Toolbar: paste from clipboard, or pull from a URL */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={pasteClipboard}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">
+              📋 Paste from clipboard
+            </button>
+            <div className="flex items-center gap-2 flex-1 min-w-[16rem]">
+              <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/docker-compose.yml"
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchUrl() } }}
+                className="flex-1 px-3 py-1.5 bg-surface border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              <button type="button" onClick={fetchUrl} disabled={fetching || !url.trim()}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 disabled:opacity-40 transition-colors">
+                {fetching ? 'Fetching…' : 'Fetch URL'}
+              </button>
+            </div>
+          </div>
           <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} spellCheck={false}
-            className="w-full h-64 px-3 py-2 bg-surface border border-border-strong rounded-lg text-content-strong font-mono text-xs focus:outline-none focus:border-brand-500 resize-y" />
+            className="w-full flex-1 min-h-[24rem] px-3 py-2 bg-surface border border-border-strong rounded-lg text-content-strong font-mono text-xs leading-relaxed focus:outline-none focus:border-brand-500 resize-y" />
           {err && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
           {preview && (
             <div className="text-xs text-content-subtle space-y-1 bg-surface border border-border rounded-lg px-3 py-2">
@@ -762,10 +806,11 @@ function ImageEditor({ images, onChange }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <Hint>Add ready-made image services below, or import them from a Docker Compose file.</Hint>
         <button type="button" onClick={() => setComposeOpen(true)}
-          className="text-xs px-2.5 py-1 rounded-lg border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">
-          ⇕ Paste / edit compose
+          className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold border border-brand-500 text-brand-600 hover:bg-brand-600 hover:text-white transition-colors">
+          ⇕ Paste / edit docker-compose
         </button>
       </div>
       {composeOpen && <ComposeImportModal images={images} onApply={onChange} onClose={() => setComposeOpen(false)} />}
@@ -804,13 +849,55 @@ function ImageEditor({ images, onChange }) {
   )
 }
 
-function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange, deployment }) {
+// parseDotenvText parses pasted .env content into a {KEY: value} map — one KEY=VALUE per
+// line, skipping blanks and # comments, tolerating a leading `export `, and stripping a
+// single pair of surrounding quotes. Only valid shell-var keys are kept.
+function parseDotenvText(text) {
+  const out = {}
+  for (let line of (text || '').split(/\r?\n/)) {
+    line = line.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('export ')) line = line.slice(7).trim()
+    const eq = line.indexOf('=')
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+    let val = line.slice(eq + 1).trim()
+    if (val.length >= 2 && ((val[0] === '"' && val.endsWith('"')) || (val[0] === "'" && val.endsWith("'")))) {
+      val = val.slice(1, -1)
+    }
+    out[key] = val
+  }
+  return out
+}
+
+// SECRETISH flags .env keys that look like credentials, so a bulk import defaults them to
+// secret (over-flagging is the safe error: secret ⇒ encrypted with Swarm, plaintext otherwise).
+const SECRETISH = /(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY|ACCESS_KEY|PRIVATE|CREDENTIAL|_KEY$|^KEY$)/i
+
+function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange = () => {}, deployment, sharedKeys = [] }) {
   const [newKey, setNewKey] = useState('')
   const [newVal, setNewVal] = useState('')
   const [newSecret, setNewSecret] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
+  const [bulk, setBulk] = useState('')
   const entries = Object.entries(envVars)
   const secretSet = new Set(secretKeys)
   const swarm = deployment === 'swarm'
+  const bulkParsed = parseDotenvText(bulk)
+  const bulkCount = Object.keys(bulkParsed).length
+
+  async function pasteBulkClipboard() {
+    try { const t = await navigator.clipboard.readText(); if (t?.trim()) setBulk(t) } catch { /* clipboard blocked — paste manually */ }
+  }
+  function importBulk() {
+    if (bulkCount === 0) return
+    onChange({ ...envVars, ...bulkParsed })
+    // Default credential-looking keys to secret (user can unflag any).
+    const add = Object.keys(bulkParsed).filter(k => SECRETISH.test(k) && !secretSet.has(k))
+    if (add.length) onSecretKeysChange([...secretKeys, ...add])
+    setBulk(''); setShowBulk(false)
+  }
 
   function update(k, v) { onChange({ ...envVars, [k]: v }) }
   function remove(k) {
@@ -833,15 +920,50 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange, 
       {swarm
         ? <p className="text-xs text-emerald-400/80">🔒 Secret-flagged values become Docker Swarm secrets (encrypted at rest) when this environment is created.</p>
         : <p className="text-xs text-warning-fg/70">⚠ Compose keeps values plaintext in .env — flag secrets and deploy with Swarm for encryption at rest.</p>}
+      {/* Bulk import: paste an entire .env instead of adding vars one by one */}
+      <div className="rounded-lg border border-border-strong/60 bg-surface/40">
+        <button type="button" onClick={() => setShowBulk(o => !o)}
+          className="w-full flex items-center justify-between px-3 py-1.5 text-xs font-medium text-content-subtle hover:text-content">
+          <span>⎘ Paste .env file</span>
+          <span className="text-content-faint">{showBulk ? '▲' : '▼'}</span>
+        </button>
+        {showBulk && (
+          <div className="px-3 pb-3 space-y-2">
+            <textarea value={bulk} onChange={e => setBulk(e.target.value)} spellCheck={false}
+              placeholder={'# paste KEY=VALUE lines\nDATABASE_URL=postgres://…\nSECRET_KEY=…'}
+              className="w-full h-40 px-2 py-1.5 bg-surface border border-border-strong rounded text-content-strong font-mono text-xs leading-relaxed focus:outline-none focus:border-brand-500 resize-y" />
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={pasteBulkClipboard}
+                className="px-2.5 py-1 rounded text-xs font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">📋 Clipboard</button>
+              <span className="text-[11px] text-content-faint flex-1">{bulkCount > 0 ? `${bulkCount} variable${bulkCount !== 1 ? 's' : ''} found — credential-looking keys will be flagged secret.` : 'One KEY=VALUE per line; # comments and blanks are ignored.'}</span>
+              <button type="button" onClick={importBulk} disabled={bulkCount === 0}
+                className="px-3 py-1 rounded text-xs font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Import {bulkCount > 0 ? bulkCount : ''}</button>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* Provenance: variables inherited from the shared (setup-step) set, applied to every environment. */}
+      {sharedKeys.length > 0 && (
+        <div className="rounded-lg border border-border/60 bg-surface/30 px-3 py-2">
+          <p className="text-xs text-content-subtle"><span className="font-medium text-content">Shared variables</span> — set on the setup step, applied to every environment{sharedKeys.some(k => k in envVars) ? ' (struck-through ones are overridden below)' : ''}:</p>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {sharedKeys.map(k => (
+              <span key={k} className={`font-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-raised ${k in envVars ? 'line-through text-content-faint' : 'text-content-subtle'}`}>{k}</span>
+            ))}
+          </div>
+          <Hint className="mt-1.5">Edit these on the setup step. Add a variable with the same name below to override it for this environment only.</Hint>
+        </div>
+      )}
       {entries.map(([k, v]) => {
         const secret = secretSet.has(k)
+        const overrides = sharedKeys.includes(k)
         return (
           <div key={k} className={`flex items-center gap-2 pl-1.5 border-l-2 ${secret ? 'border-warning/70' : 'border-transparent'}`}>
             <button type="button" onClick={() => toggleSecret(k)} title={secret ? 'Secret — click to unflag' : 'Flag as secret'}
               className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
               {secret ? '🔒' : '🔓'}
             </button>
-            <span className="font-mono text-xs text-content w-40 shrink-0 truncate">{k}</span>
+            <span className="font-mono text-xs text-content w-40 shrink-0 truncate flex items-center gap-1">{k}{overrides && <span className="text-[9px] uppercase tracking-wide text-brand-400 not-italic" title="Overrides a shared variable for this environment">ovr</span>}</span>
             <input
               type={secret ? 'password' : 'text'} value={v} onChange={e => update(k, e.target.value)}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
@@ -1036,8 +1158,8 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
             <ImageEditor images={data.images} onChange={v => onChange('images', v)} />
           </div>
           <div>
-            <Label>Environment variables</Label>
-            <Hint className="mb-2">These will be written to <code className="font-mono text-xs">.env</code>. Secrets can be set now or edited after creation.</Hint>
+            <Label>Shared variables <span className="font-normal normal-case text-content-faint">— applied to every environment</span></Label>
+            <Hint className="mb-2">These seed each environment&apos;s <code className="font-mono text-xs">.env</code>. You can override any of them per-environment on the next step. Secrets can be set now or edited after creation.</Hint>
             <EnvVarEditor envVars={data.customEnvVars} onChange={v => onChange('customEnvVars', v)} />
           </div>
         </div>
@@ -1144,7 +1266,7 @@ export function leCapable(domain) {
   return true
 }
 
-function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [], defaultHostId = 0, acmeDefault = '', resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '' }) {
+function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, sharedVars = {}, hosts = [], defaultHostId = 0, acmeDefault = '', resourcePrefix = '', baseDomain = '', autoUrlMode = '', appHost = '' }) {
   const upd = (k, v) => onChange(idx, { ...env, [k]: v })
   const [tosAccepted, setTosAccepted] = useState(!!env.ssl_enabled) // LE ToS ack gates SSL
   const sslBlocked = looksLocalOrIP(env.domain)
@@ -1306,7 +1428,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
 
       {/* Per-environment variables */}
       <div className="pt-3 border-t border-border-strong/60">
-        <EnvVarsSection vars={env.vars || {}} secretKeys={env.secret_keys || []} deployment={env.deployment}
+        <EnvVarsSection vars={env.vars || {}} secretKeys={env.secret_keys || []} deployment={env.deployment} sharedVars={sharedVars}
           onChange={v => upd('vars', v)} onSecretKeysChange={s => upd('secret_keys', s)} />
       </div>
 
@@ -1329,21 +1451,23 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, hosts = [
 }
 
 // Collapsible per-env vars section inside EnvForm
-function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, deployment }) {
+function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, deployment, sharedVars = {} }) {
   const [open, setOpen] = useState(false)
   const count = Object.keys(vars).length
   const secretCount = secretKeys.length
+  const sharedKeys = Object.keys(sharedVars)
   return (
     <div>
       <button type="button" onClick={() => setOpen(o => !o)}
         className="flex items-center gap-2 text-xs font-semibold text-content-muted uppercase tracking-wider hover:text-content transition-colors w-full">
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
-        {count > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{count} set</span>}
+        {sharedKeys.length > 0 && <span className="ml-1 text-content-faint normal-case font-normal">{sharedKeys.length} shared</span>}
+        {count > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">· {count} set</span>}
         {secretCount > 0 && <span className="ml-1 text-warning-fg normal-case font-normal">· {secretCount} 🔒</span>}
         <span className="ml-auto text-content-faint normal-case font-normal">per-environment .env</span>
       </button>
-      {open && <div className="mt-3"><EnvVarEditor envVars={vars} secretKeys={secretKeys} onChange={onChange} onSecretKeysChange={onSecretKeysChange} deployment={deployment} /></div>}
+      {open && <div className="mt-3"><EnvVarEditor envVars={vars} secretKeys={secretKeys} onChange={onChange} onSecretKeysChange={onSecretKeysChange} deployment={deployment} sharedKeys={sharedKeys} /></div>}
     </div>
   )
 }
@@ -1361,6 +1485,10 @@ function Step3({ data, onChange, workspace }) {
   const autoUrlMode = gs.auto_url_mode || ''
   const appHost = (gs.app_host || gs.auto_url_host || '').trim()
   const resourcePrefix = workspace && data.key ? `${workspace}_${data.key}` : ''
+  // Shared variables seeded into EVERY environment's .env at create — the image stack's
+  // setup-step "Shared variables" box, or a scanned repo's .env.example. Surfaced per-env
+  // so it's clear these flow down (and which local vars override them).
+  const sharedVars = data.stackType === 'image' ? (data.customEnvVars || {}) : (data.scanDraft?.env_vars || {})
   function updateEnv(idx, updated) {
     const envs = [...data.environments]
     envs[idx] = updated
@@ -1386,6 +1514,7 @@ function Step3({ data, onChange, workspace }) {
           onRemove={removeEnv}
           canRemove={data.environments.length > 1}
           stackType={data.stackType}
+          sharedVars={sharedVars}
           hosts={hosts}
           defaultHostId={data.default_host_id || 0}
           acmeDefault={acmeDefault}
