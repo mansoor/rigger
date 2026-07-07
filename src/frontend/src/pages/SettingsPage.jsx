@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
@@ -19,6 +19,7 @@ import {
   fetchManagedMetrics, managedMetricsAction,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
   fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
+  dockerVersions, dockerUpdate, dockerUpdateStatus,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -2182,14 +2183,19 @@ function SystemEmailTab() {
 // now this surfaces the manual command.
 function UpdatesTab() {
   const { data: ver } = useQuery({ queryKey: ['rigger-version'], queryFn: fetchVersion, staleTime: Infinity })
+  // Seed from a cached (non-forced) check so "last updated" and any available
+  // release show on open; the Check button forces a fresh look.
+  const { data: seeded } = useQuery({ queryKey: ['rigger-update-check'], queryFn: () => checkUpdates(false), staleTime: 5 * 60 * 1000 })
   const [checking, setChecking] = useState(false)
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [restarting, setRestarting] = useState(false)
 
-  const current = info?.current || ver?.version || '—'
-  const isDev = info ? info.dev : (ver?.version === 'dev')
+  const eff = info || seeded
+  const current = eff?.current || ver?.version || '—'
+  const isDev = eff ? eff.dev : (ver?.version === 'dev')
+  const lastUpdated = eff?.last_updated_at
 
   async function runCheck() {
     setChecking(true); setErr('')
@@ -2260,6 +2266,11 @@ function UpdatesTab() {
               {current === 'dev' ? 'dev build' : current}
               {ver?.commit && <span className="ml-2 text-xs font-mono text-content-faint">{ver.commit.slice(0, 7)}</span>}
             </p>
+            {lastUpdated && (
+              <p className="text-xs text-content-faint mt-0.5" title={new Date(lastUpdated).toLocaleString()}>
+                Last updated {relTime(lastUpdated)}
+              </p>
+            )}
           </div>
           <button onClick={runCheck} disabled={checking || restarting}
             className="shrink-0 text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
@@ -2275,36 +2286,36 @@ function UpdatesTab() {
 
         {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
 
-        {info && !err && (
+        {eff && !err && (
           <div className="border-t border-border pt-4 space-y-3">
-            {info.error ? (
-              <p className="text-sm text-warning-fg">Couldn’t check: {info.error}</p>
-            ) : !info.latest ? (
+            {eff.error ? (
+              <p className="text-sm text-warning-fg">Couldn’t check: {eff.error}</p>
+            ) : !eff.latest ? (
               <p className="text-sm text-content-subtle">No published releases found yet.</p>
-            ) : info.update_available ? (
+            ) : eff.update_available ? (
               <>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-success-subtle text-success-fg border border-success-border/60">Update available</span>
-                  <span className="text-sm text-content-strong font-semibold">{info.latest}</span>
-                  {info.published_at && <span className="text-xs text-content-faint">· {new Date(info.published_at).toLocaleDateString()}</span>}
+                  <span className="text-sm text-content-strong font-semibold">{eff.latest}</span>
+                  {eff.published_at && <span className="text-xs text-content-faint">· {new Date(eff.published_at).toLocaleDateString()}</span>}
                 </div>
-                {info.notes && (
+                {eff.notes && (
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-content-muted mb-1">Changelog</p>
-                    <pre className="text-xs whitespace-pre-wrap break-words bg-surface-raised border border-border-strong rounded-lg p-3 max-h-72 overflow-y-auto text-content">{info.notes}</pre>
+                    <pre className="text-xs whitespace-pre-wrap break-words bg-surface-raised border border-border-strong rounded-lg p-3 max-h-72 overflow-y-auto text-content">{eff.notes}</pre>
                   </div>
                 )}
                 <div className="flex items-center gap-3 flex-wrap">
-                  <button onClick={() => doApply(info.latest)} disabled={busy || restarting}
+                  <button onClick={() => doApply(eff.latest)} disabled={busy || restarting}
                     className="text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
-                    {busy ? 'Starting…' : `Update to ${info.latest}`}
+                    {busy ? 'Starting…' : `Update to ${eff.latest}`}
                   </button>
-                  {info.html_url && <a href={info.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
+                  {eff.html_url && <a href={eff.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
                 </div>
                 <Hint tone="faint" className="text-[11px]">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></Hint>
               </>
             ) : (
-              <p className="text-sm text-success-fg">✓ You’re on the latest release ({info.latest}).</p>
+              <p className="text-sm text-success-fg">✓ You’re on the latest release ({eff.latest}).</p>
             )}
           </div>
         )}
@@ -2316,6 +2327,267 @@ function UpdatesTab() {
           </button>
           <Hint tone="faint" className="text-[11px] mt-0.5">Re-runs the version that was active before the last update.</Hint>
         </div>
+      </div>
+
+      <DockerUpdatesCard />
+    </div>
+  )
+}
+
+// relTime renders an ISO timestamp as a compact "3 days ago" / "just now".
+function relTime(iso) {
+  const then = new Date(iso).getTime()
+  if (!then) return ''
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000))
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60); if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
+  const h = Math.floor(m / 60); if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`
+  const d = Math.floor(h / 24); if (d < 30) return `${d} day${d === 1 ? '' : 's'} ago`
+  const mo = Math.floor(d / 30); if (mo < 12) return `${mo} month${mo === 1 ? '' : 's'} ago`
+  return `${Math.floor(mo / 12)} year${Math.floor(mo / 12) === 1 ? '' : 's'} ago`
+}
+
+// DockerUpdatesCard shows the Docker Engine version of the local daemon and every
+// registered host, and offers an over-SSH in-place update (Linux hosts with
+// passwordless sudo). Updating the machine that runs Rigger restarts Rigger, so
+// that path switches into a countdown-and-reconnect flow (see DockerUpdateModal).
+function DockerUpdatesCard() {
+  const { data, isLoading, error, refetch, isFetching } = useQuery({ queryKey: ['docker-versions'], queryFn: dockerVersions, staleTime: 60_000 })
+  const [target, setTarget] = useState(null) // { hostId, name, isRiggerHost }
+
+  const hosts = data?.hosts || []
+  const local = hosts.find(h => h.host_id === 0)
+  const selfHost = hosts.find(h => h.host_id > 0 && h.is_rigger_host)
+  const others = hosts.filter(h => h.host_id > 0 && !h.is_rigger_host)
+
+  return (
+    <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-content-strong">Docker Engine</h3>
+          <Hint className="text-xs mt-0.5">Engine version on this machine and each registered host. Latest release: {data?.latest || '—'}{data?.latest_error ? ' (couldn’t check)' : ''}</Hint>
+        </div>
+        <button onClick={() => refetch()} disabled={isFetching}
+          className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-raised text-content-strong transition-colors disabled:opacity-50">
+          {isFetching ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+
+      {isLoading && <p className="text-sm text-content-subtle">Loading…</p>}
+      {error && <p className="text-sm text-danger-fg">{error?.response?.data?.error || 'Failed to load Docker versions'}</p>}
+
+      {!isLoading && !error && (
+        <div className="space-y-2">
+          {local && (
+            <DockerHostRow
+              row={{ ...local, name: 'This machine', operating_system: local.operating_system }}
+              latest={data?.latest} updatableVia={selfHost}
+              onUpdate={selfHost && selfHost.updatable
+                ? () => setTarget({ hostId: selfHost.host_id, name: 'this machine (Rigger host)', isRiggerHost: true })
+                : null}
+            />
+          )}
+          {others.map(h => (
+            <DockerHostRow key={h.host_id} row={h} latest={data?.latest}
+              onUpdate={h.updatable ? () => setTarget({ hostId: h.host_id, name: h.name, isRiggerHost: h.is_rigger_host }) : null} />
+          ))}
+          {others.length === 0 && !local && <p className="text-sm text-content-subtle">No hosts.</p>}
+        </div>
+      )}
+
+      {target && <DockerUpdateModal target={target} onClose={() => { setTarget(null); refetch() }} />}
+    </div>
+  )
+}
+
+// DockerHostRow renders one daemon's version + state, and an Update button when
+// the engine can be updated in place. updatableVia is the registered self-host
+// through which the local daemon (which has no direct SSH path) gets updated.
+function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
+  const isLocal = row.host_id === 0
+  const os = row.operating_system || row.os_type || ''
+  const latestClean = (latest || '').replace(/^v/, '')
+  return (
+    <div className="flex items-center justify-between gap-3 bg-canvas/50 border border-border rounded-lg px-3 py-2">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-content-strong truncate">{row.name}</span>
+          {row.is_rigger_host && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30">Rigger host</span>}
+          {row.update_available && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-success-subtle text-success-fg border border-success-border/60">{latestClean ? `update available → ${latestClean}` : 'update available'}</span>}
+          {row.is_desktop && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-raised text-content-muted border border-border">Docker Desktop</span>}
+        </div>
+        <p className="text-xs text-content-faint mt-0.5 truncate">
+          {row.error ? <span className="text-danger-fg">{row.error}</span>
+            : <>Docker {row.server_version || '—'}{row.update_available && latestClean && <> → {latestClean}</>}{os && <> · {os}</>}</>}
+        </p>
+      </div>
+      <div className="shrink-0">
+        {onUpdate ? (
+          <button onClick={onUpdate}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+            Update Docker
+          </button>
+        ) : isLocal && !updatableVia && row.reachable ? (
+          <span className="text-[11px] text-content-faint" title="Rigger runs in a container and can't update its host's daemon directly. Register this machine as a host (SSH + sudo) to update it here, or run: curl -fsSL https://get.docker.com | sudo sh">register as host to update</span>
+        ) : row.reachable && !row.linux ? (
+          <span className="text-[11px] text-content-faint">Linux only</span>
+        ) : row.reachable && !row.sudo_ok && row.host_id > 0 ? (
+          <span className="text-[11px] text-content-faint">needs sudo</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+// DockerUpdateModal drives the confirm → run → reconnect/progress → result flow.
+// For the Rigger host the daemon restart takes Rigger down, so we show a live
+// counter and poll for the server to come back (from ~1 min, capped at 5 min);
+// for any other host Rigger stays up and streams the on-host log.
+function DockerUpdateModal({ target, onClose }) {
+  const [step, setStep] = useState('confirm') // confirm | starting | reconnect | remote | result
+  const [err, setErr] = useState('')
+  const [elapsed, setElapsed] = useState(0)
+  const [status, setStatus] = useState(null)
+  const [result, setResult] = useState(null) // { ok, rc, version } | { timeout: true }
+  const stopRef = useRef(false)
+
+  async function start() {
+    setStep('starting'); setErr('')
+    try {
+      const resp = await dockerUpdate(target.hostId)
+      setStep(resp.is_rigger_host ? 'reconnect' : 'remote')
+    } catch (e) {
+      setErr(e?.response?.data?.error || 'Failed to start the update'); setStep('confirm')
+    }
+  }
+
+  // Live counter while we wait for the Rigger host to come back.
+  useEffect(() => {
+    if (step !== 'reconnect') return
+    const iv = setInterval(() => setElapsed(e => e + 1), 1000)
+    return () => clearInterval(iv)
+  }, [step])
+
+  // Reconnect poll (Rigger host): start at ~60s, every 5s, give up at 5 min.
+  useEffect(() => {
+    if (step !== 'reconnect') return
+    stopRef.current = false
+    let t
+    const startAt = Date.now()
+    const tick = async () => {
+      if (stopRef.current) return
+      const secs = (Date.now() - startAt) / 1000
+      if (secs > 300) { setResult({ timeout: true }); setStep('result'); return }
+      if (secs >= 60) {
+        try {
+          const s = await dockerUpdateStatus(target.hostId)
+          setStatus(s)
+          if (s.done) { setResult({ ok: s.rc === 0, rc: s.rc, version: s.server_version }); setStep('result'); return }
+        } catch { /* Rigger still restarting — keep waiting */ }
+      }
+      t = setTimeout(tick, 5000)
+    }
+    t = setTimeout(tick, 5000)
+    return () => { stopRef.current = true; clearTimeout(t) }
+  }, [step, target.hostId])
+
+  // Remote poll (other host, Rigger stays up): stream the log until done.
+  useEffect(() => {
+    if (step !== 'remote') return
+    stopRef.current = false
+    let t
+    const startAt = Date.now()
+    const tick = async () => {
+      if (stopRef.current) return
+      try {
+        const s = await dockerUpdateStatus(target.hostId)
+        setStatus(s)
+        if (s.done) { setResult({ ok: s.rc === 0, rc: s.rc, version: s.server_version }); setStep('result'); return }
+      } catch { /* transient */ }
+      if ((Date.now() - startAt) / 1000 > 600) { setResult({ timeout: true }); setStep('result'); return }
+      t = setTimeout(tick, 4000)
+    }
+    t = setTimeout(tick, 4000)
+    return () => { stopRef.current = true; clearTimeout(t) }
+  }, [step, target.hostId])
+
+  const mmss = `${String(Math.floor(elapsed / 60)).padStart(2, '0')}:${String(elapsed % 60).padStart(2, '0')}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-10">
+      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-content-strong">Update Docker · {target.name}</h3>
+          {(step === 'confirm' || step === 'result') && (
+            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          )}
+        </div>
+
+        {step === 'confirm' && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-warning-subtle/40 border border-warning-border/60 px-3 py-3 text-sm text-warning-fg">
+              {target.isRiggerHost ? (
+                <>⚠ This updates the Docker Engine on the machine running Rigger. The Docker daemon restarts, so <strong>every project on this host — and Rigger itself — will briefly go down</strong>. This page will show a counter and reconnect automatically when Rigger comes back.</>
+              ) : (
+                <>⚠ This updates the Docker Engine on <strong>{target.name}</strong>. The Docker daemon restarts, so <strong>every container on that host will briefly go down</strong>. Rigger stays online and streams the progress.</>
+              )}
+            </div>
+            <p className="text-xs text-content-faint">Runs Docker’s official install script over SSH (<code className="font-mono">get.docker.com</code>), detached so it survives the restart.</p>
+            {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+            <div className="flex justify-end gap-3">
+              <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+              <button onClick={start}
+                className="text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                Update Docker now
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'starting' && <p className="py-6 text-center text-content-subtle text-sm">Starting the update on the host…</p>}
+
+        {step === 'reconnect' && (
+          <div className="space-y-4 py-2 text-center">
+            <div className="text-4xl font-mono font-semibold text-content-strong tabular-nums">{mmss}</div>
+            <div className="flex items-center justify-center gap-2 text-sm text-content-subtle">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              Docker is restarting on the Rigger host — waiting for Rigger to reconnect (up to 5:00).
+            </div>
+            <p className="text-xs text-content-faint">{elapsed < 60 ? 'Reconnect polling begins at 1:00…' : 'Polling for the server to respond…'}</p>
+            {status?.log && <pre className="text-[11px] text-left whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-3 max-h-40 overflow-y-auto text-content">{status.log}</pre>}
+          </div>
+        )}
+
+        {step === 'remote' && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-content-subtle">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              Updating Docker on {target.name}…
+            </div>
+            <pre className="text-[11px] whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-3 max-h-64 overflow-y-auto text-content min-h-[4rem]">{status?.log || 'Waiting for output…'}</pre>
+          </div>
+        )}
+
+        {step === 'result' && (
+          <div className="space-y-4">
+            {result?.timeout ? (
+              <div className="rounded-lg bg-warning-subtle/40 border border-warning-border/60 px-3 py-3 text-sm text-warning-fg">
+                ⏱ No response after 5 minutes. The update may still be running. Check on the server directly:
+                <code className="block font-mono mt-1">tail -f /tmp/rigger-docker-update.log</code>
+              </div>
+            ) : result?.ok ? (
+              <div className="rounded-lg bg-success-subtle/40 border border-success-border/60 px-3 py-3 text-sm text-success-fg">
+                ✓ Docker updated{result.version ? <> — now on <strong>{result.version}</strong></> : ''}.
+              </div>
+            ) : (
+              <div className="rounded-lg bg-danger-subtle/40 border border-danger-border/50 px-3 py-3 text-sm text-danger-fg">
+                ✗ Update finished with exit code {result?.rc}. See the log below.
+              </div>
+            )}
+            {status?.log && <pre className="text-[11px] whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-3 max-h-64 overflow-y-auto text-content">{status.log}</pre>}
+            <div className="flex justify-end"><Btn variant="ghost" onClick={onClose}>Close</Btn></div>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -6,6 +6,7 @@ import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
   fetchProxyAccessLists, createProxyAccessList, updateProxyAccessList, deleteProxyAccessList,
+  proxyBackup, proxyRestore,
 } from '../lib/api'
 
 // Proxy Service — standalone reverse-proxy manager (docs/design/proxy-service.md).
@@ -181,6 +182,8 @@ export default function ProxyServicePage() {
         <PluginsCard plugins={plugins} />
 
         <DefaultRouteCard route={defaultRoute} />
+
+        <BackupRestoreCard />
       </div>
 
       {modal && (
@@ -202,6 +205,133 @@ export default function ProxyServicePage() {
         </div>
       )}
     </Layout>
+  )
+}
+
+// BackupRestoreCard exports every route + access list (and, optionally, the
+// portable Let's Encrypt cert store) as an encrypted .rpb bundle, and restores one
+// on another server — so switching hosts doesn't mean rebuilding routes by hand or
+// re-requesting certs (which risks LE rate limits).
+const CERT_SCOPES = [
+  { value: 'none', label: 'Routes and Access Lists Only — No certificates' },
+  { value: 'proxy', label: 'Routes and Access Lists + Proxy Route Certificates' },
+  { value: 'all', label: "Routes and Access Lists + All Let’s Encrypt Certificates" },
+]
+
+async function blobErr(e) {
+  const d = e?.response?.data
+  if (d instanceof Blob) { try { return JSON.parse(await d.text()).error || errMsg(e) } catch { return errMsg(e) } }
+  return errMsg(e)
+}
+
+function BackupRestoreCard() {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  // export
+  const [certScope, setCertScope] = useState('none')
+  const [expPass, setExpPass] = useState('')
+  const [exporting, setExporting] = useState(false)
+  const [expErr, setExpErr] = useState('')
+  // import
+  const fileRef = useRef(null)
+  const [fileName, setFileName] = useState('')
+  const [impPass, setImpPass] = useState('')
+  const [replace, setReplace] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [impErr, setImpErr] = useState('')
+  const [summary, setSummary] = useState(null)
+
+  async function doExport() {
+    setExporting(true); setExpErr('')
+    try {
+      await proxyBackup(certScope, expPass)
+    } catch (e) {
+      setExpErr(await blobErr(e))
+    } finally { setExporting(false) }
+  }
+
+  async function doImport() {
+    const f = fileRef.current?.files?.[0]
+    if (!f) { setImpErr('Choose a .rpb backup file first.'); return }
+    setImporting(true); setImpErr(''); setSummary(null)
+    try {
+      const s = await proxyRestore(f, impPass, replace)
+      setSummary(s)
+      qc.invalidateQueries({ queryKey: ['proxy-routes'] })
+      qc.invalidateQueries({ queryKey: ['proxy-access-lists'] })
+    } catch (e) {
+      setImpErr(errMsg(e))
+    } finally { setImporting(false) }
+  }
+
+  return (
+    <div className="bg-surface border border-border rounded-xl">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-3 text-left">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-content-strong">Backup &amp; restore</span>
+          <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">move routes + certs to another server</span>
+        </div>
+        <span className="text-content-subtle text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 grid md:grid-cols-2 gap-5 border-t border-border pt-4">
+          {/* Export */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-content-strong">Export a backup</p>
+            <div>
+              <Label>What to back up</Label>
+              <Select value={certScope} onChange={setCertScope} options={CERT_SCOPES} />
+              <Hint tone="faint" className="text-[11px] mt-1">
+                Including certs makes them portable — the new server serves them immediately instead of re-requesting from Let’s Encrypt (which can hit rate limits on a bulk restore).
+              </Hint>
+            </div>
+            <div>
+              <Label>Passphrase {certScope !== 'none' ? '(required)' : '(optional)'}</Label>
+              <Input type="password" value={expPass} onChange={setExpPass} placeholder="Protects private keys in the bundle" />
+            </div>
+            {expErr && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-2.5 py-1.5">{expErr}</p>}
+            <Btn onClick={doExport} disabled={exporting}>{exporting ? 'Preparing…' : '⭳ Download backup'}</Btn>
+          </div>
+
+          {/* Import */}
+          <div className="space-y-3 md:border-l md:border-border md:pl-5">
+            <p className="text-xs font-semibold text-content-strong">Restore a backup</p>
+            <div>
+              <Label>Backup file (.rpb)</Label>
+              <input ref={fileRef} type="file" accept=".rpb,.tar.gz,.gz" onChange={e => setFileName(e.target.files?.[0]?.name || '')}
+                className="block w-full text-xs text-content file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-surface-overlay file:text-content hover:file:bg-surface-raised" />
+              {fileName && <p className="text-[11px] text-content-faint mt-1 truncate">{fileName}</p>}
+            </div>
+            <div>
+              <Label>Passphrase</Label>
+              <Input type="password" value={impPass} onChange={setImpPass} placeholder="If the backup is encrypted" />
+            </div>
+            <Toggle checked={replace} onChange={setReplace} label="Overwrite routes/lists with the same name" />
+            {impErr && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-2.5 py-1.5">{impErr}</p>}
+            <Btn onClick={doImport} disabled={importing}>{importing ? 'Restoring…' : '⭱ Restore'}</Btn>
+
+            {summary && (
+              <div className="text-xs space-y-2 border-t border-border pt-3">
+                <p className="text-success-fg">
+                  ✓ Routes: {summary.routes_created} added{summary.routes_replaced ? `, ${summary.routes_replaced} replaced` : ''}{summary.routes_skipped ? `, ${summary.routes_skipped} skipped` : ''}
+                  {' · '}Access-lists: {summary.access_lists_created} added{summary.access_lists_replaced ? `, ${summary.access_lists_replaced} replaced` : ''}{summary.access_lists_skipped ? `, ${summary.access_lists_skipped} skipped` : ''}
+                </p>
+                {(summary.warnings || []).length > 0 && (
+                  <ul className="text-warning-fg list-disc pl-4">{summary.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                )}
+                {summary.cert_instructions && (
+                  <div>
+                    <p className="text-content-muted mb-1">Certificates staged ({(summary.certs_staged || []).join(', ')}). To install them into Traefik and reload:</p>
+                    <pre className="whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-2.5 text-[11px] text-content overflow-x-auto">{summary.cert_instructions}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 

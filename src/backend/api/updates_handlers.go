@@ -22,6 +22,34 @@ const imageRepo = "ghcr.io/mansoor/rigger"
 // rollback can pin back to it (app_settings KV).
 const prevTagKey = "self_update_prev_tag"
 
+// installedVersionKey records the buildinfo.Version last seen at boot, and
+// lastUpdatedKey the RFC-3339 time we first saw the CURRENT version. Together they
+// let the Updates screen show "last updated" — reconciled on every boot so it
+// catches manual `docker compose pull` upgrades too, not just in-app applies.
+const (
+	installedVersionKey = "self_update_installed_version"
+	lastUpdatedKey      = "self_update_last_at"
+)
+
+// ReconcileInstalledVersion stamps when the running version first appeared. On
+// first boot it records the install time; whenever buildinfo.Version differs from
+// the stored value (an upgrade or rollback, however performed) it advances the
+// timestamp. A dev build reports a constant "dev", so it stamps once and never
+// churns. Best-effort: any DB error is ignored (the feature is cosmetic).
+func (h *Handler) ReconcileInstalledVersion() {
+	if h == nil || h.db == nil {
+		return
+	}
+	cur := buildinfo.Version
+	prev := strings.TrimSpace(settings.AppSetting(h.db, installedVersionKey))
+	if prev == cur {
+		return // unchanged since last boot
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_ = settings.SetAppSetting(h.db, installedVersionKey, cur) //nolint:errcheck
+	_ = settings.SetAppSetting(h.db, lastUpdatedKey, now)      //nolint:errcheck
+}
+
 // Self-update Phase 2 — check for a newer Rigger release.
 //
 // Reads the latest GitHub Release for the Rigger repo and compares its tag to
@@ -48,6 +76,7 @@ type updateInfo struct {
 	HTMLURL         string `json:"html_url"`         // release page
 	CheckedAt       int64  `json:"checked_at"`       // epoch ms of this check
 	Error           string `json:"error,omitempty"`  // soft error (e.g. GitHub unreachable)
+	LastUpdatedAt   string `json:"last_updated_at,omitempty"` // RFC-3339 when the current version first booted
 }
 
 var (
@@ -68,6 +97,7 @@ func (h *Handler) CheckUpdates(w http.ResponseWriter, r *http.Request) {
 	if !force && updateCache != nil && time.Now().Before(updateCacheExp) {
 		cached := *updateCache
 		updateCacheMu.Unlock()
+		cached.LastUpdatedAt = strings.TrimSpace(settings.AppSetting(h.db, lastUpdatedKey))
 		writeJSON(w, http.StatusOK, cached)
 		return
 	}
@@ -80,7 +110,11 @@ func (h *Handler) CheckUpdates(w http.ResponseWriter, r *http.Request) {
 	updateCacheExp = time.Now().Add(updateCacheTTL)
 	updateCacheMu.Unlock()
 
-	writeJSON(w, http.StatusOK, *info)
+	// The "last updated" stamp lives in app_settings (not the GitHub cache) so it
+	// stays fresh even on a cache hit.
+	out := *info
+	out.LastUpdatedAt = strings.TrimSpace(settings.AppSetting(h.db, lastUpdatedKey))
+	writeJSON(w, http.StatusOK, out)
 }
 
 // fetchUpdateInfo reads the latest release from GitHub and builds the comparison.

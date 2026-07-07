@@ -268,6 +268,7 @@ func main() {
 	handler.StartHousekeepingScheduler(3)
 	handler.MigrateBackupConfig()   // one-time: legacy config.backup → per-env schedules
 	handler.MigrateLegacyDomains()  // one-time: legacy per-env domain → verified primary custom domain
+	handler.ReconcileInstalledVersion() // stamp "last updated" when the running version first appears
 	handler.RenderProxyRoutes()     // re-render the Proxy Service file-provider config (drift repair)
 	handler.StartBackupScheduler()      // Phase 11 — per-env interval-based backup schedules
 	handler.StartPreviewReaper()        // tear down preview envs past their TTL (missed-close safety net)
@@ -339,6 +340,11 @@ func main() {
 	// Self-update Phase 3 — apply / rollback via a detached recreate helper (admin only).
 	mux.Handle("POST /api/updates/apply", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.ApplyUpdate))))
 	mux.Handle("POST /api/updates/rollback", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.RollbackUpdate))))
+
+	// Docker Engine version awareness + one-click update over SSH (admin only).
+	mux.Handle("GET /api/docker/versions", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerVersions))))
+	mux.Handle("POST /api/docker/update", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerUpdate))))
+	mux.Handle("GET /api/docker/update/status", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerUpdateStatus))))
 
 	// User management (Phase 5 / roadmap 10a) — admin only.
 	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1055,6 +1061,10 @@ func main() {
 			handler.CreateProxyRoute(w, r)
 		case r.Method == "GET" && path == "/api/proxy/certs":
 			handler.ListProxyCerts(w, r)
+		case r.Method == "POST" && path == "/api/proxy/backup":
+			handler.ProxyBackup(w, r)
+		case r.Method == "POST" && path == "/api/proxy/restore":
+			handler.ProxyRestore(w, r)
 		case r.Method == "GET" && path == "/api/proxy/access-lists":
 			handler.ListProxyAccessLists(w, r)
 		case r.Method == "POST" && path == "/api/proxy/access-lists":

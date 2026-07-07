@@ -356,6 +356,26 @@ export const fetchProxyCerts    = ()         => api.get('/proxy/certs').then(r =
 export const fetchProxyPlugins  = ()         => api.get('/settings/proxy/plugins').then(r => r.data)
 export const updateProxyPlugins = (body)     => api.post('/settings/proxy/plugins', body).then(r => r.data)
 export const setProxyGeoIPDB    = (token)    => api.post('/settings/proxy/geoip', { token }).then(r => r.data)
+// Backup: POST returns the .rpb bundle as a blob; trigger a browser download.
+export const proxyBackup = async (certScope, passphrase) => {
+  const res = await api.post('/proxy/backup', { cert_scope: certScope, passphrase }, { responseType: 'blob' })
+  const cd = res.headers?.['content-disposition'] || ''
+  const m = /filename="?([^"]+)"?/.exec(cd)
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = m ? m[1] : 'proxy-backup.rpb'
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+}
+// Restore: multipart upload of a .rpb bundle → returns a summary of what was imported.
+export const proxyRestore = (file, passphrase, replaceExisting) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (passphrase) fd.append('passphrase', passphrase)
+  fd.append('replace_existing', replaceExisting ? 'true' : 'false')
+  return api.post('/proxy/restore', fd).then(r => r.data)
+}
 export const fetchProxyAccessLists  = ()         => api.get('/proxy/access-lists').then(r => r.data)
 export const createProxyAccessList  = (body)     => api.post('/proxy/access-lists', body).then(r => r.data)
 export const updateProxyAccessList  = (id, body) => api.put(`/proxy/access-lists/${id}`, body).then(r => r.data)
@@ -625,6 +645,15 @@ export const checkUpdates = (force = false) => api.get(`/updates/check${force ? 
 // Apply an update / roll back to the previous version (self-update Phase 3; admin). Rigger restarts.
 export const applyUpdate = (tag) => api.post('/updates/apply', tag ? { tag } : {}).then(r => r.data)
 export const rollbackUpdate = () => api.post('/updates/rollback', {}).then(r => r.data)
+
+// Docker Engine versions for the local daemon + every registered host, and the
+// latest published engine release (admin). Drives the "update available" hints.
+export const dockerVersions = () => api.get('/docker/versions').then(r => r.data)
+// Launch a detached, over-SSH Docker Engine update on a host (admin). Returns
+// { is_rigger_host } so the UI knows whether Rigger itself will restart.
+export const dockerUpdate = (hostId) => api.post('/docker/update', { host_id: hostId }).then(r => r.data)
+// Poll the update's on-host log + current version (admin).
+export const dockerUpdateStatus = (hostId) => api.get(`/docker/update/status?host_id=${hostId}`).then(r => r.data)
 
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {
