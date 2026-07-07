@@ -978,6 +978,8 @@ func main() {
 			handler.HostStats(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/test"):
 			handler.TestHost(w, r)
+		case r.Method == "POST" && hasSuffix(path, "/workspaces-dir"):
+			handler.CreateHostWorkspacesDir(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/build-only"):
 			handler.SetHostBuildOnly(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/scan"):

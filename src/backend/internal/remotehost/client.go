@@ -131,6 +131,26 @@ func (c *Client) ListDir(dir string) ([]string, error) {
 	return names, nil
 }
 
+// DirExists reports whether path is a directory on the remote host. The `test`
+// exit code is folded into an echo so a non-existent dir isn't a command error.
+func (c *Client) DirExists(path string) (bool, error) {
+	out, err := c.RunCombined("test -d " + shQuote(path) + " && echo __yes__ || echo __no__")
+	if err != nil {
+		return false, err
+	}
+	fields := strings.Fields(out)
+	return len(fields) > 0 && fields[len(fields)-1] == "__yes__", nil
+}
+
+// MkdirAll creates path and any missing parents on the remote host (`mkdir -p`).
+func (c *Client) MkdirAll(path string) error {
+	out, err := c.RunCombined("mkdir -p " + shQuote(path))
+	if err != nil {
+		return fmt.Errorf("mkdir -p %s: %w: %s", path, err, strings.TrimSpace(out))
+	}
+	return nil
+}
+
 // ReadFile returns the raw contents of a file on the remote host (`cat`).
 func (c *Client) ReadFile(path string) ([]byte, error) {
 	out, err := c.output("cat " + shQuote(path))

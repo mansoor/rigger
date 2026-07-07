@@ -17,7 +17,7 @@ import {
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
   fetchManagedMetrics, managedMetricsAction,
-  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats,
+  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, createHostWorkspacesDir,
   fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
   dockerVersions, dockerUpdate, dockerUpdateStatus,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
@@ -522,29 +522,58 @@ function HostsTab() {
   const { data: workspaces = [] } = useQuery({ queryKey: ['workspaces'], queryFn: fetchWorkspaces })
   const [modal, setModal]       = useState(null)
   const [deleting, setDeleting] = useState(null)
-  const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, msg, error }
+  const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, msg, error, dirMissing, dir, dirBusy }
   const [scanning, setScanning] = useState(null)    // host being scanned (modal)
   const [health, setHealth]     = useState(null)    // host whose health is shown (modal)
+  const [postSave, setPostSave] = useState(null)    // { tone, msg } banner after adding a host
 
   const saveMut = useMutation({
     mutationFn: ({ id, body }) => id ? updateHost(id, body) : createHost(body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['hosts'] }); setModal(null) },
+    onSuccess: (data, vars) => {
+      qc.invalidateQueries({ queryKey: ['hosts'] }); setModal(null)
+      if (vars.id) return // edit — no connectivity banner
+      // Report what the create-time connectivity check found.
+      if (data?.connect_error || data?.connected === false) {
+        setPostSave({ tone: 'warn', msg: `Host added, but Rigger couldn’t fully set it up: ${data.connect_error || 'connection failed'}. Did you run the authorize command on the host? Fix it and click Test.` })
+      } else if (data?.workspaces_dir_created) {
+        setPostSave({ tone: 'ok', msg: `Host added — connected and created the workspaces directory (${data.workspaces_dir}).` })
+      } else {
+        setPostSave({ tone: 'ok', msg: 'Host added — connected. Workspaces directory is ready.' })
+      }
+      setTimeout(() => setPostSave(null), 12000)
+    },
   })
   const delMut = useMutation({
     mutationFn: (id) => deleteHost(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['hosts'] }); setDeleting(null) },
   })
 
+  const clearTestSoon = (id) => setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+
   async function handleTest(id) {
     setTestStatus(s => ({ ...s, [id]: { loading: true } }))
     try {
       const res = await testHost(id)
-      if (res.status === 'ok') setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message } }))
-      else setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } }))
+      if (res.status === 'ok') {
+        const dirMissing = res.workspaces_dir_exists === false
+        setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message, dirMissing, dir: res.workspaces_dir } }))
+        if (!dirMissing) clearTestSoon(id) // keep the prompt visible until acted on
+      } else {
+        setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } })); clearTestSoon(id)
+      }
     } catch (err) {
-      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } }))
+      setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } })); clearTestSoon(id)
     }
-    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+  }
+
+  async function handleCreateDir(id) {
+    setTestStatus(s => ({ ...s, [id]: { ...s[id], dirBusy: true } }))
+    try {
+      const res = await createHostWorkspacesDir(id)
+      setTestStatus(s => ({ ...s, [id]: { ok: true, msg: `Workspaces directory created (${res.workspaces_dir}).` } })); clearTestSoon(id)
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { ...s[id], dirBusy: false, error: err.response?.data?.error || 'Couldn’t create directory' } }))
+    }
   }
 
   function handleSave(body) {
@@ -562,6 +591,13 @@ function HostsTab() {
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add host</Btn>
       </div>
+
+      {postSave && (
+        <div className={`mb-4 rounded-lg px-3 py-2 text-sm border flex items-start justify-between gap-3 ${postSave.tone === 'warn' ? 'bg-warning-subtle/40 border-warning-border/60 text-warning-fg' : 'bg-success-subtle/40 border-success-border/60 text-success-fg'}`}>
+          <span>{postSave.msg}</span>
+          <button onClick={() => setPostSave(null)} className="shrink-0 opacity-70 hover:opacity-100">×</button>
+        </div>
+      )}
 
       {hosts.length === 0 ? (
         <EmptyState
@@ -591,7 +627,16 @@ function HostsTab() {
                 </div>
                 <div className="flex items-center gap-2">
                   {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
-                  {ts?.ok && <span className="text-xs text-success-fg max-w-[200px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                  {ts?.ok && !ts.dirMissing && <span className="text-xs text-success-fg max-w-[200px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                  {ts?.ok && ts.dirMissing && (
+                    <span className="text-xs text-warning-fg flex items-center gap-1.5" title={`Rigger workspaces directory does not exist on the remote: ${ts.dir}`}>
+                      ✓ Connected · workspaces dir missing
+                      <button onClick={() => handleCreateDir(host.id)} disabled={ts.dirBusy}
+                        className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                        {ts.dirBusy ? 'Creating…' : 'Create it now'}
+                      </button>
+                    </span>
+                  )}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setHealth(host)}>Health</Btn>
@@ -2421,19 +2466,32 @@ function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
             : <>Docker {row.server_version || '—'}{row.update_available && latestClean && <> → {latestClean}</>}{os && <> · {os}</>}</>}
         </p>
       </div>
-      <div className="shrink-0">
-        {onUpdate ? (
-          <button onClick={onUpdate}
-            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
-            Update Docker
-          </button>
-        ) : isLocal && !updatableVia && row.reachable ? (
-          <span className="text-[11px] text-content-faint" title="Rigger runs in a container and can't update its host's daemon directly. Register this machine as a host (SSH + sudo) to update it here, or run: curl -fsSL https://get.docker.com | sudo sh">register as host to update</span>
-        ) : row.reachable && !row.linux ? (
-          <span className="text-[11px] text-content-faint">Linux only</span>
-        ) : row.reachable && !row.sudo_ok && row.host_id > 0 ? (
-          <span className="text-[11px] text-content-faint">needs sudo</span>
-        ) : null}
+      <div className="shrink-0 text-right">
+        {(() => {
+          const latestKnown = !!latest
+          const current = latestKnown && !row.update_available && row.reachable && !row.is_desktop
+          // A host we can update in place (Linux + sudo, or the local daemon via a
+          // registered self-host). Only OFFER the button when an update actually
+          // exists — or when we couldn't determine the latest release (can't confirm
+          // it's current). Otherwise say so, rather than a misleading Update button.
+          if (onUpdate) {
+            if (row.update_available || !latestKnown) {
+              return <button onClick={onUpdate}
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+                Update Docker
+              </button>
+            }
+            return <span className="text-[11px] text-success-fg">✓ Up to date</span>
+          }
+          // Local daemon with no SSH path to update it in place.
+          if (isLocal && !updatableVia && row.reachable) {
+            if (current) return <span className="text-[11px] text-success-fg">✓ Up to date</span>
+            return <span className="text-[11px] text-content-faint" title="Rigger runs in a container and can't update its host's daemon directly. Register this machine as a host (SSH + sudo) to update it here, or run: curl -fsSL https://get.docker.com | sudo sh">register as host to update</span>
+          }
+          if (row.reachable && !row.linux) return <span className="text-[11px] text-content-faint">Linux only</span>
+          if (row.reachable && !row.sudo_ok && row.host_id > 0) return <span className="text-[11px] text-content-faint">needs sudo</span>
+          return null
+        })()}
       </div>
     </div>
   )
@@ -2518,9 +2576,9 @@ function DockerUpdateModal({ target, onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-content-strong">Update Docker · {target.name}</h3>
-          {(step === 'confirm' || step === 'result') && (
-            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
-          )}
+          {/* Always closable — the update runs detached on the host, so dismissing
+              this dialog never aborts it. */}
+          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
         </div>
 
         {step === 'confirm' && (
@@ -2555,6 +2613,7 @@ function DockerUpdateModal({ target, onClose }) {
             </div>
             <p className="text-xs text-content-faint">{elapsed < 60 ? 'Reconnect polling begins at 1:00…' : 'Polling for the server to respond…'}</p>
             {status?.log && <pre className="text-[11px] text-left whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-3 max-h-40 overflow-y-auto text-content">{status.log}</pre>}
+            <div className="flex justify-center"><Btn variant="ghost" onClick={onClose}>Close — the update keeps running</Btn></div>
           </div>
         )}
 
@@ -2565,6 +2624,10 @@ function DockerUpdateModal({ target, onClose }) {
               Updating Docker on {target.name}…
             </div>
             <pre className="text-[11px] whitespace-pre-wrap break-words bg-surface-raised border border-border rounded-lg p-3 max-h-64 overflow-y-auto text-content min-h-[4rem]">{status?.log || 'Waiting for output…'}</pre>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-content-faint">Runs on the host — safe to close and Refresh.</p>
+              <Btn variant="ghost" onClick={onClose}>Close</Btn>
+            </div>
           </div>
         )}
 

@@ -130,7 +130,12 @@ func (h *Handler) DockerVersions(w http.ResponseWriter, r *http.Request) {
 
 // dockerProbeCmd gathers, in one round trip, the daemon's OS/version/ID and
 // whether passwordless sudo (or root) is available for a later update.
-const dockerProbeCmd = `echo "@@INFO@@"; docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@END@@"`
+// timeout 8 guards every remote `docker` call: the daemon can be mid-restart
+// (e.g. right after an in-place update) and a bare `docker info` would block the
+// SSH command — and RunCombined has no deadline — wedging the status poll exactly
+// when it should report completion. If `timeout` is absent it fails fast (127),
+// which is harmless (empty field), never a hang.
+const dockerProbeCmd = `echo "@@INFO@@"; timeout 8 docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@END@@"`
 
 type dockerProbe struct {
 	osType, operatingSystem, serverVersion, daemonID string
@@ -338,7 +343,7 @@ func (h *Handler) DockerUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 // dockerPreflightCmd checks Linux/desktop, a downloader, and sudo up front.
-const dockerPreflightCmd = `echo "@@INFO@@"; docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@TOOLS@@"; command -v curl >/dev/null 2>&1 && echo curl; command -v wget >/dev/null 2>&1 && echo wget; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@END@@"`
+const dockerPreflightCmd = `echo "@@INFO@@"; timeout 8 docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@TOOLS@@"; command -v curl >/dev/null 2>&1 && echo curl; command -v wget >/dev/null 2>&1 && echo wget; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@END@@"`
 
 type dockerPreflight struct {
 	osType, operatingSystem, daemonID string
@@ -405,7 +410,9 @@ func (h *Handler) DockerUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rh.Close()
 
-	out, _ := rh.RunCombined(`echo "@@LOG@@"; cat ` + dockerUpdateLog + ` 2>/dev/null; echo "@@VER@@"; docker info --format '{{.ServerVersion}}' 2>/dev/null; echo "@@END@@"`)
+	// The log (with the completion sentinel) is read FIRST and can't hang; the
+	// version probe is bounded so a daemon mid-restart can't block the whole poll.
+	out, _ := rh.RunCombined(`echo "@@LOG@@"; cat ` + dockerUpdateLog + ` 2>/dev/null; echo "@@VER@@"; timeout 8 docker info --format '{{.ServerVersion}}' 2>/dev/null; echo "@@END@@"`)
 	logText, ver := parseUpdateStatus(out)
 
 	done, rc := false, 0

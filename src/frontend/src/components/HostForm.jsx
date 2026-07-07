@@ -65,9 +65,29 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
     ? `mkdir -p ~/.ssh && echo '${pubKey}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`
     : ''
 
-  function copy(text) {
-    navigator.clipboard?.writeText(text)
-    setCopied(true); setTimeout(() => setCopied(false), 2000)
+  // navigator.clipboard is only available in secure contexts (HTTPS/localhost) —
+  // over plain HTTP (a self-hosted box on a LAN IP) it's undefined and the copy
+  // silently no-ops. Fall back to a hidden textarea + execCommand so Copy works
+  // everywhere; surface an error if even that fails so the user knows to select
+  // the command manually.
+  async function copy(text) {
+    let ok = false
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); ok = true }
+    } catch { /* fall through to the legacy path */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.focus(); ta.select()
+        ok = document.execCommand('copy')
+        ta.remove()
+      } catch { ok = false }
+    }
+    if (ok) { setError(''); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+    else { setError('Couldn’t copy automatically — select the command above and copy it manually.') }
   }
 
   function toggleGrant(k) {

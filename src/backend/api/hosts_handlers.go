@@ -114,6 +114,18 @@ func (h *Handler) managedKey() (pub, privEnc string, err error) {
 	return line, privEnc, nil
 }
 
+// hostSaveResp is the create response: the host, plus whether Rigger could reach
+// it and the state of its remote workspaces directory. Embedding *settings.Host
+// keeps the host's own fields at the top level for existing consumers.
+type hostSaveResp struct {
+	*settings.Host
+	Connected            bool   `json:"connected"`
+	ConnectError         string `json:"connect_error,omitempty"`
+	WorkspacesDir        string `json:"workspaces_dir,omitempty"`
+	WorkspacesDirExists  bool   `json:"workspaces_dir_exists"`
+	WorkspacesDirCreated bool   `json:"workspaces_dir_created"`
+}
+
 // GET /api/hosts/managed-key — the Rigger-managed public key to install on a host.
 func (h *Handler) ManagedHostKey(w http.ResponseWriter, r *http.Request) {
 	pub, _, err := h.managedKey()
@@ -172,7 +184,57 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 		host.BuildOnly = true
 	}
 	host.Grants, _ = settings.HostGrants(h.db, host.ID)
-	writeJSON(w, http.StatusCreated, host)
+
+	// Verify reachability and provision the remote workspaces directory. On a
+	// fresh host the operator has (hopefully) just installed the key — if we can
+	// connect, create the workspaces dir now so scan/deploy work immediately. If we
+	// can't connect, the host is still saved (they can fix the key and Test later);
+	// the response tells the UI to warn.
+	resp := hostSaveResp{Host: host, WorkspacesDir: h.hostWorkspacesDir(host)}
+	if rh, derr := h.dialHost(host.ID); derr != nil {
+		resp.ConnectError = derr.Error()
+	} else {
+		resp.Connected = true
+		if exists, _ := rh.DirExists(resp.WorkspacesDir); exists {
+			resp.WorkspacesDirExists = true
+		} else if merr := rh.MkdirAll(resp.WorkspacesDir); merr != nil {
+			resp.ConnectError = "connected, but couldn't create the workspaces directory " + resp.WorkspacesDir + ": " + merr.Error()
+		} else {
+			resp.WorkspacesDirExists = true
+			resp.WorkspacesDirCreated = true
+		}
+		rh.Close()
+	}
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// POST /api/hosts/{id}/workspaces-dir — dial the host and create its effective
+// remote workspaces directory (mkdir -p). Used by the Test flow's "create it now"
+// prompt when the directory is missing.
+func (h *Handler) CreateHostWorkspacesDir(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimSuffix(r.URL.Path, "/workspaces-dir")
+	id, err := parseSettingsID(path, "/api/hosts/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
+		return
+	}
+	rh, err := h.dialHost(id)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "can't reach host over SSH: " + err.Error()})
+		return
+	}
+	defer rh.Close()
+	dir := h.hostWorkspacesDir(host)
+	if err := rh.MkdirAll(dir); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "couldn't create " + dir + ": " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "workspaces_dir": dir, "created": true})
 }
 
 // PUT /api/hosts/{id} — admin update, including the workspace allowlist (grants)
@@ -272,10 +334,19 @@ func (h *Handler) testHostByID(w http.ResponseWriter, id int64) {
 		swarmState, swarmManager = parseSwarmInfo(info)
 		_ = settings.SetHostCapability(h.db, id, swarmState, swarmManager) //nolint:errcheck
 	}
+	// Also report whether the remote workspaces directory exists — a successful
+	// connection with a missing dir is the case the UI prompts to fix.
+	wsDir, wsExists := "", false
+	if host, _ := settings.GetHost(h.db, id); host != nil {
+		wsDir = h.hostWorkspacesDir(host)
+		wsExists, _ = rh.DirExists(wsDir)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok",
-		"message":       "Connected — Docker " + strings.TrimSpace(out),
-		"swarm_state":   swarmState,
-		"swarm_manager": swarmManager})
+		"message":               "Connected — Docker " + strings.TrimSpace(out),
+		"swarm_state":           swarmState,
+		"swarm_manager":         swarmManager,
+		"workspaces_dir":        wsDir,
+		"workspaces_dir_exists": wsExists})
 }
 
 // POST /api/hosts/{id}/build-only — admin: mark/unmark a host as a dedicated

@@ -526,6 +526,8 @@ export const createHost = (body)     => api.post('/hosts', body).then(r => r.dat
 export const updateHost = (id, body) => api.put(`/hosts/${id}`, body).then(r => r.data)
 export const deleteHost = (id)       => api.delete(`/hosts/${id}`)
 export const testHost   = (id)       => api.post(`/hosts/${id}/test`).then(r => r.data)
+// Create the remote workspaces directory on a host (mkdir -p over SSH).
+export const createHostWorkspacesDir = (id) => api.post(`/hosts/${id}/workspaces-dir`).then(r => r.data)
 export const fetchManagedHostKey = () => api.get('/hosts/managed-key').then(r => r.data)
 export const scanHost   = (id)       => api.post(`/hosts/${id}/scan`).then(r => r.data)
 export const importHost = (id, workspaces) => api.post(`/hosts/${id}/import`, { workspaces }).then(r => r.data)
@@ -652,8 +654,10 @@ export const dockerVersions = () => api.get('/docker/versions').then(r => r.data
 // Launch a detached, over-SSH Docker Engine update on a host (admin). Returns
 // { is_rigger_host } so the UI knows whether Rigger itself will restart.
 export const dockerUpdate = (hostId) => api.post('/docker/update', { host_id: hostId }).then(r => r.data)
-// Poll the update's on-host log + current version (admin).
-export const dockerUpdateStatus = (hostId) => api.get(`/docker/update/status?host_id=${hostId}`).then(r => r.data)
+// Poll the update's on-host log + current version (admin). A per-request timeout
+// keeps the poll loop alive even if one status call is slow (e.g. the host's
+// daemon is briefly mid-restart) — a stuck request rejects and the loop retries.
+export const dockerUpdateStatus = (hostId) => api.get(`/docker/update/status?host_id=${hostId}`, { timeout: 20000 }).then(r => r.data)
 
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {
