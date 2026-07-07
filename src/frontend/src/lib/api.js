@@ -156,6 +156,15 @@ export const downloadContainerFile = async (ws, name, env, svc, path) => {
 export const fetchEnvMetrics    = (ws, name, env, minutes = 60) => api.get(`${projBase(ws, name)}/envs/${env}/metrics`, { params: { minutes } }).then(r => r.data)
 export const fetchMetricsConfig = ()         => api.get('/metrics/config').then(r => r.data)
 export const fetchActivity     = (ws, name)      => api.get(`${projBase(ws, name)}/activity`).then(r => r.data)
+
+// Project Wiki / Notes — multiple named Markdown docs, rendered server-side (no
+// frontend md lib). The list is metadata only; content is fetched per note.
+export const fetchProjectNotes  = (ws, name)              => api.get(`${projBase(ws, name)}/notes`).then(r => r.data)
+export const fetchProjectNote   = (ws, name, id)          => api.get(`${projBase(ws, name)}/notes/${id}`).then(r => r.data)
+export const createProjectNote  = (ws, name, noteName)    => api.post(`${projBase(ws, name)}/notes`, { name: noteName }).then(r => r.data)
+export const saveProjectNote    = (ws, name, id, content, noteName) => api.put(`${projBase(ws, name)}/notes/${id}`, noteName !== undefined ? { content, name: noteName } : { content }).then(r => r.data)
+export const deleteProjectNote  = (ws, name, id)          => api.delete(`${projBase(ws, name)}/notes/${id}`).then(r => r.data)
+export const renderProjectNotes = (ws, name, content)     => api.post(`${projBase(ws, name)}/notes/render`, { content }).then(r => r.data)
 export const fetchDeployHistory = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/deploy-history`).then(r => r.data)
 export const rollbackEnv        = (ws, name, env, toId)  => api.post(`${projBase(ws, name)}/envs/${env}/rollback`, { to_id: toId }).then(r => r.data)
 export const fetchImageStatus   = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/image-status`).then(r => r.data)

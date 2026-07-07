@@ -1155,6 +1155,12 @@ func main() {
 	// Release-pipeline #4: explicit env deploy-tier order (drives auto-seeded pipelines).
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.GetEnvOrder)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/env-order", authSvc.Middleware(http.HandlerFunc(handler.PutEnvOrder)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/notes", authSvc.Middleware(http.HandlerFunc(handler.ListProjectNotes)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/notes", authSvc.Middleware(http.HandlerFunc(handler.CreateProjectNote)))
+	mux.Handle("POST /api/workspaces/{workspace}/projects/{name}/notes/render", authSvc.Middleware(http.HandlerFunc(handler.RenderProjectNotes)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.GetProjectNote)))
+	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.UpdateProjectNote)))
+	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.DeleteProjectNote)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/build-host", authSvc.Middleware(http.HandlerFunc(handler.GetProjectBuildHost)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/build-host", authSvc.Middleware(http.HandlerFunc(handler.SetProjectBuildHost)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/build-pipeline", authSvc.Middleware(http.HandlerFunc(handler.SetBuildPipeline)))

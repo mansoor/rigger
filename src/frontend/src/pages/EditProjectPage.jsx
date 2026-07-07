@@ -8,6 +8,7 @@ import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
 import VerticalTabs from '../components/VerticalTabs'
 import PipelinesTab from '../components/PipelinesTab'
 import PreviewEnvironmentsTab from '../components/PreviewEnvironmentsTab'
+import ProjectNotesTab from '../components/ProjectNotesTab'
 import RegistryPicker from '../components/RegistryPicker'
 import GitProviderPicker from '../components/GitProviderPicker'
 import DatabaseSelect from '../components/DatabaseSelect'
@@ -2701,6 +2702,7 @@ export default function EditProjectPage() {
             { id: 'backup', label: 'Backup', icon: '💾' },
             { id: 'pipelines', label: 'Pipelines', icon: '🚀' },
             { id: 'previews', label: 'Preview Envs', icon: '🔀' },
+            { id: 'notes', label: 'Notes', icon: '📝' },
             { group: 'Project' },
             { id: 'danger', label: 'Danger Zone', icon: '⚠', danger: true },
           ]}
@@ -2936,6 +2938,7 @@ export default function EditProjectPage() {
         {/* Pipelines (Phase 9) */}
         {tab === 'pipelines' && <PipelinesTab workspace={workspace} name={name} envNames={currentEnvNames} serviceNames={(images || []).map(img => img.name).filter(Boolean)} />}
         {tab === 'previews' && <PreviewEnvironmentsTab workspace={workspace} name={name} envNames={currentEnvNames} />}
+        {tab === 'notes' && <ProjectNotesTab workspace={workspace} name={name} />}
 
         {/* Danger zone */}
         {tab === 'danger' && <DangerZone name={name} />}
