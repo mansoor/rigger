@@ -1204,7 +1204,7 @@ function WorkspaceBackup() {
   // Shared
   const [selectedWs, setSelectedWs]   = useState('')
 
-  // Configuration snapshot (.rws) state
+  // Configuration snapshot (.rps) state
   const [snapName, setSnapName]         = useState('')
   const [snapBusy, setSnapBusy]         = useState(false)
   const [snapMsg, setSnapMsg]           = useState(null) // { ok, text }
@@ -1212,7 +1212,7 @@ function WorkspaceBackup() {
   const [rollingBack, setRollingBack]   = useState({})
   const [snapUploading, setSnapUploading] = useState(false)
 
-  // Full backup (.rwb) state
+  // Full backup (.rpb) state
   const [bkpName, setBkpName]               = useState('')    // optional custom backup filename
   const [activeJobId, setActiveJobId]       = useState(null)  // job ID string while running
   const [backupErr, setBackupErr]           = useState(null)
@@ -1223,7 +1223,7 @@ function WorkspaceBackup() {
   const [restoringArchive, setRestoringArchive] = useState({})
   const [archiveUploading, setArchiveUploading] = useState(false)
 
-  // Project list for the selected workspace (the .rwb/.rws tools operate per project).
+  // Project list for the selected workspace (the .rpb/.rps tools operate per project).
   const { data: workspaces = [] } = useQuery({
     queryKey: ['projects', currentWs],
     queryFn: () => fetchProjects(currentWs),
@@ -1350,7 +1350,7 @@ function WorkspaceBackup() {
     }
   }
 
-  // Upload a .rwb to the server — it joins the list, then restore it like any other.
+  // Upload a .rpb to the server — it joins the list, then restore it like any other.
   async function uploadArchive(f) {
     if (!f) return
     setArchiveUploading(true); setBkpMsg(null)
@@ -1456,9 +1456,9 @@ function WorkspaceBackup() {
       {/* Intro */}
       <div className="bg-surface-raised/50 border border-border-strong/60 rounded-xl p-4 text-sm text-content-muted leading-relaxed">
         Pick a workspace, then take a lightweight <strong className="text-content">configuration snapshot</strong>{' '}
-        (<code className="font-mono text-xs">.rws</code> — <code className="font-mono text-xs">config.json</code> + each{' '}
+        (<code className="font-mono text-xs">.rps</code> — <code className="font-mono text-xs">config.json</code> + each{' '}
         <code className="font-mono text-xs">.env</code>, no data) or a <strong className="text-content">full backup</strong>{' '}
-        (<code className="font-mono text-xs">.rwb</code> — config, env files, and the latest backup snapshot per env). Both can be downloaded, uploaded
+        (<code className="font-mono text-xs">.rpb</code> — config, env files, and the latest backup snapshot per env). Both can be downloaded, uploaded
         and restored on the server.
       </div>
 
@@ -1478,10 +1478,10 @@ function WorkspaceBackup() {
 
       {/* Two consistent panels */}
       <div className="grid grid-cols-2 gap-6 items-start">
-        {/* ── Configuration snapshot (.rws) ── */}
+        {/* ── Configuration snapshot (.rps) ── */}
         <section className="space-y-3">
           <div>
-            <h3 className="text-base font-semibold text-content-strong">Configuration snapshot <span className="text-xs font-normal text-content-faint">.rws</span></h3>
+            <h3 className="text-base font-semibold text-content-strong">Configuration snapshot <span className="text-xs font-normal text-content-faint">.rps</span></h3>
             <Hint className="text-sm mt-1">
               Just <code className="font-mono text-xs">config.json</code> and each env's{' '}
               <code className="font-mono text-xs">.env</code> (secrets included). No volume data — fast to take, easy to roll back.
@@ -1496,7 +1496,7 @@ function WorkspaceBackup() {
               <input
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
-                placeholder={selectedWs ? `${currentWs}_${selectedWs}_<timestamp>.rws` : 'auto: <workspace>_<project>_<timestamp>.rws'}
+                placeholder={selectedWs ? `${currentWs}_${selectedWs}_<timestamp>.rps` : 'auto: <workspace>_<project>_<timestamp>.rps'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1528,29 +1528,29 @@ function WorkspaceBackup() {
           </SavedList>
 
           {/* Bring a snapshot in from elsewhere */}
-          <DropZone onFile={uploadSnapshot} accept=".rws" busy={snapUploading}
+          <DropZone onFile={uploadSnapshot} accept=".rps,.rws" busy={snapUploading}
             busyLabel="Uploading snapshot…"
-            hint="↑ Drop a .rws snapshot here, or click to browse" />
+            hint="↑ Drop a .rps snapshot here, or click to browse" />
 
           {/* Snapshot-specific guidance */}
           <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Rolling back configuration</p>
             <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
               <li>Click <strong className="text-content-muted">Roll back</strong> on a snapshot to overwrite the project's <code className="font-mono text-content-muted">config.json</code> and every <code className="font-mono text-content-muted">.env</code></li>
-              <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-content-muted">.rws</code> above — it joins the list, then roll back to it</li>
+              <li>To use a snapshot from elsewhere, drop the <code className="font-mono text-content-muted">.rps</code> above — it joins the list, then roll back to it</li>
               <li>If a secret (DB password, API key…) changed since the snapshot, update it afterward and redeploy</li>
               <li>Volume data is never touched — use a full backup for that</li>
             </ol>
           </div>
         </section>
 
-        {/* ── Full backup (.rwb) ── */}
+        {/* ── Full backup (.rpb) ── */}
         <section className="space-y-3">
           <div>
-            <h3 className="text-base font-semibold text-content-strong">Full backup <span className="text-xs font-normal text-content-faint">.rwb</span></h3>
+            <h3 className="text-base font-semibold text-content-strong">Full backup <span className="text-xs font-normal text-content-faint">.rpb</span></h3>
             <Hint className="text-sm mt-1">
               Config + env files + the <strong className="text-content-muted">most recent backup snapshot per env</strong> (older snapshots excluded).
-              Larger than a config snapshot; restoring re-creates the whole workspace.
+              Larger than a config snapshot; restoring re-creates the whole project.
             </Hint>
           </div>
 
@@ -1562,7 +1562,7 @@ function WorkspaceBackup() {
               <input
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
-                placeholder={selectedWs ? `${currentWs}_${selectedWs}-<timestamp>.rwb` : 'auto: <workspace>_<project>-<timestamp>.rwb'}
+                placeholder={selectedWs ? `${currentWs}_${selectedWs}-<timestamp>.rpb` : 'auto: <workspace>_<project>-<timestamp>.rpb'}
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1637,16 +1637,16 @@ function WorkspaceBackup() {
           </SavedList>
 
           {/* Bring a backup in from elsewhere */}
-          <DropZone onFile={uploadArchive} accept=".rwb,.tar.gz,.gz" busy={archiveUploading}
+          <DropZone onFile={uploadArchive} accept=".rpb,.rwb,.tar.gz,.gz" busy={archiveUploading}
             busyLabel="Uploading backup…"
-            hint="↑ Drop a .rwb backup here, or click to browse" />
+            hint="↑ Drop a .rpb backup here, or click to browse" />
 
           {/* Backup-specific guidance */}
           <div className="bg-surface-raised/30 border border-border-strong/40 rounded-xl p-4 space-y-2">
             <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider">Restoring a full backup</p>
             <ol className="text-xs text-content-subtle space-y-1 list-decimal list-inside">
               <li>Stop the project's containers if it already exists</li>
-              <li>To use a backup from elsewhere, drop the <code className="font-mono text-content-muted">.rwb</code> above — it joins the list</li>
+              <li>To use a backup from elsewhere, drop the <code className="font-mono text-content-muted">.rpb</code> above — it joins the list</li>
               <li>Click <strong className="text-content-muted">Restore</strong> on a backup row (an existing project is replaced)</li>
               <li>The project appears in the sidebar immediately</li>
               <li>Run <code className="font-mono text-content-muted">./run.sh refresh &lt;env&gt;</code> to regenerate compose files, then redeploy</li>

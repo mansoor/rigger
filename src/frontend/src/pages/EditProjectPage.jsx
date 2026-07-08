@@ -357,7 +357,18 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         <>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Dockerfile template</Label>
-            <Select value={img.build?.template || ''} onChange={v => upd('build', { ...(img.build || {}), template: v })} options={buildTemplates} />
+            <Select value={img.build?.template || ''} onChange={v => {
+              const next = { ...img, build: { ...(img.build || {}), template: v } }
+              // Pre-fill the in-image .env mount for templates with a known app root,
+              // so the path isn't left blank and typo'd — a wrong/blank mount silently
+              // breaks the app's environment (a Laravel app then 500s on APP_KEY).
+              const knownMounts = { laravel: '/var/www/html/.env' }
+              if (knownMounts[v] && !(img.env_file_mount || '').trim()) {
+                next.env_file_mount = knownMounts[v]
+                next.env_file = true
+              }
+              onUpdate(idx, next)
+            }} options={buildTemplates} />
             <Hint>Scaffolds a starter Dockerfile; replace with your own via repo sync.</Hint></div>
           <div><Label>Build context</Label>
             <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
@@ -426,12 +437,17 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               <Toggle inline label="App owns .env (writable)"
                 checked={!!img.env_file_writable}
                 onChange={v => upd('env_file_writable', v)} />
-              <Hint className="self-center">
-                Bind the .env writable (not read-only) and skip process-env injection, so an app
-                that writes its own <code className="font-mono text-xs">.env</code> at runtime — a
-                CodeCanyon installer setting <code className="font-mono text-xs">INSTALLED=true</code> —
-                persists. Rigger still re-asserts managed DB/Redis/storage keys on redeploy.
-              </Hint>
+              {/* Wrapped in a div so this grid cell always exists — <Hint> renders
+                  null when help-text is off, which would drop the cell and shift
+                  every following toggle/input into the wrong column. */}
+              <div className="self-center">
+                <Hint>
+                  Bind the .env writable (not read-only) and skip process-env injection, so an app
+                  that writes its own <code className="font-mono text-xs">.env</code> at runtime — a
+                  CodeCanyon installer setting <code className="font-mono text-xs">INSTALLED=true</code> —
+                  persists. Rigger still re-asserts managed DB/Redis/storage keys on redeploy.
+                </Hint>
+              </div>
             </>
           : null}
 

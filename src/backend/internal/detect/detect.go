@@ -9,6 +9,8 @@
 package detect
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io/fs"
 	"os"
@@ -376,6 +378,20 @@ func Detect(repoDir string, overlays []string) Draft {
 	// Seed env vars from .env.example so the env's .env carries the app's expected
 	// keys (and ${VAR:-default} refs in compose `environment:` resolve at deploy).
 	d.EnvVars = parseDotenv(repoDir)
+	if d.EnvVars == nil {
+		d.EnvVars = map[string]string{}
+	}
+
+	// Laravel requires a stable APP_KEY or every request 500s with
+	// MissingAppKeyException — but .env.example ships it blank. Seed a correctly
+	// formatted key (base64:<32 bytes>) as a saved env var so it persists across
+	// deploys (unlike a per-boot `php artisan key:generate`).
+	if isLaravelRepo(repoDir) && strings.TrimSpace(strings.TrimPrefix(d.EnvVars["APP_KEY"], "base64:")) == "" {
+		if b := make([]byte, 32); readRand(b) {
+			d.EnvVars["APP_KEY"] = "base64:" + base64.StdEncoding.EncodeToString(b)
+			d.Notes = append(d.Notes, "Generated a Laravel APP_KEY — the app 500s without one (MissingAppKeyException).")
+		}
+	}
 
 	// 1. An existing compose file is authoritative.
 	if cf := findFirst(repoDir, "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"); cf != "" {
@@ -1017,6 +1033,22 @@ func volHostPart(v string) string {
 		return v[:i]
 	}
 	return v
+}
+
+// isLaravelRepo reports whether the repo is a Laravel app (mirrors identify's
+// laravel signal): an `artisan` console file, or a composer.json requiring laravel.
+func isLaravelRepo(dir string) bool {
+	if fileExists(filepath.Join(dir, "artisan")) {
+		return true
+	}
+	cj := filepath.Join(dir, "composer.json")
+	return fileExists(cj) && strings.Contains(readFile(cj), "laravel")
+}
+
+// readRand fills b with cryptographic randomness, reporting success.
+func readRand(b []byte) bool {
+	_, err := rand.Read(b)
+	return err == nil
 }
 
 // ── Dockerfiles ──────────────────────────────────────────────────────────────

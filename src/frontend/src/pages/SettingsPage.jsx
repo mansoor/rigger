@@ -172,7 +172,7 @@ function BackupTargetsTab() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-base font-semibold text-content-strong">Backup Targets</h2>
-          <Hint className="text-sm mt-0.5">S3-compatible object storage and SFTP destinations for workspace backups.</Hint>
+          <Hint className="text-sm mt-0.5">S3-compatible object storage and SFTP destinations for project backups.</Hint>
         </div>
         <Btn onClick={() => setModal('new')}>＋ Add target</Btn>
       </div>

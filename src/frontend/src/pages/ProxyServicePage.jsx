@@ -209,7 +209,7 @@ export default function ProxyServicePage() {
 }
 
 // BackupRestoreCard exports every route + access list (and, optionally, the
-// portable Let's Encrypt cert store) as an encrypted .rpb bundle, and restores one
+// portable Let's Encrypt cert store) as an encrypted .rpx bundle, and restores one
 // on another server — so switching hosts doesn't mean rebuilding routes by hand or
 // re-requesting certs (which risks LE rate limits).
 const CERT_SCOPES = [
@@ -298,8 +298,8 @@ function BackupRestoreCard() {
           <div className="space-y-3 md:border-l md:border-border md:pl-5">
             <p className="text-xs font-semibold text-content-strong">Restore a backup</p>
             <div>
-              <Label>Backup file (.rpb)</Label>
-              <input ref={fileRef} type="file" accept=".rpb,.tar.gz,.gz" onChange={e => setFileName(e.target.files?.[0]?.name || '')}
+              <Label>Backup file (.rpx)</Label>
+              <input ref={fileRef} type="file" accept=".rpx,.rpb,.tar.gz,.gz" onChange={e => setFileName(e.target.files?.[0]?.name || '')}
                 className="block w-full text-xs text-content file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-surface-overlay file:text-content hover:file:bg-surface-raised" />
               {fileName && <p className="text-[11px] text-content-faint mt-1 truncate">{fileName}</p>}
             </div>

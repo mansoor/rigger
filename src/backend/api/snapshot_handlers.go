@@ -17,19 +17,34 @@ import (
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
 
-// Workspace configuration snapshots (.rws = Rigger Workspace Snapshot).
+// Project configuration snapshots (.rps = Rigger Project Snapshot).
 //
-// A snapshot captures ONLY the workspace's configuration — config.json plus each
-// environment's .env file (which holds secrets like DB passwords) — NOT the data
-// volumes. It's a lightweight, fast counterpart to the full data backup/restore.
-// The archive also carries a meta.json so the originating workspace is always
-// known regardless of a custom filename.
+// A snapshot captures ONLY the project's configuration — config.json plus each
+// environment's .env file (which holds secrets like DB passwords) and the
+// project's DB config rows — NOT the data volumes. It's a lightweight, fast
+// counterpart to the full data backup/restore. The archive also carries a
+// meta.json so the originating project is always known regardless of a custom
+// filename.
 
 func snapshotsDir(dataDir string) string {
 	return filepath.Join(dataDir, "workspace-snapshots")
 }
 
-const snapshotExt = ".rws"
+// snapshotExt is the canonical extension for new snapshots (was .rws pre-rename).
+const snapshotExt = ".rps"
+
+// snapshotSuffixes are recognised on list/upload/restore — the current .rps plus
+// the legacy .rws so older snapshots keep working.
+var snapshotSuffixes = []string{".rps", ".rws"}
+
+func hasSnapshotSuffix(name string) bool {
+	for _, s := range snapshotSuffixes {
+		if strings.HasSuffix(name, s) {
+			return true
+		}
+	}
+	return false
+}
 
 // SnapshotInfo is the API shape for one saved snapshot.
 type SnapshotInfo struct {
@@ -52,7 +67,7 @@ var snapshotNameSafe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 // filename ending in .rws.
 func sanitizeSnapshotName(name string) string {
 	name = strings.TrimSpace(name)
-	name = strings.TrimSuffix(name, snapshotExt)
+	name = strings.TrimSuffix(strings.TrimSuffix(name, ".rws"), snapshotExt)
 	name = snapshotNameSafe.ReplaceAllString(name, "-")
 	name = strings.Trim(name, "-._")
 	if name == "" {
@@ -89,7 +104,8 @@ func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	size, err := createConfigSnapshot(wsDir, body.Workspace, body.Project, destPath)
+	dbJSON, _ := h.exportProjectDB(body.Workspace, body.Project)
+	size, err := createConfigSnapshot(wsDir, body.Workspace, body.Project, destPath, dbJSON)
 	if err != nil {
 		os.Remove(destPath) //nolint:errcheck
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create snapshot: " + err.Error()})
@@ -107,7 +123,7 @@ func (h *Handler) CreateWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 
 // createConfigSnapshot writes a .rws (tar.gz) containing meta.json, config.json
 // and every envs/<env>/.env file. Returns the file size.
-func createConfigSnapshot(wsDir, wsName, project, destPath string) (int64, error) {
+func createConfigSnapshot(wsDir, wsName, project, destPath string, dbJSON []byte) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return 0, err
 	}
@@ -131,6 +147,14 @@ func createConfigSnapshot(wsDir, wsName, project, destPath string) (int64, error
 	if err := writeBytes("meta.json", meta, time.Now()); err != nil {
 		f.Close()
 		return 0, err
+	}
+
+	// Portable project DB config — a snapshot is "configuration", so it belongs here.
+	if len(dbJSON) > 0 {
+		if err := writeBytes(projectDBFile, dbJSON, time.Now()); err != nil {
+			f.Close()
+			return 0, err
+		}
 	}
 
 	// config.json + envs/<env>/.env — skip any that are missing.
@@ -232,7 +256,7 @@ func (h *Handler) UploadWorkspaceSnapshot(w http.ResponseWriter, r *http.Request
 	// Validate it's a real .rws: gzip+tar containing at least config.json.
 	meta, err := validateSnapshotBytes(data)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid .rws snapshot: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid project snapshot (.rps): " + err.Error()})
 		return
 	}
 
@@ -328,7 +352,7 @@ func (h *Handler) ListWorkspaceSnapshots(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), snapshotExt) {
+		if e.IsDir() || !hasSnapshotSuffix(e.Name()) {
 			continue
 		}
 		fi, err := e.Info()
@@ -406,10 +430,16 @@ func (h *Handler) RollbackWorkspaceSnapshot(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	restored, err := extractConfigSnapshot(path, wsDir)
+	restored, dbJSON, err := extractConfigSnapshot(path, wsDir)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "rollback failed: " + err.Error()})
 		return
+	}
+
+	// Restore the project's portable DB config (pipelines, alerts, domains, host
+	// bindings) captured in the snapshot. Best-effort.
+	if len(dbJSON) > 0 {
+		h.importProjectDB(meta.Workspace, meta.Project, dbJSON)
 	}
 
 	// Regenerate compose from the restored config (best-effort, non-fatal).
@@ -424,31 +454,38 @@ func (h *Handler) RollbackWorkspaceSnapshot(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// extractConfigSnapshot unpacks config.json + envs/<env>/.env from a .rws into
+// extractConfigSnapshot unpacks config.json + envs/<env>/.env from a .rps into
 // wsDir, overwriting existing files. Whitelisted paths only; never escapes wsDir.
-func extractConfigSnapshot(srcPath, wsDir string) ([]string, error) {
+// The portable project DB config (if present) is returned separately for the
+// caller to import — it is never written to the project dir.
+func extractConfigSnapshot(srcPath, wsDir string) ([]string, []byte, error) {
 	f, err := os.Open(srcPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	gr, err := gzip.NewReader(f)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer gr.Close()
 	tr := tar.NewReader(gr)
 
 	var restored []string
+	var dbJSON []byte
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return restored, err
+			return restored, dbJSON, err
 		}
 		name := filepath.ToSlash(hdr.Name)
+		if name == projectDBFile {
+			dbJSON, _ = io.ReadAll(io.LimitReader(tr, maxNotesBytes)) //nolint:errcheck — bounded config JSON
+			continue
+		}
 		// Whitelist config.json and envs/<env>/.env only.
 		ok := name == "config.json" ||
 			(strings.HasPrefix(name, "envs/") && strings.HasSuffix(name, "/.env") && !strings.Contains(name, ".."))
@@ -461,20 +498,20 @@ func extractConfigSnapshot(srcPath, wsDir string) ([]string, error) {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-			return restored, err
+			return restored, dbJSON, err
 		}
 		out, err := os.Create(dest)
 		if err != nil {
-			return restored, err
+			return restored, dbJSON, err
 		}
 		if _, err := io.Copy(out, tr); err != nil { //nolint:gosec — whitelisted, size-bounded config files
 			out.Close()
-			return restored, err
+			return restored, dbJSON, err
 		}
 		out.Close()
 		restored = append(restored, name)
 	}
-	return restored, nil
+	return restored, dbJSON, nil
 }
 
 func safeSnapshotFilename(name string) bool {
@@ -482,5 +519,5 @@ func safeSnapshotFilename(name string) bool {
 		!strings.Contains(name, "/") &&
 		!strings.Contains(name, "\\") &&
 		!strings.Contains(name, "..") &&
-		strings.HasSuffix(name, snapshotExt)
+		hasSnapshotSuffix(name)
 }

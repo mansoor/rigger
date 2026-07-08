@@ -19,7 +19,8 @@ import (
 
 // Proxy Service backup & restore.
 //
-// A backup is a gzip-tar ".rpb" bundle: a plaintext manifest plus the proxy
+// A backup is a gzip-tar ".rpx" bundle (Rigger Proxy eXport — distinct from the
+// project backup's .rpb): a plaintext manifest plus the proxy
 // routes + access lists (from SQLite) and, optionally, the Let's Encrypt cert
 // store so the certs are PORTABLE — restoring them means the new server serves
 // the existing certs immediately instead of re-requesting from LE (which would
@@ -202,7 +203,7 @@ func (h *Handler) ProxyBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fname := "proxy-backup-" + time.Now().UTC().Format("20060102-150405") + ".rpb"
+	fname := "proxy-backup-" + time.Now().UTC().Format("20060102-150405") + ".rpx"
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+fname+"\"")
 	_, _ = w.Write(buf.Bytes())
@@ -344,7 +345,7 @@ func (h *Handler) ProxyRestore(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := untarGz(raw)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid .rpb bundle: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid .rpx bundle: " + err.Error()})
 		return
 	}
 

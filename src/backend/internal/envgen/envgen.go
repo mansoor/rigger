@@ -353,6 +353,18 @@ func ResolveImageValue(key, value string, existing map[string]string, r Rand) st
 	if !IsPlaceholder(value) {
 		return value
 	}
+	// Laravel's APP_KEY must be the exact base64:<32 bytes> form — the generic
+	// secret path yields a hex string, which 500s the app ("unsupported cipher or
+	// incorrect key length"). Generate the correct shape, reusing any real existing
+	// key so it stays stable across regens.
+	if strings.EqualFold(key, "APP_KEY") {
+		if existing != nil {
+			if ev, ok := existing[key]; ok && !IsPlaceholder(ev) {
+				return ev
+			}
+		}
+		return "base64:" + base64N(r, 32)
+	}
 	if isSkipKey(key) {
 		return value
 	}

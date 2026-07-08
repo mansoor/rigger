@@ -160,7 +160,7 @@ export default function ProjectNotesTab({ workspace, name }) {
               className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
           </div>
         </div>
-      ) : notes.length > 0 && (
+      ) : (
         <div className="flex items-end gap-2 border-b border-border mb-4 min-h-[2.75rem]">
           <div className="flex items-end gap-1 overflow-x-auto overflow-y-hidden flex-1 min-w-0">
             {notes.map(n => (
@@ -184,8 +184,10 @@ export default function ProjectNotesTab({ workspace, name }) {
                 className="shrink-0 px-3 py-2.5 text-sm font-medium text-content-subtle hover:text-brand-400 transition-colors">＋ Add</button>
             )}
           </div>
-          <button onClick={startEdit} disabled={!note}
-            className="shrink-0 mb-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">Edit</button>
+          {notes.length > 0 && (
+            <button onClick={startEdit} disabled={!note}
+              className="shrink-0 mb-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">Edit</button>
+          )}
         </div>
       )}
 

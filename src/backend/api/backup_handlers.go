@@ -83,13 +83,15 @@ func (s *JobStore) update(id string, fn func(*BackupJob)) {
 
 // ── Archive helpers ───────────────────────────────────────────────────────────
 
-// archiveExt is the canonical extension for a full workspace backup
-// ("rigger workspace backup"). Older archives may still carry ".tar.gz" —
-// listing accepts both, new backups are always written as .rwb.
-const archiveExt = ".rwb"
+// archiveExt is the canonical extension for a full project backup ("Rigger
+// Project Backup"). Was .rwb before the workspace→project rename; older archives
+// may still carry .rwb or .tar.gz — listing/restore accept all, new backups are
+// always written as .rpb.
+const archiveExt = ".rpb"
 
-// archiveSuffixes are the extensions recognised as workspace backups.
-var archiveSuffixes = []string{".rwb", ".tar.gz"}
+// archiveSuffixes are the extensions recognised as project backups (current +
+// legacy).
+var archiveSuffixes = []string{".rpb", ".rwb", ".tar.gz"}
 
 func hasArchiveSuffix(name string) bool {
 	for _, s := range archiveSuffixes {
@@ -157,7 +159,7 @@ func archiveExcluded(rel string, keep map[string]string) bool {
 // directory (workspaces/{ws}/projects/{proj}); ws/project identify it. Content is
 // tarred under "{ws}/projects/{proj}/…" and a rigger-backup.json manifest is
 // embedded at the root so a restore can rebuild the exact nested path.
-func createArchive(projDir, ws, project, destPath string) (int64, error) {
+func createArchive(projDir, ws, project, destPath string, dbJSON []byte) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return 0, err
 	}
@@ -174,6 +176,14 @@ func createArchive(projDir, ws, project, destPath string) (int64, error) {
 	meta, _ := json.Marshal(archiveMeta{Workspace: ws, Project: project, CreatedAt: time.Now()})
 	if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: riggerBackupManifest, Size: int64(len(meta)), Mode: 0o644, ModTime: time.Now()}); err == nil {
 		tw.Write(meta) //nolint:errcheck
+	}
+
+	// Portable project DB config (pipelines, alerts, domains, host bindings, …) so
+	// a restore is self-contained. Embedded at the archive root like the manifest.
+	if len(dbJSON) > 0 {
+		if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: projectDBFile, Size: int64(len(dbJSON)), Mode: 0o644, ModTime: time.Now()}); err == nil {
+			tw.Write(dbJSON) //nolint:errcheck
+		}
 	}
 
 	root := ws + "/projects/" + project
@@ -276,11 +286,14 @@ func (h *Handler) StartWorkspaceBackup(w http.ResponseWriter, r *http.Request) {
 		archiveName = fmt.Sprintf("%s_%s-%s%s", body.Workspace, body.Project, ts, archiveExt)
 	}
 
+	// Portable project DB config travels alongside the files (self-contained restore).
+	dbJSON, _ := h.exportProjectDB(body.Workspace, body.Project)
+
 	// Run backup asynchronously
 	go func() {
 		destPath := filepath.Join(dir, archiveName)
 
-		size, err := createArchive(projDir, body.Workspace, body.Project, destPath)
+		size, err := createArchive(projDir, body.Workspace, body.Project, destPath, dbJSON)
 		now := time.Now()
 		if err != nil {
 			h.jobs.update(job.ID, func(j *BackupJob) {
@@ -510,6 +523,15 @@ func (h *Handler) restoreFromReader(rd io.Reader, force bool) (ws, project strin
 		// Rename may fail across filesystems — fall back to copy
 		if err2 := copyDir(srcDir, destDir); err2 != nil {
 			return ws, project, http.StatusInternalServerError, fmt.Errorf("failed to restore: %w", err2)
+		}
+	}
+
+	// Import the project's portable DB config (pipelines, alerts, domains, host
+	// bindings) if the archive carried it. Runs after the dir is in place so the
+	// resource-prefix resolves from the restored config.json. Best-effort.
+	if project != "" {
+		if data, err := os.ReadFile(filepath.Join(tmpDir, projectDBFile)); err == nil {
+			h.importProjectDB(ws, project, data)
 		}
 	}
 	return ws, project, http.StatusOK, nil

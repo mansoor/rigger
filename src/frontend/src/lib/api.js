@@ -365,7 +365,7 @@ export const fetchProxyCerts    = ()         => api.get('/proxy/certs').then(r =
 export const fetchProxyPlugins  = ()         => api.get('/settings/proxy/plugins').then(r => r.data)
 export const updateProxyPlugins = (body)     => api.post('/settings/proxy/plugins', body).then(r => r.data)
 export const setProxyGeoIPDB    = (token)    => api.post('/settings/proxy/geoip', { token }).then(r => r.data)
-// Backup: POST returns the .rpb bundle as a blob; trigger a browser download.
+// Backup: POST returns the .rpx bundle as a blob; trigger a browser download.
 export const proxyBackup = async (certScope, passphrase) => {
   const res = await api.post('/proxy/backup', { cert_scope: certScope, passphrase }, { responseType: 'blob' })
   const cd = res.headers?.['content-disposition'] || ''
@@ -373,11 +373,11 @@ export const proxyBackup = async (certScope, passphrase) => {
   const url = URL.createObjectURL(res.data)
   const a = document.createElement('a')
   a.href = url
-  a.download = m ? m[1] : 'proxy-backup.rpb'
+  a.download = m ? m[1] : 'proxy-backup.rpx'
   document.body.appendChild(a); a.click(); a.remove()
   URL.revokeObjectURL(url)
 }
-// Restore: multipart upload of a .rpb bundle → returns a summary of what was imported.
+// Restore: multipart upload of a .rpx bundle → returns a summary of what was imported.
 export const proxyRestore = (file, passphrase, replaceExisting) => {
   const fd = new FormData()
   fd.append('file', file)

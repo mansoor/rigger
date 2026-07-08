@@ -23,8 +23,8 @@ func TestArchiveExcludesOldSnapshots(t *testing.T) {
 	// stage has one snapshot — kept.
 	writeFile(t, filepath.Join(projDir, "backups", "stage", "2026-03-03_00-00-00", "s.tar.gz"), "s")
 
-	dest := filepath.Join(root, "out.rwb")
-	if _, err := createArchive(projDir, "alpha", "web", dest); err != nil {
+	dest := filepath.Join(root, "out.rpb")
+	if _, err := createArchive(projDir, "alpha", "web", dest, nil); err != nil {
 		t.Fatalf("createArchive: %v", err)
 	}
 
