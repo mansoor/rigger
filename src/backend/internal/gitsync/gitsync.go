@@ -103,6 +103,69 @@ func Sync(envDir, repo, branch string, auth *Auth, out io.Writer) (string, error
 	return src, nil
 }
 
+// Push initializes a fresh git repository in srcDir, commits everything, and pushes
+// it to repo@branch. Used to seed a "start from a stack template" project's empty
+// remote with generated starter code. Like Sync, git runs in the Rigger container
+// and credentials are applied via the child ENVIRONMENT only (never argv/URL) so the
+// secret can't leak into `ps` or the streamed log. auth may be nil for a public repo
+// with an embedded token, but a real push almost always needs one. A blank branch
+// defaults to "main". The committer identity is set per-invocation via -c flags so we
+// don't depend on (or mutate) any global git config in the container.
+func Push(srcDir, repo, branch string, auth *Auth, out io.Writer) error {
+	if out == nil {
+		out = io.Discard
+	}
+	if repo == "" {
+		return fmt.Errorf("no target repository configured")
+	}
+	if branch == "" {
+		branch = "main"
+	}
+	run := func(args ...string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		var captured bytes.Buffer
+		w := io.MultiWriter(out, &captured)
+		cmd.Stdout, cmd.Stderr = w, w
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		if auth != nil && len(auth.Env) > 0 {
+			cmd.Env = append(cmd.Env, auth.Env...)
+		}
+		if err := cmd.Run(); err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return fmt.Errorf("timed out after %s (the host may be unreachable)", timeout)
+			}
+			return ClassifyError(captured.String())
+		}
+		return nil
+	}
+	// -C runs git in srcDir without a chdir. Identity via -c so no global config needed.
+	ident := []string{"-c", "user.email=rigger@localhost", "-c", "user.name=Rigger"}
+	fmt.Fprintf(out, "⟳ Pushing scaffold to %s @ %s\n", repo, branchLabel(branch))
+	if err := run("-C", srcDir, "init", "-q"); err != nil {
+		return err
+	}
+	if err := run("-C", srcDir, "add", "-A"); err != nil {
+		return err
+	}
+	commitArgs := append([]string{"-C", srcDir}, ident...)
+	commitArgs = append(commitArgs, "commit", "-q", "-m", "Initial scaffold from Rigger")
+	if err := run(commitArgs...); err != nil {
+		return err
+	}
+	if err := run("-C", srcDir, "branch", "-M", branch); err != nil {
+		return err
+	}
+	if err := run("-C", srcDir, "remote", "add", "origin", repo); err != nil {
+		return err
+	}
+	if err := run("-C", srcDir, "push", "-u", "origin", branch); err != nil {
+		return err
+	}
+	return nil
+}
+
 // branchLabel renders the branch for progress output, naming the empty (default) case.
 func branchLabel(branch string) string {
 	if branch == "" {

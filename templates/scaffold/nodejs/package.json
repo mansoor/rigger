@@ -1,0 +1,16 @@
+{
+  "name": "rigger-node-starter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal Node.js (Express) starter scaffolded by Rigger",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "mkdir -p dist && cp -r src/. dist/",
+    "start": "node dist/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "license": "MIT"
+}

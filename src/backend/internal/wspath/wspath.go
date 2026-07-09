@@ -55,6 +55,14 @@ func SeedFile(root, workspace, project string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "_source", "seed.sql")
 }
 
+// ScaffoldDir is the project-level directory holding generated starter code for a
+// "start from a stack template" (blueprint) project. Project-level (beside _source)
+// so it survives env copies; the create handler pushes it to the project's git repo
+// and the scaffold.zip endpoint streams it for download.
+func ScaffoldDir(root, workspace, project string) string {
+	return filepath.Join(ProjectDir(root, workspace, project), "_scaffold")
+}
+
 // EnvDir is the directory of one environment within a project.
 func EnvDir(root, workspace, project, env string) string {
 	return filepath.Join(ProjectDir(root, workspace, project), "envs", env)

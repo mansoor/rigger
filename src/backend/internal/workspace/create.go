@@ -29,6 +29,7 @@ type CreateRequest struct {
 	SourceRepo    string           `json:"source_repo"`       // project-level git repo (one per project)
 	SourceBranch  string           `json:"source_branch"`     // default branch (per-env override via env.git.branch)
 	GitProviderID int64            `json:"git_provider_id"`   // optional git provider for a private source repo (Phase 12)
+	Scaffold      bool             `json:"scaffold"`          // blueprint: generate starter code into _scaffold and push to SourceRepo
 	SourceKind   string            `json:"source_kind"`   // "upload" → build source came from an uploaded archive (see SourceToken)
 	SourceToken  string            `json:"source_token"`  // staging token from POST /api/upload-source; archive moved into the project on create
 	DBSeedFile   string            `json:"db_seed_file"`  // chosen bundled SQL dump (path relative to source); copied to _source/seed.sql on create

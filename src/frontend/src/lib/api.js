@@ -165,6 +165,19 @@ export const createProjectNote  = (ws, name, noteName)    => api.post(`${projBas
 export const saveProjectNote    = (ws, name, id, content, noteName) => api.put(`${projBase(ws, name)}/notes/${id}`, noteName !== undefined ? { content, name: noteName } : { content }).then(r => r.data)
 export const deleteProjectNote  = (ws, name, id)          => api.delete(`${projBase(ws, name)}/notes/${id}`).then(r => r.data)
 export const renderProjectNotes = (ws, name, content)     => api.post(`${projBase(ws, name)}/notes/render`, { content }).then(r => r.data)
+// Blueprint scaffolding: clone/dev instructions + starter-code ZIP download.
+export const fetchScaffoldInfo  = (ws, name)              => api.get(`${projBase(ws, name)}/scaffold-info`).then(r => r.data)
+export const downloadScaffoldZip = async (ws, name) => {
+  const res = await api.get(`${projBase(ws, name)}/scaffold.zip`, { responseType: 'blob' })
+  const cd = res.headers?.['content-disposition'] || ''
+  const m = /filename="?([^"]+)"?/.exec(cd)
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = m ? m[1] : `${name}-scaffold.zip`
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+}
 export const fetchDeployHistory = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/deploy-history`).then(r => r.data)
 export const rollbackEnv        = (ws, name, env, toId)  => api.post(`${projBase(ws, name)}/envs/${env}/rollback`, { to_id: toId }).then(r => r.data)
 export const fetchImageStatus   = (ws, name, env)        => api.get(`${projBase(ws, name)}/envs/${env}/image-status`).then(r => r.data)

@@ -1161,6 +1161,9 @@ func main() {
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.GetProjectNote)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.UpdateProjectNote)))
 	mux.Handle("DELETE /api/workspaces/{workspace}/projects/{name}/notes/{noteId}", authSvc.Middleware(http.HandlerFunc(handler.DeleteProjectNote)))
+	// Blueprint scaffolding: post-create clone/dev instructions + starter-code download.
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/scaffold-info", authSvc.Middleware(http.HandlerFunc(handler.ScaffoldInfo)))
+	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/scaffold.zip", authSvc.Middleware(http.HandlerFunc(handler.ScaffoldZip)))
 	mux.Handle("GET /api/workspaces/{workspace}/projects/{name}/build-host", authSvc.Middleware(http.HandlerFunc(handler.GetProjectBuildHost)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/build-host", authSvc.Middleware(http.HandlerFunc(handler.SetProjectBuildHost)))
 	mux.Handle("PUT /api/workspaces/{workspace}/projects/{name}/build-pipeline", authSvc.Middleware(http.HandlerFunc(handler.SetBuildPipeline)))

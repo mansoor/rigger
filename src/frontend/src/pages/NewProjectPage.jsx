@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, parseCompose, uploadSource, fetchBlueprints, fetchWorkspaces, createPipeline } from '../lib/api'
+import { fetchTemplates, fetchTemplate, recordTemplateUse, openCreateSocket, fetchWorkspaceBackupTargets, fetchWorkspaceHosts, fetchWorkspaceSettings, fetchGeneralSettings, scanRepo, parseCompose, uploadSource, fetchBlueprints, fetchWorkspaces, createPipeline, fetchScaffoldInfo, downloadScaffoldZip } from '../lib/api'
 import TemplateBrowserModal, { TemplateCard } from '../components/TemplateBrowserModal'
 import { resolveEnvRoute } from '../lib/envRoute'
 import RegistryPicker from '../components/RegistryPicker'
@@ -163,7 +163,7 @@ const STACK_TYPES = [
 // BlueprintStack: pick a stack template (no repo). The selected blueprint's
 // seeded service graph (from GET /api/blueprints) becomes the project's
 // services[]; the user fine-tunes each in Edit Project after creation.
-function BlueprintStack({ data, onChange }) {
+function BlueprintStack({ data, onChange, workspace }) {
   const { data: blueprints = [], isLoading, error } = useQuery({
     queryKey: ['blueprints'], queryFn: fetchBlueprints, staleTime: 5 * 60_000,
   })
@@ -171,6 +171,10 @@ function BlueprintStack({ data, onChange }) {
     onChange('blueprintId', bp.id)
     onChange('blueprintServices', bp.services || [])
   }
+  // Only the curated frameworks have a bundled starter today; the scaffold offer is
+  // hidden for the rest (kept in sync with internal/scaffold's supported set).
+  const SCAFFOLDABLE = ['laravel', 'nodejs', 'react', 'django', 'go']
+  const canScaffold = SCAFFOLDABLE.includes(data.blueprintId)
   // The seeds note counts the app service(s) plus a managed database when chosen,
   // so "creates 2 services from the start" reads true (e.g. Laravel + PostgreSQL).
   const appCount = (data.blueprintServices || []).length
@@ -208,6 +212,47 @@ function BlueprintStack({ data, onChange }) {
           </span>.
           {data.blueprintId && ' Rigger scaffolds a starter Dockerfile you replace with your code — fine-tune everything in '}
           {data.blueprintId && <strong>Edit Project → Services</strong>}{data.blueprintId && '.'}
+        </div>
+      )}
+
+      {/* Opt-in: generate real starter code and push it to a Git repo so the developer
+          can clone and work locally (off by default — plain blueprints are unchanged). */}
+      {canScaffold && (
+        <div className="bg-surface border border-border rounded-xl p-3 space-y-3">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={!!data.scaffold}
+              onChange={e => onChange('scaffold', e.target.checked)}
+              className="w-4 h-4 mt-0.5 accent-brand-500 shrink-0" />
+            <span>
+              <span className="text-sm font-semibold text-content-strong">Scaffold starter code into a Git repo</span>
+              <span className="block text-xs text-content-subtle mt-0.5">
+                Rigger generates a minimal, runnable {data.blueprintId} app, commits it, and pushes it to
+                the repository below. Then clone it locally and develop — every push rebuilds and deploys.
+              </span>
+            </span>
+          </label>
+          {data.scaffold && (
+            <div className="space-y-3 pl-6">
+              <div className="grid grid-cols-[1fr_8rem] gap-2 items-end">
+                <div>
+                  <Label>Target repository</Label>
+                  <Input value={data.source_repo || ''} onChange={v => onChange('source_repo', v)} placeholder="https://github.com/org/app.git" />
+                </div>
+                <div>
+                  <Label>Branch</Label>
+                  <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="main" />
+                </div>
+              </div>
+              <Hint>Create an <strong>empty</strong> repository on your provider first, then paste its URL here. Rigger pushes the scaffold to it.</Hint>
+              <div>
+                <Label>Git provider <span className="font-normal normal-case text-content-faint">(auth for push)</span></Label>
+                <GitProviderPicker workspace={workspace}
+                  value={data.git_provider_id || 0}
+                  onChange={(id) => onChange('git_provider_id', id)} />
+              </div>
+              <Hint tone="faint">No provider / repo? You can still download the generated code as a ZIP on the final step.</Hint>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1136,7 +1181,7 @@ function Step2({ data, onChange, errors, workspace, defaultRegistryId }) {
       {data.stackType === 'scan' && <ScanStack data={data} onChange={onChange} workspace={workspace} />}
 
       {/* No-repo stack template picker */}
-      {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} />}
+      {data.stackType === 'blueprint' && <BlueprintStack data={data} onChange={onChange} workspace={workspace} />}
 
       {/* Managed service hosting: managed services on their own (no app code). The
           engines + tooling are chosen on the next step (Managed services). */}
@@ -2216,6 +2261,57 @@ function Step6({ data }) {
   )
 }
 
+// ScaffoldResultCard — post-create panel for a scaffolded blueprint project. Fetches
+// the clone/dev instructions and offers a starter-code ZIP download, so the developer
+// can pull the code onto their own machine and start working. Rendered only on success.
+function ScaffoldResultCard({ workspace, projectKey }) {
+  const [info, setInfo] = useState(null)
+  const [zipBusy, setZipBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetchScaffoldInfo(workspace, projectKey).then(d => { if (alive) setInfo(d) }).catch(() => {})
+    return () => { alive = false }
+  }, [workspace, projectKey])
+  if (!info || !info.available) return null
+
+  const Cmd = ({ children }) => (
+    <code className="block bg-surface-raised border border-border-strong rounded-lg px-3 py-1.5 text-xs font-mono text-content-strong overflow-x-auto whitespace-pre">{children}</code>
+  )
+  async function dl() {
+    setZipBusy(true)
+    try { await downloadScaffoldZip(workspace, projectKey) } finally { setZipBusy(false) }
+  }
+  return (
+    <div className="bg-surface border border-border rounded-xl p-4 space-y-3 text-left">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-content-strong">Start developing ({info.framework})</p>
+        <button type="button" onClick={dl} disabled={zipBusy}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content hover:border-brand-600 disabled:opacity-40 transition-colors">
+          {zipBusy ? 'Preparing…' : '↓ Download as ZIP'}
+        </button>
+      </div>
+      <div className="space-y-2">
+        {info.pushed ? (
+          <>
+            <p className="text-xs text-content-subtle">Clone the repo and run it locally:</p>
+            <Cmd>{info.clone_cmd}</Cmd>
+          </>
+        ) : (
+          <p className="text-xs text-content-subtle">
+            No repo was configured — download the ZIP above, then <span className="font-mono">git init</span>, commit, and push to your own repository.
+          </p>
+        )}
+        {info.install_cmd && <Cmd>{info.install_cmd}</Cmd>}
+        {info.run_cmd && <Cmd>{info.run_cmd}</Cmd>}
+      </div>
+      <p className="text-[11px] text-content-faint">
+        Edit locally, then <span className="font-mono">git push</span> — Rigger rebuilds and deploys. Dependencies
+        (node_modules / vendor) live only inside the container, never on your machine.
+      </p>
+    </div>
+  )
+}
+
 // ── Step 7: Creating (live terminal) ─────────────────────────────────────────
 
 function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorkspace, onResult, onGoBack }) {
@@ -2335,6 +2431,10 @@ function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorksp
         >
           ← Go back &amp; fix
         </button>
+      )}
+
+      {isSuccess && payload.scaffold && (
+        <ScaffoldResultCard workspace={payload.workspace} projectKey={payload.key} />
       )}
 
       {isSuccess && (
@@ -2539,9 +2639,12 @@ export default function NewProjectPage() {
       services: detected ? (data.scanDraft?.services || []) : isBlueprint ? (data.blueprintServices || []) : [],
       // Routing table translated from the imported compose's Traefik labels (repo scan).
       routes: detected ? (data.scanDraft?.routes || []) : [],
-      source_repo: isScan ? (data.source_repo || '').trim() : '',
-      source_branch: isScan ? (data.source_branch || '').trim() : '',
-      git_provider_id: isScan ? (Number(data.git_provider_id) || 0) : 0,
+      // Scaffold-into-git reuses the project-level source fields: after Rigger pushes the
+      // generated code, config.json's git_repo points at it and builds clone from there.
+      source_repo: (isScan || (isBlueprint && data.scaffold)) ? (data.source_repo || '').trim() : '',
+      source_branch: (isScan || (isBlueprint && data.scaffold)) ? (data.source_branch || '').trim() : '',
+      git_provider_id: (isScan || (isBlueprint && data.scaffold)) ? (Number(data.git_provider_id) || 0) : 0,
+      scaffold: isBlueprint && !!data.scaffold,
       source_kind: isUpload ? 'upload' : '',
       source_token: isUpload ? (data.sourceUploadToken || '') : '',
       // Bundled SQL dump chosen in the scan review (only with a managed DB).

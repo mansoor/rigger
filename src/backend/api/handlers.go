@@ -31,9 +31,12 @@ import (
 	"github.com/mansoor/rigger/ui/internal/envgen"
 	"github.com/mansoor/rigger/ui/internal/envorder"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/gitproviders"
+	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/scaffold"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 	"github.com/mansoor/rigger/ui/internal/workspace"
@@ -481,6 +484,28 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + projKey
 	}
 
+	// Laravel scaffold: seed session/cache/queue drivers that need no provisioned
+	// backend plus a stable APP_KEY, so the fresh app deploys green out of the box (its
+	// .env.example carries the same file-based defaults for local dev). Seeded into the
+	// project's initial env vars → env-gen writes them into each environment's .env.
+	// Done BEFORE Create so they land in config.json. Existing keys are never overwritten.
+	if msg.Workspace.Scaffold && scaffold.TemplateID(msg.Workspace.Services) == "laravel" {
+		if msg.Workspace.InitialEnvVars == nil {
+			msg.Workspace.InitialEnvVars = map[string]string{}
+		}
+		laravelDefaults := map[string]string{
+			"APP_KEY":          scaffold.NewLaravelAppKey(),
+			"SESSION_DRIVER":   "file",
+			"CACHE_STORE":      "file",
+			"QUEUE_CONNECTION": "sync",
+		}
+		for k, v := range laravelDefaults {
+			if _, ok := msg.Workspace.InitialEnvVars[k]; !ok {
+				msg.Workspace.InitialEnvVars[k] = v
+			}
+		}
+	}
+
 	// Write config.json + run.sh (TemplateEnvs embedded in each env's env_vars block)
 	if err := workspace.Create(h.workspacesDir, msg.Workspace); err != nil {
 		send("\033[31m✗ Error: " + err.Error() + "\033[0m\n")
@@ -498,6 +523,50 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		send("\033[32m✓\033[0m uploaded source stored\n")
 		if msg.Workspace.DBSeedFile != "" {
 			send("\033[32m✓\033[0m database seed stored (" + msg.Workspace.DBSeedFile + ")\n")
+		}
+	}
+
+	// Blueprint scaffolding (opt-in): generate real starter code for the chosen stack
+	// and push it to the project's git repo so the developer can clone and work locally.
+	// Non-scaffold blueprints are byte-identical to before. The generated tree also
+	// feeds the scaffold.zip download and the post-create clone instructions.
+	if msg.Workspace.Scaffold {
+		id := scaffold.TemplateID(msg.Workspace.Services)
+		scaffDir := wspath.ScaffoldDir(h.workspacesDir, wsName, projKey)
+		if ok, gerr := scaffold.Generate(h.templatesDir, id, scaffDir); gerr != nil {
+			send("\033[33m⚠ scaffold generation failed: " + gerr.Error() + "\033[0m\n")
+		} else if !ok {
+			send("\033[33m⚠ no starter available for this stack — skipping scaffold\033[0m\n")
+		} else {
+			if id == "laravel" {
+				_ = scaffold.EnsureLaravelAppKey(scaffDir)
+			}
+			send("\033[32m✓\033[0m scaffolded " + id + " starter code\n")
+			// Push to the project's repo when one was provided (empty repo the user created).
+			if repo := strings.TrimSpace(msg.Workspace.SourceRepo); repo != "" {
+				branch := strings.TrimSpace(msg.Workspace.SourceBranch)
+				if branch == "" {
+					branch = "main"
+				}
+				var auth *gitsync.Auth
+				if msg.Workspace.GitProviderID != 0 {
+					if p, perr := gitproviders.Get(h.db, h.cryptoKey, msg.Workspace.GitProviderID); perr == nil && p != nil {
+						if a, aerr := p.BuildAuth(repo); aerr == nil {
+							auth = a
+						} else {
+							send("\033[33m⚠ git auth: " + aerr.Error() + "\033[0m\n")
+						}
+					}
+				}
+				if perr := gitsync.Push(scaffDir, repo, branch, auth, sendWriter{send}); perr != nil {
+					send("\033[33m⚠ scaffold push failed: " + perr.Error() + " (code saved — download the ZIP and push manually)\033[0m\n")
+				} else {
+					send("\033[32m✓\033[0m scaffold pushed to " + repo + "\n")
+				}
+				if auth != nil && auth.Cleanup != nil {
+					auth.Cleanup()
+				}
+			}
 		}
 	}
 

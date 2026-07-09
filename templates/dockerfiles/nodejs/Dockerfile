@@ -37,13 +37,12 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 
-# Copy built application and pruned modules
-COPY --from=builder --chown=appuser:appgroup /app/package.json ./
-COPY --from=builder --chown=appuser:appgroup /app/node_modules ./node_modules
-COPY --from=builder --chown=appuser:appgroup /app/dist ./dist 2>/dev/null || true
-COPY --from=builder --chown=appuser:appgroup /app/build ./build 2>/dev/null || true
-# For apps that run src directly (e.g., tsc compiled to dist)
-COPY --from=builder --chown=appuser:appgroup /app/src ./src 2>/dev/null || true
+# Copy the built application from the builder: package.json, the pruned production
+# node_modules, and whatever the build produced (dist/ build/ src/). A single COPY of
+# the whole app tree is used because Docker COPY has no conditional — the previous
+# per-directory `COPY … 2>/dev/null || true` lines were invalid (COPY is not a shell,
+# so those trailing tokens were parsed as extra, nonexistent sources and failed).
+COPY --from=builder --chown=appuser:appgroup /app ./
 
 EXPOSE 3000
 
