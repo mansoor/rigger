@@ -356,6 +356,18 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
       {serviceSource(img) === 'build' && (
         <>
         <div className="grid grid-cols-2 gap-3">
+          <div><Label>Build method</Label>
+            <Select value={img.build?.method === 'nixpacks' ? 'nixpacks' : 'dockerfile'}
+              onChange={v => upd('build', { ...(img.build || {}), method: v === 'nixpacks' ? 'nixpacks' : '' })}
+              options={[{ value: 'dockerfile', label: 'Dockerfile' }, { value: 'nixpacks', label: 'Nixpacks (auto-detect)' }]} />
+            <Hint>{img.build?.method === 'nixpacks'
+              ? 'Nixpacks auto-detects the stack and builds — no Dockerfile needed. Build args below are passed as build-time env. A good fallback when a Dockerfile build fights you.'
+              : 'Build from a Dockerfile — yours, or a scaffolded starter template below.'}</Hint></div>
+          <div><Label>Build context</Label>
+            <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
+        </div>
+        {img.build?.method !== 'nixpacks' && (
+        <div className="grid grid-cols-2 gap-3">
           <div><Label>Dockerfile template</Label>
             <Select value={img.build?.template || ''} onChange={v => {
               const next = { ...img, build: { ...(img.build || {}), template: v } }
@@ -370,9 +382,8 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               onUpdate(idx, next)
             }} options={buildTemplates} />
             <Hint>Scaffolds a starter Dockerfile; replace with your own via repo sync.</Hint></div>
-          <div><Label>Build context</Label>
-            <Input value={img.build?.context || ''} onChange={v => upd('build', { ...(img.build || {}), context: v })} placeholder={img.name || 'service dir'} /></div>
         </div>
+        )}
 
         {/* Build args — passed as --build-arg KEY=VALUE at image build time. */}
         <div>

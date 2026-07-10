@@ -200,61 +200,83 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	if fi, err := os.Stat(ctxDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("build context not found: %s (configure a source repo or run init)", ctxDir)
 	}
-	// Source-backed projects (git or upload) may ship source but NO Dockerfile (e.g. a
-	// CodeCanyon Laravel app) — scaffold the service's blueprint Dockerfile into the
-	// context. Re-scaffold (overwrite) a previously Rigger-generated one (marked by
-	// .rigger-scaffolded) so template fixes apply even though _src isn't re-extracted
-	// every build; an app's OWN Dockerfile (no marker) is never touched.
-	dfPath := filepath.Join(ctxDir, dockerfile)
-	_, dfErr := os.Stat(dfPath)
-	_, markerErr := os.Stat(filepath.Join(ctxDir, ".rigger-scaffolded"))
-	if (dfErr != nil || markerErr == nil) && srcDir != "" && svc.Build != nil && svc.Build.Template != "" && o.TemplatesDir != "" {
-		o.info("Scaffolding the %s Dockerfile for %s", svc.Build.Template, svc.Name)
-		if serr := workspace.ScaffoldDockerfile(o.TemplatesDir, svc.Build.Template, ctxDir, o.Env); serr != nil {
-			return serr
-		}
-	}
-	if _, err := os.Stat(dfPath); err != nil {
-		return fmt.Errorf("%s not found in build context %s", dockerfile, ctxDir)
-	}
-
 	ver := cfg.VersionString()
 	imgTag := cfg.ImageTag(svc.Name, o.Env)
-	o.info("Building %s image: %s", svc.Name, imgTag)
 
-	// Run with the build context as the working dir and relative paths, so the
-	// remote executor can translate the dir to the host and build against the
-	// pushed context on the remote daemon (local behaviour is identical).
-	//
-	// Use BuildKit via `docker buildx build` (not the legacy builder) so modern
-	// Dockerfiles work — RUN --mount=type=cache/secret/bind, heredocs, etc. The
-	// legacy builder rejects `--mount` ("requires BuildKit"). buildx is an argv change
-	// (no env var), so it applies identically to local and remote build hosts (the
-	// remote executor only forwards args, not env). --load puts the result in the
-	// target daemon's image store so `compose up` finds it — matching the classic
-	// builder's behaviour, including the no-registry pull_policy:never local fallback.
-	args := []string{"buildx", "build", "--load"}
-	if noCache {
-		args = append(args, "--no-cache") // force mode: rebuild every layer
-	}
-	args = append(args,
-		"--build-arg", "BUILD_ENV="+o.Env,
-		"--build-arg", "VERSION="+ver,
-	)
-	for _, kv := range o.serviceBuildArgs(svc, ver) {
-		args = append(args, "--build-arg", kv)
-	}
-	args = append(args,
-		"--label", "project="+cfg.Project.Name,
-		"--label", "environment="+o.Env,
-		"--label", "version="+ver,
-		"--label", "service="+svc.Name,
-		"-t", imgTag,
-		"-f", dockerfile,
-		".",
-	)
-	if err := o.dockerRunInDir(ctxDir, args...); err != nil {
-		return err
+	if svc.Build.IsNixpacks() {
+		// Nixpacks auto-detects the stack and builds an OCI image with NO Dockerfile —
+		// so skip Dockerfile scaffolding + validation entirely. Build-time env is passed
+		// via --env (Nixpacks' analog of --build-arg). It shells out to `docker build`,
+		// so the image lands in the same daemon (local, or the env's remote build host)
+		// and pushes/pointer-advances identically. Run in ctxDir (path arg ".") so the
+		// remote executor translates the dir and builds the pushed context.
+		o.info("Building %s image with Nixpacks (auto-detect): %s", svc.Name, imgTag)
+		o.info("  ↳ Nixpacks pulls a Nix base image and runs a package-install layer — the FIRST build can take several minutes with little log output while that step runs (it's not stuck). Later builds are cached and fast. If it never progresses, check this host's connectivity to ghcr.io.")
+		nargs := []string{"build", ".", "--name", imgTag,
+			"--env", "BUILD_ENV=" + o.Env,
+			"--env", "VERSION=" + ver,
+		}
+		for _, kv := range o.serviceBuildArgs(svc, ver) {
+			nargs = append(nargs, "--env", kv)
+		}
+		if err := o.nixpacksRunInDir(ctxDir, nargs...); err != nil {
+			return err
+		}
+	} else {
+		// Source-backed projects (git or upload) may ship source but NO Dockerfile (e.g. a
+		// CodeCanyon Laravel app) — scaffold the service's blueprint Dockerfile into the
+		// context. Re-scaffold (overwrite) a previously Rigger-generated one (marked by
+		// .rigger-scaffolded) so template fixes apply even though _src isn't re-extracted
+		// every build; an app's OWN Dockerfile (no marker) is never touched.
+		dfPath := filepath.Join(ctxDir, dockerfile)
+		_, dfErr := os.Stat(dfPath)
+		_, markerErr := os.Stat(filepath.Join(ctxDir, ".rigger-scaffolded"))
+		if (dfErr != nil || markerErr == nil) && srcDir != "" && svc.Build != nil && svc.Build.Template != "" && o.TemplatesDir != "" {
+			o.info("Scaffolding the %s Dockerfile for %s", svc.Build.Template, svc.Name)
+			if serr := workspace.ScaffoldDockerfile(o.TemplatesDir, svc.Build.Template, ctxDir, o.Env); serr != nil {
+				return serr
+			}
+		}
+		if _, err := os.Stat(dfPath); err != nil {
+			return fmt.Errorf("%s not found in build context %s", dockerfile, ctxDir)
+		}
+
+		o.info("Building %s image: %s", svc.Name, imgTag)
+
+		// Run with the build context as the working dir and relative paths, so the
+		// remote executor can translate the dir to the host and build against the
+		// pushed context on the remote daemon (local behaviour is identical).
+		//
+		// Use BuildKit via `docker buildx build` (not the legacy builder) so modern
+		// Dockerfiles work — RUN --mount=type=cache/secret/bind, heredocs, etc. The
+		// legacy builder rejects `--mount` ("requires BuildKit"). buildx is an argv change
+		// (no env var), so it applies identically to local and remote build hosts (the
+		// remote executor only forwards args, not env). --load puts the result in the
+		// target daemon's image store so `compose up` finds it — matching the classic
+		// builder's behaviour, including the no-registry pull_policy:never local fallback.
+		args := []string{"buildx", "build", "--load"}
+		if noCache {
+			args = append(args, "--no-cache") // force mode: rebuild every layer
+		}
+		args = append(args,
+			"--build-arg", "BUILD_ENV="+o.Env,
+			"--build-arg", "VERSION="+ver,
+		)
+		for _, kv := range o.serviceBuildArgs(svc, ver) {
+			args = append(args, "--build-arg", kv)
+		}
+		args = append(args,
+			"--label", "project="+cfg.Project.Name,
+			"--label", "environment="+o.Env,
+			"--label", "version="+ver,
+			"--label", "service="+svc.Name,
+			"-t", imgTag,
+			"-f", dockerfile,
+			".",
+		)
+		if err := o.dockerRunInDir(ctxDir, args...); err != nil {
+			return err
+		}
 	}
 	o.success("Built: %s", imgTag)
 

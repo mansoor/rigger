@@ -345,6 +345,7 @@ func main() {
 	mux.Handle("GET /api/docker/versions", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerVersions))))
 	mux.Handle("POST /api/docker/update", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerUpdate))))
 	mux.Handle("GET /api/docker/update/status", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.DockerUpdateStatus))))
+	mux.Handle("POST /api/docker/install-nixpacks", authSvc.Middleware(adminOnly(http.HandlerFunc(handler.InstallNixpacks))))
 
 	// User management (Phase 5 / roadmap 10a) — admin only.
 	mux.Handle("/api/users", authSvc.Middleware(adminOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

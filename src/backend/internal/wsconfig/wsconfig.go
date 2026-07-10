@@ -127,8 +127,15 @@ type Build struct {
 	Context    string            `json:"context,omitempty"`    // subdir under envs/<env>/, default = service name
 	Dockerfile string            `json:"dockerfile,omitempty"` // default "Dockerfile"
 	Template   string            `json:"template,omitempty"`   // templates/dockerfiles/<template> to scaffold
+	Method     string            `json:"method,omitempty"`     // "" / "dockerfile" (default) | "nixpacks" — the build backend
 	Target     string            `json:"target,omitempty"`
 	Args       map[string]string `json:"args,omitempty"` // --build-arg KEY=VALUE; values may use ${ENV}/${VERSION}/${ROUTE_URL}
+}
+
+// IsNixpacks reports whether this build service builds via Nixpacks (no Dockerfile)
+// rather than the default Dockerfile backend.
+func (b *Build) IsNixpacks() bool {
+	return b != nil && strings.EqualFold(b.Method, "nixpacks")
 }
 
 // BuildServices returns the services that build from source (Build != nil).

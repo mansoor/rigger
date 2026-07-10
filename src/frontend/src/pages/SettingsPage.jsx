@@ -19,7 +19,7 @@ import {
   fetchManagedMetrics, managedMetricsAction,
   fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, createHostWorkspacesDir,
   fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
-  dockerVersions, dockerUpdate, dockerUpdateStatus,
+  dockerVersions, dockerUpdate, dockerUpdateStatus, installNixpacks,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -2434,7 +2434,8 @@ function DockerUpdatesCard() {
           )}
           {others.map(h => (
             <DockerHostRow key={h.host_id} row={h} latest={data?.latest}
-              onUpdate={h.updatable ? () => setTarget({ hostId: h.host_id, name: h.name, isRiggerHost: h.is_rigger_host }) : null} />
+              onUpdate={h.updatable ? () => setTarget({ hostId: h.host_id, name: h.name, isRiggerHost: h.is_rigger_host }) : null}
+              onInstallNixpacks={async (id) => { await installNixpacks(id); refetch() }} />
           ))}
           {others.length === 0 && !local && <p className="text-sm text-content-subtle">No hosts.</p>}
         </div>
@@ -2448,10 +2449,19 @@ function DockerUpdatesCard() {
 // DockerHostRow renders one daemon's version + state, and an Update button when
 // the engine can be updated in place. updatableVia is the registered self-host
 // through which the local daemon (which has no direct SSH path) gets updated.
-function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
+function DockerHostRow({ row, onUpdate, updatableVia, latest, onInstallNixpacks }) {
   const isLocal = row.host_id === 0
   const os = row.operating_system || row.os_type || ''
   const latestClean = (latest || '').replace(/^v/, '')
+  const [npBusy, setNpBusy] = useState(false)
+  const [npErr, setNpErr] = useState('')
+  // Offer a Nixpacks install on a reachable remote Linux host that lacks it (local is
+  // always bundled). Requires sudo/root to write /usr/local/bin.
+  const canInstallNixpacks = !isLocal && row.reachable && row.linux && row.sudo_ok && !row.nixpacks_version && onInstallNixpacks
+  async function doInstallNixpacks() {
+    setNpErr(''); setNpBusy(true)
+    try { await onInstallNixpacks(row.host_id) } catch (e) { setNpErr(e?.response?.data?.error || 'install failed') } finally { setNpBusy(false) }
+  }
   return (
     <div className="flex items-center justify-between gap-3 bg-canvas/50 border border-border rounded-lg px-3 py-2">
       <div className="min-w-0">
@@ -2465,8 +2475,22 @@ function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
           {row.error ? <span className="text-danger-fg">{row.error}</span>
             : <>Docker {row.server_version || '—'}{row.update_available && latestClean && <> → {latestClean}</>}{os && <> · {os}</>}</>}
         </p>
+        {!row.error && row.reachable && (
+          <p className="text-[11px] text-content-faint mt-0.5 truncate">
+            Nixpacks {row.nixpacks_version
+              ? <span className="text-content-muted">{row.nixpacks_version}</span>
+              : <span>not installed</span>}
+            {npErr && <span className="text-danger-fg"> · {npErr}</span>}
+          </p>
+        )}
       </div>
-      <div className="shrink-0 text-right">
+      <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
+        {canInstallNixpacks && (
+          <button onClick={doInstallNixpacks} disabled={npBusy}
+            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border-strong text-content hover:border-brand-600 disabled:opacity-40 transition-colors">
+            {npBusy ? 'Installing…' : 'Install nixpacks'}
+          </button>
+        )}
         {(() => {
           const latestKnown = !!latest
           const current = latestKnown && !row.update_available && row.reachable && !row.is_desktop

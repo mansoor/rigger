@@ -39,6 +39,7 @@ func setup(t *testing.T) string {
 type recorder struct {
 	calls [][]string
 	dirs  []string
+	bins  []string // the binary each call ran as ("docker" by default, "nixpacks" for the nixpacks backend)
 	// missingImages: tags for which `docker image inspect` should report "no such
 	// image" (everything else is treated as present). Lets tests exercise the
 	// stale-pointer resync path in advancePointers.
@@ -48,12 +49,14 @@ type recorder struct {
 func (r *recorder) Docker(s executor.Spec) error {
 	r.calls = append(r.calls, s.Args)
 	r.dirs = append(r.dirs, s.Dir)
+	r.bins = append(r.bins, executor.BinOr(s.Bin))
 	return nil
 }
 
 func (r *recorder) DockerOutput(s executor.Spec) ([]byte, error) {
 	r.calls = append(r.calls, s.Args)
 	r.dirs = append(r.dirs, s.Dir)
+	r.bins = append(r.bins, executor.BinOr(s.Bin))
 	if len(s.Args) == 3 && s.Args[0] == "image" && s.Args[1] == "inspect" && r.missingImages[s.Args[2]] {
 		return nil, fmt.Errorf("no such image: %s", s.Args[2])
 	}
@@ -101,6 +104,51 @@ func TestBuildBackendWithPushAndBump(t *testing.T) {
 	}
 	if push := joined(rec.calls[1]); push != "push "+wantTag {
 		t.Errorf("push call = %q, want push %s", push, wantTag)
+	}
+}
+
+// TestBuildNixpacks verifies a build.method=nixpacks service builds via `nixpacks
+// build … --name <tag> --env …` (through Spec.Bin="nixpacks") and needs NO Dockerfile
+// (no scaffolding/validation), while the image tag/pointer scheme is unchanged.
+func TestBuildNixpacks(t *testing.T) {
+	wsDir := t.TempDir()
+	wsRoot := filepath.Join(wsDir, "ws", "projects", "app")
+	beCtx := filepath.Join(wsRoot, "envs", "prod", "backend")
+	if err := os.MkdirAll(beCtx, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// NOTE: deliberately NO Dockerfile in the context — nixpacks must not require one.
+	cfg := `{
+  "project": { "name": "app", "registry": "reg",
+    "version": { "major": 1, "minor": 2, "patch": 3, "build": 4 } },
+  "services": [ { "name": "backend", "build": { "context": "backend", "method": "nixpacks" } } ],
+  "environments": { "prod": { "domain": "app.com" } }
+}`
+	os.WriteFile(filepath.Join(wsRoot, "config.json"), []byte(cfg), 0o644) //nolint:errcheck
+
+	rec := &recorder{}
+	o := Options{
+		WorkspacesDir: wsDir, Workspace: "ws", Project: "app", Command: "build", Env: "prod",
+		Extra: []string{"backend"}, Stdout: &strings.Builder{}, Exec: rec,
+	}
+	if _, err := o.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected 1 build call, got %d: %v", len(rec.calls), rec.calls)
+	}
+	if rec.bins[0] != "nixpacks" {
+		t.Errorf("build ran as %q, want nixpacks", rec.bins[0])
+	}
+	build := joined(rec.calls[0])
+	wantTag := "reg/app-backend:1.2.3-build.4-prod"
+	for _, want := range []string{"build .", "--name " + wantTag, "--env BUILD_ENV=prod", "--env VERSION=1.2.3-build.4"} {
+		if !strings.Contains(build, want) {
+			t.Errorf("nixpacks build missing %q: %s", want, build)
+		}
+	}
+	if strings.Contains(build, "buildx") || strings.Contains(build, "-f Dockerfile") {
+		t.Errorf("nixpacks build must not use docker buildx / -f Dockerfile: %s", build)
 	}
 }
 

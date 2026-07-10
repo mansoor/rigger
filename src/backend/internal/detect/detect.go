@@ -95,6 +95,7 @@ type Build struct {
 	Context    string            `json:"context,omitempty"`
 	Dockerfile string            `json:"dockerfile,omitempty"`
 	Template   string            `json:"template,omitempty"`
+	Method     string            `json:"method,omitempty"` // "" (dockerfile) | "nixpacks"
 	Args       map[string]string `json:"args,omitempty"`
 }
 
@@ -228,6 +229,7 @@ func DetectRepo(repoDir, subdir string, overlays []string) Draft {
 	if subdir != "" {
 		d := Detect(filepath.Join(repoDir, filepath.FromSlash(subdir)), overlays)
 		applySubdir(&d, subdir, true)
+		NixpacksFallback(&d)
 		return d
 	}
 	d := Detect(repoDir, overlays)
@@ -245,7 +247,30 @@ func DetectRepo(repoDir, subdir string, overlays []string) Draft {
 			return nd
 		}
 	}
+	// Nothing recognized anywhere → build the root with Nixpacks (auto-detect).
+	NixpacksFallback(&d)
 	return d
+}
+
+// NixpacksFallback seeds a single web-routed "app" build service that builds via
+// Nixpacks (auto-detect, no Dockerfile) when detection found nothing deployable — so
+// a language Rigger doesn't template is still buildable instead of a dead end. No-op
+// when services already exist or the repo is a scaffolding template. Callers apply
+// this as the LAST resort, after nested-subdir discovery, so it never short-circuits
+// a repo whose real stack lives in a subdirectory.
+func NixpacksFallback(d *Draft) {
+	if d == nil || len(d.Services) > 0 || d.TemplateOnly != "" {
+		return
+	}
+	d.Services = append(d.Services, Service{
+		Name:      "app",
+		Build:     &Build{Context: ".", Method: "nixpacks"},
+		EnvFile:   true,
+		Restart:   "unless-stopped",
+		WebRouted: true,
+	})
+	d.Detected = "Nixpacks (auto-detect)"
+	d.Notes = append(d.Notes, "No supported framework detected — building with Nixpacks, which auto-detects the stack. Set a port on the app service if its web port isn't detected, or switch to a Dockerfile in Edit Project → Services.")
 }
 
 // cleanSubdir normalizes a subdir to a forward-slash relative path (or "" for the root),

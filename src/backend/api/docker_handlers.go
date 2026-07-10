@@ -48,6 +48,9 @@ type dockerHostInfo struct {
 	SSHAvailable    bool   `json:"ssh_available"`  // registered host with SSH creds
 	UpdateAvailable bool   `json:"update_available"`
 	Updatable       bool   `json:"updatable"` // linux && !desktop && ssh && sudo
+	// Nixpacks (optional build backend): the CLI version present on this daemon's host,
+	// "" when not installed. Local (host 0) always has it — Rigger bakes it in.
+	NixpacksVersion string `json:"nixpacks_version,omitempty"`
 }
 
 type dockerVersionsResp struct {
@@ -77,6 +80,7 @@ func (h *Handler) DockerVersions(w http.ResponseWriter, r *http.Request) {
 		local.Linux = strings.EqualFold(osType, "linux")
 		local.UpdateAvailable = engineUpdateAvailable(latest, ver)
 	}
+	local.NixpacksVersion = localNixpacksVersion()
 	localID := local.DaemonID
 
 	hosts, err := settings.ListHosts(h.db)
@@ -116,6 +120,7 @@ func (h *Handler) DockerVersions(w http.ResponseWriter, r *http.Request) {
 			row.IsRiggerHost = localID != "" && p.daemonID == localID
 			row.UpdateAvailable = engineUpdateAvailable(latest, p.serverVersion)
 			row.Updatable = row.Linux && !row.IsDesktop && row.SudoOK
+			row.NixpacksVersion = p.nixpacksVersion
 			rows[i] = row
 		}(i)
 	}
@@ -135,11 +140,12 @@ func (h *Handler) DockerVersions(w http.ResponseWriter, r *http.Request) {
 // SSH command — and RunCombined has no deadline — wedging the status poll exactly
 // when it should report completion. If `timeout` is absent it fails fast (127),
 // which is harmless (empty field), never a hang.
-const dockerProbeCmd = `echo "@@INFO@@"; timeout 8 docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@END@@"`
+const dockerProbeCmd = `echo "@@INFO@@"; timeout 8 docker info --format '{{.OSType}}|{{.OperatingSystem}}|{{.ServerVersion}}|{{.ID}}' 2>/dev/null; echo "@@SUDO@@"; if [ "$(id -u)" = 0 ]; then echo root; else sudo -n true 2>/dev/null && echo yes || echo no; fi; echo "@@NIXPACKS@@"; command -v nixpacks >/dev/null 2>&1 && (timeout 8 nixpacks --version 2>/dev/null | head -n1); echo "@@END@@"`
 
 type dockerProbe struct {
 	osType, operatingSystem, serverVersion, daemonID string
 	sudoOK                                           bool
+	nixpacksVersion                                  string
 }
 
 // parseDockerProbe reads the marker-delimited output of dockerProbeCmd.
@@ -149,7 +155,7 @@ func parseDockerProbe(out string) dockerProbe {
 	for _, line := range strings.Split(out, "\n") {
 		t := strings.TrimSpace(line)
 		switch t {
-		case "@@INFO@@", "@@SUDO@@", "@@END@@":
+		case "@@INFO@@", "@@SUDO@@", "@@NIXPACKS@@", "@@END@@":
 			section = t
 			continue
 		case "":
@@ -162,9 +168,31 @@ func parseDockerProbe(out string) dockerProbe {
 			}
 		case "@@SUDO@@":
 			p.sudoOK = t == "root" || t == "yes"
+		case "@@NIXPACKS@@":
+			if p.nixpacksVersion == "" {
+				p.nixpacksVersion = normalizeNixpacksVersion(t)
+			}
 		}
 	}
 	return p
+}
+
+// normalizeNixpacksVersion trims `nixpacks --version` output ("nixpacks 1.41.0") to
+// just the version.
+func normalizeNixpacksVersion(s string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), "nixpacks"))
+}
+
+// localNixpacksVersion returns the bundled nixpacks CLI version (Rigger bakes it in),
+// or "" if somehow absent.
+func localNixpacksVersion() string {
+	out, err := (executor.Local{}).DockerOutput(executor.Spec{
+		Bin: "nixpacks", Args: []string{"--version"}, Timeout: 8 * time.Second,
+	})
+	if err != nil {
+		return ""
+	}
+	return normalizeNixpacksVersion(string(out))
 }
 
 // splitInfoLine parses "linux|Ubuntu 22.04|24.0.7|ABCD:..." into its four fields.
@@ -340,6 +368,64 @@ func (h *Handler) DockerUpdate(w http.ResponseWriter, r *http.Request) {
 		"log":            dockerUpdateLog,
 		"message":        "Docker update started on the host. This runs detached so it survives the daemon restart.",
 	})
+}
+
+// nixpacksInstallCmd downloads the pinned Nixpacks CLI onto a Linux host and installs
+// it to /usr/local/bin (sudo when not root). Arch-detected; ends by printing the
+// version so the handler can confirm success. Keep the pinned version in sync with
+// src/Dockerfile's NIXPACKS_VERSION.
+const nixpacksInstallCmd = `set -e; V=1.41.0; a="$(uname -m)"; case "$a" in x86_64) a=x86_64;; aarch64|arm64) a=aarch64;; *) echo "unsupported arch $a" >&2; exit 1;; esac; cd /tmp; curl -fsSL "https://github.com/railwayapp/nixpacks/releases/download/v$V/nixpacks-v$V-$a-unknown-linux-musl.tar.gz" -o rigger-nixpacks.tgz; tar -xzf rigger-nixpacks.tgz nixpacks; if [ "$(id -u)" = 0 ]; then mv -f nixpacks /usr/local/bin/; else sudo mv -f nixpacks /usr/local/bin/; fi; rm -f rigger-nixpacks.tgz; nixpacks --version`
+
+// parseNixpacksVersionOut pulls "1.41.0" from a blob containing a `nixpacks 1.41.0` line.
+func parseNixpacksVersionOut(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "nixpacks ") {
+			return normalizeNixpacksVersion(t)
+		}
+	}
+	return ""
+}
+
+// InstallNixpacks — POST /api/hosts/{id}/install-nixpacks (admin). Installs the Nixpacks
+// CLI onto a registered Linux host so build.method=nixpacks services can build there.
+// Runs synchronously (no daemon restart, unlike the Docker update) and returns the
+// installed version.
+func (h *Handler) InstallNixpacks(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		HostID int64 `json:"host_id"`
+	}
+	if err := readJSON(r, &body); err != nil || body.HostID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "select a registered host"})
+		return
+	}
+	rh, err := h.dialHost(body.HostID)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "can't reach host over SSH: " + err.Error()})
+		return
+	}
+	defer rh.Close()
+
+	pf := parseDockerPreflight(func() string { out, _ := rh.RunCombined(dockerPreflightCmd); return out }())
+	if !strings.EqualFold(pf.osType, "linux") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Nixpacks install is supported only on Linux hosts (this host reports: " + firstNonEmpty(pf.operatingSystem, pf.osType, "unknown") + ")"})
+		return
+	}
+	if !pf.hasDownloader {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "host has neither curl nor wget — install one so the Nixpacks binary can be fetched"})
+		return
+	}
+	if !pf.sudoOK {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the SSH user needs root or passwordless sudo to install Nixpacks to /usr/local/bin on this host"})
+		return
+	}
+
+	out, rerr := rh.RunCombined(nixpacksInstallCmd)
+	ver := parseNixpacksVersionOut(out)
+	if rerr != nil || ver == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "install failed: " + tailStr(out, 400)})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "installed", "host_id": body.HostID, "nixpacks_version": ver})
 }
 
 // dockerPreflightCmd checks Linux/desktop, a downloader, and sudo up front.

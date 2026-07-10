@@ -12,9 +12,13 @@ import (
 	"time"
 )
 
-// Spec describes one docker invocation. Args are the arguments after "docker".
+// Spec describes one command invocation. Args are the arguments after the binary.
 type Spec struct {
-	Args    []string
+	Args []string
+	// Bin is the executable to run; empty ⇒ "docker" (the historical default, so every
+	// existing docker call site is unchanged). Set to e.g. "nixpacks" to run an
+	// alternative build backend through the same local/remote abstraction.
+	Bin     string
 	Dir     string // working directory (e.g. the env dir so `compose` reads ./.env)
 	Env     []string
 	Stdin   io.Reader
@@ -36,14 +40,24 @@ func newCmd(s Spec) (*exec.Cmd, context.CancelFunc) {
 	if base == nil {
 		base = context.Background()
 	}
+	bin := BinOr(s.Bin)
 	if s.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(base, s.Timeout)
-		return exec.CommandContext(ctx, "docker", s.Args...), cancel //nolint:gosec
+		return exec.CommandContext(ctx, bin, s.Args...), cancel //nolint:gosec
 	}
 	if s.Context != nil {
-		return exec.CommandContext(base, "docker", s.Args...), func() {} //nolint:gosec
+		return exec.CommandContext(base, bin, s.Args...), func() {} //nolint:gosec
 	}
-	return exec.Command("docker", s.Args...), func() {} //nolint:gosec
+	return exec.Command(bin, s.Args...), func() {} //nolint:gosec
+}
+
+// BinOr returns the Spec's binary, defaulting to "docker" when unset. Shared by the
+// local and remote executors so both honor Spec.Bin identically.
+func BinOr(bin string) string {
+	if bin == "" {
+		return "docker"
+	}
+	return bin
 }
 
 // Executor runs docker commands. Docker streams via Stdin/Stdout/Stderr;

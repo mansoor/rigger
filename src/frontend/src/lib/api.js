@@ -680,6 +680,9 @@ export const dockerUpdate = (hostId) => api.post('/docker/update', { host_id: ho
 // keeps the poll loop alive even if one status call is slow (e.g. the host's
 // daemon is briefly mid-restart) — a stuck request rejects and the loop retries.
 export const dockerUpdateStatus = (hostId) => api.get(`/docker/update/status?host_id=${hostId}`, { timeout: 20000 }).then(r => r.data)
+// Install the Nixpacks CLI on a registered host (build.method=nixpacks build backend).
+// Synchronous (downloads a small binary; no daemon restart) — allow a longer timeout.
+export const installNixpacks = (hostId) => api.post('/docker/install-nixpacks', { host_id: hostId }, { timeout: 120000 }).then(r => r.data)
 
 // WebSocket terminal into a container. Nested under workspace → project → env.
 export function terminalSocketURL(workspace, name, env) {

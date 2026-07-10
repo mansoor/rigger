@@ -5,6 +5,25 @@
 # =============================================================================
 
 # =============================================================================
+# Stage 0 — Fetch the Nixpacks CLI (optional alternative build backend). The CLI
+# is a small static Rust binary; the heavy Nix bits are pulled at `nixpacks build`
+# time (like any base image), not baked here. Pin the version in one place.
+# =============================================================================
+FROM alpine:3.19 AS nixpacks
+ARG NIXPACKS_VERSION=1.41.0
+RUN apk add --no-cache curl tar \
+    && arch="$(uname -m)" \
+    && case "$arch" in \
+         x86_64) a=x86_64 ;; \
+         aarch64|arm64) a=aarch64 ;; \
+         *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://github.com/railwayapp/nixpacks/releases/download/v${NIXPACKS_VERSION}/nixpacks-v${NIXPACKS_VERSION}-${a}-unknown-linux-musl.tar.gz" \
+         -o /tmp/nixpacks.tar.gz \
+    && tar -xzf /tmp/nixpacks.tar.gz -C /usr/local/bin nixpacks \
+    && chmod +x /usr/local/bin/nixpacks
+
+# =============================================================================
 # Stage 1 — Build React frontend
 # =============================================================================
 FROM node:20-alpine AS frontend-builder
@@ -74,6 +93,11 @@ RUN apk add --no-cache \
     docker-cli-buildx
 
 COPY --from=go-builder /rigger /usr/local/bin/rigger
+
+# Nixpacks CLI — the optional per-service build backend (build.method=nixpacks) and
+# the auto-fallback for languages Rigger doesn't template. Builds by shelling out to
+# the docker-cli above, so no extra daemon is needed.
+COPY --from=nixpacks /usr/local/bin/nixpacks /usr/local/bin/nixpacks
 
 # Bake templates/ into the image as a seed (Dockerfile/nginx/stack templates the
 # Go bootstrapper reads). docker-compose.yml bind-mounts ../templates and

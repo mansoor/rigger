@@ -127,6 +127,16 @@ func (o Options) dockerRunInDir(dir string, args ...string) error {
 	})
 }
 
+// nixpacksRunInDir runs `nixpacks <args>` in dir through the same executor (local or
+// remote-over-SSH, with dir path-translated) — the Nixpacks build backend counterpart
+// of dockerRunInDir. nixpacks itself shells out to `docker build`, so it runs against
+// the same daemon the docker path would.
+func (o Options) nixpacksRunInDir(dir string, args ...string) error {
+	return executor.Default(o.Exec).Docker(executor.Spec{
+		Bin: "nixpacks", Args: args, Dir: dir, Env: o.EnvVars, Stdout: o.Stdout, Stderr: o.Stderr,
+	})
+}
+
 // SetDeploy overrides the deploy step used by promote. The shell bridge sets it
 // to route the post-promote deploy through remote-aware execution; it is also a
 // test seam.

@@ -84,8 +84,10 @@ func (h *Handler) UploadSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	draft := detect.Detect(srcDir, nil)
+	detect.NixpacksFallback(&draft) // unrecognized upload → build with Nixpacks rather than a dead end
 	writeJSON(w, http.StatusOK, map[string]any{
-		"draft":        detect.Detect(srcDir, nil),
+		"draft":        draft,
 		"upload_token": token,
 	})
 }

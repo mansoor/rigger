@@ -84,7 +84,8 @@ func (r Remote) DockerOutput(s executor.Spec) ([]byte, error) {
 }
 
 // command renders the remote shell line for a Spec: an optional `cd <dir> &&`
-// prefix followed by `docker` with each argument single-quoted.
+// prefix followed by the binary (Spec.Bin, default `docker`) with each argument
+// single-quoted.
 func (r Remote) command(s executor.Spec) string {
 	b := strings.Builder{}
 	if dir := r.translate(s.Dir); dir != "" {
@@ -92,7 +93,7 @@ func (r Remote) command(s executor.Spec) string {
 		b.WriteString(shQuote(dir))
 		b.WriteString(" && ")
 	}
-	b.WriteString("docker")
+	b.WriteString(executor.BinOr(s.Bin))
 	for _, a := range s.Args {
 		b.WriteByte(' ')
 		b.WriteString(shQuote(a))
