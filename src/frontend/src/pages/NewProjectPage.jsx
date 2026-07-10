@@ -320,6 +320,9 @@ function ScanStack({ data, onChange, workspace }) {
           onChange={(id) => onChange('git_provider_id', id)} />
       </div>
       {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
+      {!err && !data.scanDraft && (data.source_repo || '').trim() && (
+        <p className="text-xs text-content-faint">Click <strong>Scan</strong> to detect the stack — you can’t continue until it succeeds.</p>
+      )}
       {overlayList.length > 0 && (
         <div className="bg-surface border border-border rounded-xl p-4 space-y-2">
           <Label>Environment-specific compose files</Label>
@@ -490,6 +493,7 @@ function ScanReview({ data, onChange }) {
                       : s.image_from ? `worker → ${s.image_from}`
                       : `image ${s.image}${s.tag ? `:${s.tag}` : ''}`}
                   </span>
+                  {s.build?.method === 'nixpacks' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30">Nixpacks</span>}
                   {ports.length > 0 && <span className="text-content-subtle">:{ports.join(',')}</span>}
                   {meta.length > 0 && <span className="text-content-faint">· {meta.join(' · ')}</span>}
                   {s.web_routed && <span className="text-success-fg">web</span>}
@@ -2746,6 +2750,10 @@ export default function NewProjectPage() {
     navigate('/')
   }
 
+  // Block Continue on the Git-scan step until a successful scan produced a draft, so
+  // the user can't advance a repo we haven't detected (a scannable, non-template repo).
+  const scanIncomplete = step === 2 && data.stackType === 'scan' && (!data.scanDraft || !!data.scanDraft.template_only)
+
   return (
     <div className="min-h-screen bg-canvas flex flex-col">
       {/* Nav bar (same style as Layout) */}
@@ -2814,9 +2822,10 @@ export default function NewProjectPage() {
                 <button
                   type="button"
                   onClick={step === 6 ? () => { if (validate()) { setMaxVisited(7); setStep(7) } } : next}
-                  disabled={step === 1 && !!nameConflict}
+                  disabled={(step === 1 && !!nameConflict) || scanIncomplete}
+                  title={scanIncomplete ? 'Scan the repository first' : undefined}
                   className={`text-content-strong text-sm font-semibold px-6 py-2 rounded-lg transition-colors ${
-                    step === 1 && nameConflict
+                    (step === 1 && nameConflict) || scanIncomplete
                       ? 'bg-brand-800 text-brand-400 cursor-not-allowed'
                       : 'bg-brand-600 hover:bg-brand-700'
                   }`}

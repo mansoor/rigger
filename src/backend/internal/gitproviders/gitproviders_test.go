@@ -165,3 +165,23 @@ func TestBuildAuthMissingSecret(t *testing.T) {
 		t.Fatal("github_app should report not-yet-supported")
 	}
 }
+
+func TestNormalizeRepoURL(t *testing.T) {
+	ssh := &Provider{Kind: KindSSHKey}
+	tok := &Provider{Kind: KindToken}
+	cases := []struct{ p *Provider; in, want string }{
+		// SSH-key provider: HTTPS URL → scp-style SSH URL (the deploy key then applies).
+		{ssh, "https://github.com/mansoor/squareroot-cms", "git@github.com:mansoor/squareroot-cms.git"},
+		{ssh, "https://github.com/mansoor/squareroot-cms.git", "git@github.com:mansoor/squareroot-cms.git"},
+		{ssh, "https://gitea.example.com/team/app.git", "git@gitea.example.com:team/app.git"},
+		{ssh, "git@github.com:mansoor/app.git", "git@github.com:mansoor/app.git"}, // already SSH: unchanged
+		// Token provider: SSH URL → HTTPS (token auth applies).
+		{tok, "git@github.com:mansoor/app.git", "https://github.com/mansoor/app.git"},
+		{tok, "https://github.com/mansoor/app.git", "https://github.com/mansoor/app.git"}, // already HTTPS
+	}
+	for _, c := range cases {
+		if got := c.p.NormalizeRepoURL(c.in); got != c.want {
+			t.Errorf("%s NormalizeRepoURL(%q) = %q, want %q", c.p.Kind, c.in, got, c.want)
+		}
+	}
+}

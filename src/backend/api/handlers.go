@@ -484,6 +484,15 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		msg.Workspace.ProjectRootDir = strings.TrimRight(hwd, "/\\") + "/" + wsName + "/projects/" + projKey
 	}
 
+	// Adapt the project's source repo URL to its git provider's auth form (e.g. an
+	// HTTPS URL entered with an SSH deploy key → git@host:owner/repo.git) so builds —
+	// and the scaffold push below — clone with the credential actually applied.
+	if msg.Workspace.GitProviderID != 0 && strings.TrimSpace(msg.Workspace.SourceRepo) != "" {
+		if p, perr := gitproviders.Get(h.db, h.cryptoKey, msg.Workspace.GitProviderID); perr == nil && p != nil {
+			msg.Workspace.SourceRepo = p.NormalizeRepoURL(msg.Workspace.SourceRepo)
+		}
+	}
+
 	// Laravel scaffold: seed session/cache/queue drivers that need no provisioned
 	// backend plus a stable APP_KEY, so the fresh app deploys green out of the box (its
 	// .env.example carries the same file-based defaults for local dev). Seeded into the

@@ -356,6 +356,39 @@ func (p *Provider) BuildAuth(repo string) (*gitsync.Auth, error) {
 	}
 }
 
+// NormalizeRepoURL adapts a repo URL to the form the provider's auth actually needs,
+// so a user isn't blocked by the common mismatch of an HTTPS URL with an SSH deploy key
+// (the key is silently ignored and the private clone fails "authentication failed").
+//   - SSH-key providers need the scp-style  git@host:owner/repo.git
+//   - Token / GitHub-App providers need      https://host/owner/repo(.git)
+// Returns repo unchanged when it can't confidently convert (e.g. a non-standard SSH
+// port, which the scp-style form can't express) so we never mangle an unusual URL.
+func (p *Provider) NormalizeRepoURL(repo string) string {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return repo
+	}
+	switch p.Kind {
+	case KindSSHKey:
+		// https://host/owner/repo(.git) → git@host:owner/repo.git
+		if u, err := url.Parse(repo); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+			path := strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git")
+			if path == "" {
+				return repo
+			}
+			return "git@" + u.Host + ":" + path + ".git"
+		}
+	case KindToken, KindGitHubApp:
+		// git@host:owner/repo.git → https://host/owner/repo.git (default port only)
+		if rest, ok := strings.CutPrefix(repo, "git@"); ok {
+			if host, path, found := strings.Cut(rest, ":"); found && host != "" && !strings.Contains(path, ":") {
+				return "https://" + host + "/" + strings.TrimPrefix(path, "/")
+			}
+		}
+	}
+	return repo
+}
+
 // Verify checks the credential against a repo with `git ls-remote` (read access).
 // repo must be an HTTPS URL for token providers / an SSH URL for ssh_key providers.
 func (p *Provider) Verify(repo string) error {
