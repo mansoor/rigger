@@ -2922,7 +2922,20 @@ export default function EditProjectPage() {
                 baseDomain={baseDomain}
                 acmeDefault={acmeDefault}
                 autoUrlMode={ws?.auto_url_mode || ''}
-                appHost={ws?.app_host || ''}
+                // Magic-DNS host is per-env: a remote-bound env's URL must embed the
+                // BOUND host's IP (that's where its edge Traefik runs), not the control
+                // plane's. Falls back to the workspace app host for local envs. Mirrors
+                // bridge.magicDNSHost so the shown URL matches what deploy emits.
+                appHost={(() => {
+                  // A PUBLIC host is its own front door → use its IP. A PRIVATE host is
+                  // fronted by the control-plane gateway → the public name points at the
+                  // control plane, so fall through to the workspace app host.
+                  const bh = ws?.env_hosts?.[envName]
+                  const bound = (bh && bh.reachability !== 'private') ? bh.host_address : ''
+                  const ph = cfg._host_id ? wsHosts.find(h => h.id === cfg._host_id) : null
+                  const picked = (ph && ph.reachability !== 'private') ? ph.address : ''
+                  return bound || picked || ws?.app_host || ''
+                })()}
                 localTLS={!!project?.local_tls}
                 projectDatabase={project?.database || ''}
                 projectRedis={!!project?.redis_enabled}

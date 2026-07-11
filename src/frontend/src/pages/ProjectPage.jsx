@@ -105,7 +105,10 @@ function envAccess(cfg, ws, envName) {
   // remote host's address. For local envs, prefer the configured app host/IP
   // (Admin → General) so links still work when the dashboard is reached via a
   // proxy domain; only then fall back to the browser's hostname.
-  const host    = ws?.env_hosts?.[envName]?.host_address || ws?.app_host || window.location.hostname
+  const _ehRef  = ws?.env_hosts?.[envName]
+  // A PUBLIC remote host is reached at its own address; a PRIVATE host is fronted by
+  // the control plane, so use the app host (Admin → General) instead of the remote IP.
+  const host    = (_ehRef && _ehRef.reachability !== 'private' && _ehRef.host_address) ? _ehRef.host_address : (ws?.app_host || window.location.hostname)
   const traefik = !!cfg?.traefik_enabled
   const ssl     = !!cfg?.ssl_enabled
   const isImage = ws?.config?.project?.type === 'image'

@@ -161,7 +161,12 @@ function ProjectEnvDetails({ workspace, name, envHosts = {} }) {
         // takes the per-ENV config, not the whole project config.
         const e = cfg.environments[env] || {}
         const exposeMode = e.expose_mode || (e.traefik_enabled ? 'traefik' : 'host_port')
-        const route = resolveEnvRoute(e, prefix, env, baseDomain, localTLS, autoUrlMode, appHost)
+        // A PUBLIC remote host's magic-DNS URL embeds its own IP (its edge runs there);
+        // a PRIVATE host is fronted by the control-plane gateway, so its URL points at
+        // the control plane (workspace app host). Local envs use the app host too.
+        const eh = envHosts?.[env]
+        const envAppHost = (eh && eh.reachability !== 'private' && eh.host_address) ? eh.host_address : appHost
+        const route = resolveEnvRoute(e, prefix, env, baseDomain, localTLS, autoUrlMode, envAppHost)
         const hostName = envHosts?.[env]?.host_name || 'localhost'
         const hostPort = exposeMode === 'host_port' ? (e.http_port || 80) : null
         return (

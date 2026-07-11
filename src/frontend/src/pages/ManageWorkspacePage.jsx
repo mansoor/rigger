@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import HostHealthModal from '../components/HostHealthModal'
 import HostCapabilityBadges from '../components/HostBadges'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
@@ -15,7 +16,7 @@ import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
-  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost,
+  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost, installWorkspaceHostEdge,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
   fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider, startGitHubAppManifest, gitHubAppInstallURL,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
@@ -618,11 +619,24 @@ function HostsSection({ workspace, qc }) {
   })
   const [modal, setModal]       = useState(null) // null | 'new' | { editing: host }
   const [deleting, setDeleting] = useState(null)
+  const [health, setHealth]     = useState(null) // host being inspected (components + stats)
   const [testStatus, setTestStatus] = useState({}) // id -> { loading, ok, msg, error }
 
+  const [postSave, setPostSave] = useState(null) // { ok, text } — remote workspaces-dir status after create
   const saveMut = useMutation({
     mutationFn: ({ id, body }) => id ? updateWorkspaceHost(workspace, id, body) : createWorkspaceHost(workspace, body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: hostsKey }); setModal(null) },
+    onSuccess: (data, vars) => {
+      qc.invalidateQueries({ queryKey: hostsKey })
+      setModal(null)
+      // On create, surface remote workspaces-dir provisioning (parity with admin Settings).
+      if (!vars.id && data) {
+        const edgeNote = data.edge_installing ? ' Installing the Traefik edge in the background so web-routed apps are reachable here.' : ''
+        if (data.workspaces_dir_created) setPostSave({ ok: true, text: `Created ${data.workspaces_dir} on ${data.name}.${edgeNote}` })
+        else if (data.connect_error) setPostSave({ ok: false, text: `Host saved, but: ${data.connect_error}` })
+        else if (data.workspaces_dir_exists) setPostSave({ ok: true, text: `${data.workspaces_dir} already present on ${data.name}.${edgeNote}` })
+        if (data.workspaces_dir_created || data.connect_error || data.workspaces_dir_exists) setTimeout(() => setPostSave(null), 10000)
+      }
+    },
   })
   const delMut = useMutation({
     mutationFn: (id) => deleteWorkspaceHost(workspace, id),
@@ -632,12 +646,33 @@ function HostsSection({ workspace, qc }) {
     setTestStatus(s => ({ ...s, [id]: { loading: true } }))
     try {
       const res = await testWorkspaceHost(workspace, id)
-      if (res.status === 'ok') setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message } }))
-      else setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } }))
+      if (res.status === 'ok') {
+        const edgeRunning = res.edge_running === true
+        setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message, edgeRunning } }))
+        if (edgeRunning) setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+      } else {
+        setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } }))
+        setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+      }
     } catch (err) {
       setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } }))
+      setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
     }
-    setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+  }
+
+  async function handleInstallEdge(id) {
+    setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: true, error: undefined } }))
+    try {
+      const res = await installWorkspaceHostEdge(workspace, id)
+      if (res.status === 'ok') {
+        setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, edgeRunning: true, msg: res.message } }))
+        setTimeout(() => setTestStatus(s => { const n = { ...s }; delete n[id]; return n }), 8000)
+      } else {
+        setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, error: res.error || 'Edge install failed' } }))
+      }
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, error: err.response?.data?.error || 'Edge install failed' } }))
+    }
   }
 
   const isOwned = (h) => h.owner_scope === `ws:${workspace}`
@@ -654,6 +689,14 @@ function HostsSection({ workspace, qc }) {
           ＋ Add host
         </button>
       </div>
+
+      {postSave && (
+        <div className={`mb-3 text-xs px-3 py-2 rounded-lg border ${postSave.ok
+          ? 'bg-success-subtle/40 border-success-border/50 text-success-fg'
+          : 'bg-warning-subtle/40 border-warning-border/50 text-warning-fg'}`}>
+          {postSave.text}
+        </div>
+      )}
 
       <div className="bg-surface border border-border rounded-xl">
         {isLoading ? (
@@ -680,10 +723,21 @@ function HostsSection({ workspace, qc }) {
                   </div>
                   <div className="flex items-center gap-2">
                     {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
-                    {ts?.ok && <span className="text-xs text-success-fg max-w-[180px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                    {ts?.ok && ts.edgeRunning !== false && <span className="text-xs text-success-fg max-w-[180px] truncate" title={ts.msg}>✓ {ts.msg}</span>}
+                    {ts?.ok && ts.edgeRunning === false && (
+                      <span className="text-xs text-warning-fg flex items-center gap-1.5" title="No Traefik edge on this host — web-routed apps deployed here won't be reachable until it's installed.">
+                        ⚠ no Traefik edge
+                        <button onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
+                          className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                          {ts.edgeBusy ? 'Installing…' : 'Install edge'}
+                        </button>
+                      </span>
+                    )}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
                     <button onClick={() => handleTest(host.id)} disabled={ts?.loading}
                       className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    <button onClick={() => setHealth(host)}
+                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Manage</button>
                     {owned ? (
                       <>
                         <button onClick={() => setModal({ editing: host })}
@@ -701,6 +755,10 @@ function HostsSection({ workspace, qc }) {
           </div>
         )}
       </div>
+
+      {health && (
+        <HostHealthModal host={health} workspace={workspace} onClose={() => setHealth(null)} />
+      )}
 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8" onClick={() => setModal(null)}>

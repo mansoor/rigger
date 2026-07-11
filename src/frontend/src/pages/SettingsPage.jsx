@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import HostForm from '../components/HostForm'
+import HostHealthModal from '../components/HostHealthModal'
 import HostCapabilityBadges from '../components/HostBadges'
 import RegistryForm from '../components/RegistryForm'
 import BackupTargetForm from '../components/BackupTargetForm'
@@ -17,9 +18,9 @@ import {
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
   fetchManagedMetrics, managedMetricsAction,
-  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, fetchHostStats, createHostWorkspacesDir,
+  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, createHostWorkspacesDir, installHostEdge,
   fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
-  dockerVersions, dockerUpdate, dockerUpdateStatus, installNixpacks,
+  dockerVersions, dockerUpdate, dockerUpdateStatus,
   fetchGeneralSettings, updateGeneralSettings, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
@@ -535,10 +536,13 @@ function HostsTab() {
       // Report what the create-time connectivity check found.
       if (data?.connect_error || data?.connected === false) {
         setPostSave({ tone: 'warn', msg: `Host added, but Rigger couldn’t fully set it up: ${data.connect_error || 'connection failed'}. Did you run the authorize command on the host? Fix it and click Test.` })
-      } else if (data?.workspaces_dir_created) {
-        setPostSave({ tone: 'ok', msg: `Host added — connected and created the workspaces directory (${data.workspaces_dir}).` })
       } else {
-        setPostSave({ tone: 'ok', msg: 'Host added — connected. Workspaces directory is ready.' })
+        const edgeNote = data?.edge_installing ? ' Installing the Traefik edge in the background so web-routed apps are reachable here.' : ''
+        if (data?.workspaces_dir_created) {
+          setPostSave({ tone: 'ok', msg: `Host added — connected and created the workspaces directory (${data.workspaces_dir}).${edgeNote}` })
+        } else {
+          setPostSave({ tone: 'ok', msg: `Host added — connected. Workspaces directory is ready.${edgeNote}` })
+        }
       }
       setTimeout(() => setPostSave(null), 12000)
     },
@@ -556,13 +560,28 @@ function HostsTab() {
       const res = await testHost(id)
       if (res.status === 'ok') {
         const dirMissing = res.workspaces_dir_exists === false
-        setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message, dirMissing, dir: res.workspaces_dir } }))
-        if (!dirMissing) clearTestSoon(id) // keep the prompt visible until acted on
+        const edgeRunning = res.edge_running === true
+        setTestStatus(s => ({ ...s, [id]: { ok: true, msg: res.message, dirMissing, dir: res.workspaces_dir, edgeRunning } }))
+        if (!dirMissing && edgeRunning) clearTestSoon(id) // keep prompts visible until acted on
       } else {
         setTestStatus(s => ({ ...s, [id]: { error: res.error || 'Connection failed' } })); clearTestSoon(id)
       }
     } catch (err) {
       setTestStatus(s => ({ ...s, [id]: { error: err.response?.data?.error || 'Connection failed' } })); clearTestSoon(id)
+    }
+  }
+
+  async function handleInstallEdge(id) {
+    setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: true, error: undefined } }))
+    try {
+      const res = await installHostEdge(id)
+      if (res.status === 'ok') {
+        setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, edgeRunning: true, msg: res.message } })); clearTestSoon(id)
+      } else {
+        setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, error: res.error || 'Edge install failed' } }))
+      }
+    } catch (err) {
+      setTestStatus(s => ({ ...s, [id]: { ...s[id], edgeBusy: false, error: err.response?.data?.error || 'Edge install failed' } }))
     }
   }
 
@@ -637,6 +656,15 @@ function HostsTab() {
                       </button>
                     </span>
                   )}
+                  {ts?.ok && !ts.dirMissing && ts.edgeRunning === false && (
+                    <span className="text-xs text-warning-fg flex items-center gap-1.5" title="No Traefik edge on this host — web-routed apps deployed here won't be reachable until it's installed. Standalone or Swarm is auto-detected.">
+                      ⚠ no Traefik edge
+                      <button onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
+                        className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                        {ts.edgeBusy ? 'Installing…' : 'Install edge'}
+                      </button>
+                    </span>
+                  )}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                   <Btn variant="ghost" size="sm" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
                   <Btn variant="ghost" size="sm" onClick={() => setHealth(host)}>Health</Btn>
@@ -688,84 +716,8 @@ function HostsTab() {
       )}
 
       {health && (
-        <HostStatsModal host={health} onClose={() => setHealth(null)} />
+        <HostHealthModal host={health} onClose={() => setHealth(null)} />
       )}
-    </div>
-  )
-}
-
-// HostStatsModal fetches and displays a remote host's Docker + system health.
-function HostStatsModal({ host, onClose }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['host-stats', host.id],
-    queryFn: () => fetchHostStats(host.id),
-    refetchInterval: 5000,
-  })
-  const failed = error || data?.status === 'error'
-  const d = data?.docker || {}
-  const hs = data?.host || {}
-
-  const fmtUptime = (s) => {
-    if (!s) return '—'
-    const days = Math.floor(s / 86400), hrs = Math.floor((s % 86400) / 3600)
-    return days > 0 ? `${days}d ${hrs}h` : `${hrs}h ${Math.floor((s % 3600) / 60)}m`
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-8">
-      <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-content-strong">Health · {host.name}</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
-        </div>
-
-        {isLoading && <div className="py-8 text-center text-content-subtle text-sm">Loading…</div>}
-        {!isLoading && failed && (
-          <div className="py-3 px-4 bg-red-500/10 border border-danger/30 rounded-lg text-sm text-danger-fg">
-            {data?.error || error?.response?.data?.error || 'Failed to reach host'}
-          </div>
-        )}
-
-        {!isLoading && !failed && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs font-semibold text-content-muted uppercase tracking-wider mb-2">Docker</p>
-              {d.error ? (
-                <p className="text-sm text-danger-fg">{d.error}</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <StatCell label="Server" value={d.server_version || '—'} />
-                  <StatCell label="Storage driver" value={d.storage_driver || '—'} />
-                  <StatCell label="Containers" value={`${d.containers_running || 0} up · ${d.containers_stopped || 0} stopped`} />
-                  <StatCell label="Images" value={d.images_total ?? 0} />
-                  <StatCell label="Volumes" value={d.volumes_total ?? 0} />
-                  <StatCell label="Networks" value={d.networks_total ?? 0} />
-                </div>
-              )}
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-content-muted uppercase tracking-wider mb-2">System</p>
-              <div className="grid grid-cols-2 gap-3">
-                <StatCell label="OS" value={hs.os || '—'} />
-                <StatCell label="Arch · CPUs" value={`${hs.arch || '—'} · ${hs.cpus || 0}`} />
-                <StatCell label="Memory" value={`${(hs.mem_used_pct || 0).toFixed(0)}% of ${(hs.mem_total_mb / 1024 || 0).toFixed(1)} GB`} />
-                <StatCell label="Disk" value={`${(hs.disk_used_pct || 0).toFixed(0)}% of ${(hs.disk_total_gb || 0).toFixed(0)} GB`} />
-                <StatCell label="Uptime" value={fmtUptime(hs.uptime_seconds)} />
-              </div>
-            </div>
-            <div className="flex justify-end pt-1"><Btn variant="ghost" onClick={onClose}>Close</Btn></div>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function StatCell({ label, value }) {
-  return (
-    <div className="bg-canvas/50 border border-border rounded-lg px-3 py-2">
-      <p className="text-[11px] text-content-subtle uppercase tracking-wider">{label}</p>
-      <p className="text-sm text-content-strong mt-0.5 truncate" title={String(value)}>{value}</p>
     </div>
   )
 }
@@ -2434,8 +2386,7 @@ function DockerUpdatesCard() {
           )}
           {others.map(h => (
             <DockerHostRow key={h.host_id} row={h} latest={data?.latest}
-              onUpdate={h.updatable ? () => setTarget({ hostId: h.host_id, name: h.name, isRiggerHost: h.is_rigger_host }) : null}
-              onInstallNixpacks={async (id) => { await installNixpacks(id); refetch() }} />
+              onUpdate={h.updatable ? () => setTarget({ hostId: h.host_id, name: h.name, isRiggerHost: h.is_rigger_host }) : null} />
           ))}
           {others.length === 0 && !local && <p className="text-sm text-content-subtle">No hosts.</p>}
         </div>
@@ -2449,19 +2400,10 @@ function DockerUpdatesCard() {
 // DockerHostRow renders one daemon's version + state, and an Update button when
 // the engine can be updated in place. updatableVia is the registered self-host
 // through which the local daemon (which has no direct SSH path) gets updated.
-function DockerHostRow({ row, onUpdate, updatableVia, latest, onInstallNixpacks }) {
+function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
   const isLocal = row.host_id === 0
   const os = row.operating_system || row.os_type || ''
   const latestClean = (latest || '').replace(/^v/, '')
-  const [npBusy, setNpBusy] = useState(false)
-  const [npErr, setNpErr] = useState('')
-  // Offer a Nixpacks install on a reachable remote Linux host that lacks it (local is
-  // always bundled). Requires sudo/root to write /usr/local/bin.
-  const canInstallNixpacks = !isLocal && row.reachable && row.linux && row.sudo_ok && !row.nixpacks_version && onInstallNixpacks
-  async function doInstallNixpacks() {
-    setNpErr(''); setNpBusy(true)
-    try { await onInstallNixpacks(row.host_id) } catch (e) { setNpErr(e?.response?.data?.error || 'install failed') } finally { setNpBusy(false) }
-  }
   return (
     <div className="flex items-center justify-between gap-3 bg-canvas/50 border border-border rounded-lg px-3 py-2">
       <div className="min-w-0">
@@ -2479,18 +2421,11 @@ function DockerHostRow({ row, onUpdate, updatableVia, latest, onInstallNixpacks 
           <p className="text-[11px] text-content-faint mt-0.5 truncate">
             Nixpacks {row.nixpacks_version
               ? <span className="text-content-muted">{row.nixpacks_version}</span>
-              : <span>not installed</span>}
-            {npErr && <span className="text-danger-fg"> · {npErr}</span>}
+              : <span>not installed · <span className="text-content-muted">install from Remote Hosts</span></span>}
           </p>
         )}
       </div>
       <div className="shrink-0 text-right flex flex-col items-end gap-1.5">
-        {canInstallNixpacks && (
-          <button onClick={doInstallNixpacks} disabled={npBusy}
-            className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border-strong text-content hover:border-brand-600 disabled:opacity-40 transition-colors">
-            {npBusy ? 'Installing…' : 'Install nixpacks'}
-          </button>
-        )}
         {(() => {
           const latestKnown = !!latest
           const current = latestKnown && !row.update_available && row.reachable && !row.is_desktop

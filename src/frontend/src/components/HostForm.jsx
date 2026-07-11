@@ -43,6 +43,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
   const [key, setKey]         = useState('')
   const [managed, setManaged] = useState(false)
   const [buildOnly, setBuildOnly] = useState(!!initial?.build_only)
+  const [reachability, setReachability] = useState(initial?.reachability === 'private' ? 'private' : 'public')
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState('')
 
@@ -105,6 +106,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
       workspaces_dir: wsDir.trim(),
     }
     if (showBuildOnly) body.build_only = buildOnly
+    body.reachability = reachability
     if (showGrants) body.grants = grantMode === 'all' ? ['*'] : grantKeys
     try {
       await onSave(body)
@@ -189,6 +191,21 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
           </div>
         </div>
       )}
+
+      <div className="rounded-lg border border-border-strong bg-canvas/60 p-3 space-y-2">
+        <Label>How is this host reached?</Label>
+        <div className="space-y-1.5 text-sm text-content">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" checked={reachability === 'public'} onChange={() => setReachability('public')} className="accent-brand-500 mt-0.5" />
+            <span><strong className="text-content">Public</strong> — this host is its own front door (own public IP / DNS). Apps on it are reached directly at the host.</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="radio" checked={reachability === 'private'} onChange={() => setReachability('private')} className="accent-brand-500 mt-0.5" />
+            <span><strong className="text-content">Private (behind gateway)</strong> — only this Rigger control plane is exposed; it routes traffic to this host's apps. Use for LAN / homelab boxes with no public IP.</span>
+          </label>
+        </div>
+        <Hint className="mt-0.5">The control plane must be reachable at :80/:443 for private hosts. Public apps get their own TLS; private apps are served under the control plane's cert.</Hint>
+      </div>
 
       {showBuildOnly && (
         <div className="rounded-lg border border-border-strong bg-canvas/60 p-3">
