@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- JS drives the auto-retry (with a visible countdown). The <noscript> meta
+       refresh is the fallback when JS is disabled. -->
+  <noscript><meta http-equiv="refresh" content="10" /></noscript>
+  <title>Starting up…</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #1e2440 0%, #0b0e1a 60%); color: #e6e8f0;
+      padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 520px; background: rgba(20, 24, 40, 0.7);
+      border: 1px solid rgba(99, 102, 241, 0.25); border-radius: 16px; padding: 40px 36px;
+      box-shadow: 0 0 60px rgba(99, 102, 241, 0.12); text-align: center;
+    }
+    /* Countdown ring: a depleting progress arc with the seconds remaining in the center. */
+    .ring { position: relative; width: 96px; height: 96px; margin: 0 auto 24px; }
+    .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .ring .track { fill: none; stroke: rgba(129, 140, 248, 0.18); stroke-width: 6; }
+    .ring .prog {
+      fill: none; stroke: #818cf8; stroke-width: 6; stroke-linecap: round;
+      transition: stroke-dashoffset 0.95s linear;
+    }
+    .ring .count {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 30px; font-weight: 650; color: #f3f4ff; font-variant-numeric: tabular-nums;
+    }
+    .ring .count.refreshing {
+      font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: #a5b0ff;
+    }
+    h1 { font-size: 22px; margin: 0 0 8px; font-weight: 650; color: #f3f4ff; }
+    p { font-size: 14.5px; line-height: 1.6; color: #b6bbd4; margin: 0 0 14px; }
+    .hint { font-size: 13px; color: #8a90ad; }
+    ul { text-align: left; font-size: 13.5px; line-height: 1.7; color: #aab0cc; margin: 14px auto 0; max-width: 380px; padding-left: 20px; }
+    .foot { margin-top: 26px; font-size: 12px; color: #6b7195; letter-spacing: .04em; text-transform: uppercase; }
+    .foot b { color: #818cf8; font-weight: 600; }
+    /* When the retry has gone on past a normal startup, the card shifts to an
+       amber "this looks stuck — go check" treatment. */
+    .card.stalled { border-color: rgba(245, 158, 11, 0.4); box-shadow: 0 0 60px rgba(245, 158, 11, 0.12); }
+    .card.stalled .ring .prog { stroke: #f59e0b; }
+    .card.stalled .ring .count { color: #fde68a; }
+    .card.stalled h1 { color: #fde68a; }
+    .stalled-only { display: none; }
+    .card.stalled .stalled-only { display: block; }
+    .card.stalled .startup-only { display: none; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="ring" role="status" aria-live="polite">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="track" cx="50" cy="50" r="45"></circle>
+        <circle class="prog"  cx="50" cy="50" r="45"></circle>
+      </svg>
+      <div class="count" id="count">10</div>
+    </div>
+
+    <!-- Default state: likely just starting up. -->
+    <div class="startup-only">
+      <h1>This app isn't ready yet</h1>
+      <p>If you just deployed it, it's most likely still <strong>starting up</strong> — a first
+        launch can take a minute or two while the app initializes (database setup, migrations,
+        building its index, etc.). This page retries on its own, so it'll load automatically once
+        the app is ready.</p>
+      <p class="hint">Still not loading after a few minutes? It may be:</p>
+      <ul>
+        <li>stopped or still building — check the environment's status in Rigger</li>
+        <li>crash-looping — check the app's logs from the env card</li>
+        <li>reached at the wrong address — verify the URL</li>
+      </ul>
+    </div>
+
+    <!-- Escalated state: shown after it's been retrying longer than a normal startup. -->
+    <div class="stalled-only">
+      <h1>Still not responding</h1>
+      <p>This has been retrying for a while — longer than a typical startup. The app may still be
+        coming up, but if this persists it's likely <strong>not just a delay</strong>. Open this
+        environment in <strong>Rigger</strong> and check:</p>
+      <ul>
+        <li>the environment <strong>status</strong> on the env card — is it running, stopped, or crash-looping?</li>
+        <li>the service <strong>logs</strong> (env card → Logs) for the actual error</li>
+        <li>project <strong>settings</strong> — ports, database credentials, and service dependencies</li>
+      </ul>
+      <p class="hint">This page keeps retrying, so it'll still load on its own if the app recovers.</p>
+    </div>
+
+    <div class="foot">Served by <b>Rigger</b> · retrying automatically</div>
+  </div>
+
+  <script>
+    (function () {
+      var SECONDS = 10;
+      var countEl = document.getElementById('count');
+      var progEl  = document.querySelector('.ring .prog');
+      var R = 45, C = 2 * Math.PI * R;
+      progEl.style.strokeDasharray = C;
+      progEl.style.strokeDashoffset = 0; // full ring at the start
+      var remaining = SECONDS;
+
+      // Escalation: track how long this page has been retrying (across its own
+      // reloads) via localStorage — which is scoped to this app's origin, so each
+      // app tracks itself. After STALL_MS of continuous retrying we switch the card
+      // from "probably starting up" to "this looks stuck — go check Rigger". If the
+      // gap since the last tick is large, the app was probably up in between, so we
+      // treat it as a fresh episode and reset the timer.
+      try {
+        var STALL_MS = 120000, GAP_MS = 60000, now = Date.now();
+        var last  = parseInt(localStorage.getItem('rigger_fb_last')  || '0', 10);
+        var start = parseInt(localStorage.getItem('rigger_fb_start') || '0', 10);
+        if (!start || (now - last) > GAP_MS) start = now;
+        localStorage.setItem('rigger_fb_start', String(start));
+        localStorage.setItem('rigger_fb_last', String(now));
+        if (now - start >= STALL_MS) {
+          document.getElementById('card').classList.add('stalled');
+          document.title = 'Still not responding…';
+        }
+      } catch (e) { /* private mode / no storage — just show the default state */ }
+
+      function tick() {
+        // Deplete the arc proportionally to the time elapsed.
+        progEl.style.strokeDashoffset = (C * (1 - remaining / SECONDS)).toFixed(2);
+        if (remaining <= 0) {
+          countEl.textContent = 'Refreshing';
+          countEl.className = 'count refreshing';
+          // Reload to re-check the app. If it's still down, the fallback is served
+          // again and this countdown restarts from 10.
+          window.location.reload();
+          return;
+        }
+        countEl.textContent = remaining;
+        remaining -= 1;
+        setTimeout(tick, 1000);
+      }
+      tick();
+    })();
+  </script>
+</body>
+</html>

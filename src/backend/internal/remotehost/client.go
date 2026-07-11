@@ -142,6 +142,18 @@ func (c *Client) DirExists(path string) (bool, error) {
 	return len(fields) > 0 && fields[len(fields)-1] == "__yes__", nil
 }
 
+// FileExists reports whether path is a regular file on the remote host. Like
+// DirExists, the `test` exit code is folded into an echo so a missing file isn't a
+// command error.
+func (c *Client) FileExists(path string) (bool, error) {
+	out, err := c.RunCombined("test -f " + shQuote(path) + " && echo __yes__ || echo __no__")
+	if err != nil {
+		return false, err
+	}
+	fields := strings.Fields(out)
+	return len(fields) > 0 && fields[len(fields)-1] == "__yes__", nil
+}
+
 // MkdirAll creates path and any missing parents on the remote host (`mkdir -p`).
 func (c *Client) MkdirAll(path string) error {
 	out, err := c.RunCombined("mkdir -p " + shQuote(path))
