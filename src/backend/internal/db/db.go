@@ -816,6 +816,11 @@ func (d *DB) migrate() error {
 	d.addColumn("hosts", "swarm_state TEXT NOT NULL DEFAULT ''")
 	d.addColumn("hosts", "swarm_manager INTEGER NOT NULL DEFAULT 0")
 	d.addColumn("hosts", "build_only INTEGER NOT NULL DEFAULT 0")
+	// Reachability drives how a host's routed apps are exposed: 'public' = the host is
+	// its own front door (own edge Traefik + public IP/DNS, direct routing); 'private' =
+	// only the control plane is exposed and it gateways requests to this host's edge.
+	// Default 'public' preserves the direct-routing behavior existing hosts already had.
+	d.addColumn("hosts", "reachability TEXT NOT NULL DEFAULT 'public'")
 	// Same scoping for docker registries (Phase 3); pre-scope registries → '*'.
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck

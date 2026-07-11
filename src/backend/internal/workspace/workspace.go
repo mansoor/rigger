@@ -319,6 +319,9 @@ type EnvHostRef struct {
 	HostID   int64  `json:"host_id"`
 	HostName string `json:"host_name"`
 	Address  string `json:"host_address"` // for building direct host:port URLs
+	// Reachability ('public'|'private') tells the UI whether the env's URL points at
+	// this host directly (public/direct) or at the control-plane gateway (private).
+	Reachability string `json:"reachability,omitempty"`
 }
 
 // WorkspaceInfo is one parent-tier workspace (a folder containing projects/).

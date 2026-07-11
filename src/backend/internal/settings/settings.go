@@ -724,10 +724,18 @@ type Host struct {
 	SwarmManager bool   `json:"swarm_manager"`
 	// BuildOnly marks a host as a dedicated builder: offered in build-host pickers,
 	// excluded from deploy-host pickers + blocked from env→host binding.
-	BuildOnly bool      `json:"build_only"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	BuildOnly bool `json:"build_only"`
+	// Reachability is 'public' (host is its own front door — own edge + public IP/DNS,
+	// direct routing) or 'private' (only the control plane is exposed; it gateways
+	// requests to this host's edge). Drives magic-DNS host + gateway forward-routes.
+	Reachability string    `json:"reachability"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
+
+// IsPrivate reports whether the host sits behind the control-plane gateway (model #3)
+// rather than being its own public front door (model #2 / default).
+func (h *Host) IsPrivate() bool { return h != nil && h.Reachability == "private" }
 
 // WorkspaceScope returns the workspace key a host is private to, or "" if the
 // host is global (shared via grants).
@@ -742,7 +750,7 @@ func (h Host) WorkspaceScope() string {
 func WorkspaceOwnerScope(wsKey string) string { return "ws:" + wsKey }
 
 func ListHosts(d *db.DB) ([]Host, error) {
-	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -750,7 +758,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -765,7 +773,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 // hosts (owner_scope='ws:{key}') plus any global host granted to it (or to '*').
 func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	rows, err := d.Query(`
-		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at
+		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, created_at, updated_at
 		FROM hosts h
 		WHERE h.owner_scope = ?
 		   OR (h.owner_scope = 'global' AND EXISTS(
@@ -779,7 +787,7 @@ func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -845,8 +853,8 @@ func SetHostGrants(d *db.DB, hostID int64, workspaces []string) error {
 // GetHost returns a host including the encrypted SSH key (for dialing).
 func GetHost(d *db.DB, id int64) (*Host, error) {
 	var h Host
-	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, created_at, updated_at FROM hosts WHERE id=?`, id).
-		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.CreatedAt, &h.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, created_at, updated_at FROM hosts WHERE id=?`, id).
+		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.CreatedAt, &h.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -865,6 +873,17 @@ func SetHostCapability(d *db.DB, id int64, swarmState string, swarmManager bool)
 // build-host pickers but excluded from deploy-host pickers + env→host binding.
 func SetHostBuildOnly(d *db.DB, id int64, buildOnly bool) error {
 	_, err := d.Exec(`UPDATE hosts SET build_only=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, buildOnly, id)
+	return err
+}
+
+// SetHostReachability sets whether a host is 'public' (its own front door, direct
+// routing) or 'private' (fronted by the control-plane gateway). Any value other than
+// 'private' normalizes to 'public'.
+func SetHostReachability(d *db.DB, id int64, reachability string) error {
+	if reachability != "private" {
+		reachability = "public"
+	}
+	_, err := d.Exec(`UPDATE hosts SET reachability=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, reachability, id)
 	return err
 }
 
@@ -988,17 +1007,18 @@ func HostForEnv(d *db.DB, workspace, env string) (*Host, error) {
 // EnvHostBinding is one (env → host) association for a workspace; env="" is the
 // workspace-wide default.
 type EnvHostBinding struct {
-	Env      string `json:"env"`
-	HostID   int64  `json:"host_id"`
-	HostName string `json:"host_name"`
-	Address  string `json:"address"`
+	Env          string `json:"env"`
+	HostID       int64  `json:"host_id"`
+	HostName     string `json:"host_name"`
+	Address      string `json:"address"`
+	Reachability string `json:"reachability"`
 }
 
 // EnvHosts lists every host binding for a workspace (incl. the env=” default),
 // joined to host name + address. Environments with no row are local and not listed.
 func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 	rows, err := d.Query(
-		`SELECT we.env, hs.id, hs.name, hs.address FROM workspace_host_envs we
+		`SELECT we.env, hs.id, hs.name, hs.address, hs.reachability FROM workspace_host_envs we
 		   JOIN hosts hs ON hs.id = we.host_id WHERE we.project=? ORDER BY we.env`, workspace)
 	if err != nil {
 		return nil, err
@@ -1007,7 +1027,7 @@ func EnvHosts(d *db.DB, workspace string) ([]EnvHostBinding, error) {
 	var out []EnvHostBinding
 	for rows.Next() {
 		var b EnvHostBinding
-		if err := rows.Scan(&b.Env, &b.HostID, &b.HostName, &b.Address); err != nil {
+		if err := rows.Scan(&b.Env, &b.HostID, &b.HostName, &b.Address, &b.Reachability); err != nil {
 			return nil, err
 		}
 		out = append(out, b)
