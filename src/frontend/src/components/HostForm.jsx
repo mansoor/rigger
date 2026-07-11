@@ -44,6 +44,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
   const [managed, setManaged] = useState(false)
   const [buildOnly, setBuildOnly] = useState(!!initial?.build_only)
   const [reachability, setReachability] = useState(initial?.reachability === 'private' ? 'private' : 'public')
+  const [publicAddress, setPublicAddress] = useState(initial?.public_address || '')
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState('')
 
@@ -107,6 +108,7 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
     }
     if (showBuildOnly) body.build_only = buildOnly
     body.reachability = reachability
+    body.public_address = reachability === 'public' ? publicAddress.trim() : ''
     if (showGrants) body.grants = grantMode === 'all' ? ['*'] : grantKeys
     try {
       await onSave(body)
@@ -205,6 +207,13 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
           </label>
         </div>
         <Hint className="mt-0.5">The control plane must be reachable at :80/:443 for private hosts. Public apps get their own TLS; private apps are served under the control plane's cert.</Hint>
+        {reachability === 'public' && (
+          <div className="pt-1">
+            <Label>Public web address <span className="text-content-faint font-normal">(optional)</span></Label>
+            <Input value={publicAddress} onChange={setPublicAddress} placeholder="same as SSH address" />
+            <Hint className="mt-0.5">Only if this host serves web traffic on a different IP/hostname than its SSH address (e.g. you SSH via a bastion). Used for the app's DNS record and magic-DNS URL.</Hint>
+          </div>
+        )}
       </div>
 
       {showBuildOnly && (

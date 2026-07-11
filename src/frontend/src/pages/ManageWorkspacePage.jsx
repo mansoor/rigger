@@ -128,12 +128,14 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
   const [dnsProvider, setDnsProvider] = useState('') // "" = inherit global
   const [dnsToken, setDnsToken] = useState('') // masked sentinel when already set
   const [keepPorts, setKeepPorts] = useState(false) // keep web host ports under Traefik (default: strip)
+  const [manageDns, setManageDns] = useState(true)  // auto-manage public DNS A records for public hosts
   const [seeded, setSeeded] = useState(false)
   if (!seeded && saved) {
     setAcme(saved.acme_email || ''); setDomain(saved.domain || '')
     setAutoMode(saved.auto_url_mode || ''); setAutoHost(saved.auto_url_host || ''); setDnsProvider(saved.apps_dns_provider || '')
     setDnsToken(saved.apps_dns_token || '')
     setKeepPorts(saved.keep_host_ports_under_traefik === 'true')
+    setManageDns(saved.apps_manage_dns !== 'false')
     setSeeded(true)
   }
 
@@ -143,13 +145,15 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
       auto_url_mode: autoMode, auto_url_host: autoHost.trim(), apps_dns_provider: dnsProvider,
       apps_dns_token: dnsToken, // backend keeps current on blank/masked, encrypts a new value
       keep_host_ports_under_traefik: keepPorts ? 'true' : 'false',
+      apps_manage_dns: manageDns ? 'true' : 'false',
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
   const dirty = saved && (acme.trim() !== (saved.acme_email || '') || domain.trim() !== (saved.domain || '')
     || autoMode !== (saved.auto_url_mode || '') || autoHost.trim() !== (saved.auto_url_host || '') || dnsProvider !== (saved.apps_dns_provider || '')
     || dnsToken !== (saved.apps_dns_token || '')
-    || keepPorts !== (saved.keep_host_ports_under_traefik === 'true'))
+    || keepPorts !== (saved.keep_host_ports_under_traefik === 'true')
+    || manageDns !== (saved.apps_manage_dns !== 'false'))
 
   return (
     <section>
@@ -192,6 +196,14 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
             )}
           </div>
         )}
+        {/* Auto-manage public DNS records for public-host apps (model #2 / direct). */}
+        <label className="flex items-start gap-2.5 cursor-pointer select-none">
+          <input type="checkbox" checked={manageDns} onChange={e => setManageDns(e.target.checked)} className="accent-brand-500 mt-0.5" />
+          <span>
+            <span className="text-sm text-content">Auto-manage DNS records</span>
+            <Hint className="mt-0.5">When a base domain + Cloudflare token are set, Rigger upserts an A record (<code className="font-mono">{'{app}'}.{domain.trim() || '{base}'}</code> → the host&apos;s IP) on deploy for apps on <strong>public</strong> hosts, so they resolve straight to that host. Uncheck if you manage DNS yourself.</Hint>
+          </span>
+        </label>
         {/* Auto-URL fallback (when no base domain) — mirrors Admin → General. */}
         {!domain.trim() && (
           <div>
