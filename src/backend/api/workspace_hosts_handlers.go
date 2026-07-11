@@ -67,7 +67,13 @@ func (h *Handler) CreateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, host)
+	if b.Reachability == "private" {
+		_ = settings.SetHostReachability(h.db, host.ID, "private") //nolint:errcheck
+		host.Reachability = "private"
+	}
+	// Provision the remote workspaces dir on registration, same as the admin path —
+	// otherwise a workspace-registered host has no /…/workspaces until first deploy.
+	writeJSON(w, http.StatusCreated, h.provisionHostWorkspacesDir(host))
 }
 
 // PUT /api/workspaces/{ws}/hosts/{id} — edit a host owned by this workspace.
@@ -113,6 +119,8 @@ func (h *Handler) UpdateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = settings.SetHostBuildOnly(h.db, id, b.BuildOnly) //nolint:errcheck
 	updated.BuildOnly = b.BuildOnly
+	_ = settings.SetHostReachability(h.db, id, b.Reachability) //nolint:errcheck
+	updated.Reachability = b.Reachability
 	h.bridge.EvictHost(id)
 	writeJSON(w, http.StatusOK, updated)
 }
@@ -194,6 +202,60 @@ func (h *Handler) SetWorkspaceHostBuildOnly(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "build_only": body.BuildOnly})
+}
+
+// wsHostInPool resolves + pool-gates a workspace host route, returning the id and
+// whether it's usable by the workspace (writing the error response if not).
+func (h *Handler) wsHostInPool(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	ws := r.PathValue("workspace")
+	id, err := wsHostID(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return 0, false
+	}
+	if inPool, _ := settings.HostInWorkspacePool(h.db, ws, id); !inPool {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return 0, false
+	}
+	return id, true
+}
+
+// GET /api/workspaces/{ws}/hosts/{id}/components — per-host component status, pooled.
+func (h *Handler) WorkspaceHostComponents(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.wsHostInPool(w, r)
+	if !ok {
+		return
+	}
+	c, found := h.probeHostComponents(id)
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// POST /api/workspaces/{ws}/hosts/{id}/install-nixpacks — install Nixpacks, pooled.
+func (h *Handler) InstallWorkspaceHostNixpacks(w http.ResponseWriter, r *http.Request) {
+	if id, ok := h.wsHostInPool(w, r); ok {
+		h.installNixpacksByID(w, id)
+	}
+}
+
+// POST /api/workspaces/{ws}/hosts/{id}/workspaces-dir — create the remote workspaces
+// directory, pooled.
+func (h *Handler) CreateWorkspaceHostWorkspacesDir(w http.ResponseWriter, r *http.Request) {
+	if id, ok := h.wsHostInPool(w, r); ok {
+		h.createWorkspacesDirByID(w, id)
+	}
+}
+
+// POST /api/workspaces/{ws}/hosts/{id}/install-edge — (re)install the Traefik edge
+// on a host in the workspace's pool so web-routed workloads deployed there are
+// reachable. Gated to the pool; any pool member (own or granted global) may install.
+func (h *Handler) InstallWorkspaceHostEdge(w http.ResponseWriter, r *http.Request) {
+	if id, ok := h.wsHostInPool(w, r); ok {
+		h.installEdgeByID(w, id)
+	}
 }
 
 // GET /api/workspaces/{ws}/hosts/{id}/stats — host health, gated to the pool.

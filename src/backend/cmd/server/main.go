@@ -470,12 +470,20 @@ func main() {
 				handler.ListWorkspaceHosts(w, r)
 			case r.Method == "GET" && sub == "stats":
 				handler.WorkspaceHostStats(w, r)
+			case r.Method == "GET" && sub == "components":
+				handler.WorkspaceHostComponents(w, r)
+			case r.Method == "POST" && sub == "install-nixpacks":
+				handler.InstallWorkspaceHostNixpacks(w, r)
+			case r.Method == "POST" && sub == "workspaces-dir":
+				handler.CreateWorkspaceHostWorkspacesDir(w, r)
 			case r.Method == "POST" && id == "":
 				handler.CreateWorkspaceHost(w, r)
 			case r.Method == "POST" && sub == "test":
 				handler.TestWorkspaceHost(w, r)
 			case r.Method == "POST" && sub == "build-only":
 				handler.SetWorkspaceHostBuildOnly(w, r)
+			case r.Method == "POST" && sub == "install-edge":
+				handler.InstallWorkspaceHostEdge(w, r)
 			case r.Method == "PUT" && id != "":
 				handler.UpdateWorkspaceHost(w, r)
 			case r.Method == "DELETE" && id != "":
@@ -977,12 +985,16 @@ func main() {
 			handler.ManagedHostKey(w, r)
 		case r.Method == "GET" && hasSuffix(path, "/stats"):
 			handler.HostStats(w, r)
+		case r.Method == "GET" && hasSuffix(path, "/components"):
+			handler.HostComponents(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/test"):
 			handler.TestHost(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/workspaces-dir"):
 			handler.CreateHostWorkspacesDir(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/build-only"):
 			handler.SetHostBuildOnly(w, r)
+		case r.Method == "POST" && hasSuffix(path, "/install-edge"):
+			handler.InstallHostEdge(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/scan"):
 			handler.ScanHost(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/import"):

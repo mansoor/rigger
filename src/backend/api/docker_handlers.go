@@ -398,7 +398,14 @@ func (h *Handler) InstallNixpacks(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "select a registered host"})
 		return
 	}
-	rh, err := h.dialHost(body.HostID)
+	h.installNixpacksByID(w, body.HostID)
+}
+
+// installNixpacksByID SSHes to a host, preflights it, installs the pinned Nixpacks CLI
+// and returns the version. Shared by the admin (/api/docker/install-nixpacks) and the
+// workspace-scoped host install-nixpacks endpoints.
+func (h *Handler) installNixpacksByID(w http.ResponseWriter, id int64) {
+	rh, err := h.dialHost(id)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "can't reach host over SSH: " + err.Error()})
 		return
@@ -425,7 +432,7 @@ func (h *Handler) InstallNixpacks(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "install failed: " + tailStr(out, 400)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "installed", "host_id": body.HostID, "nixpacks_version": ver})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "installed", "host_id": id, "nixpacks_version": ver})
 }
 
 // dockerPreflightCmd checks Linux/desktop, a downloader, and sudo up front.

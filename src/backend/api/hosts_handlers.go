@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +12,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/db"
+	"github.com/mansoor/rigger/ui/internal/edge"
 	"github.com/mansoor/rigger/ui/internal/remotehost"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/stats"
@@ -28,6 +32,7 @@ type hostBody struct {
 	WorkspacesDir string   `json:"workspaces_dir"`  // remote WORKSPACES_DIR ('' = global default)
 	Grants        []string `json:"grants"`          // admin only: global host's workspace allowlist ('*' = all)
 	BuildOnly     bool     `json:"build_only"`      // dedicated builder — excluded from deploy targets
+	Reachability  string   `json:"reachability"`    // 'public' (direct) | 'private' (behind control-plane gateway)
 }
 
 // buildOnlyConflict reports whether marking the host build-only would strand a
@@ -124,6 +129,11 @@ type hostSaveResp struct {
 	WorkspacesDir        string `json:"workspaces_dir,omitempty"`
 	WorkspacesDirExists  bool   `json:"workspaces_dir_exists"`
 	WorkspacesDirCreated bool   `json:"workspaces_dir_created"`
+	// EdgeInstalling ⇒ Rigger kicked off provisioning the Traefik edge (traefik_net +
+	// traefik/socket-proxy/fallback) on this host in the background so web-routed
+	// deploys there are reachable. Progress isn't awaited here (image pulls are slow);
+	// the first routed deploy also ensures the edge, and the host Test reports its state.
+	EdgeInstalling bool `json:"edge_installing"`
 }
 
 // GET /api/hosts/managed-key — the Rigger-managed public key to install on a host.
@@ -183,13 +193,24 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 		_ = settings.SetHostBuildOnly(h.db, host.ID, true) //nolint:errcheck
 		host.BuildOnly = true
 	}
+	if b.Reachability == "private" {
+		_ = settings.SetHostReachability(h.db, host.ID, "private") //nolint:errcheck
+		host.Reachability = "private"
+	}
 	host.Grants, _ = settings.HostGrants(h.db, host.ID)
 
-	// Verify reachability and provision the remote workspaces directory. On a
-	// fresh host the operator has (hopefully) just installed the key — if we can
-	// connect, create the workspaces dir now so scan/deploy work immediately. If we
-	// can't connect, the host is still saved (they can fix the key and Test later);
-	// the response tells the UI to warn.
+	writeJSON(w, http.StatusCreated, h.provisionHostWorkspacesDir(host))
+}
+
+// provisionHostWorkspacesDir verifies reachability and creates the host's remote
+// workspaces directory (mkdir -p) when missing, returning the create-response the UI
+// uses to show connection + directory status. On a fresh host the operator has
+// (hopefully) just installed the key — if we can connect, create the workspaces dir
+// now so scan/deploy work immediately. If we can't connect, the host is still saved
+// (they can fix the key and Test later); the response tells the UI to warn. Shared by
+// the admin (CreateHost) and workspace (CreateWorkspaceHost) create paths so BOTH
+// provision the dir on registration.
+func (h *Handler) provisionHostWorkspacesDir(host *settings.Host) hostSaveResp {
 	resp := hostSaveResp{Host: host, WorkspacesDir: h.hostWorkspacesDir(host)}
 	if rh, derr := h.dialHost(host.ID); derr != nil {
 		resp.ConnectError = derr.Error()
@@ -204,8 +225,95 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspacesDirCreated = true
 		}
 		rh.Close()
+		// With the host reachable and its workspaces dir ready, provision the Traefik
+		// edge so routed workloads deployed here are reachable. Done in the background:
+		// it pulls traefik/nginx images (slow) and the first routed deploy re-ensures it
+		// anyway. Skip dedicated builders — they carry no workload. (remote-host edge/G1.)
+		if resp.Connected && resp.WorkspacesDirExists && !host.BuildOnly {
+			resp.EdgeInstalling = true
+			go h.provisionHostEdgeAsync(host.ID)
+		}
 	}
-	writeJSON(w, http.StatusCreated, resp)
+	return resp
+}
+
+// provisionHostEdge ensures the Traefik edge is present + running on a host so
+// web-routed workloads deployed there are reachable. It first probes (and persists)
+// the host's swarm capability to pick the edge mode (standalone bridge vs Swarm
+// overlay). out (may be nil) receives the deploy command's output.
+func (h *Handler) provisionHostEdge(rh *remotehost.Client, host *settings.Host, out io.Writer) (edge.Result, error) {
+	swarm := host.SwarmManager
+	if info, perr := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); perr == nil {
+		state, mgr := parseSwarmInfo(info)
+		_ = settings.SetHostCapability(h.db, host.ID, state, mgr) //nolint:errcheck
+		swarm = mgr
+	}
+	base := h.hostWorkspacesDir(host)
+	ex := remotehost.NewRemote(rh, h.workspacesDir, base)
+	return edge.Ensure(ex, rh, base, edge.Options{Swarm: swarm}, out)
+}
+
+// provisionHostEdgeAsync provisions the edge on its own SSH connection, for the
+// background call at host registration. Failures are logged, not surfaced (the
+// deploy-time guard re-ensures the edge before any routed deploy).
+func (h *Handler) provisionHostEdgeAsync(id int64) {
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		return
+	}
+	rh, err := h.dialHost(id)
+	if err != nil {
+		log.Printf("edge: cannot dial host %q to provision edge: %v", host.Name, err)
+		return
+	}
+	defer rh.Close()
+	if res, err := h.provisionHostEdge(rh, host, nil); err != nil {
+		log.Printf("edge: provisioning on host %q failed: %v", host.Name, err)
+	} else if res.AlreadyRunning {
+		log.Printf("edge: already running on host %q", host.Name)
+	} else {
+		log.Printf("edge: Traefik edge ready on host %q", host.Name)
+	}
+}
+
+// installEdgeByID (re)installs the Traefik edge on a host synchronously and returns
+// the deploy output. Shared by the admin + workspace install-edge endpoints.
+func (h *Handler) installEdgeByID(w http.ResponseWriter, id int64) {
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
+		return
+	}
+	rh, err := h.dialHost(id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "error": err.Error()})
+		return
+	}
+	defer rh.Close()
+	var buf bytes.Buffer
+	res, eerr := h.provisionHostEdge(rh, host, &buf)
+	if eerr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "error", "error": eerr.Error(), "log": buf.String()})
+		return
+	}
+	msg := "Traefik edge is ready on " + host.Name
+	if res.AlreadyRunning {
+		msg = "Traefik edge already running on " + host.Name
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok", "message": msg, "log": buf.String(),
+		"already_running": res.AlreadyRunning, "network_created": res.NetworkCreated, "deployed": res.Deployed,
+	})
+}
+
+// POST /api/hosts/{id}/install-edge — admin: (re)install the Traefik edge on a host.
+func (h *Handler) InstallHostEdge(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSettingsID(strings.TrimSuffix(r.URL.Path, "/install-edge"), "/api/hosts/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	h.installEdgeByID(w, id)
 }
 
 // POST /api/hosts/{id}/workspaces-dir — dial the host and create its effective
@@ -218,6 +326,12 @@ func (h *Handler) CreateHostWorkspacesDir(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
+	h.createWorkspacesDirByID(w, id)
+}
+
+// createWorkspacesDirByID dials a host and creates its effective remote workspaces
+// directory (mkdir -p). Shared by the admin + workspace-scoped endpoints.
+func (h *Handler) createWorkspacesDirByID(w http.ResponseWriter, id int64) {
 	host, err := settings.GetHost(h.db, id)
 	if err != nil || host == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
@@ -235,6 +349,67 @@ func (h *Handler) CreateHostWorkspacesDir(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "workspaces_dir": dir, "created": true})
+}
+
+// hostComponents is a one-probe snapshot of a host's installable/provisionable
+// components, backing the unified per-host "Components" panel (Docker / Nixpacks /
+// Traefik edge / workspaces dir). ConnectError is set when the host is unreachable.
+type hostComponents struct {
+	Reachability        string `json:"reachability"`
+	ConnectError        string `json:"connect_error,omitempty"`
+	DockerVersion       string `json:"docker_version,omitempty"`
+	DockerReachable     bool   `json:"docker_reachable"`
+	NixpacksVersion     string `json:"nixpacks_version,omitempty"`
+	EdgeRunning         bool   `json:"edge_running"`
+	SwarmState          string `json:"swarm_state,omitempty"`
+	SwarmManager        bool   `json:"swarm_manager"`
+	WorkspacesDir       string `json:"workspaces_dir,omitempty"`
+	WorkspacesDirExists bool   `json:"workspaces_dir_exists"`
+}
+
+// probeHostComponents gathers a host's component status in a single SSH connection.
+func (h *Handler) probeHostComponents(id int64) (hostComponents, bool) {
+	host, err := settings.GetHost(h.db, id)
+	if err != nil || host == nil {
+		return hostComponents{}, false
+	}
+	c := hostComponents{Reachability: host.Reachability, WorkspacesDir: h.hostWorkspacesDir(host)}
+	rh, err := h.dialHost(id)
+	if err != nil {
+		c.ConnectError = err.Error()
+		return c, true
+	}
+	defer rh.Close()
+	if out, e := rh.RunCombined(`docker version --format '{{.Server.Version}}'`); e == nil {
+		c.DockerVersion = strings.TrimSpace(out)
+		c.DockerReachable = c.DockerVersion != ""
+	}
+	if out, e := rh.RunCombined(`nixpacks --version 2>/dev/null`); e == nil {
+		c.NixpacksVersion = normalizeNixpacksVersion(strings.TrimSpace(out))
+	}
+	if info, e := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); e == nil {
+		c.SwarmState, c.SwarmManager = parseSwarmInfo(info)
+		_ = settings.SetHostCapability(h.db, id, c.SwarmState, c.SwarmManager) //nolint:errcheck
+	}
+	ex := remotehost.NewRemote(rh, h.workspacesDir, c.WorkspacesDir)
+	c.EdgeRunning, _ = edge.Status(ex, c.SwarmManager)
+	c.WorkspacesDirExists, _ = rh.DirExists(c.WorkspacesDir)
+	return c, true
+}
+
+// GET /api/hosts/{id}/components — admin: per-host component status.
+func (h *Handler) HostComponents(w http.ResponseWriter, r *http.Request) {
+	id, err := parseSettingsID(strings.TrimSuffix(r.URL.Path, "/components"), "/api/hosts/")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		return
+	}
+	c, ok := h.probeHostComponents(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "host not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }
 
 // PUT /api/hosts/{id} — admin update, including the workspace allowlist (grants)
@@ -277,6 +452,8 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = settings.SetHostBuildOnly(h.db, id, b.BuildOnly) //nolint:errcheck
 	host.BuildOnly = b.BuildOnly
+	_ = settings.SetHostReachability(h.db, id, b.Reachability) //nolint:errcheck
+	host.Reachability = b.Reachability
 	if host.OwnerScope == "global" && b.Grants != nil {
 		_ = settings.SetHostGrants(h.db, id, b.Grants) //nolint:errcheck
 	}
@@ -335,18 +512,22 @@ func (h *Handler) testHostByID(w http.ResponseWriter, id int64) {
 		_ = settings.SetHostCapability(h.db, id, swarmState, swarmManager) //nolint:errcheck
 	}
 	// Also report whether the remote workspaces directory exists — a successful
-	// connection with a missing dir is the case the UI prompts to fix.
-	wsDir, wsExists := "", false
+	// connection with a missing dir is the case the UI prompts to fix — and whether the
+	// Traefik edge is running (so the UI can offer "Install edge" when it isn't).
+	wsDir, wsExists, edgeRunning := "", false, false
 	if host, _ := settings.GetHost(h.db, id); host != nil {
 		wsDir = h.hostWorkspacesDir(host)
 		wsExists, _ = rh.DirExists(wsDir)
+		ex := remotehost.NewRemote(rh, h.workspacesDir, wsDir)
+		edgeRunning, _ = edge.Status(ex, swarmManager)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok",
 		"message":               "Connected — Docker " + strings.TrimSpace(out),
 		"swarm_state":           swarmState,
 		"swarm_manager":         swarmManager,
 		"workspaces_dir":        wsDir,
-		"workspaces_dir_exists": wsExists})
+		"workspaces_dir_exists": wsExists,
+		"edge_running":          edgeRunning})
 }
 
 // POST /api/hosts/{id}/build-only — admin: mark/unmark a host as a dedicated

@@ -964,7 +964,7 @@ func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 			}
 			id := int64(0)
 			if ok {
-				eh[env] = workspace.EnvHostRef{HostID: b.HostID, HostName: b.HostName, Address: b.Address}
+				eh[env] = workspace.EnvHostRef{HostID: b.HostID, HostName: b.HostName, Address: b.Address, Reachability: b.Reachability}
 				id = b.HostID
 			}
 			if common == -1 {
@@ -988,13 +988,15 @@ func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 	}
 }
 
-// refineRemoteEnvURLs corrects the displayed route URL for envs bound to a remote
-// host. workspace.load computes each env's URL with the local app_host (the only
-// value it's given), so a remote env in magic-DNS mode would show the wrong host.
-// Now that annotateHosts has filled EnvHosts with per-env addresses, recompute
-// those envs' URLs using their own host's address. (Base-domain and *.localhost
-// URLs don't depend on the host, so this only changes magic-DNS URLs.) Call after
-// annotateHosts.
+// refineRemoteEnvURLs corrects the displayed route URL for envs bound to a PUBLIC
+// remote host. workspace.load computes each env's URL with the local app_host (the
+// only value it's given), so a public remote env in magic-DNS mode would show the
+// wrong host. Now that annotateHosts has filled EnvHosts with per-env addresses,
+// recompute those envs' URLs using their own host's address. (Base-domain and
+// *.localhost URLs don't depend on the host, so this only changes magic-DNS URLs.)
+// PRIVATE (gateway) hosts are deliberately skipped: they're fronted by the control
+// plane, so the base app_host URL workspace.load already produced is the right one.
+// Call after annotateHosts.
 func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
 	for i := range wss {
 		if len(wss[i].EnvHosts) == 0 || len(wss[i].EnvAccess) == 0 {
@@ -1007,8 +1009,8 @@ func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
 		baseDomain := settings.EffectiveBaseDomain(h.db, wss[i].WorkspaceName)
 		autoMode := settings.EffectiveAutoURLMode(h.db, wss[i].WorkspaceName)
 		for env, hostRef := range wss[i].EnvHosts {
-			if hostRef.Address == "" {
-				continue
+			if hostRef.Address == "" || hostRef.Reachability == "private" {
+				continue // private host → control plane fronts it; keep the app_host URL
 			}
 			info, ok := wss[i].EnvAccess[env]
 			if !ok {

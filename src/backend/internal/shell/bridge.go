@@ -16,12 +16,15 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/backup"
 	"github.com/mansoor/rigger/ui/internal/builder"
+	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/customdomains"
 	"github.com/mansoor/rigger/ui/internal/db"
 	"github.com/mansoor/rigger/ui/internal/deployhistory"
 	"github.com/mansoor/rigger/ui/internal/dockerops"
+	"github.com/mansoor/rigger/ui/internal/edge"
 	"github.com/mansoor/rigger/ui/internal/executor"
+	"github.com/mansoor/rigger/ui/internal/gateway"
 	"github.com/mansoor/rigger/ui/internal/gitproviders"
 	"github.com/mansoor/rigger/ui/internal/gitsync"
 	"github.com/mansoor/rigger/ui/internal/proxyroutes"
@@ -121,17 +124,21 @@ func (b *Bridge) resourcePrefix(workspaceName, project string) string {
 }
 
 // magicDNSHost resolves the address to embed in an env's magic-DNS auto-URL
-// ({prefix}-{env}.<host>.sslip.io). The address is per-LOCATION, not global: an
-// env bound to a remote host uses THAT host's address (it's where the workload —
-// and its published ports — actually run); a local env uses the configured
-// app_host. "" ⇒ the magic-DNS modes degrade to *.localhost. This is what makes
-// the auto-URL correct in a mixed local+remote fleet (a single global IP can't
-// be right once a second host exists).
+// ({prefix}-{env}.<host>.sslip.io) — reachability-aware:
+//   - a PUBLIC remote host uses THAT host's address (it's its own front door; the
+//     name resolves straight to it — model #2 / direct).
+//   - a PRIVATE remote host uses the CONTROL PLANE's app_host: only the control
+//     plane is exposed, and it gateways the request to the host's edge, so the
+//     public name must point at the control plane (model #3 / gateway).
+//   - a local env uses the configured app_host.
+//
+// "" ⇒ the magic-DNS modes degrade to *.localhost. This keeps the auto-URL correct
+// across a mixed local + public-remote + private-remote fleet.
 func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
 	if b.db == nil {
 		return ""
 	}
-	if host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env); err == nil && host != nil {
+	if host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env); err == nil && host != nil && !host.IsPrivate() {
 		return host.Address
 	}
 	return settings.EffectiveAutoURLHost(b.db, workspaceName)
@@ -273,6 +280,88 @@ func (b *Bridge) hostBase(host *settings.Host) string {
 		return host.WorkspacesDir
 	}
 	return b.remoteWorkspacesDir
+}
+
+// envUsesTraefik reports whether an env's stack is web-routed (attaches the shared
+// traefik_net). Gates the remote-edge guard so a non-routed stack doesn't stand up an
+// edge. A load failure or missing env defaults to true — safest is to ensure the edge.
+func (b *Bridge) envUsesTraefik(workspaceName, project, env string) bool {
+	cfg, err := wsconfig.Load(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return true
+	}
+	e, ok := cfg.Environments[env]
+	if !ok {
+		return true
+	}
+	return e.TraefikEnabled
+}
+
+// ensureRemoteEdge makes sure the Traefik edge (traefik_net + traefik/socket-proxy/
+// fallback) is present and running on a remote deploy host before a routed stack is
+// deployed there. Mode (standalone vs Swarm overlay) follows the host's probed swarm
+// capability. Idempotent and fast when the edge is already up.
+func (b *Bridge) ensureRemoteEdge(rt *remoteTarget, out io.Writer) error {
+	host, _ := settings.GetHost(b.db, rt.hostID)
+	swarm := host != nil && host.SwarmManager
+	_, err := edge.Ensure(rt.exec, rt.client, b.hostBase(host), edge.Options{Swarm: swarm}, out)
+	return err
+}
+
+// syncGatewayRoute keeps the control-plane gateway forward-route for an env in sync
+// with its deploy state. For a PRIVATE remote host (model #3) it writes a Traefik
+// file-provider route on the control plane: Host(publicName) → http://<host>:80 (the
+// remote edge), so the single public ingress fronts a private LAN box. For a public
+// or local env it removes any stale route (the host is its own front door). up=false
+// (stop/down) always removes it. Best-effort — the app still runs if this fails; the
+// URL just won't front until re-synced.
+func (b *Bridge) syncGatewayRoute(workspaceName, project, env string, rt *remoteTarget, up bool) error {
+	dir := proxyroutes.DynDir()
+	if !up {
+		return gateway.Remove(dir, workspaceName, project, env)
+	}
+	host, _ := settings.GetHost(b.db, rt.hostID)
+	if host == nil || !host.IsPrivate() {
+		return gateway.Remove(dir, workspaceName, project, env) // direct-routed — no gateway
+	}
+	cfgBytes, err := os.ReadFile(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return err
+	}
+	// magicDNSHost already returns the CONTROL PLANE for a private host, so the app's
+	// public name points at the ingress; the route below forwards it to the host's edge.
+	url, ok := composegen.EnvRouteURL(cfgBytes, env,
+		settings.EffectiveBaseDomain(b.db, workspaceName),
+		settings.EffectiveAutoURLMode(b.db, workspaceName),
+		b.magicDNSHost(workspaceName, project, env))
+	if !ok {
+		return gateway.Remove(dir, workspaceName, project, env) // not domain-routed
+	}
+	ssl := strings.HasPrefix(url, "https://")
+	publicHost := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
+	return gateway.Write(dir, workspaceName, project, env, gateway.Route{
+		PublicHost:  publicHost,
+		UpstreamURL: "http://" + host.Address + ":80",
+		TLS:         ssl,
+		Middlewares: []string{"rigger-loading@file"},
+	})
+}
+
+// ensureRemoteEnvFile seeds a remote env's .env from the freshly-generated local copy
+// when the host has none yet — the first-deploy case, since ordinary deploys skip
+// .env to keep the host copy authoritative. A present host .env is left untouched
+// (its edits win); env-var/secret saves push updates via PushEnvFile.
+func (b *Bridge) ensureRemoteEnvFile(rt *remoteTarget, workspaceName, project, env string) error {
+	localEnv := wspath.DotEnv(b.workspacesDir, workspaceName, project, env)
+	remoteEnv := rt.exec.RemoteDir(localEnv)
+	if exists, err := rt.client.FileExists(remoteEnv); err == nil && exists {
+		return nil // host copy is authoritative
+	}
+	data, err := os.ReadFile(localEnv)
+	if err != nil {
+		return fmt.Errorf("read local .env: %w", err)
+	}
+	return rt.client.WriteFile(remoteEnv, data, 0o600)
 }
 
 // PushEnvFile pushes an environment's local .env to its remote host. The .env is
@@ -1492,25 +1581,25 @@ func (b *Bridge) Run(opts RunOptions) error {
 	// natively in Go. Env/Extra carry the run.sh argument layout.
 	if builder.Handles(opts.Command) {
 		bopts := builder.Options{
-			WorkspacesDir:             b.workspacesDir,
-			Workspace:                 opts.Workspace,
-			Project:                   opts.Project,
-			Command:                   opts.Command,
-			Env:                       opts.Env,
-			Extra:                     opts.Extra,
-			EnvVars:                   shellEnv(),
-			Stdout:                    opts.Stdout,
-			Stderr:                    opts.Stderr,
-			BaseDomain:                settings.EffectiveBaseDomain(b.db, opts.Workspace),
-			AutoURLMode:               settings.EffectiveAutoURLMode(b.db, opts.Workspace),
-			AutoURLHost:               b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
-			DNSProvider:               settings.EffectiveDNSProvider(b.db, opts.Workspace),
-			OverrideCert:              b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
-			CustomDomains:             customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
-			RouterMiddlewares:         b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
-			Registry:                  b.effectiveRegistry(opts.Workspace, opts.Project),
-			TemplatesDir:              filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
-			Exec:                      runExec,                                   // default: env's deploy host (or local) — used by promote
+			WorkspacesDir:     b.workspacesDir,
+			Workspace:         opts.Workspace,
+			Project:           opts.Project,
+			Command:           opts.Command,
+			Env:               opts.Env,
+			Extra:             opts.Extra,
+			EnvVars:           shellEnv(),
+			Stdout:            opts.Stdout,
+			Stderr:            opts.Stderr,
+			BaseDomain:        settings.EffectiveBaseDomain(b.db, opts.Workspace),
+			AutoURLMode:       settings.EffectiveAutoURLMode(b.db, opts.Workspace),
+			AutoURLHost:       b.magicDNSHost(opts.Workspace, opts.Project, opts.Env),
+			DNSProvider:       settings.EffectiveDNSProvider(b.db, opts.Workspace),
+			OverrideCert:      b.usesOverrideCert(opts.Workspace, opts.Project, opts.Env),
+			CustomDomains:     customdomains.VerifiedDomains(b.db, opts.Workspace, opts.Project, opts.Env),
+			RouterMiddlewares: b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
+			Registry:          b.effectiveRegistry(opts.Workspace, opts.Project),
+			TemplatesDir:      filepath.Join(b.toolkitRoot, "templates"), // scaffold a missing Dockerfile into _src
+			Exec:              runExec,                                   // default: env's deploy host (or local) — used by promote
 		}
 		// Phase 4: `build` runs on the project's BUILD host, which may differ from the
 		// env's deploy host. With no explicit build host the default is to build on the
@@ -1643,6 +1732,35 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Exec:                      runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
+			// A web-routed stack needs a Traefik edge (+ the external traefik_net) on the
+			// remote host: without it `compose up` fails on the missing network, and even
+			// forced up nothing would route the app's URL. Provision/verify it before we
+			// sync + deploy. Idempotent and fast when the edge is already running. This is
+			// the single choke point every remote deploy/start/refresh/migrate-start hits,
+			// so it also covers moving an env to a fresh host. (See remote-host edge / G1.)
+			if b.envUsesTraefik(opts.Workspace, opts.Project, opts.Env) {
+				if err := b.ensureRemoteEdge(rt, opts.Stdout); err != nil {
+					return fmt.Errorf("provision Traefik edge on host %q: %w", rt.hostName, err)
+				}
+				// Gateway (model #3): if this host is PRIVATE, front it from the control
+				// plane by writing/removing the forward-route as the stack comes up or down.
+				// Best-effort — a routing-file hiccup shouldn't fail an otherwise-good deploy.
+				switch opts.Command {
+				case "start", "deploy", "up", "refresh", "restart", "update":
+					if err := b.syncGatewayRoute(opts.Workspace, opts.Project, opts.Env, rt, true); err != nil {
+						fmt.Fprintf(opts.Stdout, "⚠ gateway route not written: %v\n", err)
+					}
+				case "stop", "down":
+					_ = b.syncGatewayRoute(opts.Workspace, opts.Project, opts.Env, rt, false) //nolint:errcheck
+				}
+			}
+			// The deploy sync deliberately skips .env (host-authoritative). A remote env
+			// that has never had its vars/secrets saved has NO .env on the host yet, so
+			// compose interpolation fails ("env file not found"). Seed it once when absent;
+			// an existing host copy is left untouched. (See remote-host workload gaps / G5.)
+			if err := b.ensureRemoteEnvFile(rt, opts.Workspace, opts.Project, opts.Env); err != nil {
+				return fmt.Errorf("provision .env on host %q: %w", rt.hostName, err)
+			}
 			localDir := b.localEnvDir(opts.Workspace, opts.Project, opts.Env)
 			dopts.Remote = true
 			dopts.RemoteWorkspacesDir = b.remoteWorkspacesDir
