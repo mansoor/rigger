@@ -143,6 +143,12 @@ func (g *gen) buildMongoExpress(prefix, rp, registry, tag string, isSwarm bool) 
 			"ME_CONFIG_MONGODB_URL":          flexStr("${MONGO_URI}"),
 			"ME_CONFIG_MONGODB_ENABLE_ADMIN": flexStr("true"),
 			"ME_CONFIG_BASICAUTH":            flexStr("false"),
+			// Pin the listen port to mongo-express's native 8081 (= the Traefik target
+			// above). mongo-express (Node) honors $PORT, and the env's .env carries a
+			// global PORT=<web port> (env_file) that would otherwise make it listen on the
+			// wrong port → Traefik routes to a dead port ("app isn't ready"). An explicit
+			// environment entry wins over env_file, so this is immune to that leak.
+			"PORT": flexStr("8081"),
 		},
 		DependsOn: []string{"mongodb"},
 		// Admin UI → eligible for the per-env basic-auth middleware (gated on ProtectAdminUIs).

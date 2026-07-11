@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mansoor/rigger/ui/internal/databases"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
 	"github.com/mansoor/rigger/ui/internal/wspath"
 )
@@ -512,7 +513,14 @@ func seedServices(req CreateRequest) []map[string]any {
 	// Adminer web SQL client is added as the sole web-routed service → web entry.
 	if req.Type == "database" {
 		if (req.WebSQL || req.Cloudbeaver) && req.Database != "" && req.Database != "none" {
-			return []map[string]any{adminerService(req.Database)}
+			// Adminer is a SQL client — it can't talk to a document store. Only add it for
+			// SQL engines (postgres/mysql/mariadb). Non-SQL engines (MongoDB) get their own
+			// console (mongo-express) synthesized by composegen from the web_sql flag, so add
+			// NO explicit Adminer service here (matches composegen's buildAdminer gating).
+			if eng, ok := databases.Get(req.Database); ok && (eng.Driver == "postgres" || eng.Driver == "mysql") {
+				return []map[string]any{adminerService(req.Database)}
+			}
+			return nil
 		}
 		return nil
 	}
