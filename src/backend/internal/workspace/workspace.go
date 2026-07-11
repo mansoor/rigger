@@ -322,6 +322,16 @@ type EnvHostRef struct {
 	// Reachability ('public'|'private') tells the UI whether the env's URL points at
 	// this host directly (public/direct) or at the control-plane gateway (private).
 	Reachability string `json:"reachability,omitempty"`
+	// PublicAddress is the host's public web address override ('' = use Address).
+	PublicAddress string `json:"public_address,omitempty"`
+}
+
+// WebAddress is the host's public-facing address: the PublicAddress override, else Address.
+func (e EnvHostRef) WebAddress() string {
+	if e.PublicAddress != "" {
+		return e.PublicAddress
+	}
+	return e.Address
 }
 
 // WorkspaceInfo is one parent-tier workspace (a folder containing projects/).

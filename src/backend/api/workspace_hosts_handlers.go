@@ -71,6 +71,10 @@ func (h *Handler) CreateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 		_ = settings.SetHostReachability(h.db, host.ID, "private") //nolint:errcheck
 		host.Reachability = "private"
 	}
+	if b.PublicAddress != "" {
+		_ = settings.SetHostPublicAddress(h.db, host.ID, b.PublicAddress) //nolint:errcheck
+		host.PublicAddress = strings.TrimSpace(b.PublicAddress)
+	}
 	// Provision the remote workspaces dir on registration, same as the admin path —
 	// otherwise a workspace-registered host has no /…/workspaces until first deploy.
 	writeJSON(w, http.StatusCreated, h.provisionHostWorkspacesDir(host))
@@ -121,6 +125,8 @@ func (h *Handler) UpdateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 	updated.BuildOnly = b.BuildOnly
 	_ = settings.SetHostReachability(h.db, id, b.Reachability) //nolint:errcheck
 	updated.Reachability = b.Reachability
+	_ = settings.SetHostPublicAddress(h.db, id, b.PublicAddress) //nolint:errcheck
+	updated.PublicAddress = strings.TrimSpace(b.PublicAddress)
 	h.bridge.EvictHost(id)
 	writeJSON(w, http.StatusOK, updated)
 }

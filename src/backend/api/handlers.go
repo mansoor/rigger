@@ -964,7 +964,7 @@ func (h *Handler) annotateHosts(wss []workspace.Workspace) {
 			}
 			id := int64(0)
 			if ok {
-				eh[env] = workspace.EnvHostRef{HostID: b.HostID, HostName: b.HostName, Address: b.Address, Reachability: b.Reachability}
+				eh[env] = workspace.EnvHostRef{HostID: b.HostID, HostName: b.HostName, Address: b.Address, Reachability: b.Reachability, PublicAddress: b.PublicAddress}
 				id = b.HostID
 			}
 			if common == -1 {
@@ -1016,7 +1016,7 @@ func (h *Handler) refineRemoteEnvURLs(wss []workspace.Workspace) {
 			if !ok {
 				continue
 			}
-			if url, routed := composegen.EnvRouteURL(data, env, baseDomain, autoMode, hostRef.Address); routed {
+			if url, routed := composegen.EnvRouteURL(data, env, baseDomain, autoMode, hostRef.WebAddress()); routed {
 				info.URL = url
 				wss[i].EnvAccess[env] = info
 			}

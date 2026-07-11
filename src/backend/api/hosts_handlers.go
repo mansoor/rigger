@@ -33,6 +33,7 @@ type hostBody struct {
 	Grants        []string `json:"grants"`          // admin only: global host's workspace allowlist ('*' = all)
 	BuildOnly     bool     `json:"build_only"`      // dedicated builder — excluded from deploy targets
 	Reachability  string   `json:"reachability"`    // 'public' (direct) | 'private' (behind control-plane gateway)
+	PublicAddress string   `json:"public_address"`  // public web IP/hostname override ('' = use address)
 }
 
 // buildOnlyConflict reports whether marking the host build-only would strand a
@@ -196,6 +197,10 @@ func (h *Handler) CreateHost(w http.ResponseWriter, r *http.Request) {
 	if b.Reachability == "private" {
 		_ = settings.SetHostReachability(h.db, host.ID, "private") //nolint:errcheck
 		host.Reachability = "private"
+	}
+	if b.PublicAddress != "" {
+		_ = settings.SetHostPublicAddress(h.db, host.ID, b.PublicAddress) //nolint:errcheck
+		host.PublicAddress = strings.TrimSpace(b.PublicAddress)
 	}
 	host.Grants, _ = settings.HostGrants(h.db, host.ID)
 
@@ -454,6 +459,8 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	host.BuildOnly = b.BuildOnly
 	_ = settings.SetHostReachability(h.db, id, b.Reachability) //nolint:errcheck
 	host.Reachability = b.Reachability
+	_ = settings.SetHostPublicAddress(h.db, id, b.PublicAddress) //nolint:errcheck
+	host.PublicAddress = strings.TrimSpace(b.PublicAddress)
 	if host.OwnerScope == "global" && b.Grants != nil {
 		_ = settings.SetHostGrants(h.db, id, b.Grants) //nolint:errcheck
 	}

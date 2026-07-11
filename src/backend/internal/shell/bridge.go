@@ -16,6 +16,7 @@ import (
 
 	"github.com/mansoor/rigger/ui/internal/backup"
 	"github.com/mansoor/rigger/ui/internal/builder"
+	"github.com/mansoor/rigger/ui/internal/clouddns"
 	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/crypto"
 	"github.com/mansoor/rigger/ui/internal/customdomains"
@@ -139,7 +140,7 @@ func (b *Bridge) magicDNSHost(workspaceName, project, env string) string {
 		return ""
 	}
 	if host, err := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env); err == nil && host != nil && !host.IsPrivate() {
-		return host.Address
+		return host.WebAddress()
 	}
 	return settings.EffectiveAutoURLHost(b.db, workspaceName)
 }
@@ -304,8 +305,59 @@ func (b *Bridge) envUsesTraefik(workspaceName, project, env string) bool {
 func (b *Bridge) ensureRemoteEdge(rt *remoteTarget, out io.Writer) error {
 	host, _ := settings.GetHost(b.db, rt.hostID)
 	swarm := host != nil && host.SwarmManager
-	_, err := edge.Ensure(rt.exec, rt.client, b.hostBase(host), edge.Options{Swarm: swarm}, out)
+	// Thread the real ACME account email so the edge's LE resolver can issue certs for
+	// a public host's base-domain apps (empty would default to admin@example.com, which
+	// LE rejects).
+	_, err := edge.Ensure(rt.exec, rt.client, b.hostBase(host),
+		edge.Options{Swarm: swarm, ACMEEmail: strings.TrimSpace(settings.AppSetting(b.db, "acme_email"))}, out)
 	return err
+}
+
+// syncPublicHostDNS keeps the public DNS A record for a base-domain app on a PUBLIC
+// remote host in sync with deploy state: on up it upserts label.base -> the host's
+// public IP (a specific record that overrides the wildcard, so the name resolves
+// straight to the host, which then serves its own http-01 cert); on down it removes
+// it. No-op unless a base domain + DNS token are configured, DNS management is on, and
+// the host is public. Best-effort — a DNS API hiccup is warned, never fatal.
+func (b *Bridge) syncPublicHostDNS(workspaceName, project, env string, rt *remoteTarget, up bool, out io.Writer) {
+	base := settings.EffectiveBaseDomain(b.db, workspaceName)
+	if base == "" || !settings.EffectiveManageDNS(b.db, workspaceName) {
+		return
+	}
+	host, _ := settings.GetHost(b.db, rt.hostID)
+	if host == nil || host.IsPrivate() {
+		return // private hosts route via the control-plane wildcard, not a per-host record
+	}
+	token := settings.EffectiveDNSToken(b.db, b.cryptoKey, workspaceName)
+	if token == "" {
+		return // no token — the operator manages DNS themselves
+	}
+	cfgBytes, err := os.ReadFile(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return
+	}
+	url, ok := composegen.EnvRouteURL(cfgBytes, env, base,
+		settings.EffectiveAutoURLMode(b.db, workspaceName), host.WebAddress())
+	if !ok {
+		return
+	}
+	fqdn := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
+	// Only manage records under the configured base domain (never a custom/explicit domain).
+	if fqdn != base && !strings.HasSuffix(fqdn, "."+base) {
+		return
+	}
+	cf := clouddns.NewCloudflare(token)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if up {
+		if err := cf.UpsertA(ctx, fqdn, host.WebAddress()); err != nil {
+			fmt.Fprintf(out, "⚠ DNS record %s -> %s not set: %v\n", fqdn, host.WebAddress(), err)
+		} else {
+			fmt.Fprintf(out, "✓ DNS %s -> %s\n", fqdn, host.WebAddress())
+		}
+	} else {
+		_ = cf.DeleteA(ctx, fqdn) //nolint:errcheck
+	}
 }
 
 // syncGatewayRoute keeps the control-plane gateway forward-route for an env in sync
@@ -1732,6 +1784,13 @@ func (b *Bridge) Run(opts RunOptions) error {
 			Exec:                      runExec, // context-bound (local or remote) — cancellable
 		}
 		if rt != nil {
+			// A PUBLIC remote host is its own front door and issues its OWN cert via
+			// http-01 (single domain) on its edge — it can't do the dns-01 wildcard (that
+			// token lives only on the control plane). Force the letsencrypt (http-01)
+			// resolver for it; the control plane + private hosts keep the dns wildcard.
+			if host, _ := settings.GetHost(b.db, rt.hostID); host != nil && !host.IsPrivate() {
+				dopts.DNSProvider = ""
+			}
 			// A web-routed stack needs a Traefik edge (+ the external traefik_net) on the
 			// remote host: without it `compose up` fails on the missing network, and even
 			// forced up nothing would route the app's URL. Provision/verify it before we
@@ -1743,15 +1802,18 @@ func (b *Bridge) Run(opts RunOptions) error {
 					return fmt.Errorf("provision Traefik edge on host %q: %w", rt.hostName, err)
 				}
 				// Gateway (model #3): if this host is PRIVATE, front it from the control
-				// plane by writing/removing the forward-route as the stack comes up or down.
-				// Best-effort — a routing-file hiccup shouldn't fail an otherwise-good deploy.
+				// plane by writing/removing the forward-route. Public host (model #2): upsert
+				// a DNS A record label.base -> the host's own IP so the name resolves straight
+				// to it. Both are best-effort — a routing hiccup shouldn't fail a good deploy.
 				switch opts.Command {
 				case "start", "deploy", "up", "refresh", "restart", "update":
 					if err := b.syncGatewayRoute(opts.Workspace, opts.Project, opts.Env, rt, true); err != nil {
 						fmt.Fprintf(opts.Stdout, "⚠ gateway route not written: %v\n", err)
 					}
+					b.syncPublicHostDNS(opts.Workspace, opts.Project, opts.Env, rt, true, opts.Stdout)
 				case "stop", "down":
 					_ = b.syncGatewayRoute(opts.Workspace, opts.Project, opts.Env, rt, false) //nolint:errcheck
+					b.syncPublicHostDNS(opts.Workspace, opts.Project, opts.Env, rt, false, opts.Stdout)
 				}
 			}
 			// The deploy sync deliberately skips .env (host-authoritative). A remote env

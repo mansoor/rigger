@@ -46,6 +46,9 @@ var workspaceSettingKeys = map[string]bool{
 	"auto_url_host":     true,
 	"apps_dns_provider": true,
 	"apps_dns_token":    true,
+	// apps_manage_dns = 'false' opts out of auto-managing public DNS A records for
+	// public-host apps (default on when a base domain + token are set).
+	"apps_manage_dns": true,
 }
 
 // GET /api/workspaces/{ws}/settings

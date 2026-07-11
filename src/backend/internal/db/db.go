@@ -821,6 +821,9 @@ func (d *DB) migrate() error {
 	// only the control plane is exposed and it gateways requests to this host's edge.
 	// Default 'public' preserves the direct-routing behavior existing hosts already had.
 	d.addColumn("hosts", "reachability TEXT NOT NULL DEFAULT 'public'")
+	// public_address is the host's PUBLIC web IP/hostname for DNS + magic-DNS, when it
+	// differs from the SSH address (e.g. SSH via a bastion). '' = use the SSH address.
+	d.addColumn("hosts", "public_address TEXT NOT NULL DEFAULT ''")
 	// Same scoping for docker registries (Phase 3); pre-scope registries → '*'.
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck
