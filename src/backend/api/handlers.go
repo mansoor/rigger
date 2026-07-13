@@ -1766,11 +1766,14 @@ func parseStackServicesJSON(out []byte, runErr error) string {
 }
 
 // isOneShotService reports whether a compose service is a synthesized run-once job
-// (restart:"no") rather than a long-lived service: the MinIO bucket init ("…_init")
-// or a pre-deploy migration gate ("…-migrate"). A clean (exit 0) one-shot is not a
-// stopped service, so it must not drag an env's status to "partial".
+// (restart:"no") rather than a long-lived service: the MinIO bucket init ("…_init"),
+// a pre-deploy migration gate ("…-migrate"), or the bind-mount chown gate
+// ("…-init-perms"). A clean (exit 0) one-shot is not a stopped service, so it must
+// not drag an env's status to "partial".
 func isOneShotService(name string) bool {
-	return strings.HasSuffix(name, "_init") || strings.HasSuffix(name, "-migrate")
+	return strings.HasSuffix(name, "_init") ||
+		strings.HasSuffix(name, "-migrate") ||
+		strings.HasSuffix(name, "-init-perms")
 }
 
 // parseComposePsJSON parses docker compose ps --format json (NDJSON) output.

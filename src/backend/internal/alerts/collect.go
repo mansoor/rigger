@@ -18,14 +18,17 @@ type containerInfo struct {
 	ExitCode int    `json:"ExitCode"`
 }
 
-// isCompletedInit reports a one-shot init job (service name ends in "_init", e.g.
-// minio_init creating the S3 bucket) that ran and exited 0. That's success, not a
-// down/partial container — exclude it from every alert condition so a finished init
-// doesn't fire container_down / stack_partial. A still-running or non-zero-exit init
-// is NOT a completed init, so a stuck/failed init still surfaces.
+// isCompletedInit reports a one-shot init job that ran and exited 0: the MinIO
+// bucket init ("…_init"), a pre-deploy migration gate ("…-migrate"), or the
+// bind-mount chown gate ("…-init-perms"). That's success, not a down/partial
+// container — exclude it from every alert condition so a finished init doesn't fire
+// container_down / stack_partial. A still-running or non-zero-exit init is NOT a
+// completed init, so a stuck/failed init still surfaces.
 func isCompletedInit(c containerInfo) bool {
-	return strings.HasSuffix(c.Service, "_init") &&
-		strings.EqualFold(c.State, "exited") && c.ExitCode == 0
+	oneShot := strings.HasSuffix(c.Service, "_init") ||
+		strings.HasSuffix(c.Service, "-migrate") ||
+		strings.HasSuffix(c.Service, "-init-perms")
+	return oneShot && strings.EqualFold(c.State, "exited") && c.ExitCode == 0
 }
 
 // projectContainers runs `docker compose ps --all` for one env and returns its

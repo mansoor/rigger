@@ -13,6 +13,26 @@ func TestSplitInfoLine(t *testing.T) {
 	}
 }
 
+func TestParseComposePsJSONOneShotExclusion(t *testing.T) {
+	// The long-lived app is up; a completed chown-init one-shot (…-init-perms,
+	// exit 0) plus a completed migrate and minio_init must NOT drag the env to
+	// "partial" — they're synthesized run-once gates, and finishing is success.
+	out := []byte(`{"Service":"app","State":"running","Status":"Up 2 minutes","ExitCode":0}
+{"Service":"app-init-perms","State":"exited","Status":"Exited (0)","ExitCode":0}
+{"Service":"app-migrate","State":"exited","Status":"Exited (0)","ExitCode":0}
+{"Service":"minio_init","State":"exited","Status":"Exited (0)","ExitCode":0}`)
+	if got := parseComposePsJSON(out, nil); got != "running" {
+		t.Fatalf("status = %q, want running (completed one-shots must be excluded)", got)
+	}
+
+	// A NON-zero-exit init is a real failure — it must still surface as partial.
+	bad := []byte(`{"Service":"app","State":"running","Status":"Up","ExitCode":0}
+{"Service":"app-init-perms","State":"exited","Status":"Exited (1)","ExitCode":1}`)
+	if got := parseComposePsJSON(bad, nil); got != "partial" {
+		t.Fatalf("status = %q, want partial (failed init must count)", got)
+	}
+}
+
 func TestParseDockerProbe(t *testing.T) {
 	out := "@@INFO@@\nlinux|Ubuntu 22.04|24.0.7|ID123\n@@SUDO@@\nyes\n@@END@@\n"
 	p := parseDockerProbe(out)
