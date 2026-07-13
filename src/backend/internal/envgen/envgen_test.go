@@ -516,8 +516,10 @@ func TestCustomDevAndMysqlAndMinIO(t *testing.T) {
 	if m["APP_DEBUG"] != "true" {
 		t.Errorf("dev APP_DEBUG = %q, want true", m["APP_DEBUG"])
 	}
-	if m["NODE_ENV"] != "development" {
-		t.Errorf("dev NODE_ENV = %q, want development", m["NODE_ENV"])
+	// A deployed container is always a production runtime — the dev TIER does not
+	// mean Node's development mode (that breaks pruned prod images; pino-pretty class).
+	if m["NODE_ENV"] != "production" {
+		t.Errorf("dev NODE_ENV = %q, want production", m["NODE_ENV"])
 	}
 	if m["MYSQL_HOST"] != "app_dev_mysql" || m["MYSQL_DATABASE"] != "app_dev" {
 		t.Errorf("mysql block wrong: HOST=%q DB=%q", m["MYSQL_HOST"], m["MYSQL_DATABASE"])

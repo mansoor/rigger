@@ -785,11 +785,15 @@ func generate(cfg *wsconfig.Config, env string, e wsconfig.Env, existing map[str
 	p("MAIL_FROM_NAME=%s\n\n", envQuote(project))
 
 	p("# ── App listen port ────────────────────────────────────────\n")
-	if env == "prod" {
-		p("NODE_ENV=production\n")
-	} else {
-		p("NODE_ENV=development\n")
-	}
+	// A deployed container image is ALWAYS a production-mode runtime, regardless of
+	// the Rigger environment TIER (dev/staging/prod) — the tier means "which copy /
+	// which data / which config", not Node's NODE_ENV. NODE_ENV=development is a
+	// local-dev-machine concept (devDeps installed, verbose framework behavior) and
+	// breaks pruned production images: e.g. Fastify flips to pretty-logging and tries
+	// to load pino-pretty (a devDependency absent from the built image) → crash loop.
+	// So always emit production; a user who genuinely wants dev mode overrides via the
+	// project's env_vars (NODE_ENV is not a reserved managed key, and last-in wins).
+	p("NODE_ENV=production\n")
 	// PORT must match the port Traefik routes to (the web-routed service's port);
 	// otherwise an app that honors $PORT listens somewhere Traefik can't reach
 	// (502). Fall back to 3000 (the common Node default) when no web port is set.
