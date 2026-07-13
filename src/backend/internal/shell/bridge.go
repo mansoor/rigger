@@ -399,6 +399,107 @@ func (b *Bridge) syncGatewayRoute(workspaceName, project, env string, rt *remote
 	})
 }
 
+// bindChownUIDs probes, for each IMAGE service (not built) that has directory bind
+// mounts, the UID:GID its image runs as, so composegen can synthesize a chown-init
+// that makes the root-owned bind dirs writable by a non-root image (the SFTPGo-class
+// crash). Returns service→"uid:gid" for non-root numeric users only; nil when nothing
+// needs it. Runs on the deploy host (local or remote) where the images live.
+func (b *Bridge) bindChownUIDs(workspaceName, project, env string, exec executor.Executor) map[string]string {
+	data, err := os.ReadFile(wspath.ConfigPath(b.workspacesDir, workspaceName, project))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Services []struct {
+			Name    string          `json:"name"`
+			Image   string          `json:"image"`
+			Tag     string          `json:"tag"`
+			Build   json.RawMessage `json:"build"`
+			Volumes []string        `json:"volumes"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, s := range cfg.Services {
+		if len(s.Build) > 0 && string(s.Build) != "null" {
+			continue // a built image owns its own Dockerfile/user
+		}
+		if s.Image == "" || !hasDirBind(s.Volumes) {
+			continue
+		}
+		ref := s.Image
+		if s.Tag != "" {
+			ref += ":" + s.Tag
+		}
+		if uid := resolveImageUID(exec, ref); uid != "" {
+			out[s.Name] = uid
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// hasDirBind reports whether any volume is a Rigger relative directory bind mount
+// (./x, no file extension) — the kind Docker creates root-owned.
+func hasDirBind(vols []string) bool {
+	for _, v := range vols {
+		host := v
+		if i := strings.Index(v, ":"); i >= 0 {
+			host = v[:i]
+		}
+		if strings.HasPrefix(host, "./") {
+			if base := host[strings.LastIndex(host, "/")+1:]; !strings.Contains(base, ".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resolveImageUID returns the image's non-root user as "uid:gid" (numeric), or "" for
+// a root/empty/username-based user. Pulls the image if it isn't present yet.
+func resolveImageUID(exec executor.Executor, image string) string {
+	get := func() (string, error) {
+		out, err := exec.DockerOutput(executor.Spec{Args: []string{"image", "inspect", image, "--format", "{{.Config.User}}"}})
+		return strings.TrimSpace(string(out)), err
+	}
+	user, err := get()
+	if err != nil {
+		_ = exec.Docker(executor.Spec{Args: []string{"pull", image}}) //nolint:errcheck — best-effort
+		if user, err = get(); err != nil {
+			return ""
+		}
+	}
+	if user == "" || user == "root" || user == "0" || strings.HasPrefix(user, "0:") {
+		return ""
+	}
+	parts := strings.SplitN(user, ":", 2)
+	if !isAllDigits(parts[0]) {
+		return "" // username-based — can't resolve a numeric uid from here
+	}
+	gid := parts[0]
+	if len(parts) == 2 && isAllDigits(parts[1]) {
+		gid = parts[1]
+	}
+	return parts[0] + ":" + gid
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // ensureRemoteEnvFile seeds a remote env's .env from the freshly-generated local copy
 // when the host has none yet — the first-deploy case, since ordinary deploys skip
 // .env to keep the host copy authoritative. A present host .env is left untouched
@@ -1782,6 +1883,13 @@ func (b *Bridge) Run(opts RunOptions) error {
 			RouterMiddlewares:         b.routerMiddlewares(opts.Workspace, opts.Project, opts.Env),
 			Registry:                  b.effectiveRegistry(opts.Workspace, opts.Project),
 			Exec:                      runExec, // context-bound (local or remote) — cancellable
+		}
+		// For a deploy (not stop/down/ps), probe non-root image UIDs so composegen can
+		// chown bind-mount dirs before the app starts — fixing the SFTPGo-class "non-root
+		// image can't write a root-owned bind mount" crash. Runs on the deploy host.
+		switch opts.Command {
+		case "start", "deploy", "up", "refresh", "restart", "update":
+			dopts.ChownUIDs = b.bindChownUIDs(opts.Workspace, opts.Project, opts.Env, executor.Default(runExec))
 		}
 		if rt != nil {
 			// A PUBLIC remote host is its own front door and issues its OWN cert via

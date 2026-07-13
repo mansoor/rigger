@@ -62,6 +62,9 @@ type Options struct {
 	// web-routed services still publish their primary host port under Traefik. false
 	// (default) ⇒ strip it. A per-env override still wins in composegen.
 	KeepHostPortsUnderTraefik bool
+	// ChownUIDs maps an image service name → "uid:gid" of its image's non-root user,
+	// so composegen can synthesize a bind-mount chown init service (see RouteOpts).
+	ChownUIDs map[string]string
 	// AutoURLMode / AutoURLHost are the magic-DNS fallback used when BaseDomain is
 	// empty (e.g. "sslip" + "10.10.10.111" → {label}.10.10.10.111.sslip.io), so an
 	// env is reachable cross-machine without a real domain. See composegen.RouteOpts.
@@ -158,7 +161,7 @@ func Run(opts Options) (bool, error) {
 		// Cross-host: regenerate the compose file locally (deterministic, no
 		// secrets) so it exists to push. The remote .env is authoritative and is
 		// never generated/pushed here — so the local .env check is skipped too.
-		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, DNSProvider: opts.DNSProvider, OverrideCert: opts.OverrideCert, CustomDomains: opts.CustomDomains, RouterMiddlewares: opts.RouterMiddlewares, Registry: opts.Registry, KeepHostPortsUnderTraefik: opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(envDir)})
+		content, err := composegen.GenerateRouted(cfgBytes, opts.Env, composegen.RouteOpts{BaseDomain: opts.BaseDomain, AutoURLMode: opts.AutoURLMode, AutoURLHost: opts.AutoURLHost, DNSProvider: opts.DNSProvider, OverrideCert: opts.OverrideCert, CustomDomains: opts.CustomDomains, RouterMiddlewares: opts.RouterMiddlewares, Registry: opts.Registry, ChownUIDs: opts.ChownUIDs, KeepHostPortsUnderTraefik: opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(envDir)})
 		if err != nil {
 			return true, fmt.Errorf("generate compose: %w", err)
 		}
@@ -467,7 +470,7 @@ func (r *runner) logTail() error {
 
 func (r *runner) refresh() error {
 	r.info("Regenerating docker-compose.yml for '%s'...", r.opts.Env)
-	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, OverrideCert: r.opts.OverrideCert, CustomDomains: r.opts.CustomDomains, RouterMiddlewares: r.opts.RouterMiddlewares, Registry: r.opts.Registry, KeepHostPortsUnderTraefik: r.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(filepath.Dir(r.composePath))})
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, OverrideCert: r.opts.OverrideCert, CustomDomains: r.opts.CustomDomains, RouterMiddlewares: r.opts.RouterMiddlewares, Registry: r.opts.Registry, ChownUIDs: r.opts.ChownUIDs, KeepHostPortsUnderTraefik: r.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(filepath.Dir(r.composePath))})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}

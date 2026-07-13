@@ -31,6 +31,13 @@ type RouteOpts struct {
 	// magic-DNS modes degrade to *.localhost.
 	AutoURLMode string
 	AutoURLHost string
+	// ChownUIDs maps an image service name → "uid:gid" of its image's non-root user
+	// (probed by the bridge). For each such service with directory bind mounts,
+	// composegen synthesizes a one-shot {svc}-init-perms service that chowns those bind
+	// dirs before the app starts, so a non-root image can write to a root-owned,
+	// Docker-created bind mount. Empty/absent ⇒ no init service (named volumes, root
+	// images, and file binds never need it).
+	ChownUIDs map[string]string
 	// DNSProvider, when set (e.g. "cloudflare"), switches base-domain envs to the
 	// Traefik DNS-01 certresolver and requests a single wildcard cert *.{base}
 	// instead of per-host HTTP-01. "" ⇒ per-host Let's Encrypt (unchanged).
@@ -149,6 +156,7 @@ func generate(configJSON []byte, env string, ro RouteOpts, now time.Time) ([]byt
 	}
 	applyWebEntryFallback(cfg, e)
 	applyPreDeploy(cfg, e)
+	applyChownInit(cfg, e, ro.ChownUIDs)
 	g := &gen{cfg: cfg, env: env, e: e, now: now, envFile: ro.EnvFile}
 	g.build()
 	return []byte(g.b.String()), nil
@@ -253,6 +261,73 @@ func isDatastoreImage(image string) bool {
 		}
 	}
 	return false
+}
+
+// applyChownInit fixes the classic "non-root image + bind mount" failure: Docker
+// creates a bind-mount source dir as root:root, which an image running as a non-root
+// UID (e.g. SFTPGo = 1000) can't write to → crash loop. For each image service whose
+// image runs as a non-root user (uids[serviceName] = "uid:gid", probed by the bridge)
+// and that has DIRECTORY bind mounts, this synthesizes a one-shot "{svc}-init-perms"
+// service (busybox, runs as root by default) that chowns those bind dirs before the
+// app starts, gating the app via depends_on service_completed_successfully. Named
+// volumes need none of this (Docker inits their ownership from the image); root images
+// and file binds are skipped. Compose only — swarm ignores depends_on conditions.
+func applyChownInit(cfg *Config, e Env, uids map[string]string) {
+	if e.Deployment == "swarm" || len(uids) == 0 {
+		return
+	}
+	existing := map[string]bool{}
+	for _, s := range cfg.Services {
+		existing[s.Name] = true
+	}
+	var synthesized []Service
+	for i := range cfg.Services {
+		s := &cfg.Services[i]
+		uid := uids[s.Name]
+		if uid == "" {
+			continue
+		}
+		var targets, binds []string
+		for _, vol := range s.Volumes {
+			host := volHost(vol)
+			if !strings.HasPrefix(host, "./") { // only Rigger relative bind mounts
+				continue
+			}
+			base := host[strings.LastIndex(host, "/")+1:]
+			if strings.Contains(base, ".") { // a file bind (has an extension) — don't chown it
+				continue
+			}
+			target := strings.SplitN(volRest(vol), ":", 2)[0] // container target, without any :ro
+			if target == "" {
+				continue
+			}
+			targets = append(targets, target)
+			binds = append(binds, host+":"+target) // mount rw so the init can chown
+		}
+		if len(targets) == 0 {
+			continue
+		}
+		initName := s.Name + "-init-perms"
+		if existing[initName] {
+			continue
+		}
+		synthesized = append(synthesized, Service{
+			Name:    initName,
+			Role:    "init-perms",
+			Image:   "busybox",
+			Tag:     "stable",
+			Command: "chown -R " + uid + " " + strings.Join(targets, " "),
+			Volumes: binds,
+			Restart: "no",
+		})
+		existing[initName] = true
+		s.DependsOn = appendUnique(s.DependsOn, initName)
+		if s.DependsOnConditions == nil {
+			s.DependsOnConditions = map[string]string{}
+		}
+		s.DependsOnConditions[initName] = "service_completed_successfully"
+	}
+	cfg.Services = append(cfg.Services, synthesized...)
 }
 
 // applyPreDeploy synthesizes a one-shot "{svc}-migrate" service for each BUILD service

@@ -265,7 +265,7 @@ func (s *swarmRunner) update() error {
 
 func (s *swarmRunner) refresh() error {
 	s.info("Regenerating docker-compose.yml for '%s'...", s.opts.Env)
-	content, err := composegen.GenerateRouted(s.cfgBytes, s.opts.Env, composegen.RouteOpts{BaseDomain: s.opts.BaseDomain, AutoURLMode: s.opts.AutoURLMode, AutoURLHost: s.opts.AutoURLHost, DNSProvider: s.opts.DNSProvider, OverrideCert: s.opts.OverrideCert, CustomDomains: s.opts.CustomDomains, RouterMiddlewares: s.opts.RouterMiddlewares, Registry: s.opts.Registry, KeepHostPortsUnderTraefik: s.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(s.envDir)})
+	content, err := composegen.GenerateRouted(s.cfgBytes, s.opts.Env, composegen.RouteOpts{BaseDomain: s.opts.BaseDomain, AutoURLMode: s.opts.AutoURLMode, AutoURLHost: s.opts.AutoURLHost, DNSProvider: s.opts.DNSProvider, OverrideCert: s.opts.OverrideCert, CustomDomains: s.opts.CustomDomains, RouterMiddlewares: s.opts.RouterMiddlewares, Registry: s.opts.Registry, ChownUIDs: s.opts.ChownUIDs, KeepHostPortsUnderTraefik: s.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(s.envDir)})
 	if err != nil {
 		return fmt.Errorf("generate compose: %w", err)
 	}
