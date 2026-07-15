@@ -7,11 +7,11 @@ export const UNCATEGORIZED = '__uncat__'
 // TemplateCard — a single template tile (label + optional website link + container
 // count + description + tags). Shared by the new-project wizard and the Template
 // Manager so both render templates identically.
-export function TemplateCard({ tmpl, selected, onClick }) {
+export function TemplateCard({ tmpl, selected, onClick, onDoubleClick }) {
   const tagColors = ['bg-info-subtle text-info-fg', 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300', 'bg-success-subtle text-success-fg']
   return (
     <button
-      type="button" onClick={onClick}
+      type="button" onClick={onClick} onDoubleClick={onDoubleClick}
       className={`text-left w-full p-4 rounded-xl border transition-all ${
         selected
           ? 'border-brand-500 bg-brand-950/30'
@@ -53,9 +53,22 @@ export function TemplateCard({ tmpl, selected, onClick }) {
 // templates" and the Template Manager's "Open existing template". The consumer's
 // onSelect(tmpl) decides what happens (select into the wizard / load into the
 // editor) and is responsible for closing if needed; onClose handles the ✕/backdrop.
-export default function TemplateBrowserModal({ templates = [], selected, onSelect, onClose, title = 'All templates', subtitle, footer }) {
+//
+// confirmSelect (opt-in): when true, a single card click only HIGHLIGHTS a pending
+// choice (no accidental commit while scrolling) and the footer gains explicit
+// OK/Cancel buttons — OK fires onSelect(pending), Cancel closes. Double-clicking a
+// card is a shortcut that confirms immediately. When false (default, e.g. the
+// Template Manager), a card click fires onSelect right away as before.
+export default function TemplateBrowserModal({ templates = [], selected, onSelect, onClose, title = 'All templates', subtitle, footer, confirmSelect = false }) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('') // '' = all; UNCATEGORIZED = no categories
+  // In confirm mode, the highlighted-but-not-yet-committed template (seeded from
+  // the current selection so reopening shows what's already chosen).
+  const [pending, setPending] = useState(() => templates.find(t => t.name === selected) || null)
+
+  const activeName = confirmSelect ? pending?.name : selected
+  const handleCardClick = confirmSelect ? (tmpl => setPending(tmpl)) : onSelect
+  const confirm = () => { if (pending) onSelect(pending) }
 
   const allCategories = [...new Set(templates.flatMap(t => t.categories || []))].sort((a, b) => a.localeCompare(b))
   const hasUncategorized = templates.some(t => !(t.categories || []).length)
@@ -107,12 +120,29 @@ export default function TemplateBrowserModal({ templates = [], selected, onSelec
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {filtered.map(tmpl => (
-                <TemplateCard key={tmpl.name} tmpl={tmpl} selected={selected === tmpl.name} onClick={() => onSelect(tmpl)} />
+                <TemplateCard
+                  key={tmpl.name} tmpl={tmpl}
+                  selected={activeName === tmpl.name}
+                  onClick={() => handleCardClick(tmpl)}
+                  onDoubleClick={confirmSelect ? () => onSelect(tmpl) : undefined}
+                />
               ))}
             </div>
           )}
         </div>
-        {footer && <div className="px-5 py-3 border-t border-border bg-surface-raised/30">{footer}</div>}
+        {confirmSelect ? (
+          <div className="px-5 py-3 border-t border-border bg-surface-raised/30 flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              {pending
+                ? <p className="text-sm text-content-muted truncate"><span className="text-brand-400">✓</span> <strong className="text-content-strong">{pending.label}</strong> — click OK to use it.</p>
+                : (footer || <p className="text-sm text-content-subtle">Pick a template, then click OK.</p>)}
+            </div>
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm border border-border-strong text-content-muted hover:text-content-strong hover:border-border-strong transition-colors shrink-0">Cancel</button>
+            <button type="button" onClick={confirm} disabled={!pending} className="px-5 py-2 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0">OK</button>
+          </div>
+        ) : (
+          footer && <div className="px-5 py-3 border-t border-border bg-surface-raised/30">{footer}</div>
+        )}
       </div>
     </div>
   )

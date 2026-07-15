@@ -1100,22 +1100,29 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
         Browse all templates ({templates.length}) →
       </button>
 
-      {/* Selected template confirmation */}
+      {/* Selected template — a prominent card so the choice isn't lost as fine print,
+          especially when it came from the Browse-all modal and isn't in Popular /
+          Recently used above. */}
       {selectedTmpl && (
-        <p className="text-xs text-content-subtle flex items-center gap-1.5">
-          <span className="text-brand-400">✓</span>
-          <strong className="text-content">{selectedTmpl.label}</strong> selected —
-          env vars and volumes pre-filled in the Services step. Review secrets before creating.
-        </p>
+        <div>
+          <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-2">Selected template</p>
+          <TemplateCard tmpl={selectedTmpl} selected onClick={() => setModalOpen(true)} />
+          <p className="mt-2 text-xs text-content-subtle flex items-center gap-1.5">
+            <span className="text-brand-400">✓</span>
+            Env vars and volumes are pre-filled in the Services step. Review secrets before creating.
+          </p>
+        </div>
       )}
 
-      {/* Browse all modal — shared with the Template Manager. */}
+      {/* Browse all modal — shared with the Template Manager. Confirm mode so a stray
+          click while scrolling only highlights; an explicit OK commits. */}
       {modalOpen && (
         <TemplateBrowserModal
           templates={templates}
           selected={selected}
           onSelect={handleSelect}
           onClose={() => setModalOpen(false)}
+          confirmSelect
           footer={
             <Hint>
               Can't find what you're looking for? Build your own in{' '}
