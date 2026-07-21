@@ -2,42 +2,62 @@
 
 > **Yes, it's called Rigger.** It's the deckhand who lashes your containers to the crane, double-checks every knot, and hoists them into prod without dropping one in the harbor. It remembers exactly which line went where, never fat-fingers a `docker run` at 2 a.m., and quietly judges you for deploying on a Friday. You bring the cargo — Rigger handles the heavy lifting, the rigging, and the part where everything stays afloat.
 
-A Go-powered toolkit for scaffolding, building, and operating multi-environment Docker application stacks — with a full-featured web UI for teams that prefer the browser. Create a self-contained workspace from the wizard, then build, deploy, promote, back up, and manage everything across dev, stage, and prod. The entire runtime is a single ~15 MB Go binary (no Bash scripts) plus a thin host CLI wrapper.
+A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI. Create a workspace, add projects, and build → deploy → route → back up → monitor them across dev/stage/prod — on one host or a fleet of remote hosts, all from one control plane. The entire runtime is a single ~15 MB Go binary (no Bash scripts) plus a thin host CLI wrapper.
 
 ---
 
 ## Table of Contents
 
+**Getting started**
 1. [Quick Install](#1-quick-install)
-2. [Architecture Overview](#2-architecture-overview)
-3. [Directory Structure](#3-directory-structure)
+2. [Core Concepts](#2-core-concepts)
+3. [Architecture](#3-architecture)
 4. [Prerequisites](#4-prerequisites)
 5. [Quick Start](#5-quick-start)
-6. [Creating a Workspace](#6-creating-a-workspace)
-7. [Workspace Layout](#7-workspace-layout)
-8. [Command Reference](#8-command-reference)
+
+**Building & configuring**
+6. [Creating a Project](#6-creating-a-project)
+7. [Source-Built Stacks & Build Backends](#7-source-built-stacks--build-backends)
+8. [Managed Databases & Services](#8-managed-databases--services)
 9. [Environment Configuration](#9-environment-configuration)
-10. [Version Management](#10-version-management)
-11. [Deployment Strategies](#11-deployment-strategies)
-12. [Build vs Promote](#12-build-vs-promote)
-13. [Backup & Restore](#13-backup--restore)
-14. [Git Sync](#14-git-sync)
-15. [Supported Stacks](#15-supported-stacks)
-16. [Pre-built Stack Templates](#16-pre-built-stack-templates)
-17. [Image Stacks — Manual Configuration](#17-image-stacks--manual-configuration)
-18. [Image Update Detection](#18-image-update-detection)
-19. [Healthchecks](#19-healthchecks)
-20. [Traefik vs Direct Port Routing](#20-traefik-vs-direct-port-routing)
-21. [Rigger UI — Web Interface](#21-rigger--web-interface)
-22. [Multi-Host Support](#22-multi-host-support)
-23. [Maintenance Guide](#23-maintenance-guide)
-24. [Troubleshooting](#24-troubleshooting)
+10. [Settings Levels](#10-settings-levels)
+11. [Pre-built Stack Templates](#11-pre-built-stack-templates)
+
+**Deploying & operating**
+12. [Command Reference](#12-command-reference)
+13. [Deployment Strategies (Compose & Swarm)](#13-deployment-strategies-compose--swarm)
+14. [Build, Version & Promote](#14-build-version--promote)
+15. [Domains, TLS & Routing](#15-domains-tls--routing)
+16. [App Exposure](#16-app-exposure)
+17. [Multi-Host Support](#17-multi-host-support)
+18. [Deployment Pipelines](#18-deployment-pipelines)
+19. [Preview / PR Environments](#19-preview--pr-environments)
+20. [Backup & Restore](#20-backup--restore)
+21. [Secrets](#21-secrets)
+22. [Maintenance Mode & Danger Zone](#22-maintenance-mode--danger-zone)
+
+**Platform services**
+23. [Alerting & Notifications](#23-alerting--notifications)
+24. [Metrics & Monitoring](#24-metrics--monitoring)
+25. [Housekeeping](#25-housekeeping)
+26. [Self-Update](#26-self-update)
+27. [REST API v1](#27-rest-api-v1)
+28. [Proxy Service](#28-proxy-service)
+29. [Git Providers & Registries](#29-git-providers--registries)
+30. [Users, Roles & Auth](#30-users-roles--auth)
+
+**Reference**
+31. [Rigger UI Reference](#31-rigger-ui-reference)
+32. [Directory & Config Layout](#32-directory--config-layout)
+33. [Environment Variables & Volumes](#33-environment-variables--volumes)
+34. [Maintenance Guide](#34-maintenance-guide)
+35. [Troubleshooting](#35-troubleshooting)
 
 ---
 
 ## 1. Quick Install
 
-One-line installer — detects your OS, installs all dependencies, clones the repo, generates a JWT secret, and starts Rigger:
+One-line installer — detects your OS, installs dependencies, clones the repo, generates a JWT secret, and starts Rigger:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/mansoor/rigger/main/install.sh | bash
@@ -53,10 +73,10 @@ curl -sSL https://raw.githubusercontent.com/mansoor/rigger/main/install.sh \
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RIGGER_DIR` | `~/rigger` | Where to clone the repo |
-| `RIGGER_PORT` | `8080` | UI host port |
+| `RIGGER_PORT` | `9999` | UI host port |
 | `RIGGER_BRANCH` | `main` | Git branch to install |
 | `ACME_EMAIL` | — | Let's Encrypt contact email (required for SSL) |
-| `SKIP_DOCKER` | `0` | Set to `1` to skip Docker installation check |
+| `SKIP_DOCKER` | `0` | Set to `1` to skip the Docker installation check |
 
 **Supported OS:** Ubuntu/Debian, RHEL/CentOS/AlmaLinux/Fedora, Arch, Alpine, macOS (Docker Desktop required).
 
@@ -73,111 +93,76 @@ docker network create traefik_net 2>/dev/null || true   # Swarm manager? use: do
 docker compose up --build -d
 ```
 
+The published image is pulled from **GHCR** (`ghcr.io/mansoor/rigger`) — a plain `docker compose up -d` runs it without building; `--build` builds from source for contributors.
+
 ---
 
-## 2. Architecture Overview
+## 2. Core Concepts
+
+Rigger has a three-level hierarchy:
+
+```
+Workspace  (scoping tier — a team / tenant / grouping)
+  └─ Project  (the deployable unit — an app + its dependencies)
+       └─ Environment  (dev · stage · prod · …)
+```
+
+- **Workspace** — a top-level grouping selected from the nav's workspace switcher. Has a short lowercase **key** + a free-form display **name**. Workspaces own members, hosts, registries, git providers, backup targets, notification channels, domains, and their own settings (which fall back to global defaults).
+- **Project** — the thing you build, deploy, and operate (formerly called a "workspace" in older docs). Contains one or more environments. Also has a short **key** + display **name**.
+- **Environment** — a named deployment tier of a project (`dev`, `stage`, `prod`, or anything you like), each with its own `.env`, generated `docker-compose.yml`, and data.
+- **`resource_prefix`** — the immutable Docker resource prefix `{workspaceKey}_{projectKey}`. Every container/volume/network/stack an environment creates is named `{resource_prefix}_{env}_…`. It's fixed at creation so renames can't orphan running resources.
+- **`config.json`** — the single source of truth for a project. Everything (stack, services, environments, managed deps, routes, domains, backup schedules) lives here. Edit it (UI or file), then **refresh** an env to regenerate its compose file and redeploy.
+
+API/URL shape reflects the hierarchy: `/api/workspaces/{workspace}/projects/{name}/envs/{env}/…`.
+
+**Design principles**
+
+- **Config-driven.** `config.json` is authoritative; compose files are generated from it, never hand-maintained.
+- **One Go binary, no Bash.** Compose generation, deploy (compose & swarm), bootstrap, `.env` generation, build/promote, backup/restore, and version management are all native Go. The image ships no shell scripts.
+- **Self-contained projects.** Everything to operate a project lives under `workspaces/<ws>/projects/<name>/` — archivable, movable, restorable.
+- **No host toolchain.** All build steps run inside Docker. Hosts need only `docker`; the `rigger` CLI wrapper needs only `curl`.
+- **Bind mounts by default.** Volume data lives in `envs/<env>/volumes/` on the host — readable, backupable, portable.
+- **One control plane, many hosts.** Projects (or individual environments) can run on remote hosts over SSH. Remotes need only Docker + SSH — no Rigger binary. See [Multi-Host Support](#17-multi-host-support).
+
+---
+
+## 3. Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  rigger container  (~15 MB Alpine, single Go binary)               │
-│                                                                  │
-│   Go backend  →  React SPA (embedded via embed.FS)               │
-│   REST + WebSocket API + thin `rigger` host CLI wrapper            │
-│   Native Go runtime: compose-gen, deploy (compose+swarm),        │
-│     bootstrap, env-gen, build/promote, backup/restore, version   │
-│   templates/   ← Dockerfiles, Nginx, stack templates (baked seed)│
+│  rigger container  (~15 MB Alpine, single Go binary, from GHCR)    │
+│                                                                    │
+│   Go backend  →  React SPA (embedded via embed.FS)                 │
+│   REST + WebSocket + SSE API  +  thin `rigger` host CLI wrapper     │
+│   Native Go runtime: compose-gen, deploy (compose+swarm),          │
+│     bootstrap, env-gen, build/promote, backup/restore, version,    │
+│     pipelines, previews, ACME issuer, alerts, metrics              │
+│   templates/  ← Dockerfiles, scaffold starters, stack templates    │
 └───────────────────────────────┬──────────────────────────────────┘
-                                │  generates / operates ↓
-┌───────────────────────────────▼──────────────────────────────────┐
-│  workspaces/<project>/        (one per application)              │
-│                                                                  │
-│   config.json      ← single source of truth for all settings    │
-│   envs/                                                          │
-│     dev/  stage/  prod/   ← scaffolded environments             │
-│       .env                 ← secrets (never commit)             │
-│       docker-compose.yml   ← generated from config.json (Go)    │
-│       volumes/             ← bind-mounted data                  │
-└──────────────────────────────────────────────────────────────────┘
+                                 │ generates / operates ↓
+        ┌────────────────────────▼───────────────────────────┐
+        │  Traefik edge  (control plane)                       │
+        │   rigger-traefik  (v3.4, :80/:443)                   │
+        │   rigger-socket-proxy  (Docker-API version shim)     │
+        │   rigger-fallback  (catch-all "app starting" page)   │
+        └────────────────────────┬───────────────────────────┘
+                                 │  routes by Host/Path labels ↓
+        ┌────────────────────────▼───────────────────────────┐
+        │  workspaces/<ws>/projects/<name>/                    │
+        │   config.json   ← single source of truth             │
+        │   envs/dev|stage|prod/                               │
+        │     .env, docker-compose.yml (generated), volumes/  │
+        └──────────────────────────────────────────────────────┘
 ```
 
-**Key design principles:**
+The control-plane compose stack (`src/docker-compose.yml`) runs four containers on the external `traefik_net` network:
 
-- **Config-driven.** `config.json` is the single source of truth. Edit it (UI or file) and refresh — compose files are regenerated and redeployed automatically.
-- **One Go binary, no Bash.** Every operation — compose generation, deploy (compose & swarm), bootstrap, .env generation, build/promote, backup/restore, version — is implemented natively in Go. The image ships no shell scripts.
-- **Workspace = self-contained.** Everything needed to operate a project lives in `workspaces/<project>/`. The workspace can be archived, moved, or restored independently.
-- **No host toolchain required.** All build steps happen inside Docker. The host needs only `docker`; the optional `rigger` CLI wrapper needs only `curl`.
-- **Bind mounts by default.** All volume data lives in `envs/<env>/volumes/` on the host — readable, backupable, and portable without Docker named volume gymnastics.
-- **One control plane, many hosts.** Workspaces (or individual environments) can run on remote hosts over SSH — Rigger generates files locally and runs `docker`/`compose` on the host. Remotes need only Docker + an SSH server (no Rigger binary). See [Multi-Host Support](#22-multi-host-support).
+- **`rigger`** — the Go server + embedded UI. Image `ghcr.io/mansoor/rigger` (also the tag a local `--build` produces).
+- **`rigger-traefik`** — Traefik **v3.4**, ports 80/443. Its static config is **Rigger-owned** (written to a volume Rigger controls), so Proxy Service plugins (WAF/GeoIP) toggle from the UI without editing compose.
+- **`rigger-socket-proxy`** — an nginx that rewrites Traefik's hardcoded Docker API version to one modern daemons accept, and keeps Traefik off the raw socket.
+- **`rigger-fallback`** — a lowest-priority catch-all that serves a friendly auto-refreshing page when a host has no app router yet (app starting, stopped, or wrong address).
 
----
-
-## 3. Directory Structure
-
-### Repo root
-
-```
-rigger/
-├── install.sh                          # One-line OS-aware installer
-├── rigger.sh / rigger.ps1 / rigger.bat       # Thin host CLI wrappers (HTTP → API)
-├── templates/                          # Baked into the image as a seed
-│   ├── dockerfiles/                    # laravel/ nodejs/ nextjs/ react/
-│   ├── nginx/                          # laravel.conf nodejs.conf nextjs.conf react.conf
-│   └── stacks/                         # Pre-built image stack templates (12 included)
-│       ├── ghost.json … wordpress.json
-└── src/
-    ├── Dockerfile                      # 3-stage: node → golang → alpine (no scripts)
-    ├── docker-compose.yml              # rigger + Traefik v3.1
-    ├── .env.example
-    ├── backend/                        # Go HTTP server + native runtime (CGO_ENABLED=0)
-    │   ├── go.mod
-    │   ├── cmd/server/
-    │   │   ├── main.go                 # server + `init-workspace` subcommand dispatch
-    │   │   └── initworkspace.go        # `rigger init-workspace` (headless create)
-    │   ├── api/                        # handlers, action (REST), backup, settings, housekeeping
-    │   └── internal/
-    │       ├── auth/                   # JWT (access + refresh), bcrypt, rate limiter
-    │       ├── db/                     # SQLite (modernc, CGO-free), auto-migration
-    │       ├── shell/                  # Command allowlist + Go dispatch bridge
-    │       ├── wsconfig/               # config.json reader + version/tag/stack helpers
-    │       ├── composegen/             # docker-compose.yml generator (was compose-gen.sh)
-    │       ├── envgen/                 # .env / .env.example generator (was env-gen.sh)
-    │       ├── workspace/              # discovery, config R/W, env vars, Bootstrap (was bootstrap.sh)
-    │       ├── dockerops/              # compose + swarm lifecycle (was deploy.sh)
-    │       ├── builder/                # image build + promote (was build.sh / promote.sh)
-    │       ├── backup/                 # DB dump + volume archive/restore (was backup.sh/restore.sh)
-    │       ├── version/                # semver bump/set in config.json (was version.sh)
-    │       ├── imagecheck/             # Docker Hub update checker + in-memory cache
-    │       ├── metrics/ · stats/       # host/docker metrics + history collector
-    │       ├── alerts/ · notify/       # alert rules engine + apprise-go notifications
-    │       ├── crypto/                 # AES-GCM at-rest encryption + SSH keygen (Phase 7)
-    │       ├── executor/               # docker exec abstraction (Local vs remote-over-SSH)
-    │       ├── remotehost/             # SSH client, connection pool, tar-over-SSH file sync
-    │       └── config/
-    └── frontend/src/
-        ├── pages/                      # Dashboard, Workspace, New (7-step), Edit, Settings, Housekeeping, Tools
-        ├── components/                 # Layout, ComposeEditor, SlideOutPanel, TerminalModal, Sparkline
-        ├── hooks/useDockerEvents.js    # SSE → React Query invalidation
-        └── lib/api.js
-```
-
-### Generated workspace
-
-```
-workspaces/<project>/
-├── config.json                         # Edit this (UI or file), then refresh <env>
-└── envs/
-    ├── dev/
-    │   ├── .env                        # Live secrets — NEVER commit
-    │   ├── .env.example                # Redacted template — safe to commit
-    │   ├── docker-compose.yml          # Generated natively in Go
-    │   └── volumes/                    # Bind-mounted data directories
-    │       ├── app_data/
-    │       └── db_data/
-    ├── stage/
-    └── prod/
-```
-
-> **No `run.sh`.** Earlier versions generated a per-workspace `run.sh` dispatcher; the Go runtime replaced it, and a startup sweep removes any leftover. Commands are issued via the web UI, the REST action endpoint, or the `rigger` CLI wrapper.
+An optional Apprise API sidecar exists but isn't needed — non-email notifications use an embedded `apprise-go` library by default.
 
 ---
 
@@ -188,172 +173,168 @@ workspaces/<project>/
 | `docker` + Compose v2 plugin | Everything (build / deploy / runtime) | [docker.com](https://docs.docker.com/get-docker/) or `./install.sh` |
 | `curl` | One-line installer + the `rigger` CLI wrapper | Ships with most systems |
 
-> The Rigger engine runs entirely inside the container as a single Go binary — the host needs no `bash`, `jq`, `openssl`, or `git`. All build steps happen inside Docker.
+> The Rigger engine runs entirely inside the container as a single Go binary — the host needs no `bash`, `jq`, `openssl`, `git`, or `ssh`. All build steps happen inside Docker; remote-host access uses a pure-Go SSH client.
 
-> **Planning to use Docker Swarm?** Run `docker swarm init` **before** installing Rigger. The installer then creates the shared `traefik_net` as an `overlay --attachable` network from the start, so compose and swarm projects coexist with no later network migration. Installing compose-first and enabling Swarm afterward works too, but needs a one-time `traefik_net` overlay conversion (Rigger warns you at startup when it's pending — see [Docker Swarm](#docker-swarm)).
+> **Planning to use Docker Swarm?** Run `docker swarm init` **before** installing Rigger, so the shared `traefik_net` is created as an `overlay --attachable` network from the start (compose and swarm projects then coexist). Installing compose-first and enabling Swarm later works too, but needs a one-time network conversion (Rigger warns you at startup — see [Deployment Strategies](#13-deployment-strategies-compose--swarm)).
 
 ---
 
 ## 5. Quick Start
 
-Most users create and operate workspaces from the **web UI** at `http://localhost:9999`. For headless / scripted setups, two non-UI paths exist:
+Most work happens in the **web UI** at `http://localhost:9999`. Two non-UI paths exist:
 
 **Headless create** — the `rigger` binary's `init-workspace` subcommand takes a prepared `config.json` and scaffolds + bootstraps every environment:
 
 ```bash
-# inside the rigger container (or any host with the binary)
 docker exec rigger rigger init-workspace -name myapp -config /toolkit/workspaces/myapp.config.json
-# then fill in secrets and deploy
 ```
 
-**Host CLI wrapper** — `rigger.sh` (and `rigger.ps1` / `rigger.bat`) are thin wrappers that authenticate and call the REST API of a running Rigger server:
+**Host CLI wrapper** — `rigger.sh` (+ `rigger.ps1` / `rigger.bat`) authenticate and call the REST API of a running server:
 
 ```bash
-./rigger.sh login                       # stores a refresh session in ~/.rigger
-./rigger.sh list                        # list workspaces
-./rigger.sh myapp dev start             # run any allowlisted command
+./rigger.sh login                 # stores a refresh session in ~/.rigger
+./rigger.sh list                  # list projects
+./rigger.sh myapp dev start       # run any allowlisted command
 ./rigger.sh myapp dev ps
 ```
 
 ---
 
-## 6. Creating a Workspace
+## 6. Creating a Project
 
-Workspaces are created through the **New Workspace wizard** in the web UI (see [Section 21](#21-rigger--web-interface)) — a 7-step flow covering project, stack, environments, services, backup, review, and a live bootstrap terminal.
+Projects are created through the **New Project wizard**. Step 2 offers **six stack types**:
 
-For automation, `rigger init-workspace -name <name> -config <config.json|->` performs the same creation headlessly: it writes the workspace, generates each environment's `.env` (auto-generating placeholder secrets) and `docker-compose.yml`, and installs Dockerfiles/nginx for custom stacks — all natively in Go. A `config.json` can be produced from an existing image-stack workspace or a `docker-compose.yml` via the **Tools → Template Manager**.
+| Type | What it does |
+|------|--------------|
+| **Pre-built template** | Deploy a curated stack (WordPress, Vaultwarden, Uptime Kuma, …) from the [template library](#11-pre-built-stack-templates). Searchable browser with Popular / Browse-all. |
+| **Image stack / Docker Compose** | Deploy ready-made images (name, tag, ports, volumes), **or** paste/fetch and edit a `docker-compose.yml` — Rigger converts it to a project. `${VAR}` references resolve from `.env` at deploy time. |
+| **Managed service hosting** | Provision databases/Redis/object-storage/search/metrics only, no app code — a place to host a shared DB (see [Managed Databases & Services](#8-managed-databases--services)). |
+| **From a Git repository** | Scan a repo, review the detected service graph, and build from source ([onboarding](#git-source-import)). |
+| **Start from a stack template** | No repo yet — pick a framework, get a runnable starter scaffolded into a fresh Git repo ([scaffolding](#blueprint-scaffolding)). |
+| **Custom application** | Upload a source archive (`.zip`/`.tar.gz`), auto-detect the stack, and build. |
 
-The stack types you can configure:
+The wizard's 7 steps: **Project** (name, registry, default host) → **Stack** → **Environments** (name, domain, Traefik, SSL, deployment mode, host) → **Services** (ports/volumes/healthcheck/web-entry/managed deps) → **Backup** → **Review** → **Result** (live bootstrap terminal).
 
-- **Pre-built template** — 12 curated templates: Ghost, Gitea, Grafana, Immich, MinIO, n8n, Nextcloud, Nginx Proxy Manager, Plausible, Uptime Kuma, Vaultwarden, WordPress.
-- **Image stack (manual)** — your own Docker images (name, image, tag, ports, volumes); `${VAR}` references resolve from `.env` at deploy time.
-- **Custom stack (source-built)** — backend `laravel`/`nodejs`, frontend `none`/`nextjs`/`react`, database `postgres`/`mysql`, optional Redis and Garage S3.
-
----
-
-## 7. Workspace Layout
-
-```
-workspaces/<project>/
-├── config.json        ← edit this to change any setting, then refresh
-└── envs/
-    └── dev/
-        ├── .env             ← fill in real secrets before first build
-        ├── .env.example     ← commit this to version control
-        ├── nginx.conf       ← auto-generated (custom stacks); regenerated on refresh
-        ├── docker-compose.yml  ← auto-generated; regenerated on refresh
-        └── volumes/         ← bind-mounted data (all volume data lives here)
-```
-
-**What to commit:**
-
-```
-✅ config.json
-✅ envs/*/.env.example
-✅ envs/*/nginx.conf
-✅ envs/*/docker-compose.yml
-✅ envs/*/backend/Dockerfile
-✅ envs/*/frontend/Dockerfile  (if enabled)
-
-❌ envs/*/.env          ← contains secrets
-❌ envs/*/volumes/      ← runtime data
-```
+For automation, `rigger init-workspace -name <name> -config <config.json|->` performs the same creation headlessly. A `config.json` can also be produced from an existing image-stack project or a `docker-compose.yml` via **Tools → Template Manager**.
 
 ---
 
-## 8. Command Reference
+## 7. Source-Built Stacks & Build Backends
 
-Commands are issued from the **web UI**, the **`rigger` CLI wrapper**, or the **REST action endpoint** — all hit the same Go runtime. The CLI form is:
+Rigger builds images from source using one of two backends, per build service.
 
-```bash
-rigger <workspace> <env> <command> [args]      # e.g. rigger myapp prod start
-```
+### Frameworks (Dockerfile scaffolding)
 
-REST: `POST /api/workspaces/{name}/envs/{env}/action` with `{"command":"...","extra":[...]}`.
+When a stack is recognized, Rigger scaffolds a per-framework Dockerfile from `templates/dockerfiles/<id>/`. Ten framework templates ship today:
 
-### Lifecycle
+| Backend / language | Frontend |
+|--------------------|----------|
+| `laravel` (PHP-FPM + Composer, Nginx) · `nodejs` · `django` · `go` · `rails` · `spring` / `spring-gradle` (Java) · `dotnet` | `nextjs` (standalone) · `react` (Vite → Nginx) |
 
-```
-start                  # Deploy / bring up the stack
-stop                   # Pause containers (state preserved)
-down                   # Remove containers (volumes kept)
-restart [service]      # Rolling restart (all or one service)
-update                 # Pull latest images + recreate
-refresh                # Regenerate compose file + redeploy
-```
+Each framework carries a **managed-dependency env contract** so a detected app wires up with no hand-mapping — e.g. Laravel gets discrete `DB_*` + `AWS_*`/`FILESYSTEM_DISK`; Node/Next/Django/Go get `DATABASE_URL`/`REDIS_URL`; Rails gets a `mysql2://` `DATABASE_URL`; Spring gets `SPRING_DATASOURCE_*` (JDBC); .NET gets `ConnectionStrings__*`.
 
-### Build & Release (custom stacks)
+Stack identification (`internal/detect`) never executes repo code — it reads the filesystem in signal order: existing `docker-compose.yml` → Dockerfile(s) (monorepo-aware) → language manifests → `Procfile` (workers) → dependency/env hints for managed deps.
 
-```
-build [backend|frontend|all] [--push] [--bump [major|minor|patch|build]]
-promote <dst_env> [--dry-run]    # retag + redeploy an existing image (no rebuild)
-```
+### <a id="nixpacks"></a>Nixpacks (zero-Dockerfile build backend)
 
-> `build`/`promote` operate inside the server (Docker socket + workspace files) and are reachable via the UI / CLI / REST action endpoint. (`sync` — git pull + build + deploy — is not currently available; git-driven sync is planned for a later phase.)
+Any build service can opt into **Nixpacks** instead of a Dockerfile via **Build method: Nixpacks** on the service card. Nixpacks auto-detects the stack and builds without a Dockerfile — an escape hatch when the generic scaffold doesn't fit (native deps, monorepos, odd runtimes), and the fallback for languages Rigger doesn't template.
 
-### Operations
+- **Auto-fallback:** when detection can't identify any framework, the scanner seeds a single web-routed `app` service that builds with Nixpacks — so unrecognized languages are still deployable.
+- Nixpacks produces a normal OCI image, so env-gen, managed deps, routing, image pointers, rollback, and pipelines all operate unchanged.
+- The Nixpacks CLI is **bundled in the Rigger image** for local builds; for remote build hosts, install it with one click (Settings → Remote Hosts → Install Nixpacks). Shipped v0.1.34.
 
-```
-ps                     # Show containers (+ image-update summary for image stacks)
-logs [service]         # Follow logs (all or one service)
-backup [db|files|all]  # Run backups (default: all)
-restore <snapshot>     # e.g. 2026-06-01_14-30-00
-```
+### <a id="blueprint-scaffolding"></a>Start from a stack template (scaffolding)
 
-> Container shell access (`exec` / `bash`) is available from the **web UI terminal** (the `> bash` button on an env card), not as a CLI/REST command.
+Picking **Start from a stack template** with the scaffold option generates a minimal runnable starter app for a framework, commits it, and pushes it to a fresh Git repo you specify (or offers a ZIP download). Starters ship for **django, go, laravel, nodejs, react**. After the initial push, every push rebuilds and deploys.
 
-### Configuration
+### App onboarding
 
-```
-init [--regen-env]     # Re-bootstrap env (regen Dockerfiles, nginx, compose; --regen-env rewrites .env)
-version current
-version bump [major|minor|patch|build]   # default: build
-version set 2.5.0-build.0
-```
+- **<a id="git-source-import"></a>Git-source import** — scan a repo (with a Git provider for private repos). Handles monorepo/nested subdirs, multi-file compose overlays, a **managed-dependency offer** (use a Rigger-managed DB vs keep the repo's own container), profile-gated services, bundled DB-seed auto-import, and per-service pre-deploy commands. Cookiecutter/Copier/Yeoman *template* repos are detected and blocked (they're not apps).
+- **Upload source** — drop a `.zip`/`.tar.gz`; the archive is safely extracted (hardened against zip-slip/symlink/bomb attacks, never executed), detected, and reviewed through the same flow. A Dockerfile is scaffolded if the archive has none.
+
+---
+
+## 8. Managed Databases & Services
+
+Rigger provisions managed dependencies from a **catalog** (`internal/databases`, `GET /api/databases`). They are **project-level** — shared across a project's environments, with a per-env legacy fallback — and configured in the wizard **Services** step and Edit Project → **Services**.
+
+### Databases
+
+One **primary database** per project:
+
+| Engine | Default | Port | Notes |
+|--------|---------|------|-------|
+| **PostgreSQL** | `15-alpine` | 5432 | Schemas + users management; `POSTGRES_*` |
+| **MySQL** | `8.0` | 3306 | Schemas + users; `MYSQL_*` |
+| **MariaDB** | `11` | 3306 | Reuses the `MYSQL_*` contract |
+| **MongoDB** | `7` | 27017 | Document store — connection info only (no SQL schema/user management); `MONGO_*` |
+
+Plus **auxiliary engines** that run *alongside* a primary DB (info-only, internal):
+
+| Engine | Category | Port | Notes |
+|--------|----------|------|-------|
+| **OpenSearch** | search | 9200 | HTTPS + security plugin; needs host `vm.max_map_count=262144`; `OPENSEARCH_*` |
+| **VictoriaMetrics** | tsdb | 8428 | Prometheus-compatible TSDB; `VICTORIA_*` |
+| **RabbitMQ** | queue | 5672 | AMQP broker; `-management` image serves a web UI on 15672; `RABBITMQ_*` + `AMQP_URL` |
+
+The managed-dep env contract (`POSTGRES_*`/`MYSQL_*`/`MONGO_*`/aux + a baseline `DATABASE_URL`) is emitted into each service's `.env`; framework blueprints translate it to framework-native keys. Passwords are generated once and **pinned** so they survive regens (see [Secrets](#21-secrets)).
+
+Only the **external port** (`DB_EXTERNAL_PORT`) is per-env — the dev-on/prod-off host-port exposure pattern. Everything else is project-level.
+
+### Object storage, Redis & cache
+
+- **Object storage** — `local` (a persistent volume) and/or **MinIO** (managed S3). MinIO emits the app-facing S3 contract (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_BUCKET`/`AWS_ENDPOINT`/`AWS_DEFAULT_REGION`/`AWS_USE_PATH_STYLE_ENDPOINT`) and an `mc-init` one-shot that creates the per-env bucket. *(The old Garage backend is retired.)*
+- **Redis** — a project-level toggle; emits `REDIS_HOST`/`REDIS_PORT`/`REDIS_URL`.
+
+### Consoles & per-env sidecars
+
+Several helper UIs are per-env tri-state toggles (on / off / inherit the project default):
+
+- **Adminer** (SQL) / **mongo-express** (Mongo) — the `web_sql` toggle; Adminer supports one-click **auto-login** (HMAC-signed).
+- **MinIO console** — a web console for the object store.
+- **Mailpit** — a test-SMTP catch-all; when on, the app's mail is wired to `mailpit:1025` and the inbox UI is served.
+
+The **Service Console** modal (env card) gives a tabbed view over every enabled service — database, Redis, S3, storage, Mailpit, search, TSDB, queue — with a single operator-gated "reveal credentials" toggle and open-UI links.
+
+### Database users & schemas
+
+**Manage Database** lists and creates schemas and dedicated per-schema DB **users** (passwords AES-256-GCM encrypted at rest), running the DB client **inside the container** via `docker exec` (no exposed port). It's list-and-create only — deliberately not a free-form SQL console. SQL engines only (Mongo/aux don't expose user management).
+
+> **Template-bundled DBs vs managed deps.** Pre-built stack templates bundle their own version-pinned database service (self-contained; backups cover it). That's separate from the managed-dependency catalog above — Rigger won't inject a managed DB into a template that ships its own.
 
 ---
 
 ## 9. Environment Configuration
 
-All settings live in `config.json`. Edit it (UI editor or file), then run `refresh <env>`.
+All settings live in `config.json`. Edit it (UI editor or file), then `refresh <env>`.
 
 ### Per-environment block
 
 ```json
 "environments": {
   "prod": {
-    "domain":           "example.com",
-    "http_port":        80,
-    "traefik_enabled":  true,
-    "traefik_network":  "traefik_net",
-    "ssl_enabled":      true,
-    "deployment":       "compose",
-    "replicas": { "backend": 2, "frontend": 1 },
-    "git": {
-      "enabled": true,
-      "repo":    "git@github.com:org/repo.git",
-      "branch":  "main"
-    }
+    "domain":          "example.com",
+    "http_port":       80,
+    "traefik_enabled": true,
+    "traefik_network": "traefik_net",
+    "ssl_enabled":     true,
+    "deployment":      "compose",
+    "replicas":        { "backend": 2, "frontend": 1 }
   }
 }
 ```
 
-**`http_port` note:** Only relevant for custom stacks when Traefik is **off**. It is the host port Nginx binds to for direct access. When Traefik is on, Nginx is reached via the Docker network — no host port binding is needed.
+**`http_port`** matters only for custom stacks with Traefik **off** (the host port Nginx binds). Under Traefik it's not needed (see [keep-host-ports](#keep-host-ports)).
 
-### Image stack service fields
+### Service fields (image stacks)
 
 ```json
 "images": [
   {
-    "name":       "app",
-    "image":      "ghost",
-    "tag":        "5-alpine",
-    "port":       2368,
-    "host_port":  "${GHOST_PORT}",
-    "link_ports": ["${GHOST_PORT}"],
-    "volumes":    ["./volumes/ghost_data:/var/lib/ghost/content"],
-    "depends_on": ["db"],
-    "extra_ports": [],
+    "name": "app", "image": "ghost", "tag": "5-alpine",
+    "port": 2368, "host_port": "${GHOST_PORT}", "link_ports": ["${GHOST_PORT}"],
+    "volumes": ["./volumes/ghost_data:/var/lib/ghost/content"],
+    "depends_on": ["db"], "extra_ports": [],
     "healthcheck": "curl -sf http://localhost:2368/ -o /dev/null || exit 1",
     "healthcheck_config": { "interval": "30s", "timeout": "10s", "retries": "3", "start_period": "60s" },
     "restart": "unless-stopped",
@@ -363,61 +344,96 @@ All settings live in `config.json`. Edit it (UI editor or file), then run `refre
 ]
 ```
 
-**`link_ports`** — which host ports appear as clickable links on the UI env card. Defaults to `host_port` if not set.
-
-**`extra_compose`** — raw YAML appended verbatim to the service block in the generated compose file. Use for options not covered by structured fields (mem_limit, cpus, logging, etc.). Applies to **all** environments.
-
-**Per-environment service overrides** — stored under `environments.<env>.service_overrides.<service_name>.extra_compose`. Same raw YAML format, applied **after** the base `extra_compose`. Use for environment-specific tuning:
-
-```json
-"environments": {
-  "prod": {
-    "service_overrides": {
-      "app": {
-        "extra_compose": "mem_limit: 4g\ncpus: \"2.0\"\nlogging:\n  driver: none"
-      }
-    }
-  },
-  "dev": {
-    "service_overrides": {
-      "app": {
-        "extra_compose": "mem_limit: 512m\nlogging:\n  driver: json-file"
-      }
-    }
-  }
-}
-```
+- **`link_ports`** — which host ports appear as clickable links on the env card (defaults to `host_port`).
+- **`extra_compose`** — raw YAML appended verbatim to the service block (mem_limit, cpus, logging, …), applied to all envs. Per-env overrides go under `environments.<env>.service_overrides.<service>.extra_compose`, applied after the base.
+- **Custom-app processes** — worker/scheduler services that reuse the app image with a command and no ports.
+- **Pre-deploy (migrate) command** — a build service's `PreDeploy` synthesizes a `{svc}-migrate` one-shot that runs before the app (gated via `depends_on: service_completed_successfully`). Compose-only (Swarm ignores the condition).
 
 ### Version block (custom stacks)
 
 ```json
-"versions": {
-  "postgres": "15-alpine",
-  "mysql": "8.0",
-  "redis": "7-alpine",
-  "nginx": "1.25-alpine",
-  "node": "20-alpine",
-  "php": "8.3-fpm-alpine"
-}
+"versions": { "postgres": "15-alpine", "mysql": "8.0", "redis": "7-alpine",
+              "nginx": "1.25-alpine", "node": "20-alpine", "php": "8.3-fpm-alpine" }
 ```
 
----
+### Secret env vars
 
-## 10. Version Management
+Any env var can be **flagged as a secret** in the env-var editor. On Compose it stays plaintext in `.env`; on Swarm it becomes a native Docker secret (see [Secrets](#21-secrets)). Placeholder secrets (`CHANGE_ME`, `CHANGEME`, `YOUR_…`) in a template are auto-replaced with generated values at create time.
 
-Image tags follow: `registry/project-backend:2.1.0-build.47-stage`
-
-| Command | Before → After |
-|---------|----------------|
-| `version bump` | `1.2.3-build.41` → `1.2.3-build.42` |
-| `version bump patch` | → `1.2.4-build.0` |
-| `version bump minor` | → `1.3.0-build.0` |
-| `version bump major` | → `2.0.0-build.0` |
-| `version set 3.0.0-build.0` | → `3.0.0-build.0` (full `M.m.p-build.N` form required) |
+> **`NODE_ENV` is always `production`** for deployed containers, regardless of the Rigger env tier — the tier means "which data/config", not the Node runtime mode. A pruned production image with `NODE_ENV=development` crash-loops (e.g. Fastify → pino-pretty). Override via project env vars if you truly need dev mode.
 
 ---
 
-## 11. Deployment Strategies
+## 10. Settings Levels
+
+Settings resolve across four tiers, most-specific first, via `Effective*` fallback:
+
+```
+User  →  Project (config.json)  →  Workspace  →  Global (admin)
+```
+
+- **Global** (Admin → Settings) — ACME email, base domain, App host/IP, auto-URL mode, DNS provider/token, confirm-destructive defaults, key-length bounds, **password policy**, default appearance.
+- **Workspace** (Manage Workspace) — overrides many global keys (domain, ACME email, auto-URL, DNS token), plus workspace defaults (registry/host/backup/build target), `keep_host_ports_under_traefik`, env tier names, and the [wipe-allowed env list](#22-maintenance-mode--danger-zone).
+- **Project** — everything in `config.json` (stack, services, managed deps, per-env overrides).
+- **User** — per-account appearance and confirm-destructive preference (Profile), editable only where the workspace/global tier allows an override.
+
+---
+
+## 11. Pre-built Stack Templates
+
+**37 templates** ship in `templates/stacks/` (a JSON file each):
+
+```
+activepieces · actual-budget · adguard-home · authentik · bookstack · code-server
+cyberchef · dockhand · flowise · ghost · gitea · grafana · homepage · immich
+it-tools · mealie · metabase · minio · n8n · nextcloud · nginx-proxy-manager
+nocodb · pairdrop · paperless-ngx · plausible · pocketbase · privatebin · sftpgo
+sonarqube · syncthing · teslamate · transmission · umami · uptime-kuma
+vaultwarden · wg-easy · wordpress
+```
+
+### How templates work
+
+Each template declares images, ports, volumes, healthchecks, `default_env_vars`, an optional `files` map (seed files), and — for multi-service stacks — a `web_routed` flag on the service the domain routes to. The wizard discovers templates by globbing `templates/stacks/*.json` (no registration).
+
+**Secrets.** A placeholder secret in `default_env_vars` is auto-replaced with a generated value at create time, for any secret-shaped key (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY*`, `*SALT*`). The resolved value is written to `.env` and **pinned** in `config.json` so it survives regens and matches the initialized data volume (see [Secrets](#21-secrets)). Non-secret placeholders (ports, hosts) are left for you to fill.
+
+**Web entry.** In a multi-service stack, exactly one service is the web entry (the domain routes to it) — mark it `"web_routed": true`. If none is marked, Rigger promotes the first non-datastore service (skipping postgres/mysql/mariadb/mongo/redis/clickhouse/…). The wizard's Services step lets you pick it directly.
+
+**Static config files (seed files).** Some apps bind-mount a *config file* (e.g. Prometheus's `prometheus.yml`). A bind mount whose source doesn't exist is silently created by Docker as a directory, which breaks the file mount — so ship it in a top-level `files` map (path → string or line-array), persisted into `config.json` and written into the env dir only if absent (your edits are never clobbered). Author them in **Tools → Template Manager → Static files**; Validate warns when a service bind-mounts a config file with no `files` entry.
+
+**Template Manager (Tools).** Create/edit/validate/save templates in the browser: convert a `docker-compose.yml`, generate from an existing image-stack project (secrets masked server-side), or upload a template JSON. **Save as template** writes to `templates/stacks/<name>.json` live (no rebuild).
+
+---
+
+## 12. Command Reference
+
+Commands issue from the **web UI**, the **`rigger` CLI wrapper**, or the **REST action endpoint** — all hit the same Go runtime.
+
+The authoritative REST call is:
+
+```
+POST /api/workspaces/{ws}/projects/{name}/envs/{env}/action
+     { "command": "...", "extra": [...] }
+```
+
+The `rigger` host wrapper (`rigger.sh` / `.ps1` / `.bat`) is a thin convenience over that endpoint — e.g. `./rigger.sh <project> <env> <command>` (the wrapper predates the workspace tier and refers to a project as a "workspace").
+
+**Allowlisted commands** (strict allowlist in `bridge.go`, each routed to a native Go op — no shell):
+
+```
+Lifecycle:   start · stop · down · restart · update · refresh · regen
+Build:       build · promote · version
+Ops:         ps · logs · backup · restore · migrate · init · test · script
+```
+
+- **`refresh`** regenerates the compose file and redeploys. **`regen`** regenerates the compose file *without* bringing the stack up (used to fix a stopped env's routing while keeping it stopped).
+- **`build`** / **`promote`** apply to custom (source-built) stacks; `promote <dst_env>` retags an existing image to the next env with no rebuild.
+- Container shell access (`> bash`) is available from the UI env-card terminal, not as a CLI command.
+
+---
+
+## 13. Deployment Strategies (Compose & Swarm)
 
 ### Docker Compose (default)
 
@@ -434,712 +450,569 @@ Best for dev and single-host stage/prod.
 "replicas": { "backend": 2, "frontend": 1 }
 ```
 
-Enables replica scaling via `docker stack deploy`. Requires `docker swarm init`.
+Enables replica scaling via `docker stack deploy --with-registry-auth`. Per-env swarm settings — replica counts, restart policy, update/rollback config, placement — are emitted into compose `deploy:` blocks. Swarm deploys are Traefik-hardened (providers.swarm, `deploy.labels`, overlay `traefik_net`). Requires `docker swarm init`.
 
-The shared `traefik_net` must be an **overlay/attachable** network for swarm stacks — a bridge network is rejected with *"network not in the right scope"*. The installer picks the right driver automatically when Swarm is already active, so the smoothest path is to **`docker swarm init` before installing Rigger** (compose and swarm projects then run side-by-side on the one network). If you enable Swarm on an existing compose install, recreate the network once:
+The shared `traefik_net` must be **overlay/attachable** for swarm stacks. Easiest path is `docker swarm init` before installing. To convert an existing compose install:
 
 ```bash
 docker network rm traefik_net && docker network create -d overlay --attachable traefik_net
 ```
 
-then reconnect/redeploy your stacks. Rigger logs a startup reminder while this is pending. Your running compose apps are unaffected until you deploy the first swarm stack.
+**Switching modes** on an existing env auto-tears-down the old deployment (while the old config still resolves it), so its bridge network/containers don't collide with the new overlay of the same name — then you redeploy cleanly.
 
 ---
 
-## 12. Build vs Promote
+## 14. Build, Version & Promote
 
-### `build` — compile a fresh image from source
+### Build
+
 ```bash
 rigger myapp stage build --bump minor --push
 ```
 
-### `promote` — move an existing validated image to the next environment
+- **Image pointers.** After a build, each built service's `.env` `{SVC}_IMAGE` pointer advances to the new tag **only if it was tracking** (empty or equal to the prior tag). A pointer set to anything else is a deliberate **pin** (rollback / hand-edit) and left alone (a pin whose image is missing is re-synced). The compose file is regenerated so the baked default matches.
+- **Rebuild policy.** `if-changed` skips a build when the source signature (`.build-ref`) is unchanged (source only — Dockerfile/build-arg changes aren't detected); `force`/`--no-cache` always rebuilds. Pipeline build stages expose this via a `When` field.
+- **Build args** expand `${ENV}`, `${VERSION}`, `${ROUTE_URL}` (warns on any leftover `${…}`).
+
+### Version
+
+| Command | Before → After |
+|---------|----------------|
+| `version bump` | `1.2.3-build.41` → `1.2.3-build.42` |
+| `version bump patch` | → `1.2.4-build.0` |
+| `version bump minor` | → `1.3.0-build.0` |
+| `version bump major` | → `2.0.0-build.0` |
+| `version set 3.0.0-build.0` | → exact `M.m.p-build.N` |
+
+Image tags follow `registry/project-service:2.1.0-build.47-stage`.
+
+### Promote
+
 ```bash
 rigger myapp stage promote prod
 ```
-No Dockerfile involved. The binary is byte-for-byte identical to what ran in stage.
 
-### Recommended release pipeline
+Retags the exact stage image to prod (pull → tag → push, **no rebuild**) then deploys — you ship byte-for-byte what you validated. `--dry-run` supported.
 
-```
-dev  →  build dev  →  build stage --push  →  validate  →  promote stage→prod
-```
+**Recommended pipeline:** `dev → build stage --push → validate → promote stage→prod`.
 
-**Why not `build prod` directly?** Promoting the validated stage image guarantees you ship exactly what was tested — no build-time variance.
+### Image update detection
 
----
+For image stacks, Rigger checks the registry hourly:
 
-## 13. Backup & Restore
-
-### Per-env backup snapshots (CLI)
-
-Backups are written to `workspaces/<project>/backups/` as timestamped `*.sql.gz` / `*.tar.gz` files:
-
-```bash
-rigger myapp prod backup          # database + all volumes
-rigger myapp prod backup db       # database only
-rigger myapp prod backup files    # volumes only
-rigger myapp prod restore 2026-06-01_14-30-00
-```
-
-What gets backed up (the dump tools run **inside the database container** via `docker compose exec`, so no DB client is needed on the host):
-- **PostgreSQL** — live `pg_dump` → `*.sql.gz`
-- **MySQL / MariaDB** — live `mariadb-dump`/`mysqldump` (auto-detected) → `*.sql.gz`
-- **Volumes** — `tar.gz` per volume via a helper container → filesystem fallback if SQL dump fails
-
-What `restore` does: stop → restore databases → restore volumes → start.
-
-### Workspace archive backup (UI Tools page)
-
-A separate, full-workspace archival feature available from **Tools → Workspace Manager** (the first Tools tab):
-
-- Creates a **`.rwb`** archive (Rigger Workspace Backup) of the entire workspace directory (config, .env files, all volume data). An optional **backup filename** field lets you name the archive; otherwise it defaults to `<workspace>-<timestamp>.rwb`. Legacy `.tar.gz` archives are still restorable
-- Excludes per-env backup snapshots to avoid archive-within-archive bloat
-- Stored at `/data/workspace-archives/` (persisted volume, survives container restarts)
-- Async — start the job and come back later to download; shows live status while running
-- **Archives on server** are listed with Download, Delete, and **Restore** (one-click restore of an archive still on the server — no re-upload needed)
-- **Restore from upload** — drag-and-drop or browse; backend validates `config.json` → extracts to `workspaces/`; "Overwrite if exists" guard
-- Snapshot and full-backup sections share one workspace selector at the top with a consistent row layout, button styling, and per-section drag-and-drop zones + instructions
+- **Update available** = a newer **digest for the same tag** (an amber "↑ update available" badge; one-click Update clears it).
+- **Newer stable tag** = a separate, non-actionable signal (its own alert).
+- **"? digest unknown"** (grey) = the local image has no `RepoDigest` (pulled via compose without an explicit `docker pull`, or built locally) so the comparison is indeterminate.
 
 ---
 
-## 14. Git Sync
+## 15. Domains, TLS & Routing
 
-**Private-repo credentials (built).** Rigger clones/builds from **private** Git repositories using credentials stored per workspace under **Manage Workspace → Git**. The credential never enters the repo URL, `config.json`, or logs — it's encrypted at rest (`internal/crypto`) and injected only via the git child's environment:
+### The URL model (three-layer)
 
-- **HTTPS token** — a PAT / access token, with first-class **service presets** (GitHub · GitLab · Bitbucket · Gitea · Other) that prefill the host + the right username convention + labels. Works against any HTTPS Git host, including **self-hosted Gitea/GitLab served over plain http or a non-default port** — the auth header is scoped to the repo's exact origin (`scheme://host[:port]`).
-- **SSH deploy key** — Rigger generates an ed25519 keypair; add the public key as a read-only deploy key and use an `ssh://` / `git@…` URL.
-- **GitHub App** — one-click **Connect GitHub** (App-manifest flow) → install → clones with short-lived 1-hour installation tokens (never persisted).
+An env's URL resolves per project/workspace:
 
-Pick a provider on a project's source in **New / Edit Project** (or inline-create one there); **Test** verifies access with `git ls-remote`.
+1. **Base domain** — workspace `domain` override → global `apps_base_domain`. When set, an env gets `{ws}-{project}-{env}.{base}` over **HTTPS (Let's Encrypt)**.
+2. **Magic-DNS fallback** — when no base domain is set, `auto_url_mode` = `sslip` | `nip` | `traefikme` gives `{ws}-{project}-{env}.<host>.sslip.io` (etc.) over HTTP, where `<host>` = the **App host/IP** (see below). `localhost` mode → `*.localhost`; `off` disables.
+3. **`localhost`** — the last-resort default.
 
-**Auto-deploy on git push** (webhook-driven pull → build → deploy) is not yet wired to Git providers — that's a later phase (the provider webhook would feed Pipelines / preview environments). For now, deploy from a built/pushed image with `build` + `promote`, or rebuild from updated source with `build <env> --push`. The legacy `git` block remains in `config.json` for forward compatibility:
-
-```json
-"git": { "enabled": true, "repo": "git@github.com:org/repo.git", "branch": "main" }
-```
-
----
-
-## 15. Supported Stacks
-
-### Backend
-| Key | Stack |
-|-----|-------|
-| `laravel` | PHP-FPM + Composer (multi-stage prod, Xdebug in dev) |
-| `nodejs` | Node.js — Express / Fastify / etc. |
-
-### Frontend
-| Key | Stack |
-|-----|-------|
-| `nextjs` | Next.js with `output: 'standalone'` |
-| `react` | React / Vite SPA → Nginx |
-| `none` | API only |
-
-### Database
-| Key | Image |
-|-----|-------|
-| `postgres` | `postgres:15-alpine` |
-| `mysql` | `mysql:8.0` |
-
-### Optional services
-| Service | Key |
-|---------|-----|
-| Redis | `redis_enabled: true` |
-| Garage S3 | `garage_enabled: true` |
-
----
-
-## 16. Pre-built Stack Templates
-
-12 templates included in `templates/stacks/`:
-
-| Template | Label | Services |
-|----------|-------|----------|
-| `ghost` | Ghost CMS + MySQL | ghost, mysql |
-| `gitea` | Gitea + PostgreSQL | gitea, postgres |
-| `grafana` | Grafana + Prometheus | grafana, prometheus |
-| `immich` | Immich (photo manager) | immich-server, immich-microservices, postgres, redis |
-| `minio` | MinIO object storage | minio |
-| `n8n` | n8n workflow automation | n8n, postgres |
-| `nextcloud` | Nextcloud + PostgreSQL + Redis | nextcloud, postgres, redis |
-| `nginx-proxy-manager` | Nginx Proxy Manager + MariaDB | npm-app, mariadb |
-| `plausible` | Plausible Analytics | plausible, postgres, clickhouse |
-| `uptime-kuma` | Uptime Kuma | uptime-kuma |
-| `vaultwarden` | Vaultwarden (Bitwarden) | vaultwarden |
-| `wordpress` | WordPress + MariaDB | wordpress, mariadb |
-
-### How templates work
-
-Each template is a JSON file in `templates/stacks/`. It declares images, ports, volumes, healthchecks, `default_env_vars`, an optional `files` map (see [Static config files](#static-config-files-seed-files)), and — for multi-service stacks — a `web_routed` flag on the service that fronts the web (see [Web entry](#web-entry-which-service-the-domain-routes-to)). The wizard discovers templates by globbing `templates/stacks/*.json` — no registration required.
-
-**Secrets.** A placeholder secret in `default_env_vars` (e.g. `DB_PASSWORD: CHANGE_ME` — also `CHANGEME`, `YOUR_…`, `REPLACE_ME`) is auto-replaced with a generated value at create time, for any key that looks like a secret (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY*`, `*SALT*`). Non-secret placeholders (ports, hosts, URLs) are kept for you to fill in.
-
-The resolved value is written to `.env` and **pinned** in `config.json`'s authoritative `secrets` map. The pin is the record of what the data volume was actually initialised with, so it stays consistent across refreshes and **wins over `.env`** — if the live `.env` ever drifts (rerolled or hand-edited), a regen heals it back to the pinned value instead of locking the app out of an already-initialised volume (the classic Postgres `P1000` / managed-DB auth failure). Managed-DB, MinIO and `APP_KEY` secrets are (re)captured into the pin on **every deploy** — not just first bootstrap — so a project that predates the pin, or whose `.env` was lost, records its real in-use secret *before* a later regen can reroll it. Remote-bound envs pin from the host's authoritative `.env`, not the local cache. (If a managed DB does drift, **Danger Zone → Wipe data** re-initialises the volume against the current `.env`.)
-
-You can also create templates from the UI, all consolidated in **Tools → Template Manager**:
-- **Select image workspace** — pick any image-stack workspace + an environment to generate a draft template JSON from its config (secrets masked to `CHANGE_ME` **server-side**, so they never reach the browser)
-- **Convert Docker Compose** — paste or import any `docker-compose.yml` and convert it to a template JSON
-- **Upload template** — load an existing template JSON (name, label, description, tags, and body are all restored into the editor)
-- **Save as template** — writes directly to `templates/stacks/<name>.json` on the server (no rebuild needed; templates are live-mounted)
-
-### Volume mounts in templates
-
-All templates use **bind mounts**: `./volumes/<name>:/container/path`. Volume data lives in `envs/<env>/volumes/<name>/` on the host — no Docker named volume overhead.
-
-### Web entry: which service the domain routes to
-
-For a **multi-service** stack (an app plus its database/cache), exactly one service is the **web entry** — the one Traefik routes the env's domain to. Mark it with `"web_routed": true` on that service in the template. If a multi-service template marks none, Rigger promotes the **first non-datastore service** (it skips `postgres`/`mysql`/`mariadb`/`mongo`/`redis`/`clickhouse`/`pgvecto-rs`/… and forks) so an app+db stack routes to the app, never the database. A single-service stack is always its own web entry. In the **New Project** wizard's Services step you can pick or change the web entry directly (datastore services are labelled).
-
-### Static config files (seed files)
-
-Some apps bind-mount a **config file** (not a directory) — e.g. Prometheus reads `/etc/prometheus/prometheus.yml`. A bind mount whose host source doesn't exist is silently created by Docker as a *directory*, which breaks the container's file mount. Ship that file with the template instead, via a top-level `files` map (relative path → contents):
-
-```json
-"files": {
-  "prometheus.yml": [
-    "global:",
-    "  scrape_interval: 15s",
-    "scrape_configs:",
-    "  - job_name: prometheus",
-    "    static_configs:",
-    "      - targets: ['localhost:9090']"
-  ]
-}
-```
-
-- A file body may be a **string** or an **array of lines** (joined with `\n`), so a multi-line config reads cleanly without hand-escaping newlines.
-- At create, the `files` are persisted into the project's `config.json` (`project.seed_files`) so the project stays self-contained even if the template later changes.
-- On bootstrap, each is written into the env dir **only if absent** — they live on the host bind (so they survive restarts) and your later edits are **never clobbered** on refresh. Nested paths create their dirs; absolute/parent-escape paths are rejected.
-
-Author them in **Tools → Template Manager → Static files**: a path field + a textarea per file (type the content; newlines are escaped for you), plus a drop zone that accepts text/config files (`.json` `.yml` `.conf` `.cfg` …) and pre-fills the name + content. **Validate** warns when a service bind-mounts a file that has no `files` entry.
-
-> If a project ever reaches deploy with a bind-mounted config file that doesn't exist, Rigger **stops with a clear message** listing the missing file(s) instead of letting Docker create a bogus directory — see [Troubleshooting](#bind-mounted-config-file-missing).
-
----
-
-## 17. Image Stacks — Manual Configuration
-
-An image stack (`"type": "image"`) deploys existing Docker images with no Dockerfiles or source code. Configure once → fill `.env` → `start`.
-
-### Applicable commands
-
-| Command | Image stack | Custom stack |
-|---------|:-----------:|:------------:|
-| `start` / `stop` / `restart` / `down` | ✅ | ✅ |
-| `update` (pull + recreate) | ✅ | ✅ |
-| `refresh` (regen compose + redeploy) | ✅ | ✅ |
-| `ps` / `logs` | ✅ | ✅ |
-| `backup` / `restore` | ✅ | ✅ |
-| `init` / `version` | ✅ | ✅ |
-| `build` / `promote` | ❌ | ✅ |
-
-### Per-image env var interpolation
-
-`${VAR}` placeholders in `env_vars` resolve from the `.env` file at deploy time. Each service gets only the variables it needs — no shared env blob.
-
----
-
-## 18. Image Update Detection
-
-For image stacks, Rigger checks Docker Hub for updates hourly:
-
-- **`latest` tags** — compares local digest vs remote manifest; shows "? digest unknown" (grey) if the image has no RepoDigest (e.g. pulled via compose without an explicit `docker pull`)
-- **Pinned tags** — fetches the tags list and finds newer semver tags using numeric per-segment comparison (`10.0 > 9.0` correctly)
-
-The "↑ update available" amber badge appears on the env card. After running **Update**, the cache is invalidated and a fresh check runs automatically (badge clears within ~10 seconds if the update succeeded).
-
----
-
-## 19. Healthchecks
-
-All containers include Docker healthchecks in the generated compose file.
-
-### Custom stacks
-
-Generated automatically by the Go compose generator (`internal/composegen`) per service type:
-
-| Service | Healthcheck |
-|---------|-------------|
-| Laravel backend | `php -r 'exit(0);'` |
-| Node.js backend | `wget -qO- http://localhost:3000/health` |
-| PostgreSQL | `pg_isready -U <user>` |
-| MySQL / MariaDB | `mariadb-admin ping -h localhost -u root -p${PASSWORD} --silent` |
-| Redis | `redis-cli ping` |
-| Nginx | `curl -sf http://localhost/` |
-
-### Image stack templates
-
-Each service in a template carries its own `healthcheck` command and `healthcheck_config` (interval, timeout, retries, start_period). Configurable per-service in Edit Workspace.
-
-> **Note:** Healthcheck commands containing `${VAR}` references must not use inner double-quotes around the variable (e.g. `-p${PASSWORD}` not `-p"${PASSWORD}"`). The compose generator escapes any literal `"` characters in healthcheck commands to prevent YAML syntax errors.
-
----
-
-## 20. Traefik vs Direct Port Routing
-
-### Direct ports (default for dev / Traefik off)
-
-```json
-"traefik_enabled": false
-```
-
-For custom stacks: Nginx binds `http_port` on the host → container port 80. For image stacks: each service's `host_port` is mapped directly.
-
-### Traefik (recommended for stage/prod)
-
-```json
-"traefik_enabled": true,
-"traefik_network": "traefik_net",
-"ssl_enabled": true
-```
-
-No host port binding. Traefik routes by domain name using Docker labels. SSL certificates are issued automatically via Let's Encrypt. For custom stacks, Traefik routes to Nginx's internal port 80. For image stacks, Traefik routes to each service's `port` (internal container port).
-
-**One-time setup:**
-```bash
-# Compose install (default):
-docker network create traefik_net
-# On a Swarm manager instead (so compose + swarm stacks share it):
-docker network create -d overlay --attachable traefik_net
-```
-
-**SSL requirements:** Port 80 open, DNS A record pointing to this server, `ACME_EMAIL` set in `src/.env`.
+`EnvRouteURL` builds the exact string the UI shows on the env card.
 
 ### App host / IP (Settings → General)
 
-The **App host** is the address users reach this host's apps at — it builds the
-direct `host:port` "Open app" links and the magic-DNS auto-URLs (`{ws}-{app}-{env}.<ip>.sslip.io`)
-for **locally-deployed** environments. (Envs bound to a remote host always use that
-host's own address.)
+The **App host** is the address users reach this host's apps at — it builds the direct `host:port` links and the magic-DNS host for **locally-deployed** envs (remote-host envs use their own host's address).
 
-- **Seeded at install.** The installer detects the host's outbound IP (`ip route get`,
-  falling back to `hostname -I`) and writes it to `src/.env` as `RIGGER_APP_HOST`;
-  the server seeds the `app_host` setting from it on first boot. In most cases this is
-  correct and never needs touching — update it only if the host's IP changes.
-- **Why it isn't auto-detected at runtime.** The server runs inside a container and can
-  only see its own bridge IP (e.g. `172.x`), not the host's LAN IP. The **Detect** button
-  works around this on a **native Linux host** (it runs host-networked), but on **Docker
-  Desktop** `--network host` joins the internal VM, so detection returns the VM IP, not
-  your machine's LAN IP — **enter it manually there**.
-- **Must be an IP for sslip/nip.** Those services only echo back an embedded IP address;
-  a hostname won't resolve. The **Use {hostname}** button is handy when you reach Rigger
-  by IP (it fills that IP); for a base domain (`onrigger.com`) the App host is irrelevant.
-- **Changing it warns about affected apps.** The magic-DNS host is baked into each running
-  app's Traefik router labels, so a plain IP change updates the *displayed* URLs but the
-  live containers keep routing on the old host until redeployed. When you edit the App host
-  (or a remote host's address in **Remote Hosts**), Rigger checks — as you leave the field —
-  which environments' URLs would break and offers to **refresh & redeploy** them on save. It
-  honours running state: a running env is redeployed in place; a **stopped** env only has its
-  compose regenerated (never started). Reverting the field to its original value dismisses the
-  warning.
+- Seeded at install from the detected host IP (`RIGGER_APP_HOST`). Update it only if the host IP changes.
+- The server runs in a container and can't detect the host LAN IP itself; **Detect** works on native Linux, but on Docker Desktop returns the VM IP — enter it manually there. **Use {hostname}** fills the address you reached Rigger by.
+- **Must be an IP for sslip/nip.** A hostname won't resolve; for a base domain the App host is irrelevant.
+- **Changing it warns about affected apps.** The magic-DNS host is baked into each running app's Traefik labels, so an IP change updates displayed URLs but running containers keep the old host until redeployed. As you edit the field (or a remote host's address), Rigger shows which envs' URLs would break and offers to **refresh & redeploy** them on save — state-aware (a running env is redeployed in place; a stopped env only has its compose regenerated). Reverting the value dismisses the warning.
+
+### ACME / certificates
+
+Traefik carries two resolvers: **`letsencrypt`** (HTTP-01, per-host, default) and **`dns`** (DNS-01 via Cloudflare). When `apps_dns_provider = cloudflare` is set, base-domain envs request one **`*.{base}` wildcard** cert; otherwise each host gets a per-host HTTP-01 cert.
+
+The ACME **email hierarchy** is per-env → workspace → global. Per-env/workspace overrides (and per-workspace wildcards under a workspace's own Cloudflare token) are issued **out-of-band** by a one-shot `lego` container that writes a cert Traefik hot-reloads (no restart), with a 12-hour renewer. The Cloudflare token is set in Settings → General (materialized to a file Traefik reads).
+
+> *These override/wildcard cert paths and custom domains are implemented but not yet fully live-verified end-to-end.*
+
+### Custom domains (per env)
+
+Add external domains to an env (in addition to the auto subdomain). Verify ownership by **TXT** (`_rigger-challenge.<domain>`), **CNAME** (→ the env's auto subdomain), or an **HTTP file** — then Rigger issues a per-host Let's Encrypt cert and adds an HTTPS router (+ http→https redirect). One domain can be marked **primary** (canonical, drives `APP_URL`/Open-app).
+
+### Routing table (per project)
+
+The **Routing** tab lets a project map **path prefixes** or **subdomains** on the env domain to specific services (`Config.Routes[]`). With any routes defined, composegen switches from a single `Host()` label to route-driven labels: path routes become `Host(domain) && PathPrefix(/x)`, with prefix rewrite (strip/add) for **version aliasing**. The catch-all `/` route owns the wildcard cert + custom domains. *(Weight/canary and rate-limit columns are planned, not built.)*
+
+### <a id="keep-host-ports"></a>Traefik vs direct ports
+
+With Traefik **off**, a custom stack's Nginx binds `http_port`; an image stack maps each `host_port` directly. With Traefik **on**, routing is by domain label with no host-port binding. Under Traefik the web-entry's primary host port is redundant, so it's **stripped by default** (`keep_host_ports_under_traefik`, per-env `keep`/`strip` override); `extra_ports` and non-web services always publish.
 
 ---
 
-## 21. Rigger UI — Web Interface
+## 16. App Exposure
 
-Rigger UI is a browser-based control plane. It runs as a Docker container and provides full workspace management — creation, environment lifecycle, live log streaming, container terminals, backup history, image update detection, system dashboards, and admin tools.
+Per environment, `expose_mode` controls how an app is reachable, and `auth_gate` adds an access gate (both override → project default → baseline):
 
-The UI and the `rigger` CLI are fully interchangeable — both drive the same native Go runtime through the server's command bridge. There are no shell scripts: compose generation, deploy (compose & swarm), bootstrap, build/promote, backup/restore, and version management are all Go.
+| `expose_mode` | Behavior |
+|---------------|----------|
+| **`traefik`** (default) | Public Traefik router (the URL model above). |
+| **`cloudflare_tunnel`** | No public router — a `cloudflared` sidecar (`TUNNEL_TOKEN=${CF_TUNNEL_TOKEN}`) makes an outbound-only tunnel. Swarm-native; good for exposing an app without opening the firewall. |
+| **`none`** | Internal only; optional explicit `host_port` and optional attach to an external Docker network. |
 
-### Architecture
+| `auth_gate` | Behavior |
+|-------------|----------|
+| **`none`** (default) | No gate. |
+| **`basic`** | Traefik basic-auth from `${APP_AUTH_USERS}` (htpasswd in `.env`). |
+| `forward_auth` | *Reserved but not implemented — treat as planned.* |
 
-```
-Browser  (JWT Bearer + httpOnly refresh cookie)
-  │
-  ▼
-┌─────────────────────────────────────────────────────────────┐
-│  rigger container (~15 MB Alpine, single Go binary)           │
-│                                                             │
-│  Go HTTP server (CGO_ENABLED=0)                             │
-│   ├─ React SPA embedded via embed.FS                        │
-│   ├─ REST API + WebSocket streams                           │
-│   ├─ Auth: bcrypt + dual JWT (15-min access / 7-day refresh)│
-│   ├─ Proactive token refresh (fires every 13 min)           │
-│   ├─ Command bridge (strict allowlist → native Go ops)       │
-│   ├─ Image update cache (hourly background checker)         │
-│   ├─ Stats collector (Docker info + host /proc metrics)     │
-│   └─ Async workspace archiver (.rwb backup jobs)           │
-└─────────────────────────────────────────────────────────────┘
-  │  bridge.Run → composegen / dockerops / builder / backup / version
-  ▼
-docker / docker compose  +  workspaces/<project>/  (config, envs, volumes)
-```
+Synthesized admin sidecars (Adminer/consoles) have a separate basic-auth knob (`protect_admin_uis` → `${ADMIN_UI_USERS}`).
 
-### Quick start
+---
+
+## 17. Multi-Host Support
+
+Rigger runs projects — or individual environments — on **remote Docker hosts** while you manage everything from one control plane. Keep `dev` local, put `stage`/`prod` on beefier servers, all from one UI.
+
+### How it works
+
+An **SSH-exec + file-sync** model (pure-Go SSH — no `ssh` client in the image):
+
+1. Files (compose, `.env`, build context) are generated **locally** and pushed to the host via **tar-over-SSH**.
+2. `docker` / `docker compose` run **on the remote host** over SSH, so bind mounts and build contexts resolve there.
+3. A remote host needs only **Docker + an SSH server** — no Rigger binary, no agent.
+
+Lifecycle commands are host-transparent: Rigger resolves each env's host and runs the command in the right place. On first deploy, Rigger provisions a **Traefik edge** (the same trio) + `traefik_net` on the remote host over SSH (idempotent).
+
+### Registering a host (Manage Workspace / Admin → Remote Hosts)
+
+| Field | Notes |
+|-------|-------|
+| Display name / Address / SSH user / port | Connection details |
+| SSH private key | Paste a passphrase-less key, **or** toggle **Use Rigger-managed key** (Rigger holds one identity; install its public key with the shown one-liner — the private key never transits your browser) |
+| Remote workspaces directory | Absolute path where workspaces live/are pushed (e.g. `/opt/rigger/workspaces`); blank = the `REMOTE_WORKSPACES_DIR` default |
+
+**Test** connects + runs `docker version` (captures the host-key fingerprint TOFU). **Health** shows the host's Docker/system stats. **Scan / Import** lists workspaces already on the host and imports selected ones.
+
+### Reachability: public vs private
+
+Each host is flagged for how it's reached — this decides how its apps get a public URL:
+
+- **Public (direct)** — the host is its own front door (own public IP/DNS). Its apps route directly at the host, which issues its own HTTP-01 certs. Optional `public_address` override. When a base domain + Cloudflare token + auto-manage-DNS are set, Rigger upserts a **DNS-only A record** `{label}.{base} → host IP` so the name resolves straight to it.
+- **Private (behind gateway)** — only the control plane is exposed; it fronts the host's apps. Rigger writes a **gateway forward-route** on the control plane that proxies `Host(name) → http://{host}:80` (the host's edge), serving the workspace wildcard by SNI. Use for LAN/homelab boxes with no public IP.
+
+Per-env host binding: each environment is either local or bound to one remote host (set on the Project step's default-host selector or Edit Project → Environment hosts). Different envs of one project can live on different hosts.
+
+### Moving / migrating
+
+- **Per environment** or **whole project** (all envs at once, when they share a host). A deployed migration backs up the source → ships files (incl. `.env`) → repoints → restores on the target. **The source copy is stopped but its data is left intact** — wipe it from [Housekeeping → Migration Leftovers](#25-housekeeping) before decommissioning the host.
+- Both moves warn about downtime + leftover data, run in the background, and notify on completion.
+
+### Current limitations
+
+- `build` / `promote` for remote-bound projects need the build context + a remote registry (build/promote locally, or migrate after building).
+- Editing a remote env's variables writes the **local** cache; it doesn't push to the host yet.
+- Backup S3/SFTP sync currently excludes remote-host envs (planned).
+
+---
+
+## 18. Deployment Pipelines
+
+Pipelines (Edit Project → **Pipelines** tab) are ordered stage lists — a lightweight CI/CD for a project. Viewing is viewer+, managing/running is operator+.
+
+- **Stage types:** deploy · refresh · update · build · restart · backup · test · script · version · push (promote) · **gate**.
+- **Runs** launch in the background; the run modal **polls** live per-stage progress/logs (no socket — you can close and reopen the window). Log viewer has search, per-stage jump anchors, line numbers, wrap, download. **History** keeps the last runs with per-stage status chips; runs can be cancelled.
+- **Promote gate** — a `gate` stage pauses the run (`awaiting`) for manual **Approve / Reject**.
+- **Webhooks** — a per-pipeline inbound trigger (hashed URL token + optional HMAC secret) runs the pipeline on push.
+- **Notifications** — per-pipeline Started / Succeeded / Failed events fan out to chosen notification channels (failure messages name the failing stage + a short error tail).
+- **Generate from environments** — a one-click generator drafts a release (build↑bump+push → deploy → promote chain, optional gate) or hotfix pipeline from the env topology + workspace tier order; the draft opens in the editor (nothing auto-saved). Env tier order is set in Manage Workspace and reorderable per project.
+
+### Type-aware rollback
+
+A separate env-level feature (env card → Rollback): each deploy snapshots the resolved image refs to `deploy_history`. **Custom stacks** roll back by pinning a prior entry's images in `.env` and redeploying; **image stacks** (no per-env image override) roll back via a Backup restore instead.
+
+---
+
+## 19. Preview / PR Environments
+
+Opt-in per project (Edit Project → **Preview Environments**). A signed webhook from GitHub/Gitea (GitLab not supported in v1) spins up an ephemeral **`pr{n}`** environment cloned from a chosen template env when a pull request opens, redeploys it on each push, and tears it down when the PR closes.
+
+- **Config:** enabled, template env, provider, branch filter, fork policy (off/approved/on), max concurrent, TTL hours, DB strategy (isolated-empty / isolated-seed / clone-from), auth-protect, PR write-back.
+- **Write-back** (optional) posts a commit status + comment on the PR (needs an encrypted token).
+- **Reaper** — a 30-minute safety net tears down previews past their TTL (which slides on each deploy; TTL 0 = live until the PR closes) in case a "closed" webhook is missed.
+
+---
+
+## 20. Backup & Restore
+
+### Per-env snapshots
 
 ```bash
-cd rigger/src
-cp .env.example .env
-# Set JWT_SECRET: openssl rand -hex 32
-# Set ACME_EMAIL for SSL
-docker network create traefik_net 2>/dev/null || true   # Swarm manager? use: docker network create -d overlay --attachable traefik_net
-docker compose up --build -d
-# → http://localhost:9999
+rigger myapp prod backup        # database + all volumes
+rigger myapp prod backup db     # database only
+rigger myapp prod backup files  # volumes only
+rigger myapp prod restore 2026-06-01_14-30-00
 ```
 
-### Navigation
+Snapshots write to `backups/{env}/{timestamp}/` with a manifest. SQL engines get a logical dump (gzipped, run **inside** the DB container — no host client needed); non-SQL engines (Mongo/OpenSearch/VictoriaMetrics) and file volumes are archived at the volume level. `restore` does stop → restore DB → restore volumes → start.
 
-**Top bar:** Dashboard · Housekeeping · Tools · Proxy Service (admin) · Settings · user menu
+- **Backup targets** (Manage Workspace) — S3/object-storage and SFTP destinations, with a connectivity **Test**.
+- **Sync** a snapshot to a target (per-snapshot button; auto-upload after archive backups). *(Not yet supported for remote-host envs.)*
+- **Schedules** — per-env, interval-based (every 2/4/6/12h, daily, weekly). The scheduler ticks every 30 minutes and runs a schedule when its interval has elapsed (state survives restarts). Count-based retention keeps the newest N per schedule.
+- **Health** — the dashboard shows per-env backup coverage (last-backup age, count, sync state) with a verdict (current / stale / never / disabled).
+- **Restore dry-run** — a non-destructive **Verify** checks every snapshot file is present, non-empty, and gzip-intact before you commit.
 
-**Left sidebar:** workspace list with live status dots · New workspace button · Recent activity · Backup history · Version log (slide-out panels)
+### Project backups & snapshots (Tools → Backup & Restore)
 
-### Dashboard (`/`)
+Two portable, whole-project artifacts:
 
-Skeleton loading animation while data fetches. Host/Docker panels refresh every 30 s; the workspaces table tracks live resource usage with a ~4 s poll plus SSE invalidation on Docker events.
+- **`.rps`** (Rigger Project **Snapshot**) — config only: `config.json` + each env's `.env` + a portable DB bundle. Fast; rollback overwrites config in place (data untouched) then regenerates compose. Legacy `.rws` still imports.
+- **`.rpb`** (Rigger Project **Backup**) — the full project: the whole project dir + the latest per-env data snapshot + the portable DB bundle. Legacy `.rwb`/`.tar.gz` still import.
 
-- **6 stat cards:** Active alerts, Workspaces, Environments, Running containers, Docker images, Docker networks
-- **Workspaces table:** name, type, env status dots (with a 🖥 host chip on environments running remotely), **Services** (distinct compose service count), **Containers** (running/total), **CPU**, **Memory**, **Disk**, **Net I/O** (live inbound ↓ and outbound ↑ throughput shown separately), Open link. Live stats fan out across the local control plane and every remote host with workloads
-- **Docker engine panel:** version, storage driver, root dir, container/image/volume/network counts
-- **Host system panel:** OS, arch, CPU, uptime, memory bar, disk bar (amber >65%, red >85%)
+Both embed **`rigger-project-db.json`** — pipelines (+webhooks), alert rules, custom domains, maintenance schedules, host bindings (by host name), and the project build host. It **excludes** deploy/rollback history, access grants, raw DB-user secrets, and logs. Re-imported on restore/rollback.
 
-### Workspace page (`/workspaces/:name`)
+*(The Proxy Service has its own `.rpx` export/import for routes + access lists.)*
 
-**Environment cards** — each shows:
-- Environment name + status badge (running / partial / stopped / unknown). Status is read from the env's actual host (local or remote over SSH)
-- **compose / swarm deployment badge** next to the environment name — deployment mode is configured **per environment**, so the badge lives on each env card (not on the workspace header, where it would misleadingly reflect only the first env)
-- **🖥 host badge** for environments running on a remote host (Phase 7)
-- **Access links:** domain badge (Traefik on) or port badge(es) (Traefik off) — clickable `↗` links. They're disabled (non-clickable) when the env isn't running/healthy, and use the **remote host's address** for direct `host:port` URLs. Supports multiple links per env for multi-port image stacks (configured via the 🔗 checkbox on port rows)
-- **"↑ update available"** amber badge / **"? digest unknown"** grey badge (image stacks)
-- **`> bash`** terminal button
-- **Deploy ▾** split button (Deploy / Stop / Down)
-- **Restart** and **Update** buttons
+### Migrate vs Copy environment
 
-**Action output panel** — streams live output from deploy, stop, restart, backup, update actions.
+- **Migrate data** (Tools → Migrate data) — moves **data** between two existing envs: safety-backup the target → back up the source → restore the source snapshot into the target (source read-only; target overwritten). Operator role + typed target-name confirmation; async.
+- **Copy environment** (Edit Project → Environments) — a **config-only** clone (env block + config files + fresh `.env`, domain blanked, optional secret regen) with **fresh empty volumes — no data copied**. (Data-copy is a planned Phase 2.)
 
-**Log viewer panel:**
-- Environment tabs + multi-container **checkbox** selector (tick "all" or specific services)
-- Per-container log colouring — each service gets a distinct colour from a 10-colour palette. Colour swatches in the container selector legend serve as a visual guide
-- Text filter (grep-style with filtered/total line count)
-- Auto-scroll checkbox + ⏸ Pause/Resume stream button
-- ↺ Reconnect button
-- **⛶ Maximize** button — opens full-screen modal with all inline features plus:
-  - Row limit dropdown (All / 100 / 500 / 1 000 / 5 000)
-  - **# rows** toggle for line number prefix
-  - ⎘ Copy (copies current view with filter + row limit applied)
-  - ⬇ Download as `.txt`
-  - Clear buffer
+---
 
-**Compose viewer** — read-only `docker-compose.yml` with line numbers, hover-highlight per row, **Copy** button (selection-aware: copies selected text if selection exists in the viewer, otherwise copies full file). Copy works on plain HTTP via `execCommand` fallback.
+## 21. Secrets
 
-### New Workspace wizard (7 steps)
+Two distinct mechanisms:
 
-1. **Project** — name (checked for uniqueness against existing workspaces), registry dropdown
-2. **Stack** — Pre-built template (12 options with search + Popular/Browse All views) / Image stack / Custom app
-3. **Environments** — name, domain, Traefik, SSL, port (shown only for custom stacks with Traefik off), deployment, git sync. Adding an env inherits vars from the first env
-4. **Services** — per-service port mappings (with 🔗 env-card link checkbox), volume mappings (with **RW/RO** segmented control), restart policy, healthcheck command + timing, `depends_on`, Advanced YAML. For a **multi-service** image/prebuilt stack, a **Web entry** radio picks which service the env's domain routes to (datastore services labelled; the first non-datastore service is pre-selected)
-5. **Backup** — enable/disable, target (local or configured remote), schedule, retention
-6. **Review** — summary of all choices
-7. **Result** — live bootstrap terminal. Detects success/failure from output and shows a ✓ / ✗ banner. **Open workspace** button enabled only on success. **← Go back & fix** button on failure. Step numbers in the top bar are clickable once visited for direct navigation. Top-bar button changes from Cancel → Close after creation starts
+### Flagged secrets (Compose plaintext / Swarm-native)
 
-### Edit Workspace
+Env vars you flag as secrets are stored plainly in `.env` for **Compose** deployments, and as **native Docker Swarm secrets** for **Swarm** deployments (mounted at `/run/secrets/<KEY>`; DBs use the `<KEY>_FILE` convention). Rigger runs no custom crypto — Swarm encrypts secret values at rest in its Raft log. Swarm secrets are immutable, so **rotation** creates a new version, redeploys, and removes the old one. A secret-event audit trail records the key + action only, never the value. Compose deployments are byte-for-byte unchanged.
 
-- **Services** (image stacks) — name, image, tag; port rows (with 🔗 link checkbox, **RW/RO** volume toggle); volume rows; restart policy; healthcheck; depends_on; Advanced YAML
-- **Environments** — domain, Traefik, SSL, deployment, replica counts, git sync; `http_port` shown only when Traefik is off on custom stacks; `https_port` removed (not operationally used)
-- **Per-environment service overrides** (image stacks) — collapsible section per env, one YAML textarea per service. Appended after the base Advanced YAML for that environment only. "active" badge when any override is set
-- **Environment variables** — collapsible inline editor (existing envs) or new-env editor (unsaved envs) with Show/hide values toggle
-- **Add environment** — inherits vars from first env; shows "new" badge; visible immediately after save
-- **Delete environment** — disabled when only one env remains
-- **Dirty-state save** — **Save changes** is enabled only when something actually changed; if you've made changes, **Cancel** asks for confirmation before discarding them
-- **Environment hosts** (Phase 7) — per-environment "Move to…" control to run each env on a different host (e.g. `dev` local, `stage`/`prod` remote). Changing a *deployed* env's host migrates its data; an undeployed one just repoints
-- **Move the whole workspace** (Phase 7) — migrate all environments to one host at once; available only when every env currently shares the same host. Both moves warn about downtime + leftover data, run in the background, and notify you on completion
+### Managed-secret pinning (drift protection)
 
-**Danger Zone** (Edit Project → Danger Zone) — irreversible, workspace-admin (or super-admin) only, each gated by a copy-paste acknowledgement sentence **plus your password** (an incorrect password just re-prompts — it never logs you out):
+Rigger's own auto-generated secrets (DB/app/MinIO passwords) are **pinned** in `config.json`'s authoritative `secrets` map — captured on first `.env` generation **and re-captured on every deploy**. The pin is the record of what the data volume was initialized with, so it **wins over `.env`**: if the live `.env` ever drifts (rerolled or hand-edited), a regen heals it back to the pinned value instead of locking the app out of an already-initialized volume (the classic Postgres `P1000`). Remote-bound envs pin from the host's authoritative `.env`. An existing pin is never overwritten; there's no UI — it's an internal durability mechanism.
 
-- **Wipe application data** — resets **one environment** to empty: removes its named volumes *and* clears its bind-mount data directories (keeping `docker-compose.yml`/`.env`, so settings and secrets are preserved), then redeploys it fresh. For **resetting dev/test only** — it's offered *only* for environments a workspace admin allow-lists under **Manage Workspace → Environments → "Environments allowed to wipe data"** (leave production off the list and it's never wipeable). Confirm sentence: `Wipe data for Project: <name> Environment: <env>`. Runs as a background job with live progress — safe to leave the page. Also a clean recovery path for a drifted managed-DB password (it re-initialises the volume against the current `.env`).
-- **Delete project** — permanently removes the project directory (config, env files, backups). Confirm sentence: `Delete Project: <name>`. Running containers are not stopped automatically.
+---
 
-### Housekeeping page (`/housekeeping`)
+## 22. Maintenance Mode & Danger Zone
 
-Four tabs:
+### Maintenance mode
 
-**Dashboard** — health badge, Docker storage breakdown (images/containers/volumes/build cache), safe quick actions (prune networks, prune dangling images), recent log.
+Per-env (env card → 🛠️), Rigger serves a Traefik **503 maintenance page** (ad-hoc or scheduled). Because the router points at the Rigger UI itself, it **works even when the env is stopped**. Live-verified.
 
-**Safety Center** — expandable cards for: unused image pruning (multi-select), stopped container removal (type `PRUNE` to unlock), volume purging (3-second hold button countdown), build cache overhaul (slider unlock), old kernel cleanup.
+### Danger Zone (Edit Project → Danger Zone)
 
-**Migration Leftovers** (Phase 7) — after an environment is migrated to another host, its data/volumes/files (including `.env` secrets) are intentionally left on the source. This tab lists each leftover with a confirmed, destructive **Clean up** (wipes the stack's containers, named volumes and env-dir files on the source — over SSH for remote sources) and a **Dismiss** for ones cleaned manually. Run it before decommissioning a host so secrets can't be recovered.
+Irreversible actions, **workspace-admin (or super-admin) only**, each gated by a copy-paste acknowledgement sentence **plus your password** (a wrong password just re-prompts — it never logs you out):
 
-**Automation & Logs** — daily automated tasks at 03:00 UTC; host OS operations (APT, journal rotation, temp cleanup — require `privileged: true` + `pid: host`); full task history table with output viewer.
+- **Wipe application data** — resets **one environment** to empty: removes its named volumes *and* clears its bind-mount data directories (keeping `docker-compose.yml`/`.env`, so settings and secrets are preserved), then redeploys it fresh. Offered **only** for environments a workspace admin allow-lists under **Manage Workspace → Environments → "Environments allowed to wipe data"** (keep production off the list and it's never wipeable). Runs as an async background job with live progress — safe to leave the page. Also a clean recovery path for a drifted managed-DB password (it re-initialises the volume against the current `.env`). Confirm: `Wipe data for Project: <name> Environment: <env>`.
+- **Delete project** — permanently removes the project directory (config, env files, backups). Confirm: `Delete Project: <name>`. Running containers aren't stopped automatically.
 
-### Settings page (`/settings`)
+---
 
-**Docker Registries tab** — add/edit/delete/test registries. Each registry appears as an option in the wizard registry dropdown.
+## 23. Alerting & Notifications
 
-**Backup Targets tab** — S3/object storage and SFTP remote destinations. Configured targets appear in the wizard backup step.
+An **alert rules engine** (Phase 6) re-evaluates every enabled rule on a 60-second tick, with an open/resolve state machine (auto-resolves when the condition lifts) and a per-rule cooldown (default 15 min). **12 rule types:**
 
-**Remote Hosts tab** (Phase 7) — register, test, and manage remote Docker hosts for [multi-host](#22-multi-host-support) deployment. Per host: display name, address, SSH user/port, an SSH private key (paste your own **or** toggle **Use Rigger-managed key** to install Rigger's public key instead), and an optional remote workspaces directory. **Test** verifies SSH + remote Docker; **Health** shows the host's Docker/system stats; **Scan** discovers workspaces already on the host for one-click import.
+| Category | Rules |
+|----------|-------|
+| Container | `container_down`, `container_unhealthy`, `stack_partial`, `container_oom_killed`, `restart_count` (threshold) |
+| Resources | `cpu_above_pct` / `memory_above_pct` (per-project aggregate), `disk_above_pct` (host-global, admin-managed) |
+| Backups | `backup_failed`, `backup_stale` (hours) |
+| Images | `image_update_available`, `image_version_available` |
 
-### Tools page (`/tools`)
+Severities are info/warning/critical.
 
-#### Template Manager
+**Inbox** — fired/resolved events fan out live over SSE to the **🔔 bell** (unread badge) and a slide-out inbox (dismiss / dismiss-all); the dashboard shows per-project alert dots.
 
-A single place to create, edit, validate, and save Rigger template JSON. The **template details** (name, label, description, tags) and the **Validate / Save as Template** actions stay visible from the start but are disabled until JSON is loaded, so the full flow is always in view.
+**Notification channels** — two types: **email** (direct SMTP) and **apprise** (one or more Apprise URLs covering Slack/Discord/Telegram/webhook/etc.; delivered by an embedded `apprise-go` library, or an Apprise API sidecar if `APPRISE_URL` is set). Channels are global (with per-workspace grants) or workspace-private. Alerts and channels are configured in Admin → Settings (global) and Manage Workspace → Notifications (per workspace). Pipeline and migration events also route to channels.
 
-Three ways to load JSON into the editor (toolbar buttons, left-to-right):
+---
 
-- **⇄ Convert Docker Compose** — opens a modal to **Paste** / **Import** a `docker-compose.yml` (or load an example), then **Convert & load into editor**. Conversion: services → `images[]`; ports → `port`/`host_port`/`extra_ports`; named volumes → `./volumes/name` bind mounts; env values → `${VAR}` references with originals as `default_env_vars`; healthchecks + depends_on extracted
-- **⊞ Select image workspace** — opens a modal to pick an existing image-stack workspace (pre-filtered) + an environment; **Load** generates a draft template from its config with secrets masked to `CHANGE_ME` **server-side**
-- **↑ Upload template** — load an existing template JSON file; its name, label, description, and tags are restored into the details fields too
+## 24. Metrics & Monitoring
 
-The editor:
-- **Color-coded JSON** with a **line-number gutter** (dependency-free: a transparent textarea over a highlighted layer, scroll-synced)
-- Fixed height with an internal scrollbar so the **Validate** and **Save as Template** buttons stay on screen
-- **Validate** is disabled until JSON is loaded; **Save as Template** is disabled until validation passes. Validate also surfaces non-blocking **seed-file warnings** — a service that bind-mounts a config file with no matching `files` entry (it wouldn't be seeded, so the deploy would fail)
-- **Copy** / **Download** (top) are visible from the start but disabled until JSON is loaded
-- **Save as template** writes to `templates/stacks/<name>.json` on the server — no rebuild needed
+A collector samples each project/environment every **`METRICS_INTERVAL_SECONDS`** (default 30) — CPU %, memory bytes, disk bytes, and net rx/tx — aggregated across the env's containers and written to SQLite.
 
-**Static files** (collapsible section) — author the template's bind-mounted config files (e.g. `prometheus.yml`) without hand-escaping newlines (see [Static config files](#static-config-files-seed-files)). Per file: a **path** field + a **content textarea** (multi-line content round-trips into the JSON as a readable line-array). A **drop zone** accepts text/config files (`.json` `.yml` `.yaml` `.conf` `.cfg` `.toml` `.ini` `.env` `.xml` `.txt`, single or multiple) and pre-fills the name + content — re-dropping a known filename updates it. Edits sync live into the JSON's `files` map; **Reload from JSON** re-pulls after a raw edit.
+- **Tiered downsample:** full resolution ≤ 24h, thinned to 1 sample/minute for 24–120h, 1 sample/5 min beyond; the downsample+prune job runs every 6h.
+- **Retention:** hard prune at **90 days**.
+- **Optional long-term history:** dual-write to a managed VictoriaMetrics sidecar (Admin toggle) exposes `rigger_cpu_pct` / `rigger_memory_bytes` / `rigger_disk_bytes` / `rigger_net_rx_bytes` / `rigger_net_tx_bytes` for Grafana etc.
+- **UI:** env cards render CPU / memory / disk / network sparkline tiles; the dashboard aggregates live usage across the control plane and every remote host with workloads.
 
-#### Workspace Manager (Backup & Restore)
+---
 
-The **first** Tools tab. A single workspace selector at the top drives two consistent sections — **Snapshots** and **Workspace Backup** — with matching row layouts, button styling, and per-section drag-and-drop zones + instructions.
+## 25. Housekeeping
 
-- **Create backup** — optional backup-filename field + Start button; async **`.rwb`** job with live polling; shows archive filename + size on completion
-- **Archives on server** — lists all `.rwb` (and legacy `.tar.gz`) archives in `/data/workspace-archives/` with date, size, **Download** (authenticated fetch → blob URL), **Restore** (one-click, no re-upload), **Delete**
-- **Restore from upload** — drag-and-drop or file picker; "Overwrite if exists" checkbox; streams restore status; workspace appears in the sidebar immediately after success
+The Housekeeping page (admin) has four tabs:
 
-### Proxy Service (`/proxy`, admin-only)
+- **Dashboard** — Docker storage breakdown, a health verdict (>10 GB reclaimable = critical, >2 GB = cleanup-advised), and safe one-click actions (prune networks, prune dangling images).
+- **Safety Center** — approval-gated destructive cleanup: unused/dangling images, stopped containers (type `PRUNE`), volumes (3-second hold-to-authorize), build cache (slide-to-unlock), old-kernel cleanup. Guards exclude Rigger-managed stacks and compose-labelled volumes, and lock the active/previous kernels.
+- **Migration Leftovers** — after an env migration, wipe the containers/volumes/files (incl. `.env` secrets) left on the source host, with a permanent-wipe confirmation.
+- **Automation & Logs** — a daily **03:00 UTC** cron runs two safe tasks (prune-networks, prune-dangling-images), plus manual host-OS tools (APT clean, journal vacuum, `/tmp` cleanup — require privileged/`pid: host`) and a task-history table.
 
-A standalone, NPM-style reverse-proxy manager — route public hostnames to **any** upstream (on Rigger, your LAN, or a remote host), independent of projects. Requests reach these routes only when Rigger's Traefik receives them on :80/:443 (as your edge, or forwarded from an existing proxy).
+> Host-OS actions assume a **Linux host** (`nsenter`/`apt`/`journalctl`); the Docker prune actions work anywhere Docker runs.
 
-- **Routes** — host(s) → upstream(s); load-balanced custom locations, multi-domain rules, per-route certs/SSL (ACME via the DNS-01 issuer), and an optional access list. The Routes card has its own header + section-level **Add route** button.
-- **Access lists** — reusable, named bundles of basic-auth users + IP allow/deny rules + GeoIP country policy, attachable to multiple routes.
-- **Plugins** (Traefik, UI-managed — Rigger owns Traefik's static config, no docker-compose editing): **WAF (Coraza)** and **GeoIP blocking (geoblock)** toggle here (enabling/disabling a plugin restarts Traefik briefly — downtime for all routed apps; per-route attach is instant). GeoIP uses an offline IP2Location LITE database downloaded from the UI. **Cache (Souin) is currently unavailable** — it crashes Traefik's Yaegi plugin interpreter, which would drop all routed apps; use a CDN (e.g. Cloudflare) or a cache sidecar for asset caching instead.
-- **Default route** — catch-all behavior (a branded page or a redirect) for hosts matching no project URL or route.
+---
 
-### Authentication
+## 26. Self-Update
+
+Rigger publishes images to **GHCR** (`ghcr.io/mansoor/rigger`), tagged by release (`git tag vX.Y.Z`). Admin → Settings → **Updates**:
+
+- **Rigger self-update** — Check for updates (compares GitHub Releases `latest` to the running version, with changelog), one-click **Update to vX.Y.Z** (a detached helper does `compose pull && up -d` after checking out the tag and rewriting `RIGGER_IMAGE_TAG`), and **Roll back** to the previous tag. One-click apply needs `RIGGER_HOST_DIR` set (done by the installer); otherwise update manually.
+- **Docker Engine updates** — shows the Docker version for the local daemon and each registered host vs the latest release, with an in-place over-SSH **Update Docker** button (Linux + sudo). Nixpacks is shown per host as a version line (installed from the Remote Hosts tab).
+
+---
+
+## 27. REST API v1
+
+An external, versioned API at `/api/v1`, authenticated by **API keys** (`rgk_…`, only the hash stored, shown once at create). Keys have granular **operation scopes** (grouped Read / Operate / Pipeline), an optional **rate limit** (per-key, per-project, 60s window; 429 + `Retry-After`), and **project access** (`all` or a specific list; keys can be workspace-confined). Manage them in Admin → API Keys (global) or Manage Workspace → API Keys (workspace-scoped).
+
+Endpoints (Bearer `rgk_…` or `X-API-Key`):
+
+```
+GET  /api/v1/openapi.json                                        # OpenAPI spec (public)
+GET  /api/v1/docs                                                # Redoc docs page (public)
+GET  /api/v1/workspaces/{ws}/projects                            # list projects
+GET  .../projects/{project}/envs/{env}/services                  # list services
+GET  .../services/{service}/logs?tail=N                          # log snapshot (default 200, cap 2000)
+POST .../envs/{env}/actions/{action}                             # start|stop|restart|refresh|inactivate|backup
+GET  .../projects/{project}/pipelines                            # list pipelines
+POST .../pipelines/{id}/runs                                     # trigger a run
+GET  .../pipelines/{id}/runs/{runId}                             # run status + stage logs
+POST .../pipelines/{id}/runs/{runId}/cancel                      # cancel a run
+```
+
+The OpenAPI spec is generated from the scope catalog, so the docs can't drift from what the keys allow.
+
+---
+
+## 28. Proxy Service
+
+A standalone, NPM-style reverse-proxy manager (`/proxy`, admin) — route public hostnames to **any** upstream (on Rigger, your LAN, or a remote host), independent of projects, via Traefik's file provider. Requests reach these routes only when Rigger's Traefik receives them on :80/:443.
+
+- **Routes** — host(s) → upstream(s): multi-upstream load balancing, custom locations, path rewrite, redirects, and default-status catch-alls. Per-route TLS: LE HTTP-01, LE DNS-01, an uploaded cert (encrypted at rest), an existing cert by SNI, or a per-route ACME-email override.
+- **Access lists** — reusable named bundles of basic-auth users + IP allow rules + **GeoIP** country policy, attachable to routes (and to project app routers per-env). Global routes apply only global lists (strict workspace isolation).
+- **Plugins** (UI-managed via Rigger-owned Traefik static config; enabling one restarts Traefik briefly): **WAF (Coraza + OWASP CRS)** and **GeoIP blocking** (offline IP2Location LITE DB downloaded from the UI). **Cache (Souin) is hard-disabled** — it panics under Traefik's Yaegi interpreter and would drop all routed apps; use a CDN or a cache sidecar instead.
+- Backup/restore the proxy config as a **`.rpx`** bundle.
+
+---
+
+## 29. Git Providers & Registries
+
+### Git providers (Manage Workspace → Git)
+
+Workspace-scoped, encrypted at rest. Kinds:
+
+- **Token (HTTPS PAT)** — with service presets: **GitHub** (`x-access-token`), **GitLab** (`oauth2`, `read_repository`), **Bitbucket** (username + App password), **Gitea/Forgejo** (token). Works against any HTTPS host, including self-hosted Gitea/GitLab on plain HTTP or non-default ports (the auth header is scoped to the repo's exact origin).
+- **SSH deploy key** — Rigger generates an ed25519 keypair; add the public key as a read-only deploy key and use an `ssh://`/`git@…` URL.
+- **GitHub App** — one-click Connect (App-manifest flow) → install → clones with short-lived 1-hour installation tokens (never persisted).
+
+Pick a provider on a project's source (or inline-create one); **Test** verifies with `git ls-remote`.
+
+### Container registries
+
+- **System / managed registry** — one-click a `registry:2` sidecar on the Rigger host. With a base domain it's fronted by Traefik at `registry.{base}` over HTTPS (cluster-pullable); without one it's a local HTTP port (single-node only). Auth = bcrypt htpasswd.
+- **Registry picker** — a project uses the System registry (workspace/global default), a configured registry, or "enter manually". Empty = inherit system, or local-only. Swarm/remote deploys need a real registry (blocked until one exists).
+- **Build hosts** — a host can be flagged **build-only** (a dedicated builder, excluded from deploy pickers). Remote builds run on the env's build daemon and `--load` the image into the target daemon (no-registry local fallback via `pull_policy:never`). Rigger auto-`docker login`s the project's registry before build/push.
+
+---
+
+## 30. Users, Roles & Auth
+
+Two role systems:
+
+- **Global role** — `superadmin` | `user` (a JWT claim). Superadmin manages global settings and is admin everywhere.
+- **Workspace role ladder** — `viewer < developer < operator < admin`, held via workspace membership and optional per-project ACLs (a project ACL wins over workspace membership). `EffectiveRole` gates every action.
+
+Manage users in Admin → Users (invite, edit role, delete, resend invite); grant workspace membership / project ACLs in Manage Workspace → Members.
 
 | Mechanism | Detail |
 |-----------|--------|
 | Password storage | bcrypt (cost 12) |
-| Access token | JWT, 15-minute expiry, in-memory only |
+| Access token | JWT, 15-min expiry, in-memory only |
 | Refresh token | httpOnly cookie, 7-day rolling, `/api/auth/refresh` only |
-| Session restore | Silent refresh on every page load |
-| Proactive refresh | Timer fires every 13 minutes to renew before expiry |
-| Audit log | Every action: user, workspace, command, env, timestamp |
+| Proactive refresh | Timer fires every 13 min |
+| Password policy | Min length / complexity / rotation max-age (global); expired password forces a change |
+| Invites | Invited accounts can't log in until they complete registration |
+| Email verification | Unverified banner + resend; falls back to surfacing the link when no system SMTP |
+| Forgot / reset password | Public self-service flow |
+| 2FA (TOTP) | Opt-in enrollment (QR + recovery codes), enforced at login |
+| Access requests | Self-service request → admin inbox approve/reject |
+| Audit log | Every action (user, project, command, env, host) → Recent-activity feed |
 
-### Security — shell bridge
+> **In-session re-auth (wipe / delete / change-password) returns 422 on a wrong password, not 401** — a typo re-prompts instead of tripping the global session-expiry logout.
 
-The UI never runs arbitrary shell commands. Strict allowlist in `bridge.go`, each routed to a native Go operation (no shell):
+---
+
+## 31. Rigger UI Reference
+
+**Top nav:** Dashboard · Housekeeping (admin) · Tools · Proxy Service (admin) · Admin/Settings (admin) · help-text toggle · theme toggle · 🔔 alert bell · user menu. A **workspace switcher** selects the active workspace. **⌘/Ctrl-K** opens a command palette (quick-jump over projects + a role-gated nav registry + an on-demand deep index of env-var keys, routes, domains, pipelines).
+
+**Left sidebar:** the workspace's project list with live status dots · New project · slide-out panels (Recent activity, Backup history, Version log).
+
+### Dashboard (`/`)
+
+Six stat cards (active alerts, workspaces, projects, running containers, images, networks); a projects table with env status dots (+ 🖥 host chip for remote), services/containers counts, live CPU/mem/disk/net; Docker-engine and host-system panels. Live stats fan out across the control plane and every remote host.
+
+### Project page (`/workspaces/:ws/projects/:name`)
+
+Per-env cards: status badge (running/partial/stopped/unknown, read from the env's actual host), compose/swarm badge, 🖥 host badge, access links (domain or ports, disabled when not healthy), image-update badge, `> bash` terminal, **Deploy ▾** (Deploy/Stop/Down), Restart, Update, 🛠️ maintenance, Rollback. Panels: streaming action output; a multi-container log viewer (per-service colour, filter, pause, maximize, download); a read-only compose viewer; per-env metrics tiles; the Service Console modal.
+
+### Manage Workspace (`/workspaces/:ws/manage`)
+
+Vertical tabs: **General · Preferences · Members · Access Requests · API Keys · Domains & TLS · Remote Hosts · Docker Registries · Git · Backup Targets · Notifications · Access Lists · Alert Rules · Danger Zone.**
+
+### Edit Project
+
+Tabs for Services (image/managed deps), Environments (+ hosts, copy env), Routing, Backup schedules, Pipelines, Preview Environments, Notes, and Danger Zone. Dirty-state save; Cancel confirms before discarding.
+
+- **Notes/Wiki** — multiple named Markdown docs per project, rendered + sanitized server-side.
+
+### Tools (`/tools`)
+
+- **Template Manager** — create/convert/upload/validate/save templates (see [Templates](#11-pre-built-stack-templates)).
+- **Backup & Restore** — the `.rps` / `.rpb` project artifacts (see [Backups](#20-backup--restore)).
+- **Migrate data** — env→env data movement.
+
+### Theming
+
+Light/dark via semantic CSS-var tokens (`data-theme` on root) — System / Dark / Light, plus font, density, and log-viewer prefs. A global help-text toggle gates all inline `<Hint>` help.
+
+---
+
+## 32. Directory & Config Layout
+
+### Repo root
 
 ```
-Allowed: start | stop | down | update | restart | ps | logs | refresh | regen
-       | backup | restore | migrate | init | version | build | promote
+rigger/
+├── install.sh / uninstall.sh              # OS-aware installer
+├── rigger.sh / rigger.ps1 / rigger.bat    # Thin host CLI wrappers (HTTP → API)
+├── templates/                             # Baked into the image as a seed
+│   ├── dockerfiles/    # django dotnet go laravel nextjs nodejs rails react spring spring-gradle
+│   ├── scaffold/       # django go laravel nodejs react (starter apps)
+│   └── stacks/         # 37 pre-built stack templates (*.json)
+└── src/
+    ├── Dockerfile                         # node → golang → alpine (single image, bakes templates/)
+    ├── docker-compose.yml                 # rigger + Traefik v3.4 + socket-proxy + fallback
+    ├── .env.example
+    ├── backend/
+    │   ├── cmd/server/                    # server + `init-workspace` subcommand
+    │   ├── api/                           # ~76 HTTP handler files
+    │   └── internal/                      # ~45 packages: composegen, envgen, dockerops, builder,
+    │       #   detect, blueprints, scaffold, databases, managedregistry, gitproviders, remotehost,
+    │       #   executor, acme, customdomains, gateway, clouddns, proxyroutes, pipelines, previews,
+    │       #   backup, backupsync, alerts, notify, metrics, managedmetrics, maintenance, apikey,
+    │       #   auth, crypto, settings, shell, wsconfig, workspace, imagecheck, version, …
+    └── frontend/src/                      # React SPA (pages, components, hooks, lib)
 ```
 
-(`regen` regenerates an env's compose file without bringing it up — used to fix a stopped env's routing after a host/IP change while honouring its stopped state; `migrate` moves data between environments.)
+### Generated project
 
-The runtime invokes `docker` with fixed argv arrays — no string interpolation, no `bash` (the image ships no shell scripts at all). Workspace names are validated against a slug regex and confirmed to exist in the known workspaces directory before any command executes.
+```
+workspaces/<workspace>/projects/<name>/
+├── config.json                 # Edit this (UI or file), then refresh <env>
+├── notes/                      # Wiki markdown docs
+├── backups/<env>/<ts>/         # Per-env snapshots
+└── envs/
+    └── dev/
+        ├── .env                # Live secrets — NEVER commit
+        ├── .env.example        # Redacted template — safe to commit
+        ├── docker-compose.yml  # Generated natively in Go
+        └── volumes/            # Bind-mounted data
+```
 
-### SQLite tables
+**Commit** `config.json`, `envs/*/.env.example`, `envs/*/docker-compose.yml`, and any generated Dockerfiles/nginx. **Don't commit** `envs/*/.env` (secrets) or `envs/*/volumes/` (runtime data).
 
-| Table | Purpose |
-|-------|---------|
-| `users` | Admin accounts (bcrypt passwords) |
-| `audit_log` | Every action with user, workspace, command, env, timestamp |
-| `backup_targets` | S3 and SFTP remote backup destinations |
-| `docker_registries` | Pre-authenticated container registries |
-| `housekeeping_log` | Task name, trigger, status, freed bytes, output |
-| `app_settings` | Application-wide key/value settings |
-| `template_usage` | Template selection counts (popularity tracking) |
-| `alert_rules` · `alert_events` | Alert rules engine + fired-events inbox (Phase 6) |
-| `notification_channels` | Email/Apprise channels for alert + migration notifications |
-| `backup_log` · `metrics_snapshots` | Backup outcomes + per-env CPU/mem/disk history |
-| `hosts` | Registered remote hosts (encrypted SSH key, TOFU fingerprint, per-host workspaces dir) — Phase 7 |
-| `workspace_host_envs` | Per-(workspace, env) host binding (absent ⇒ local) — Phase 7 |
-| `migration_leftovers` | Source-host data left after a migration, awaiting cleanup — Phase 7 |
-| `managed_ssh_key` | The single Rigger-managed SSH identity (encrypted private key) — Phase 7 |
+---
 
-### Environment variables
+## 33. Environment Variables & Volumes
+
+### Server environment (`src/.env`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LISTEN_ADDR` | `:8080` | Bind address |
-| `TOOLKIT_ROOT` | `/toolkit` | Mounted toolkit root |
-| `WORKSPACES_DIR` | `/toolkit/workspaces` | Workspaces directory |
-| `TEMPLATES_DIR` | `/toolkit/templates` | Stack templates directory |
-| `DATA_DIR` | `/data` | SQLite DB + workspace archives |
-| `REMOTE_WORKSPACES_DIR` | = `WORKSPACES_DIR` | Default workspaces path on remote hosts (Phase 7); overridable per host in the Remote Hosts tab |
-| `JWT_SECRET` | — | **Required.** `openssl rand -hex 32` (also derives the AES key that encrypts stored SSH keys) |
+| `JWT_SECRET` | — | **Required.** `openssl rand -hex 32` (also derives the AES key that encrypts SSH keys, tokens, DB-user passwords) |
+| `RIGGER_PORT` | `9999` | UI host port |
+| `RIGGER_APP_HOST` | — | Host LAN/public IP the installer detected → seeds the `app_host` setting for local app links + magic-DNS |
+| `ACME_EMAIL` | `admin@example.com` | Let's Encrypt account email (for SSL) |
+| `CF_DNS_API_TOKEN` | — | Cloudflare DNS-01 token for wildcard / override certs (also settable in the UI) |
+| `RIGGER_HOST_DIR` | — | Host path to the install dir; enables one-click self-update |
+| `RIGGER_IMAGE_TAG` | `latest` | The image tag this instance runs (self-update default) |
+| `REMOTE_WORKSPACES_DIR` | = `WORKSPACES_DIR` | Default workspaces path on remote hosts (overridable per host) |
+| `TZ` | `UTC` | Timezone for server-rendered timestamps |
+| `LISTEN_ADDR` | `:8080` | Bind address (inside the container) |
+| `WORKSPACES_DIR` / `TEMPLATES_DIR` / `DATA_DIR` | `/toolkit/workspaces` · `/toolkit/templates` · `/data` | Mount paths |
+| `METRICS_INTERVAL_SECONDS` | `30` | Metrics sampling cadence |
+| `APPRISE_URL` | — | Optional Apprise API sidecar (else embedded apprise-go) |
 
 ### Volume mounts
 
-The toolkit logic is baked into the Go binary, so there is no `/toolkit` code mount — only data:
+The toolkit logic is baked into the binary, so only data is mounted:
 
 | Mount | Mode | Purpose |
 |-------|------|---------|
-| `../workspaces` → `/toolkit/workspaces` | `rw` | Workspaces (config, envs, volumes, backups) |
-| `../templates` → `/toolkit/templates` | `rw` | Templates (writable so Tools page can save new templates) |
-| `/var/run/docker.sock` | `rw` | Docker socket |
-| `/` → `/host` | `ro` | Host filesystem for real disk metrics |
-| `rigger-data` → `/data` | `rw` | SQLite DB + workspace archives persistence |
+| `../workspaces → /toolkit/workspaces` | rw | Projects (config, envs, volumes, backups) |
+| `../templates → /toolkit/templates` | rw | Templates (writable so Tools can save new ones) |
+| `/var/run/docker.sock` | rw | Docker socket (command bridge) |
+| `/ → /host` | ro | Host filesystem for real disk metrics |
+| `rigger-data → /data` | rw | SQLite DB + workspace archives |
+| `traefik-certs`, `rigger-dynamic`, `rigger-traefik-config`, `rigger-geoip` | mixed | ACME store, out-of-band certs/TLS config, UI-managed Traefik static config, GeoIP DB |
 
 ### Development mode
 
 ```bash
 # Terminal 1 — Go backend
-cd src/backend
-go run ./cmd/server
-
+cd src/backend && go run ./cmd/server
 # Terminal 2 — React dev server
-cd src/frontend
-npm install && npm run dev
-# → http://localhost:5173 (proxies /api to :8080)
+cd src/frontend && npm install && npm run dev   # http://localhost:5173 (proxies /api to :8080)
 ```
+
+The containerized build gates (used in CI and locally) run `go build ./... && go vet ./... && go test ./...` in `golang:1.25` and `npm run build` (eslint + vite) in `node:20`.
 
 ---
 
-## 22. Multi-Host Support
+## 34. Maintenance Guide
 
-Rigger can run workspaces — or individual environments of a workspace — on **remote Docker hosts** while you manage everything from one control plane. A single Rigger instance becomes the control plane for a fleet: keep `dev` local, put `stage` and `prod` on beefier remote servers, all from the same UI.
+### Add a pre-built template
+Create `templates/stacks/<name>.json` (see [Templates](#11-pre-built-stack-templates)) — no registration; the wizard globs `*.json`. Or generate it in **Tools → Template Manager** and save from the browser.
 
-### How it works
+### Add a source-build framework
+1. Add Dockerfiles to `templates/dockerfiles/<id>/` (+ optional `templates/scaffold/<id>/` starter).
+2. Register the blueprint in `src/backend/internal/blueprints/blueprints.go` (language, port, healthcheck, template id, env contract).
+3. Teach `internal/detect` to recognize its manifest.
+4. Add the default image tag to `internal/workspace/create.go`.
 
-Rigger uses an **SSH-exec + file-sync** model (pure-Go SSH — the image ships no `ssh` client):
+### Add a managed database engine
+Add an `Engine` entry to `src/backend/internal/databases/databases.go` (id, image, versions, port, volume, env prefix, capability flags) — the catalog, wizard, and env contract pick it up. Auxiliary engines follow the documented multi-touchpoint pattern (composegen service, envgen contract + secret, detect folding, frontend toggle).
 
-1. Files (compose, `.env`, build context) are generated **locally** on the control plane and pushed to the host's workspaces directory via **tar-over-SSH**.
-2. `docker` / `docker compose` then run **on the remote host** over SSH, so bind mounts and build contexts resolve on the host.
-3. A remote host needs only **Docker + an SSH server** — no Rigger binary, no extra agent.
-
-Lifecycle commands (`start`, `stop`, `restart`, `ps`, `logs`, `update`, `backup`, `restore`) are **host-transparent**: the UI/CLI are unchanged; Rigger resolves each environment's host and runs the command in the right place.
-
-### Registering a host
-
-**Settings → Remote Hosts → Add host:**
-
-| Field | Notes |
-|-------|-------|
-| Display name / Address / SSH user / SSH port | Connection details |
-| SSH private key | Paste your own (passphrase-less PEM/OpenSSH), **or** toggle **Use Rigger-managed key** |
-| Remote workspaces directory | Absolute path on the host where workspaces live and are pushed (e.g. `/opt/rigger/workspaces`). Blank = the `REMOTE_WORKSPACES_DIR` default |
-
-- **Use Rigger-managed key** — Rigger generates and holds one SSH identity; the form shows its **public** key with a one-click install command (`echo … >> ~/.ssh/authorized_keys`). The private key never leaves Rigger / never transits your browser.
-- **Test** — SSH-connects and runs `docker version` on the host (captures the host-key fingerprint on first connect, TOFU).
-- **Health** — shows the host's Docker + system stats (version, containers, images, OS, CPU, memory, disk, uptime) over SSH.
-- **Scan / Import** — lists workspaces already present in the host's workspaces directory and imports the selected ones (host-badged thereafter).
-
-> If **Scan** finds nothing even though a workspace exists, set the host's **Remote workspaces directory** to the real path — the default points at the control plane's container path, which usually doesn't exist on a bare host.
-
-### Per-environment host binding
-
-Each environment is either **local** (default) or bound to **one remote host**. The binding is per-`(workspace, env)`, so different environments of the same workspace can live on different hosts.
-
-- **New Workspace wizard** — a **Default host** selector on the Project step pre-fills each environment's **Host** dropdown (overridable per env on the Environments step). Binding is recorded at creation; files are pushed and the stack starts on the host the first time you deploy.
-- **Edit Workspace → Environment hosts** — a per-env "Move to…" control. Changing a **deployed** env's host migrates its data; an **undeployed** one just repoints (provisions on next deploy).
-
-### Moving / migrating
-
-- **Per environment** — change one env's host from *Edit Workspace → Environment hosts*.
-- **Whole workspace** — *Edit Workspace → Move the whole workspace* moves every environment at once; available only when all environments currently share the same host (otherwise use the per-env controls).
-
-A deployed migration: back up on the source → stop the source stack → ship files (incl. `.env` so secrets move) → repoint → start + restore on the target. **The source copy is stopped but its data is left intact.**
-
-Both moves:
-- **Warn first** about the **downtime** (the env is down until it's back up on the target) and the **leftover data** left on the source.
-- **Run in the background** — you get a notification (in-app alert bell + any configured notification channels) when the move completes, so you can leave the page. Live progress is shown while you stay.
-
-### Cleaning up after a move
-
-A deployed migration deliberately leaves the source host's containers, volumes and files (including `.env` secrets) in place. Wipe them from **Housekeeping → Migration Leftovers** before decommissioning a host — important so the data/secrets can't be recovered by whoever gets the machine next.
-
-### Security
-
-- **SSH keys** are encrypted at rest (AES-256-GCM, key derived from `JWT_SECRET`) and never returned by the API.
-- **Host keys** use trust-on-first-use: the fingerprint is captured on first successful connect and verified thereafter; a changed key is refused.
-- **`.env` is host-authoritative** — for a remote env, the host's `.env` is never overwritten by a deploy; only the deterministic compose file is pushed.
-
-### Current limitations
-
-- `build` / `promote` are **not yet supported** for remote-bound workspaces (they need the full build context + a remote registry login) and fail with a clear message — build/promote locally, or migrate after building.
-- Editing a remote env's variables in the UI writes the **local** cache only (it doesn't push to the host yet).
-- The read/connectivity paths (register, test, scan/import, health, status, metrics) and the file-push/exec plumbing are verified; full **deployed-environment** migration and remote backup/restore should be validated against your real hosts before production use.
+### Add an environment to a project
+Edit Project → Add environment (inherits vars from the first env; bootstrapped on first deploy), or add the env block to `config.json` and `rigger <ws> <proj> <new_env> init`. Keep `http_port` unique across envs on the same host.
 
 ---
 
-## 23. Maintenance Guide
+## 35. Troubleshooting
 
-### Adding a new pre-built template
-
-1. Create `templates/stacks/<name>.json` — see Section 16 for the schema
-2. No registration needed — the wizard discovers templates by globbing `*.json`
-3. Or use **Tools → Template Manager** in the UI to generate the JSON (from a compose file or an existing image-stack workspace), then save it directly from the browser
-
-### Adding a new stack type (backend/frontend)
-
-1. Add Dockerfiles to `templates/dockerfiles/<name>/`
-2. Add Nginx config to `templates/nginx/<name>.conf`
-3. Add the choice to the New/Edit Workspace wizard (`src/frontend/src/pages/`)
-4. Add the service definition to the Go compose generator (`src/backend/internal/composegen/builders.go`)
-5. Add the default image tag to `defaultVersions` in `src/backend/internal/workspace/create.go`
-
-### Adding a new environment to an existing workspace
-
-**Option A — UI (recommended):**
-Edit Workspace → Add environment → fill in settings → Save. The new env appears immediately and is bootstrapped on first deploy.
-
-**Option B — CLI:**
-```bash
-# Add the env block to config.json, then:
-rigger myapp <new_env> init
-# fill in envs/<new_env>/.env (or let init auto-generate secrets)
-rigger myapp <new_env> start
-```
-
-> Port collision: ensure `http_port` is unique across all environments on the same host.
-
-### Updating dependency versions
-
-```json
-"versions": { "postgres": "16-alpine" }
-```
-```bash
-rigger myapp <env> refresh   # regenerates compose + pulls new image
-```
-
----
-
-## 24. Troubleshooting
-
-### Compose file looks stale or malformed
-
-`docker-compose.yml` is generated natively in Go (`internal/composegen`) from `config.json` — the old class of Bash string-mangling/escape bugs no longer applies. If a workspace's compose file is out of date (e.g. edited config.json directly on disk), run `refresh <env>` to regenerate it cleanly.
-
-### Backup archive download not working
-
-The download endpoint requires authentication (Bearer token). Use the **Download** button in the UI — it uses an authenticated `fetch()` call with a blob URL, not a direct `<a href>` link, which would fail without the token.
-
-### Image update check shows "? digest unknown"
-
-The `latest` tag update check compares local image digest against the remote. If the local image has no `RepoDigest` (common when images are pulled via compose without an explicit `docker pull`, or built locally), the comparison is indeterminate. Run **Update** to pull from the registry and populate the digest, then the check will work on subsequent hourly runs.
-
-### Log viewer shows stuck "Backing up" status
-
-Earlier versions had a path index bug in the backup job polling endpoint. Fixed in the current version — the job status is now polled via React Query with automatic retry and the correct path segment index.
-
-### Dashboard loads slowly
-
-Earlier versions computed per-workspace disk usage (`du`) **synchronously inside the `/api/stats` request**, which could take 20–30 s over a bind mount (notably the Windows/Docker Desktop mount), blocking the whole dashboard render. Fixed in the current version: disk usage is served from an async cache (5-minute TTL, refreshed in the background) and the redundant `docker stats` fan-out was dropped from `/api/stats` (the live table uses `/api/live-stats`). Dashboard responses are now sub-second.
-
-### Port already in use
-
-Each environment must have a unique `http_port`. Check `config.json` and `docker ps -a`. Default assignments: dev=8080, stage=8180, prod=80.
-
-### Bind-mounted config file missing
-
-If a deploy fails with *"cannot deploy: the compose file bind-mounts config files that don't exist yet"* listing one or more files, a service mounts a **config file** (e.g. `prometheus.yml`) that hasn't been provided. Docker would otherwise create the missing source as a *directory* and the container's file mount would fail with a cryptic OCI "not a directory" error — Rigger stops first with the actionable message. Fix it by creating the listed file in the env dir (`envs/<env>/<file>`), or — for a template — ship it as a [seed file](#static-config-files-seed-files) so every new env gets it automatically. Bind mounts of **directories** (`./volumes/<name>`) are never affected; Docker creates those cleanly.
-
-### Remote host: "No workspaces found" on Scan
-
-The scan looks under the host's **Remote workspaces directory**. The default is the control plane's container path (`/toolkit/workspaces`), which usually doesn't exist on a bare remote host. Edit the host (Settings → Remote Hosts) and set its **Remote workspaces directory** to the real path on that machine (e.g. `/opt/rigger/workspaces`), then scan again. The same path is used when pushing files for deploy/migrate.
-
-### Remote env shows as down / no metrics
-
-Status, container lists, and live/historical metrics are gathered **on the env's host over SSH**. If a remote env reads as down or shows no metrics, confirm the host's **Test** is green and its **Remote workspaces directory** is correct, and that the stack was actually deployed there (the per-env 🖥 badge confirms the binding).
+### Compose file looks stale
+`docker-compose.yml` is generated from `config.json` — the old Bash escape-bug class is gone. If it's out of date (e.g. you edited `config.json` on disk), run `refresh <env>`.
 
 ### Managed database auth fails (`P1000` / "password authentication failed")
+A managed DB applies its `*_PASSWORD` only on **first** init of an empty data dir; later starts ignore it. If the env's `.env` password diverges from what the volume was initialized with, the app (and the pre-deploy migrate gate) fail and the env reads **partial**. Rigger defends against this by [pinning](#21-secrets) each managed secret and re-capturing it every deploy, so a regen heals a drifted `.env`. If a volume still mismatches (e.g. a project pinned before its volume existed), fix it by (a) **Danger Zone → Wipe data** to re-initialise against the current `.env` (dev/test — destroys data), or (b) `ALTER USER <user> WITH PASSWORD '<value from .env>'` over the DB's local socket to realign in place (keeps data).
 
-A managed Postgres/MySQL container only applies its `*_PASSWORD` on the **first** init of an empty data dir; on every later start it's ignored. So if the env's `.env` password ever diverges from what the existing volume was initialised with, the app (and the pre-deploy migrate gate) fail to authenticate and the env reads **partial**. Rigger now defends against this by pinning each managed secret in `config.json` and re-capturing it on every deploy (see [Secrets](#pre-built-stack-templates)), so a regen heals a drifted `.env` back to the volume's real password. If a volume still ends up mismatched (e.g. a project whose secret was pinned before the volume existed), the fastest fixes are: (a) **Danger Zone → Wipe data** to re-initialise the volume against the current `.env` (dev/test — destroys data), or (b) `ALTER USER <user> WITH PASSWORD '<value from .env>'` over the DB's local socket to realign the existing volume in place (keeps data).
+### App URL updated but doesn't load after a host/IP change
+The magic-DNS host is baked into the running containers' Traefik labels; changing the App host/IP (or a remote host's address) updates the *displayed* URL but not the live labels. Rigger warns and offers to refresh & redeploy affected envs on save — accept it, or `refresh <env>` manually. See [Domains](#15-domains-tls--routing).
+
+### Non-root image crash-loops on a bind mount
+A prebuilt image running as a fixed non-root UID can't write a Docker-created (root-owned) bind dir. Rigger auto-synthesizes a `{svc}-init-perms` one-shot that chowns the bind dirs before the app starts — so this self-heals; if you see it, redeploy so the init gate runs.
+
+### "? digest unknown" on an image-update check
+The local image has no `RepoDigest` (pulled via compose without an explicit `docker pull`, or built locally), so the digest comparison is indeterminate. Run **Update** to populate it.
+
+### Dashboard loads slowly
+Per-project disk usage (`du`) is served from an async cache (background refresh), not computed inline — dashboard responses are sub-second. A slow bind mount (Windows/Docker Desktop) only delays the cached size, not the page.
+
+### Remote host: "No workspaces found" on Scan
+Scan looks under the host's **Remote workspaces directory**; the default is the control-plane container path, which doesn't exist on a bare host. Set it to the real path (e.g. `/opt/rigger/workspaces`) and scan again.
+
+### Bind-mounted config file missing
+If a deploy fails listing missing config file(s), a service bind-mounts a *file* (e.g. `prometheus.yml`) that doesn't exist — Docker would create it as a directory and break the mount, so Rigger stops first. Create the file in `envs/<env>/`, or ship it as a template [seed file](#11-pre-built-stack-templates).
 
 ### Running behind Cloudflare
-
-Set Cloudflare SSL mode to **Full** (not Flexible). Flexible mode sends plain HTTP to your server, which breaks the Let's Encrypt HTTP-01 challenge that Traefik uses for certificate issuance.
+Set Cloudflare SSL mode to **Full** (not Flexible). Flexible sends plain HTTP to your server, breaking the Let's Encrypt HTTP-01 challenge Traefik uses.
