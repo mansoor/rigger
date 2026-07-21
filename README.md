@@ -9,6 +9,7 @@ A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI.
 ## Table of Contents
 
 **Getting started**
+
 1. [Quick Install](#1-quick-install)
 2. [Core Concepts](#2-core-concepts)
 3. [Architecture](#3-architecture)
@@ -16,6 +17,7 @@ A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI.
 5. [Quick Start](#5-quick-start)
 
 **Building & configuring**
+
 6. [Creating a Project](#6-creating-a-project)
 7. [Source-Built Stacks & Build Backends](#7-source-built-stacks--build-backends)
 8. [Managed Databases & Services](#8-managed-databases--services)
@@ -24,6 +26,7 @@ A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI.
 11. [Pre-built Stack Templates](#11-pre-built-stack-templates)
 
 **Deploying & operating**
+
 12. [Command Reference](#12-command-reference)
 13. [Deployment Strategies (Compose & Swarm)](#13-deployment-strategies-compose--swarm)
 14. [Build, Version & Promote](#14-build-version--promote)
@@ -37,6 +40,7 @@ A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI.
 22. [Maintenance Mode & Danger Zone](#22-maintenance-mode--danger-zone)
 
 **Platform services**
+
 23. [Alerting & Notifications](#23-alerting--notifications)
 24. [Metrics & Monitoring](#24-metrics--monitoring)
 25. [Housekeeping](#25-housekeeping)
@@ -47,6 +51,7 @@ A Go-powered, self-hosted **PaaS for Docker & Docker Swarm** with a full web UI.
 30. [Users, Roles & Auth](#30-users-roles--auth)
 
 **Reference**
+
 31. [Rigger UI Reference](#31-rigger-ui-reference)
 32. [Directory & Config Layout](#32-directory--config-layout)
 33. [Environment Variables & Volumes](#33-environment-variables--volumes)
