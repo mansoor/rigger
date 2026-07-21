@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchManagedHostKey } from '../lib/api'
 import { Hint } from './ui'
@@ -33,7 +33,7 @@ function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest 
   )
 }
 
-export default function HostForm({ initial, onSave, onCancel, saving, showGrants = false, showBuildOnly = false, workspaces = [] }) {
+export default function HostForm({ initial, onSave, onCancel, saving, showGrants = false, showBuildOnly = false, workspaces = [], onCheckImpact }) {
   const isEdit = !!initial?.id
   const [name, setName]       = useState(initial?.name || '')
   const [address, setAddress] = useState(initial?.address || '')
@@ -47,6 +47,13 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
   const [publicAddress, setPublicAddress] = useState(initial?.public_address || '')
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState('')
+
+  // Route-impact warning: when an address change would break bound envs' magic-DNS
+  // (nip.io) URLs, an inline list appears (as the field is edited) with an opt-in
+  // "refresh & redeploy" so the new address lands in their Traefik labels.
+  const [checking, setChecking] = useState(false)
+  const [impact, setImpact]     = useState(null)   // null = none; [] never stored
+  const [autoRefresh, setAutoRefresh] = useState(true)
 
   // Grant state (admin only). A host with grants ['*'] (or none yet) is offered to
   // every workspace; otherwise to the listed workspace keys.
@@ -96,11 +103,14 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
     setGrantKeys(cur => cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k])
   }
 
-  async function submit(e) {
-    e.preventDefault()
-    setError('')
-    if (!name.trim() || !address.trim() || !user.trim()) { setError('Name, address, and SSH user are required'); return }
-    if (!isEdit && !managed && !key.trim()) { setError('Paste an SSH private key or enable the Rigger-managed key'); return }
+  // The web address changes when the SSH address, the public-address override, or
+  // the reachability (which decides whether the override applies) changes.
+  const webAddrChanged =
+    address.trim() !== (initial?.address || '').trim() ||
+    (reachability === 'public' ? publicAddress.trim() : '') !== (initial?.reachability === 'private' ? '' : (initial?.public_address || '').trim()) ||
+    reachability !== (initial?.reachability === 'private' ? 'private' : 'public')
+
+  function buildBody() {
     const body = {
       name: name.trim(), address: address.trim(), ssh_port: Number(port) || 22,
       ssh_user: user.trim(), ssh_key: managed ? '' : key, use_managed_key: managed,
@@ -110,11 +120,44 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
     body.reachability = reachability
     body.public_address = reachability === 'public' ? publicAddress.trim() : ''
     if (showGrants) body.grants = grantMode === 'all' ? ['*'] : grantKeys
+    return body
+  }
+
+  // Surface the route-impact warning automatically as the address/reachability is
+  // edited (debounced) — not only after clicking Save. Reverting to the original
+  // clears it with no request. The checkbox feeds the actual save below.
+  useEffect(() => {
+    if (!isEdit || !onCheckImpact) return
+    if (!webAddrChanged) { setImpact(null); return }
+    let alive = true
+    const t = setTimeout(async () => {
+      setChecking(true)
+      try {
+        const hits = await onCheckImpact(buildBody())
+        if (alive) { setImpact(Array.isArray(hits) && hits.length ? hits : null); setAutoRefresh(true) }
+      } catch { /* advisory — leave prior state */ } finally { if (alive) setChecking(false) }
+    }, 500)
+    return () => { alive = false; clearTimeout(t) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, publicAddress, reachability, isEdit])
+
+  async function finalize(body) {
     try {
       await onSave(body)
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to save')
     }
+  }
+
+  async function submit(e) {
+    e.preventDefault()
+    setError('')
+    if (!name.trim() || !address.trim() || !user.trim()) { setError('Name, address, and SSH user are required'); return }
+    if (!isEdit && !managed && !key.trim()) { setError('Paste an SSH private key or enable the Rigger-managed key'); return }
+    const body = buildBody()
+    // When a route-impact warning is showing, carry the user's refresh choice.
+    if (impact && impact.length) body.auto_refresh_routes = autoRefresh
+    finalize(body)
   }
 
   return (
@@ -265,12 +308,41 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
 
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
+      {/* Route-impact warning — appears automatically as the address is edited, and
+          clears when it's reverted. Informational; the checkbox feeds Save below. */}
+      {impact && impact.length > 0 && (
+        <div className="rounded-lg border border-warning-border/60 bg-warning-subtle/30 p-3 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-content-strong">⚠ This address change breaks {impact.length} environment URL{impact.length === 1 ? '' : 's'}</p>
+            <p className="text-xs text-content-muted mt-0.5">
+              These environments' auto-URLs point at this host. Their running containers keep the old address in their
+              Traefik labels, so the new URL won't load until each is refreshed (compose regenerated &amp; containers recreated).
+              Stopped envs are left stopped — only their config is regenerated.
+            </p>
+          </div>
+          <ul className="max-h-40 overflow-y-auto space-y-1 text-xs">
+            {impact.map((im, i) => (
+              <li key={i} className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1 last:border-0">
+                <span className="font-mono text-content">{im.workspace} / {im.project} / {im.env || 'default'}</span>
+                <span className="text-content-faint break-all">→ {im.new_url}</span>
+              </li>
+            ))}
+          </ul>
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} className="accent-brand-500 mt-0.5" />
+            <span className="text-sm text-content">Refresh &amp; redeploy the running ones on save
+              <span className="text-xs text-content-subtle"> — recreates containers with the new address (may cause brief downtime). Uncheck to save the address only and refresh later.</span>
+            </span>
+          </label>
+        </div>
+      )}
+
       <div className="flex gap-2 justify-end pt-2">
         <button type="button" onClick={onCancel}
           className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-surface-overlay hover:bg-surface-overlay text-content disabled:opacity-50">Cancel</button>
         <button type="submit" disabled={saving}
           className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
-          {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add host'}
+          {saving ? 'Saving…' : checking ? 'Checking…' : (impact && impact.length && autoRefresh) ? 'Save & refresh' : isEdit ? 'Save changes' : 'Add host'}
         </button>
       </div>
     </form>

@@ -128,6 +128,11 @@ func (h *Handler) UpdateWorkspaceHost(w http.ResponseWriter, r *http.Request) {
 	_ = settings.SetHostPublicAddress(h.db, id, b.PublicAddress) //nolint:errcheck
 	updated.PublicAddress = strings.TrimSpace(b.PublicAddress)
 	h.bridge.EvictHost(id)
+	// Same auto-URL refresh as the admin path: redeploy bound envs whose URL embeds
+	// this host's changed address, when the user opted in. host = OLD, updated = NEW.
+	if b.AutoRefreshRoutes {
+		h.refreshImpactedRoutes(h.hostRouteImpact(host, updated.WebAddress()))
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 

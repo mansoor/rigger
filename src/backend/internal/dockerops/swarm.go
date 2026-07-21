@@ -56,6 +56,8 @@ func (s *swarmRunner) run() (bool, error) {
 		return true, s.update()
 	case "refresh":
 		return true, s.refresh()
+	case "regen":
+		return true, s.regen()
 	case "test":
 		return true, fmt.Errorf("pipeline 'test' stages are not supported on Swarm environments yet")
 	}
@@ -273,6 +275,21 @@ func (s *swarmRunner) refresh() error {
 		return err
 	}
 	return s.deploy()
+}
+
+// regen regenerates the swarm compose (and syncs it) WITHOUT deploying — the
+// stopped-env counterpart of refresh, so a host/IP change corrects the on-disk
+// routing while honoring the stopped state.
+func (s *swarmRunner) regen() error {
+	s.info("Regenerating docker-compose.yml for '%s' (stopped — not deploying)...", s.opts.Env)
+	content, err := composegen.GenerateRouted(s.cfgBytes, s.opts.Env, composegen.RouteOpts{BaseDomain: s.opts.BaseDomain, AutoURLMode: s.opts.AutoURLMode, AutoURLHost: s.opts.AutoURLHost, DNSProvider: s.opts.DNSProvider, OverrideCert: s.opts.OverrideCert, CustomDomains: s.opts.CustomDomains, RouterMiddlewares: s.opts.RouterMiddlewares, Registry: s.opts.Registry, ChownUIDs: s.opts.ChownUIDs, KeepHostPortsUnderTraefik: s.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(s.envDir)})
+	if err != nil {
+		return fmt.Errorf("generate compose: %w", err)
+	}
+	if err := writeFile(s.composePath, content); err != nil {
+		return err
+	}
+	return s.ensureSynced()
 }
 
 // serviceNames lists the actual deployed swarm service names for this stack.

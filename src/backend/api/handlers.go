@@ -2177,6 +2177,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Workspace-admin (or super-admin) + pasted confirm sentence + password re-check
+	// before an irreversible project delete.
+	if h.verifyDeleteConfirm(w, r, wsName, name) == nil {
+		return
+	}
+
 	wsPath := wspath.ProjectDir(h.workspacesDir, wsName, name)
 	if _, err := os.Stat(wsPath); os.IsNotExist(err) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
@@ -2739,10 +2745,12 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.auth.ChangePassword(claims.UserID, body.Current, body.New); err != nil {
-		// Distinguish a wrong current password (401) from a policy rejection (400) so
-		// the user sees the actual reason instead of a misleading "incorrect password".
+		// Distinguish a wrong current password from a policy rejection (400) so the user
+		// sees the actual reason. Use 422 (not 401): an in-session re-auth check failing
+		// is not an expired session, and the frontend logs out on 401 — a mere typo in
+		// the current password must not kick the user out.
 		if errors.Is(err, auth.ErrInvalidCredentials) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "current password is incorrect"})
 			return
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

@@ -49,6 +49,7 @@ var allowedCommands = map[string]bool{
 	"logs":    true,
 	"logtail": true, // bounded, non-following logs for the /api/v1 REST API
 	"refresh": true,
+	"regen":   true, // regenerate compose (+ remote sync) without bringing the stack up
 	"backup":  true,
 	"restore": true,
 	"migrate": true, // cross-env data migration (backup source → restore into target)
@@ -705,6 +706,47 @@ func (b *Bridge) envDeployed(stack string, rt *remoteTarget) (bool, error) {
 	return len(bytes.TrimSpace(out)) > 0, nil
 }
 
+// pinEnvSecrets records an environment's IN-USE managed secrets in config.json's
+// authoritative pin, so a later .env regen can't reroll them and lock the app out of
+// its already-initialized data volume. Sources the value from whichever .env is
+// authoritative: the LOCAL file for a local env, the HOST's copy for a remote env
+// (the deploy sync deliberately never overwrites the remote .env, so the local copy
+// can be stale — pinning from it would pin a wrong value). Best-effort: pinning is a
+// safety net, never a reason to fail a deploy.
+func (b *Bridge) pinEnvSecrets(opts RunOptions, rt *remoteTarget) {
+	if rt == nil {
+		_ = workspace.PinManagedSecrets(b.workspacesDir, opts.Workspace, opts.Project, opts.Env) //nolint:errcheck
+		return
+	}
+	if cur := b.remoteDotEnv(rt, opts.Workspace, opts.Project, opts.Env); len(cur) > 0 {
+		_ = workspace.PinManagedSecretsFrom(b.workspacesDir, opts.Workspace, opts.Project, opts.Env, cur) //nolint:errcheck
+	}
+}
+
+// EnvRunning reports whether an environment currently has RUNNING containers on its
+// deploy host (local or remote). Distinct from envDeployed, which also counts
+// stopped/created containers: used to honor state on an auto-refresh — a running env
+// is refreshed in place (regenerate + up), a stopped one only has its compose
+// regenerated (regen), never started.
+func (b *Bridge) EnvRunning(workspaceName, project, env string) bool {
+	rt, err := b.resolveRemote(workspaceName, project, env)
+	if err != nil {
+		return false
+	}
+	var exec executor.Executor = executor.Local{}
+	if rt != nil {
+		exec = rt.exec
+	}
+	stack := b.resourcePrefix(workspaceName, project) + "_" + env
+	out, err := exec.DockerOutput(executor.Spec{
+		Args: []string{"ps", "-q", "--filter", "status=running", "--filter", "label=com.docker.compose.project=" + stack},
+	})
+	if err != nil {
+		return false
+	}
+	return len(bytes.TrimSpace(out)) > 0
+}
+
 // commonHost returns the host id shared by every env (0 = local), or mixed=true
 // when they are not all on the same host.
 func (b *Bridge) commonHost(workspaceName, project string, envs []string) (hostID int64, mixed bool, err error) {
@@ -1053,6 +1095,53 @@ func (b *Bridge) EvictHost(id int64) {
 // localEnvDir is the control-plane path to a workspace env directory.
 func (b *Bridge) localEnvDir(workspaceName, project, env string) string {
 	return wspath.EnvDir(b.workspacesDir, workspaceName, project, env)
+}
+
+// WipeBindData removes the bind-mount DATA of one environment on its deploy host
+// (local daemon or remote SSH), keeping files (docker-compose.yml, .env, seed
+// config files). Rigger emits bind-mounted DATA as directories under the env dir
+// (${RIGGER_BIND_ROOT}); bind-mounted CONFIG is an individual file — so removing
+// only the immediate SUB-DIRECTORIES resets data while preserving settings/secrets.
+// Named volumes are purged separately by `down --volumes`. Call AFTER the stack is
+// down (containers gone so the paths are unlocked) and BEFORE redeploying fresh.
+func (b *Bridge) WipeBindData(workspaceName, project, env string, out io.Writer) error {
+	rt, err := b.resolveRemote(workspaceName, project, env)
+	if err != nil {
+		return err
+	}
+	localDir := b.localEnvDir(workspaceName, project, env)
+	if rt == nil {
+		// Local: the in-container env-dir path maps to the real host files via our
+		// workspaces mount, so removing sub-directories here clears the actual data.
+		entries, rerr := os.ReadDir(localDir)
+		if rerr != nil {
+			return rerr
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if derr := os.RemoveAll(filepath.Join(localDir, e.Name())); derr != nil {
+				return derr
+			}
+			fmt.Fprintf(out, "  removed %s/\n", e.Name())
+		}
+		return nil
+	}
+	// Remote: the data lives on the host, so clear its immediate sub-directories over
+	// SSH (files kept). Mirrors the migration cleanup path's remote-dir translation.
+	host, herr := settings.HostForEnv(b.db, b.resourcePrefix(workspaceName, project), env)
+	if herr != nil || host == nil {
+		return fmt.Errorf("resolve deploy host for wipe: %w", herr)
+	}
+	remoteDir := b.hostBase(host) + strings.TrimPrefix(localDir, b.workspacesDir)
+	esc := strings.ReplaceAll(remoteDir, "'", `'\''`)
+	cmd := "find '" + esc + "' -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +"
+	fmt.Fprintf(out, "  clearing bind data on %s: %s\n", host.Name, remoteDir)
+	if msg, rerr := rt.client.RunCombined(cmd); rerr != nil {
+		return fmt.Errorf("remote wipe: %w: %s", rerr, msg)
+	}
+	return nil
 }
 
 // hostBindRoot returns the HOST-visible absolute path of an env directory — the
@@ -1890,6 +1979,11 @@ func (b *Bridge) Run(opts RunOptions) error {
 		switch opts.Command {
 		case "start", "deploy", "up", "refresh", "restart", "update":
 			dopts.ChownUIDs = b.bindChownUIDs(opts.Workspace, opts.Project, opts.Env, executor.Default(runExec))
+			// Capture this env's IN-USE managed secrets into config.json's authoritative
+			// pin (no-op once pinned). Without it, an env that predates pinning and later
+			// loses its .env gets a freshly-rerolled managed-DB password and locks itself
+			// out of its already-initialized volume (Postgres P1000).
+			b.pinEnvSecrets(opts, rt)
 		}
 		if rt != nil {
 			// A PUBLIC remote host is its own front door and issues its OWN cert via

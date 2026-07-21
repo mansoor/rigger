@@ -65,13 +65,16 @@ func Bootstrap(workspacesDir, templatesDir, workspaceName, name, env string, reg
 			return err
 		}
 		fmt.Fprintf(out, "  .env generated\n")
-		// Pin newly-generated managed secrets (DB/app/MinIO passwords) into config.json
-		// so they survive a future regen even if the live .env is lost — otherwise a
-		// regen rerolls them and breaks against the already-initialized DB/data volume.
-		pinManagedSecrets(workspacesDir, workspaceName, name, env, cfg, envFile)
 	} else {
 		fmt.Fprintf(out, "  .env exists — skipping (regen not requested)\n")
 	}
+	// Pin the managed secrets (DB/app/MinIO passwords) that this env is ACTUALLY using
+	// into config.json so they survive a future regen even if the live .env is lost —
+	// otherwise a regen rerolls them and breaks against the already-initialized
+	// DB/data volume. Runs whether or not .env was just generated, so an env that
+	// predates the pinning mechanism captures its real in-use secret rather than
+	// waiting for a .env loss to mint (and then pin) a wrong one.
+	pinManagedSecrets(workspacesDir, workspaceName, name, env, cfg, envFile)
 
 	writeCompose := func() error {
 		// Read the just-written .env so services that set env_file_mount get it
@@ -228,7 +231,13 @@ func pinManagedSecrets(workspacesDir, ws, name, env string, cfg *wsconfig.Config
 	if err != nil {
 		return
 	}
-	cur := envgen.ParseEnv(raw)
+	_ = pinFrom(workspacesDir, ws, name, env, cfg, envgen.ParseEnv(raw)) //nolint:errcheck
+}
+
+// pinFrom writes the managed secrets present in cur into config.json's authoritative
+// `secrets` map, for keys NOT already pinned. An existing pin is never overwritten —
+// it is the record of what the data volume was initialized with.
+func pinFrom(workspacesDir, ws, name, env string, cfg *wsconfig.Config, cur map[string]string) error {
 	e := cfg.Environments[env]
 	updates := map[string]string{}
 	for _, k := range envgen.ManagedSecretKeys {
@@ -241,7 +250,39 @@ func pinManagedSecrets(workspacesDir, ws, name, env string, cfg *wsconfig.Config
 		}
 		updates[k] = v
 	}
-	_ = UpdateConfigSecrets(workspacesDir, ws, name, env, updates) //nolint:errcheck
+	return UpdateConfigSecrets(workspacesDir, ws, name, env, updates)
+}
+
+// PinManagedSecretsFrom pins an environment's IN-USE managed secrets (cur = its live
+// .env, local or remote) into config.json's authoritative `secrets` map.
+//
+// Called on every deploy — not just bootstrap — so a project that predates the
+// pinning mechanism (or whose .env was written before it) captures the secret its
+// data volume was ACTUALLY initialized with, BEFORE a later regen can reroll it. The
+// managed-DB default is a fresh "changeme_<random>" every time, so an unpinned env
+// that loses its .env gets a brand-new password and locks itself out of its own
+// volume (Postgres P1000 — it only honors POSTGRES_PASSWORD on first init).
+//
+// Idempotent and non-destructive: never overwrites an existing pin, and a missing
+// config/.env is a no-op.
+func PinManagedSecretsFrom(workspacesDir, ws, name, env string, cur map[string]string) error {
+	if len(cur) == 0 {
+		return nil
+	}
+	cfg, err := wsconfig.Load(wspath.ConfigPath(workspacesDir, ws, name))
+	if err != nil {
+		return err
+	}
+	return pinFrom(workspacesDir, ws, name, env, cfg, cur)
+}
+
+// PinManagedSecrets is PinManagedSecretsFrom sourced from the env's LOCAL .env.
+func PinManagedSecrets(workspacesDir, ws, name, env string) error {
+	raw, err := os.ReadFile(filepath.Join(wspath.EnvDir(workspacesDir, ws, name, env), ".env"))
+	if err != nil {
+		return err
+	}
+	return PinManagedSecretsFrom(workspacesDir, ws, name, env, envgen.ParseEnv(raw))
 }
 
 // writeEnv generates .env and .env.example for env, preserving existing secrets.

@@ -70,6 +70,11 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]bool{"acme_email": true, "rigger_domain": true, "app_host": true, "traefik_enabled": true, "confirm_destructive": true, "confirm_destructive_allow_override": true, "appearance_prefs": true, "key_min_length": true, "key_max_length": true, "apps_base_domain": true, "auto_url_mode": true, "auto_url_host": true, "apps_dns_provider": true, "apps_dns_token": true,
 		// Password policy (auth Group A): min length + complexity + rotation max-age.
 		"pw_min_length": true, "pw_require_upper": true, "pw_require_lower": true, "pw_require_number": true, "pw_require_symbol": true, "pw_max_age_days": true}
+	// Capture the OLD App host/IP before applying: if it changes and the caller opted
+	// in (auto_refresh_routes, a control flag — not a stored setting), redeploy the
+	// envs whose magic-DNS URL embeds it so the new host lands in their Traefik labels.
+	oldAppHost := h.globalAppHost()
+	autoRefreshRoutes := body["auto_refresh_routes"] == "true"
 	for k, v := range body {
 		if !allowed[k] {
 			continue
@@ -115,6 +120,13 @@ func (h *Handler) PutGeneralSettings(w http.ResponseWriter, r *http.Request) {
 		h.db.Exec(`INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
 			ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
 			k, v) //nolint:errcheck
+	}
+	// Auto-refresh magic-DNS routes on an App host/IP change (opt-in), so envs whose
+	// URL embeds the old host get redeployed with the new one. Async + best-effort.
+	if autoRefreshRoutes {
+		if newHost, ok := body["app_host"]; ok {
+			h.refreshImpactedRoutes(h.autoHostRouteImpact(oldAppHost, strings.TrimSpace(newHost)))
+		}
 	}
 	h.GetGeneralSettings(w, r)
 }

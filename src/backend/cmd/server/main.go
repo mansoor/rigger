@@ -472,6 +472,8 @@ func main() {
 				handler.WorkspaceHostStats(w, r)
 			case r.Method == "GET" && sub == "components":
 				handler.WorkspaceHostComponents(w, r)
+			case r.Method == "GET" && sub == "route-impact":
+				handler.WorkspaceHostRouteImpact(w, r)
 			case r.Method == "POST" && sub == "install-nixpacks":
 				handler.InstallWorkspaceHostNixpacks(w, r)
 			case r.Method == "POST" && sub == "workspaces-dir":
@@ -749,6 +751,12 @@ func main() {
 			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
 			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
 			handler.ActionHTTP(w, r)
+		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && hasSuffix(r.URL.Path, "/wipe-data"):
+			// /api/workspaces/{ws}/projects/{name}/envs/{env}/wipe-data
+			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
+			r.SetPathValue("name", pathSegment(r.URL.Path, 4))
+			r.SetPathValue("env", pathSegment(r.URL.Path, 6))
+			handler.WipeEnvData(w, r)
 		case r.Method == "POST" && matchPrefix(r.URL.Path, "/api/workspaces/") && pathSegment(r.URL.Path, 7) == "containers":
 			// /api/workspaces/{ws}/projects/{name}/envs/{env}/containers/{service}/{action}
 			r.SetPathValue("workspace", pathSegment(r.URL.Path, 2))
@@ -890,6 +898,8 @@ func main() {
 			handler.GetGeneralSettings(w, r)
 		case r.Method == "PUT" && path == "/api/settings/general":
 			handler.PutGeneralSettings(w, r)
+		case r.Method == "GET" && path == "/api/settings/route-impact":
+			handler.SettingsRouteImpact(w, r)
 		case r.Method == "GET" && path == "/api/settings/detect-host-ip":
 			handler.DetectHostIP(w, r)
 		// System (transactional) email — invite/verification links (Phase 5.1b)
@@ -987,6 +997,8 @@ func main() {
 			handler.HostStats(w, r)
 		case r.Method == "GET" && hasSuffix(path, "/components"):
 			handler.HostComponents(w, r)
+		case r.Method == "GET" && hasSuffix(path, "/route-impact"):
+			handler.HostRouteImpact(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/test"):
 			handler.TestHost(w, r)
 		case r.Method == "POST" && hasSuffix(path, "/workspaces-dir"):

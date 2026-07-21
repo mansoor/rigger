@@ -38,6 +38,10 @@ var workspaceSettingKeys = map[string]bool{
 	// Release pipeline: env tier names (low→high, comma/newline) driving the
 	// auto-guess deploy order. Empty ⇒ envorder.DefaultTiers.
 	"env_tier_names": true,
+	// Danger zone: environment names (comma/newline) whose application DATA may be
+	// wiped (reset for dev/test). Empty ⇒ the wipe action is unavailable everywhere.
+	// Omitting prod here keeps production un-wipeable; see api/wipe_data_handlers.go.
+	"wipe_allowed_envs": true,
 	// Domain/TLS override parity with the admin General tab (resolved workspace →
 	// global via settings.Effective*). auto_url_mode/host = magic-DNS fallback when no
 	// base domain; apps_dns_provider = DNS-01 wildcard provider; apps_dns_token =

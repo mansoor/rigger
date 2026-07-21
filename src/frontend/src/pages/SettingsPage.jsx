@@ -18,10 +18,10 @@ import {
   fetchRegistries, createRegistry, updateRegistry, deleteRegistry, testRegistry, markRegistrySystem,
   fetchManagedRegistry, managedRegistryAction,
   fetchManagedMetrics, managedMetricsAction,
-  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, createHostWorkspacesDir, installHostEdge,
+  fetchHosts, createHost, updateHost, deleteHost, testHost, scanHost, importHost, createHostWorkspacesDir, installHostEdge, fetchHostRouteImpact,
   fetchVersion, checkUpdates, applyUpdate, rollbackUpdate,
   dockerVersions, dockerUpdate, dockerUpdateStatus,
-  fetchGeneralSettings, updateGeneralSettings, detectHostIP,
+  fetchGeneralSettings, updateGeneralSettings, fetchSettingsRouteImpact, detectHostIP,
   fetchAlertRules, createAlertRule, updateAlertRule, deleteAlertRule, fetchAlertMeta,
   fetchProjects, fetchWorkspaces,
   fetchNotificationChannels, createNotificationChannel, updateNotificationChannel,
@@ -693,6 +693,9 @@ function HostsTab() {
               showGrants={modal === 'new' || modal.editing?.owner_scope === 'global'}
               showBuildOnly
               workspaces={workspaces}
+              onCheckImpact={modal !== 'new' && modal.editing?.id
+                ? (body) => fetchHostRouteImpact(modal.editing.id, { address: body.address, public_address: body.public_address, reachability: body.reachability })
+                : undefined}
             />
           </div>
         </div>
@@ -846,8 +849,14 @@ function DomainsTab() {
   const [dnsProvider, setDnsProvider] = useState('')
   const [dnsToken, setDnsToken] = useState('')
 
+  // Impact of an App host/IP change on magic-DNS (nip.io) URLs — surfaced as soon as
+  // the field is edited (on blur / detect), cleared when it returns to its original.
+  const [impact, setImpact] = useState(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [checking, setChecking] = useState(false)
+
   const saveMut = useMutation({
-    mutationFn: () => updateGeneralSettings({
+    mutationFn: (opts = {}) => updateGeneralSettings({
       acme_email: acmeEmail,
       rigger_domain: riggerDomain,
       app_host: appHost.trim(),
@@ -855,9 +864,30 @@ function DomainsTab() {
       auto_url_mode: autoUrlMode,
       apps_dns_provider: dnsProvider,
       apps_dns_token: dnsToken,
+      ...(opts.autoRefresh != null ? { auto_refresh_routes: String(opts.autoRefresh) } : {}),
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['general-settings'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['general-settings'] }); setImpact(null) },
   })
+
+  // Check (on blur / after Detect) whether the entered host breaks any env's
+  // magic-DNS URL, and show the warning immediately. Reverting to the saved value
+  // (or clearing) removes it — no request needed.
+  async function checkImpact(host) {
+    const val = (host ?? '').trim()
+    if (!val || val === (cfg.app_host || '').trim()) { setImpact(null); return }
+    setChecking(true)
+    try {
+      const hits = await fetchSettingsRouteImpact({ app_host: val })
+      setImpact(Array.isArray(hits) && hits.length ? hits : null)
+      setAutoRefresh(true)
+    } catch { /* advisory — leave any prior state */ } finally { setChecking(false) }
+  }
+
+  // Live-clear the warning the instant the value matches the saved host again.
+  function onHostChange(v) {
+    setAppHost(v); setDetectErr('')
+    if (v.trim() === (cfg.app_host || '').trim()) setImpact(null)
+  }
 
   // Ask the backend to detect the Docker host's IP (host-networked lookup).
   const [detectErr, setDetectErr] = useState('')
@@ -866,6 +896,7 @@ function DomainsTab() {
     onSuccess: (d) => {
       if (d?.ip) {
         setAppHost(d.ip)
+        checkImpact(d.ip) // programmatic set fires no blur — check explicitly
         setDetectErr(looksDockerInternal(d.ip)
           ? `Detected ${d.ip}, but that looks like a Docker-internal address (common on Docker Desktop / non-Linux hosts). Enter your host's real LAN/public IP manually.`
           : '')
@@ -951,7 +982,7 @@ function DomainsTab() {
         <div className="p-4 bg-surface border border-border rounded-xl">
           <Label>Host address</Label>
           <div className="flex gap-2">
-            <Input value={appHost} onChange={v => { setAppHost(v); setDetectErr('') }}
+            <Input value={appHost} onChange={onHostChange} onBlur={() => checkImpact(appHost)}
               placeholder="192.168.1.50 or host.example.com" />
             <button type="button" onClick={() => detectMut.mutate()} disabled={detectMut.isPending}
               className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover disabled:opacity-50"
@@ -960,7 +991,7 @@ function DomainsTab() {
             </button>
             {typeof window !== 'undefined' && window.location?.hostname &&
              window.location.hostname !== appHost.trim() && (
-              <button type="button" onClick={() => { setAppHost(window.location.hostname); setDetectErr('') }}
+              <button type="button" onClick={() => { onHostChange(window.location.hostname); checkImpact(window.location.hostname) }}
                 className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover"
                 title="Use the address your browser reached Rigger at">
                 Use {window.location.hostname}
@@ -1072,10 +1103,40 @@ function DomainsTab() {
         </div>
       </div>
 
-      {/* Save */}
+      {/* App host/IP change warning — appears as soon as the field is edited (on
+          blur), listing envs whose magic-DNS URL embeds the old host. The checkbox
+          feeds the Save below; reverting the field clears this automatically. */}
+      {impact && impact.length > 0 && (
+        <div className="rounded-lg border border-warning-border/60 bg-warning-subtle/30 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-content-strong">⚠ This App host/IP change breaks {impact.length} environment URL{impact.length === 1 ? '' : 's'}</p>
+            <p className="text-xs text-content-muted mt-0.5">
+              These locally-routed environments' magic-DNS URLs embed the old host. Their running containers keep it in
+              their Traefik labels, so the new URL won't load until each is refreshed (compose regenerated &amp; containers recreated).
+              Stopped envs are left stopped — only their config is regenerated.
+            </p>
+          </div>
+          <ul className="max-h-40 overflow-y-auto space-y-1 text-xs">
+            {impact.map((im, i) => (
+              <li key={i} className="flex flex-wrap items-baseline gap-x-2 border-b border-border/40 pb-1 last:border-0">
+                <span className="font-mono text-content">{im.workspace} / {im.project} / {im.env || 'default'}</span>
+                <span className="text-content-faint break-all">→ {im.new_url}</span>
+              </li>
+            ))}
+          </ul>
+          <label className="flex items-start gap-2 cursor-pointer select-none">
+            <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} className="accent-brand-500 mt-0.5" />
+            <span className="text-sm text-content">Refresh &amp; redeploy the running ones on save
+              <span className="text-xs text-content-subtle"> — recreates containers with the new host (may cause brief downtime). Uncheck to save the address only and refresh later.</span>
+            </span>
+          </label>
+        </div>
+      )}
+
+      {/* Save — single button; passes the auto-refresh choice when a change is pending. */}
       <div className="flex items-center gap-3">
-        <Btn onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
-          {saveMut.isPending ? 'Saving…' : 'Save settings'}
+        <Btn onClick={() => saveMut.mutate(impact && impact.length ? { autoRefresh } : {})} disabled={saveMut.isPending || checking}>
+          {saveMut.isPending ? 'Saving…' : checking ? 'Checking…' : (impact && impact.length && autoRefresh) ? 'Save & refresh' : 'Save settings'}
         </Btn>
         {saveMut.isSuccess && <span className="text-xs text-success-fg">✓ Saved</span>}
       </div>

@@ -31,6 +31,7 @@ var deployCommands = map[string]bool{
 	"logs":    true,
 	"logtail": true, // bounded, non-following logs (used by the /api/v1 REST API)
 	"refresh": true,
+	"regen":   true, // regenerate compose (+ sync) WITHOUT bringing the stack up
 	"test":    true, // Phase 9: `compose exec` inside a service container
 }
 
@@ -169,8 +170,8 @@ func Run(opts Options) (bool, error) {
 			return true, err
 		}
 	} else {
-		// refresh regenerates the compose file first, so the file may not exist yet.
-		if opts.Command != "refresh" {
+		// refresh/regen regenerate the compose file first, so it may not exist yet.
+		if opts.Command != "refresh" && opts.Command != "regen" {
 			if _, err := os.Stat(composePath); err != nil {
 				return true, fmt.Errorf("docker-compose.yml not found for %q — run init first", opts.Env)
 			}
@@ -226,6 +227,8 @@ func Run(opts Options) (bool, error) {
 		return true, r.logTail()
 	case "refresh":
 		return true, r.refresh()
+	case "regen":
+		return true, r.regen()
 	case "test":
 		return true, r.test()
 	}
@@ -478,6 +481,23 @@ func (r *runner) refresh() error {
 		return err
 	}
 	return r.up()
+}
+
+// regen regenerates docker-compose.yml (and syncs it to a remote host) WITHOUT
+// bringing the stack up. Used to correct on-disk routing for a STOPPED env after a
+// host/IP change: its next manual deploy already has the right Traefik labels, while
+// its stopped state is honored (no surprise start). Local `start`/`update` don't
+// regenerate the compose, so a stopped local env would otherwise stay stale.
+func (r *runner) regen() error {
+	r.info("Regenerating docker-compose.yml for '%s' (stopped — not starting)...", r.opts.Env)
+	content, err := composegen.GenerateRouted(r.cfgBytes, r.opts.Env, composegen.RouteOpts{BaseDomain: r.opts.BaseDomain, AutoURLMode: r.opts.AutoURLMode, AutoURLHost: r.opts.AutoURLHost, DNSProvider: r.opts.DNSProvider, OverrideCert: r.opts.OverrideCert, CustomDomains: r.opts.CustomDomains, RouterMiddlewares: r.opts.RouterMiddlewares, Registry: r.opts.Registry, ChownUIDs: r.opts.ChownUIDs, KeepHostPortsUnderTraefik: r.opts.KeepHostPortsUnderTraefik, EnvFile: readDotenv(filepath.Dir(r.composePath))})
+	if err != nil {
+		return fmt.Errorf("generate compose: %w", err)
+	}
+	if err := writeFile(r.composePath, content); err != nil {
+		return err
+	}
+	return r.ensureSynced() // push the regenerated file to a remote host (no-op locally)
 }
 
 // test runs a command inside a running service container via `compose exec`

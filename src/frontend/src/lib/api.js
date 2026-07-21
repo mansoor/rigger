@@ -307,7 +307,16 @@ export const uploadWorkspaceSnapshot = (formData) =>
   api.post('/tools/workspace-snapshots/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }).then(r => r.data)
-export const deleteWorkspace   = (ws, name)      => api.delete(projBase(ws, name)).then(r => r.data)
+// Delete a project. Requires { confirm, password } — the pasted "Delete Project: …"
+// sentence + the caller's password (verified server-side; workspace-admin only).
+export const deleteWorkspace   = (ws, name, body) => api.delete(projBase(ws, name), { data: body }).then(r => r.data)
+// Wipe application DATA for one env (named volumes + bind data) then redeploy fresh.
+// body = { confirm, password }. Starts a BACKGROUND job and returns { job_id };
+// poll fetchJobStatus(job_id) for live progress. Validation errors return here.
+export const wipeEnvData = (ws, name, env, body) =>
+  api.post(`${projBase(ws, name)}/envs/${env}/wipe-data`, body).then(r => r.data)
+// Poll a background job (wipe / migration) for { status, log, error }.
+export const fetchJobStatus = (id) => api.get(`/migration-jobs/${id}`).then(r => r.data)
 export const putConfig         = (ws, name, content) =>
   api.put(`${projBase(ws, name)}/config`, { content }).then(r => r.data)
 
@@ -411,6 +420,8 @@ export const deleteWorkspaceAccessList = (ws, id)    => api.delete(`/workspaces/
 
 export const fetchGeneralSettings  = ()     => api.get('/settings/general').then(r => r.data)
 export const updateGeneralSettings = (body) => api.put('/settings/general', body).then(r => r.data)
+// Dry-run: which envs' magic-DNS URLs would break if the global App host/IP changes.
+export const fetchSettingsRouteImpact = (params) => api.get('/settings/route-impact', { params }).then(r => r.data)
 // Ask the backend to detect the Docker host's IP (runs host-networked). Returns
 // { ip } on success or { ip:'', error } so the caller can fall back to manual.
 export const detectHostIP = () => api.get('/settings/detect-host-ip').then(r => r.data)
@@ -558,6 +569,9 @@ export const fetchHostStats = (id)   => api.get(`/hosts/${id}/stats`).then(r => 
 export const fetchHostComponents = (id) => api.get(`/hosts/${id}/components`).then(r => r.data)
 // Mark/unmark a host as a dedicated builder (excluded from deploy-host pickers).
 export const markHostBuildOnly = (id, buildOnly) => api.post(`/hosts/${id}/build-only`, { build_only: buildOnly }).then(r => r.data)
+// Dry-run: which bound envs' auto-URLs (nip.io etc.) would break if the host is
+// saved with this address. params: { address, public_address, reachability }.
+export const fetchHostRouteImpact = (id, params) => api.get(`/hosts/${id}/route-impact`, { params }).then(r => r.data)
 // Install/repair the Traefik edge (traefik_net + traefik/socket-proxy/fallback) on a
 // host so web-routed workloads deployed there are reachable. Slow (pulls images).
 export const installHostEdge = (id) => api.post(`/hosts/${id}/install-edge`, {}, { timeout: 180000 }).then(r => r.data)
@@ -572,6 +586,7 @@ export const deleteWorkspaceHost  = (ws, id)     => api.delete(`/workspaces/${ws
 export const testWorkspaceHost    = (ws, id)     => api.post(`/workspaces/${ws}/hosts/${id}/test`).then(r => r.data)
 export const fetchWorkspaceHostStats = (ws, id)  => api.get(`/workspaces/${ws}/hosts/${id}/stats`).then(r => r.data)
 export const fetchWorkspaceHostComponents = (ws, id) => api.get(`/workspaces/${ws}/hosts/${id}/components`).then(r => r.data)
+export const fetchWorkspaceHostRouteImpact = (ws, id, params) => api.get(`/workspaces/${ws}/hosts/${id}/route-impact`, { params }).then(r => r.data)
 export const installWorkspaceHostNixpacks = (ws, id) => api.post(`/workspaces/${ws}/hosts/${id}/install-nixpacks`, {}, { timeout: 120000 }).then(r => r.data)
 export const createWorkspaceHostWorkspacesDir = (ws, id) => api.post(`/workspaces/${ws}/hosts/${id}/workspaces-dir`).then(r => r.data)
 export const markWorkspaceHostBuildOnly = (ws, id, buildOnly) => api.post(`/workspaces/${ws}/hosts/${id}/build-only`, { build_only: buildOnly }).then(r => r.data)

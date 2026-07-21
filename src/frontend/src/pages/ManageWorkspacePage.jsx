@@ -16,7 +16,7 @@ import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
 import {
   fetchWorkspaces, fetchProjects, renameWorkspaceTier, deleteWorkspaceTier, transferWorkspace,
-  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost, installWorkspaceHostEdge,
+  fetchWorkspaceHosts, createWorkspaceHost, updateWorkspaceHost, deleteWorkspaceHost, testWorkspaceHost, installWorkspaceHostEdge, fetchWorkspaceHostRouteImpact,
   fetchWorkspaceRegistries, createWorkspaceRegistry, updateWorkspaceRegistry, deleteWorkspaceRegistry, testWorkspaceRegistry, markWorkspaceRegistrySystem,
   fetchWorkspaceGitProviders, createWorkspaceGitProvider, updateWorkspaceGitProvider, deleteWorkspaceGitProvider, testWorkspaceGitProvider, startGitHubAppManifest, gitHubAppInstallURL,
   fetchWorkspaceBackupTargets, createWorkspaceBackupTarget, updateWorkspaceBackupTarget, deleteWorkspaceBackupTarget, testWorkspaceBackupTarget,
@@ -258,24 +258,33 @@ function WorkspaceTierOrder({ workspace, qc }) {
     queryKey: settingsKey, queryFn: () => fetchWorkspaceSettings(workspace), enabled: !!workspace,
   })
   const [tiers, setTiers] = useState('')
+  const [wipe, setWipe]   = useState('')
   const [seeded, setSeeded] = useState(false)
-  if (!seeded && saved) { setTiers(saved.env_tier_names || ''); setSeeded(true) }
+  if (!seeded && saved) { setTiers(saved.env_tier_names || ''); setWipe(saved.wipe_allowed_envs || ''); setSeeded(true) }
 
   const mut = useMutation({
-    mutationFn: () => updateWorkspaceSettings(workspace, { env_tier_names: tiers.trim() }),
+    mutationFn: () => updateWorkspaceSettings(workspace, { env_tier_names: tiers.trim(), wipe_allowed_envs: wipe.trim() }),
     onSuccess: () => qc.invalidateQueries({ queryKey: settingsKey }),
   })
-  const dirty = saved && tiers.trim() !== (saved.env_tier_names || '')
+  const dirty = saved && (tiers.trim() !== (saved.env_tier_names || '') || wipe.trim() !== (saved.wipe_allowed_envs || ''))
 
   return (
     <section>
-      <h2 className="text-sm font-semibold text-content mb-3">Environment tier order</h2>
-      <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
+      <h2 className="text-sm font-semibold text-content mb-3">Environments</h2>
+      <div className="bg-surface border border-border rounded-xl p-5 space-y-5">
         <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">Tier order</label>
           <textarea value={tiers} onChange={e => setTiers(e.target.value)} rows={2}
             placeholder="dev, staging, qa, uat, preprod, prod"
             className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
           <Hint>Tier names from lowest to highest (comma or newline). Used to auto-guess each project's deploy order (dev → prod) for the release pipeline. A project can override with an explicit order. Leave blank for the built-in default.</Hint>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">Environments allowed to wipe data</label>
+          <textarea value={wipe} onChange={e => setWipe(e.target.value)} rows={1}
+            placeholder="dev, test"
+            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+          <Hint>Environments whose application <strong className="text-content-muted">data</strong> may be wiped (reset for dev/test) from a project's Danger Zone — by a workspace admin, with a typed confirmation + password. Leave blank to disable everywhere. <strong className="text-content-muted">Do not list production.</strong></Hint>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
@@ -785,6 +794,9 @@ function HostsSection({ workspace, qc }) {
               onCancel={() => setModal(null)}
               saving={saveMut.isPending}
               showBuildOnly
+              onCheckImpact={modal !== 'new' && modal?.editing?.id
+                ? (body) => fetchWorkspaceHostRouteImpact(workspace, modal.editing.id, { address: body.address, public_address: body.public_address, reachability: body.reachability })
+                : undefined}
             />
           </div>
         </div>

@@ -114,6 +114,20 @@ func (s *Service) CreateUser(username, password, role string) error {
 	return err
 }
 
+// VerifyUserPassword reports whether password matches the stored hash for userID.
+// Used to re-confirm identity in-session before an irreversible action (wipe data,
+// delete project) — NOT a login (it issues no token and doesn't touch last-login).
+func (s *Service) VerifyUserPassword(userID int64, password string) bool {
+	if password == "" {
+		return false
+	}
+	var hash string
+	if err := s.db.QueryRow("SELECT password FROM users WHERE id = ?", userID).Scan(&hash); err != nil || hash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
 // Login verifies credentials and returns a signed JWT.
 // ChangePassword verifies the current password then updates it.
 func (s *Service) ChangePassword(userID int64, currentPassword, newPassword string) error {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, putConfig, deleteWorkspace, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain, fetchWorkspaceAccessLists, fetchProxyPlugins, fetchBlueprints } from '../lib/api'
+import { fetchConfig, putConfig, deleteWorkspace, wipeEnvData, fetchJobStatus, fetchEnvVars, updateEnvVars, fetchWorkspaceHosts, fetchWorkspace, migrateWorkspace, setEnvHost, getMigrationJob, fetchWorkspaceBackupTargets, fetchBackupServices, scanRepo, fetchWorkspaceSettings, copyEnvironment, replaceProjectSource, seedDatabase, fetchProjectBuildHost, setProjectBuildHost, fetchCustomDomains, addCustomDomain, verifyCustomDomain, deleteCustomDomain, setPrimaryCustomDomain, fetchWorkspaceAccessLists, fetchProxyPlugins, fetchBlueprints } from '../lib/api'
 import DropZone from '../components/DropZone'
 import { resolveEnvRoute } from '../lib/envRoute'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -2981,7 +2981,7 @@ export default function EditProjectPage() {
         {tab === 'notes' && <ProjectNotesTab workspace={workspace} name={name} />}
 
         {/* Danger zone */}
-        {tab === 'danger' && <DangerZone name={name} />}
+        {tab === 'danger' && <DangerZone name={name} envNames={currentEnvNames} />}
         </VerticalTabs>
       </div>
 
@@ -3383,47 +3383,124 @@ function BackupSection({ workspaceName, envs, updateEnv }) {
   )
 }
 
-function DangerZone({ name }) {
+// splitEnvList parses a comma/newline-separated setting into trimmed, non-empty names.
+function splitEnvList(s) {
+  return (s || '').split(/[\n,]/).map(x => x.trim()).filter(Boolean)
+}
+
+// ConfirmSentence renders a copy-pasteable acknowledgement sentence + a copy button,
+// so the user confirms intent without retyping. Reused by wipe + delete.
+function ConfirmSentence({ sentence }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    let ok = false
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(sentence); ok = true } } catch { /* fallback */ }
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea'); ta.value = sentence
+        ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta)
+        ta.focus(); ta.select(); ok = document.execCommand('copy'); ta.remove()
+      } catch { ok = false }
+    }
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
+  }
+  return (
+    <div className="flex items-start gap-2">
+      <code className="flex-1 bg-canvas border border-border rounded-lg px-2.5 py-1.5 text-[12px] font-mono text-content break-all select-all">{sentence}</code>
+      <button type="button" onClick={copy} className="shrink-0 px-2.5 py-1.5 text-xs bg-surface-raised hover:bg-surface-overlay text-content rounded-lg">{copied ? '✓' : 'Copy'}</button>
+    </div>
+  )
+}
+
+function DangerZone({ name, envNames = [] }) {
   const { workspace } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [open, setOpen]       = useState(false)
-  const [confirm, setConfirm] = useState('')
-  const [error, setError]     = useState('')
 
-  const mutation = useMutation({
-    mutationFn: () => deleteWorkspace(workspace, name),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['projects', workspace] })
-      navigate('/', { replace: true })
-    },
-    onError: (e) => setError(e.response?.data?.error || 'Delete failed'),
+  // ── Delete project (confirm sentence + password) ──
+  const [delOpen, setDelOpen]         = useState(false)
+  const [delConfirm, setDelConfirm]   = useState('')
+  const [delPassword, setDelPassword] = useState('')
+  const [delError, setDelError]       = useState('')
+  const deleteSentence = deleteConfirmSentence(name)
+
+  const delMut = useMutation({
+    mutationFn: () => deleteWorkspace(workspace, name, { confirm: delConfirm.trim(), password: delPassword }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['projects', workspace] }); navigate('/', { replace: true }) },
+    onError: (e) => setDelError(e.response?.data?.error || 'Delete failed'),
   })
 
-  function handleDelete() {
-    if (confirm !== name) {
-      setError(`Type "${name}" exactly to confirm`)
-      return
-    }
-    mutation.mutate()
-  }
+  // ── Wipe application data (per allowed env; confirm sentence + password) ──
+  const { data: wsSettings } = useQuery({ queryKey: ['ws-settings', workspace], queryFn: () => fetchWorkspaceSettings(workspace) })
+  const allowedNames = splitEnvList(wsSettings?.wipe_allowed_envs)
+  const wipeableEnvs = envNames.filter(e => allowedNames.some(a => a.toLowerCase() === e.toLowerCase()))
+
+  const [wipeEnv, setWipeEnv]         = useState('')
+  const [wipeOpen, setWipeOpen]       = useState(false)
+  const [wipeConfirm, setWipeConfirm] = useState('')
+  const [wipePassword, setWipePassword] = useState('')
+  const [wipeError, setWipeError]     = useState('')
+  const [wipeLog, setWipeLog]         = useState('')
+  useEffect(() => { if (!wipeEnv && wipeableEnvs.length) setWipeEnv(wipeableEnvs[0]) }, [wipeableEnvs, wipeEnv])
+  const wipeSentence = wipeEnv ? wipeConfirmSentence(name, wipeEnv) : ''
+
+  const wipeMut = useMutation({
+    // Start the background wipe job, then poll it for live progress until it settles.
+    mutationFn: async () => {
+      const { job_id } = await wipeEnvData(workspace, name, wipeEnv, { confirm: wipeConfirm.trim(), password: wipePassword })
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise(r => setTimeout(r, 1500))
+        const job = await fetchJobStatus(job_id)
+        if (typeof job.log === 'string') setWipeLog(job.log)
+        if (job.status && job.status !== 'running') {
+          if (job.status === 'failed') throw new Error(job.error || 'Wipe failed')
+          return job.log || ''
+        }
+      }
+    },
+    onSuccess: (log) => { setWipeLog(typeof log === 'string' ? log : ''); setWipeError('') },
+    onError: (e) => setWipeError(e.response?.data?.error || e.message || 'Wipe failed'),
+  })
+
+  function openWipe() { setWipeOpen(true); setWipeConfirm(''); setWipePassword(''); setWipeError(''); setWipeLog('') }
 
   return (
     <section className="mt-8">
       <div className="border border-danger-border/50 rounded-xl overflow-hidden">
-        <div className="px-5 py-3 bg-danger-subtle/30 border-b border-danger-border/50 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-danger-fg">Danger zone</h2>
-            <p className="text-xs text-danger-fg/70 mt-0.5">Irreversible actions — proceed with caution</p>
-          </div>
+        <div className="px-5 py-3 bg-danger-subtle/30 border-b border-danger-border/50">
+          <h2 className="text-sm font-semibold text-danger-fg">Danger zone</h2>
+          <p className="text-xs text-danger-fg/70 mt-0.5">Irreversible actions — proceed with caution</p>
         </div>
+
+        {/* Wipe application data — only for envs a workspace admin allow-listed. */}
+        {wipeableEnvs.length > 0 && (
+          <div className="px-5 py-4 flex items-center justify-between border-b border-danger-border/30">
+            <div className="min-w-0">
+              <p className="text-sm text-content">Wipe application data</p>
+              <Hint className="mt-0.5">Deletes all data (databases, uploads, volumes) for one environment and redeploys it <strong className="text-content-muted">fresh</strong> — settings, secrets and the project itself are kept. For resetting dev/test only.</Hint>
+            </div>
+            <div className="ml-6 shrink-0 flex items-center gap-2">
+              <select value={wipeEnv} onChange={e => setWipeEnv(e.target.value)}
+                className="px-2.5 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+                {wipeableEnvs.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+              <button onClick={openWipe}
+                className="px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors">
+                Wipe data
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Delete project */}
         <div className="px-5 py-4 flex items-center justify-between">
           <div>
             <p className="text-sm text-content">Delete this project</p>
             <Hint className="mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</Hint>
           </div>
           <button
-            onClick={() => { setOpen(true); setConfirm(''); setError('') }}
+            onClick={() => { setDelOpen(true); setDelConfirm(''); setDelPassword(''); setDelError('') }}
             className="ml-6 shrink-0 px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors"
           >
             Delete project
@@ -3431,10 +3508,63 @@ function DangerZone({ name }) {
         </div>
       </div>
 
-      {/* Confirmation modal */}
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setOpen(false)}>
-          <div className="bg-surface border border-danger-border/60 rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      {/* Wipe confirmation modal */}
+      {wipeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !wipeMut.isPending && setWipeOpen(false)}>
+          <div className="bg-surface border border-danger-border/60 rounded-xl w-full max-w-lg p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">⚠️</span>
+              <h3 className="font-semibold text-content-strong">Wipe data — <span className="text-danger-fg">{name}</span> / <span className="text-danger-fg">{wipeEnv}</span></h3>
+            </div>
+            {wipeLog || wipeMut.isPending ? (
+              <>
+                <pre className="max-h-72 overflow-auto bg-canvas border border-border rounded-lg p-3 text-[11px] font-mono text-content whitespace-pre-wrap">{(wipeLog || 'Starting…').replace(/\[[0-9;]*m/g, '')}</pre>
+                {wipeError && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{wipeError}</p>}
+                <div className="flex justify-end items-center gap-3">
+                  {wipeMut.isPending && <span className="text-xs text-content-subtle">Working… safe to leave this page.</span>}
+                  <button onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
+                    className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Done</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-content-muted">
+                  This permanently deletes all application data for <strong className="text-content">{wipeEnv}</strong> (databases, uploads, volumes), then redeploys it empty.
+                  Project settings and secrets are kept. <strong className="text-content block mt-1">This cannot be undone.</strong>
+                </p>
+                {wipeError && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{wipeError}</p>}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Paste this to confirm</label>
+                  <ConfirmSentence sentence={wipeSentence} />
+                  <input type="text" value={wipeConfirm} onChange={e => { setWipeConfirm(e.target.value); setWipeError('') }}
+                    placeholder="Paste the sentence above" autoFocus
+                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger transition-colors" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Your password</label>
+                  <input type="password" value={wipePassword} onChange={e => { setWipePassword(e.target.value); setWipeError('') }}
+                    placeholder="Re-enter your password" autoComplete="current-password"
+                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-danger transition-colors" />
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => wipeMut.mutate()}
+                    disabled={wipeMut.isPending || wipeConfirm.trim() !== wipeSentence || !wipePassword}
+                    className="flex-1 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+                    {wipeMut.isPending ? 'Wiping & redeploying…' : 'Wipe data'}
+                  </button>
+                  <button onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
+                    className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Cancel</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {delOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => !delMut.isPending && setDelOpen(false)}>
+          <div className="bg-surface border border-danger-border/60 rounded-xl w-full max-w-lg p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="text-2xl">⚠️</span>
               <h3 className="font-semibold text-content-strong">Delete <span className="text-danger-fg">{name}</span>?</h3>
@@ -3443,35 +3573,30 @@ function DangerZone({ name }) {
               This will permanently delete the project directory and all its contents including configs, environment files, and backups.
               <strong className="text-content block mt-1">This cannot be undone.</strong>
             </p>
-            {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-            <div>
-              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">
-                Type <span className="text-danger-fg font-mono">{name}</span> to confirm
-              </label>
-              <input
-                type="text"
-                value={confirm}
-                onChange={e => { setConfirm(e.target.value); setError('') }}
-                onKeyDown={e => e.key === 'Enter' && handleDelete()}
-                placeholder={name}
-                autoFocus
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger transition-colors"
-              />
+            {delError && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{delError}</p>}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Paste this to confirm</label>
+              <ConfirmSentence sentence={deleteSentence} />
+              <input type="text" value={delConfirm} onChange={e => { setDelConfirm(e.target.value); setDelError('') }}
+                placeholder="Paste the sentence above" autoFocus
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger transition-colors" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Your password</label>
+              <input type="password" value={delPassword} onChange={e => { setDelPassword(e.target.value); setDelError('') }}
+                placeholder="Re-enter your password" autoComplete="current-password"
+                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-danger transition-colors" />
             </div>
             <div className="flex gap-3">
               <button
-                onClick={handleDelete}
-                disabled={mutation.isPending || confirm !== name}
+                onClick={() => delMut.mutate()}
+                disabled={delMut.isPending || delConfirm.trim() !== deleteSentence || !delPassword}
                 className="flex-1 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors"
               >
-                {mutation.isPending ? 'Deleting…' : 'Delete permanently'}
+                {delMut.isPending ? 'Deleting…' : 'Delete permanently'}
               </button>
-              <button
-                onClick={() => setOpen(false)}
-                className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
+              <button onClick={() => setDelOpen(false)} disabled={delMut.isPending}
+                className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Cancel</button>
             </div>
           </div>
         </div>
@@ -3479,3 +3604,7 @@ function DangerZone({ name }) {
     </section>
   )
 }
+
+// The exact acknowledgement sentences the backend validates (must match server).
+function deleteConfirmSentence(project) { return `Delete Project: ${project}` }
+function wipeConfirmSentence(project, env) { return `Wipe data for Project: ${project} Environment: ${env}` }

@@ -13,6 +13,20 @@ func TestSplitInfoLine(t *testing.T) {
 	}
 }
 
+func TestWebAddrFrom(t *testing.T) {
+	cases := []struct{ addr, pub, reach, want string }{
+		{"10.0.0.5", "", "public", "10.0.0.5"},         // no override → SSH address
+		{"10.0.0.5", "1.2.3.4", "public", "1.2.3.4"},   // public override wins
+		{"10.0.0.5", "1.2.3.4", "private", "10.0.0.5"}, // private host: override ignored
+		{" 10.0.0.5 ", " ", "public", "10.0.0.5"},      // trims whitespace
+	}
+	for _, c := range cases {
+		if got := webAddrFrom(c.addr, c.pub, c.reach); got != c.want {
+			t.Errorf("webAddrFrom(%q,%q,%q) = %q, want %q", c.addr, c.pub, c.reach, got, c.want)
+		}
+	}
+}
+
 func TestParseComposePsJSONOneShotExclusion(t *testing.T) {
 	// The long-lived app is up; a completed chown-init one-shot (…-init-perms,
 	// exit 0) plus a completed migrate and minio_init must NOT drag the env to

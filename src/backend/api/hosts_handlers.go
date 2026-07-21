@@ -34,6 +34,10 @@ type hostBody struct {
 	BuildOnly     bool     `json:"build_only"`      // dedicated builder — excluded from deploy targets
 	Reachability  string   `json:"reachability"`    // 'public' (direct) | 'private' (behind control-plane gateway)
 	PublicAddress string   `json:"public_address"`  // public web IP/hostname override ('' = use address)
+	// AutoRefreshRoutes: on an address change that alters bound envs' auto-URLs,
+	// redeploy those envs so the new address is baked into their Traefik labels.
+	// Opt-in from the host editor's pre-save warning; false ⇒ save address only.
+	AutoRefreshRoutes bool `json:"auto_refresh_routes"`
 }
 
 // buildOnlyConflict reports whether marking the host build-only would strand a
@@ -466,6 +470,12 @@ func (h *Handler) UpdateHost(w http.ResponseWriter, r *http.Request) {
 	}
 	host.Grants, _ = settings.HostGrants(h.db, id)
 	h.bridge.EvictHost(id) // drop any pooled connection — address/key may have changed
+	// If the address change breaks bound envs' auto-URLs and the user opted in,
+	// redeploy those envs so the new address lands in their Traefik labels. Computed
+	// from the OLD host (cur) → new web address; async + best-effort.
+	if b.AutoRefreshRoutes {
+		h.refreshImpactedRoutes(h.hostRouteImpact(cur, host.WebAddress()))
+	}
 	writeJSON(w, http.StatusOK, host)
 }
 
