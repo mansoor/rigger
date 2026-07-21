@@ -573,7 +573,9 @@ Pick a provider on a project's source in **New / Edit Project** (or inline-creat
 
 Each template is a JSON file in `templates/stacks/`. It declares images, ports, volumes, healthchecks, `default_env_vars`, an optional `files` map (see [Static config files](#static-config-files-seed-files)), and — for multi-service stacks — a `web_routed` flag on the service that fronts the web (see [Web entry](#web-entry-which-service-the-domain-routes-to)). The wizard discovers templates by globbing `templates/stacks/*.json` — no registration required.
 
-**Secrets.** A placeholder secret in `default_env_vars` (e.g. `DB_PASSWORD: CHANGE_ME` — also `CHANGEME`, `YOUR_…`, `REPLACE_ME`) is auto-replaced with a generated value at create time, for any key that looks like a secret (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY*`, `*SALT*`). The resolved value is written to `.env` and pinned in `config.json`, so it stays consistent across refreshes and matches an already-initialized data volume. Non-secret placeholders (ports, hosts, URLs) are kept for you to fill in.
+**Secrets.** A placeholder secret in `default_env_vars` (e.g. `DB_PASSWORD: CHANGE_ME` — also `CHANGEME`, `YOUR_…`, `REPLACE_ME`) is auto-replaced with a generated value at create time, for any key that looks like a secret (`*PASSWORD*`, `*SECRET*`, `*TOKEN*`, `*KEY*`, `*SALT*`). Non-secret placeholders (ports, hosts, URLs) are kept for you to fill in.
+
+The resolved value is written to `.env` and **pinned** in `config.json`'s authoritative `secrets` map. The pin is the record of what the data volume was actually initialised with, so it stays consistent across refreshes and **wins over `.env`** — if the live `.env` ever drifts (rerolled or hand-edited), a regen heals it back to the pinned value instead of locking the app out of an already-initialised volume (the classic Postgres `P1000` / managed-DB auth failure). Managed-DB, MinIO and `APP_KEY` secrets are (re)captured into the pin on **every deploy** — not just first bootstrap — so a project that predates the pin, or whose `.env` was lost, records its real in-use secret *before* a later regen can reroll it. Remote-bound envs pin from the host's authoritative `.env`, not the local cache. (If a managed DB does drift, **Danger Zone → Wipe data** re-initialises the volume against the current `.env`.)
 
 You can also create templates from the UI, all consolidated in **Tools → Template Manager**:
 - **Select image workspace** — pick any image-stack workspace + an environment to generate a draft template JSON from its config (secrets masked to `CHANGE_ME` **server-side**, so they never reach the browser)
@@ -723,6 +725,14 @@ host's own address.)
 - **Must be an IP for sslip/nip.** Those services only echo back an embedded IP address;
   a hostname won't resolve. The **Use {hostname}** button is handy when you reach Rigger
   by IP (it fills that IP); for a base domain (`onrigger.com`) the App host is irrelevant.
+- **Changing it warns about affected apps.** The magic-DNS host is baked into each running
+  app's Traefik router labels, so a plain IP change updates the *displayed* URLs but the
+  live containers keep routing on the old host until redeployed. When you edit the App host
+  (or a remote host's address in **Remote Hosts**), Rigger checks — as you leave the field —
+  which environments' URLs would break and offers to **refresh & redeploy** them on save. It
+  honours running state: a running env is redeployed in place; a **stopped** env only has its
+  compose regenerated (never started). Reverting the field to its original value dismisses the
+  warning.
 
 ---
 
@@ -834,6 +844,11 @@ Skeleton loading animation while data fetches. Host/Docker panels refresh every 
 - **Environment hosts** (Phase 7) — per-environment "Move to…" control to run each env on a different host (e.g. `dev` local, `stage`/`prod` remote). Changing a *deployed* env's host migrates its data; an undeployed one just repoints
 - **Move the whole workspace** (Phase 7) — migrate all environments to one host at once; available only when every env currently shares the same host. Both moves warn about downtime + leftover data, run in the background, and notify you on completion
 
+**Danger Zone** (Edit Project → Danger Zone) — irreversible, workspace-admin (or super-admin) only, each gated by a copy-paste acknowledgement sentence **plus your password** (an incorrect password just re-prompts — it never logs you out):
+
+- **Wipe application data** — resets **one environment** to empty: removes its named volumes *and* clears its bind-mount data directories (keeping `docker-compose.yml`/`.env`, so settings and secrets are preserved), then redeploys it fresh. For **resetting dev/test only** — it's offered *only* for environments a workspace admin allow-lists under **Manage Workspace → Environments → "Environments allowed to wipe data"** (leave production off the list and it's never wipeable). Confirm sentence: `Wipe data for Project: <name> Environment: <env>`. Runs as a background job with live progress — safe to leave the page. Also a clean recovery path for a drifted managed-DB password (it re-initialises the volume against the current `.env`).
+- **Delete project** — permanently removes the project directory (config, env files, backups). Confirm sentence: `Delete Project: <name>`. Running containers are not stopped automatically.
+
 ### Housekeeping page (`/housekeeping`)
 
 Four tabs:
@@ -908,9 +923,11 @@ A standalone, NPM-style reverse-proxy manager — route public hostnames to **an
 The UI never runs arbitrary shell commands. Strict allowlist in `bridge.go`, each routed to a native Go operation (no shell):
 
 ```
-Allowed: start | stop | down | update | restart | ps | logs | refresh
-       | backup | restore | init | version | build | promote
+Allowed: start | stop | down | update | restart | ps | logs | refresh | regen
+       | backup | restore | migrate | init | version | build | promote
 ```
+
+(`regen` regenerates an env's compose file without bringing it up — used to fix a stopped env's routing after a host/IP change while honouring its stopped state; `migrate` moves data between environments.)
 
 The runtime invokes `docker` with fixed argv arrays — no string interpolation, no `bash` (the image ships no shell scripts at all). Workspace names are validated against a slug regex and confirmed to exist in the known workspaces directory before any command executes.
 
@@ -1118,6 +1135,10 @@ The scan looks under the host's **Remote workspaces directory**. The default is 
 ### Remote env shows as down / no metrics
 
 Status, container lists, and live/historical metrics are gathered **on the env's host over SSH**. If a remote env reads as down or shows no metrics, confirm the host's **Test** is green and its **Remote workspaces directory** is correct, and that the stack was actually deployed there (the per-env 🖥 badge confirms the binding).
+
+### Managed database auth fails (`P1000` / "password authentication failed")
+
+A managed Postgres/MySQL container only applies its `*_PASSWORD` on the **first** init of an empty data dir; on every later start it's ignored. So if the env's `.env` password ever diverges from what the existing volume was initialised with, the app (and the pre-deploy migrate gate) fail to authenticate and the env reads **partial**. Rigger now defends against this by pinning each managed secret in `config.json` and re-capturing it on every deploy (see [Secrets](#pre-built-stack-templates)), so a regen heals a drifted `.env` back to the volume's real password. If a volume still ends up mismatched (e.g. a project whose secret was pinned before the volume existed), the fastest fixes are: (a) **Danger Zone → Wipe data** to re-initialise the volume against the current `.env` (dev/test — destroys data), or (b) `ALTER USER <user> WITH PASSWORD '<value from .env>'` over the DB's local socket to realign the existing volume in place (keeps data).
 
 ### Running behind Cloudflare
 
