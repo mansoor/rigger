@@ -45,11 +45,13 @@ export function Hint({ children, className = '', tone = 'subtle' }) {
 // controls that sit inline in a dense table or list row.
 export const CONTROL =
   'px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm ' +
-  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors'
+  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors ' +
+  'disabled:opacity-50 disabled:cursor-not-allowed'
 
 export const CONTROL_SM =
   'px-2 py-1 bg-surface-raised border border-border-strong rounded text-content-strong text-sm ' +
-  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors'
+  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors ' +
+  'disabled:opacity-50 disabled:cursor-not-allowed'
 
 // ── Primitives ─────────────────────────────────────────────────────────────────
 export function Label({ children, required, htmlFor }) {
@@ -60,14 +62,38 @@ export function Label({ children, required, htmlFor }) {
   )
 }
 
-export function Input({ value, onChange, placeholder, type = 'text', className = '', ...rest }) {
+// The rendered height of a standard control (py-2 + text-sm line box + borders).
+// Use it to centre a non-input control — a toggle, a badge — so it lines up with
+// an <Input> beside it WITHOUT resorting to `items-end` on the row. items-end
+// bottom-aligns against the tallest cell, which changes when a neighbouring
+// <Hint> is hidden by the help-text preference, so the control visibly jumps.
+export const CONTROL_H = 'min-h-[2.375rem]'
+
+// LabelSpacer: occupies exactly a <Label>'s height (text-xs line box + mb-1),
+// for a cell whose control has no label but must still line up with the
+// labelled fields next to it.
+export function LabelSpacer() {
+  return <div aria-hidden className="h-4 mb-1" />
+}
+
+// `error` turns the field red and prints the message under it. The border is
+// swapped inside the CONTROL string rather than appended after it: two competing
+// border-color utilities have equal specificity, so which one won would depend on
+// Tailwind's emit order rather than on this code.
+export function Input({ value, onChange, placeholder, type = 'text', error, className = '', ...rest }) {
+  const base = error
+    ? CONTROL.replace('border-border-strong', 'border-danger').replace('focus:border-brand-500', 'focus:border-danger')
+    : CONTROL
   return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
-      className={`w-full ${CONTROL} ${className}`}
-      {...rest}
-    />
+    <>
+      <input
+        type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        className={`w-full ${base} ${className}`}
+        {...rest}
+      />
+      {error && <p className="text-danger-fg text-xs mt-1">{error}</p>}
+    </>
   )
 }
 
@@ -93,25 +119,32 @@ export function Select({ value, onChange, options, className = '', ...rest }) {
 }
 
 // Toggle: label + switch. Default spreads them (justify-between) for full-width setting
-// rows; `inline` packs the switch right after the label (compact, for grids). The `hint`
-// honors the help-text preference.
-export function Toggle({ label, hint, checked, onChange, disabled = false, inline = false }) {
+// rows; `inline` packs the switch right after the label (compact, for grids);
+// `switchFirst` puts the switch before the label, for the compact "[switch] Enabled"
+// state readout. The `hint` honors the help-text preference.
+export function Toggle({ label, hint, checked, onChange, disabled = false, inline = false, switchFirst = false }) {
+  const sw = (
+    <button
+      type="button"
+      onClick={() => !disabled && onChange(!checked)}
+      disabled={disabled}
+      className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${
+        checked && !disabled ? 'bg-brand-600' : checked ? 'bg-brand-800' : 'bg-surface-overlay'
+      }`}
+    >
+      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+    </button>
+  )
+  const text = (label || hint) ? (
+    <div>
+      {label && <p className="text-sm text-content">{label}</p>}
+      {hint && <Hint className="mt-0.5">{hint}</Hint>}
+    </div>
+  ) : null
+  const layout = switchFirst ? 'gap-2.5' : inline ? 'gap-2.5' : 'justify-between'
   return (
-    <div className={`flex items-center ${inline ? 'gap-2.5' : 'justify-between'} ${disabled ? 'opacity-50' : ''}`}>
-      <div>
-        <p className="text-sm text-content">{label}</p>
-        {hint && <Hint className="mt-0.5">{hint}</Hint>}
-      </div>
-      <button
-        type="button"
-        onClick={() => !disabled && onChange(!checked)}
-        disabled={disabled}
-        className={`relative w-10 h-5 rounded-full transition-colors shrink-0 disabled:cursor-not-allowed ${
-          checked && !disabled ? 'bg-brand-600' : checked ? 'bg-brand-800' : 'bg-surface-overlay'
-        }`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
-      </button>
+    <div className={`flex items-center ${layout} ${disabled ? 'opacity-50' : ''}`}>
+      {switchFirst ? <>{sw}{text}</> : <>{text}{sw}</>}
     </div>
   )
 }

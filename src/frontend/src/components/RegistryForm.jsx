@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint, Btn, CONTROL } from './ui'
+import { Hint, Btn, Label, Input } from './ui'
 
 // Shared Docker Registry add/edit form, used by both the admin Settings page
 // (global registries, with a workspace allowlist) and Manage Workspace
@@ -7,22 +7,7 @@ import { Hint, Btn, CONTROL } from './ui'
 //
 // Props: initial, onSave(body)→Promise, onCancel, saving, showGrants, workspaces
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text' }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`${CONTROL} w-full`}
-    />
-  )
-}
 
 export default function RegistryForm({ initial, onSave, onCancel, saving, showGrants = false, workspaces = [] }) {
   const isEdit = !!initial?.id

@@ -19,63 +19,13 @@ import { BackupScheduleEditor } from '../components/BackupSchedules'
 import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
-import { Hint, Btn, IconBtn, CONTROL, CONTROL_SM } from '../components/ui'
+import { Hint, Btn, IconBtn, CONTROL, CONTROL_SM, Field, FormRow, Label, Input, Select, Toggle } from '../components/ui'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-sm font-medium text-content mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text', error, ...rest }) {
-  return (
-    <>
-      <input
-        type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className={`w-full px-3 py-2 bg-surface-raised border rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none transition-colors ${
-          error ? 'border-danger focus:border-danger' : 'border-border-strong focus:border-brand-500'
-        }`}
-        {...rest}
-      />
-      {error && <p className="text-danger-fg text-xs mt-1">{error}</p>}
-    </>
-  )
-}
 
-function Select({ value, onChange, options }) {
-  return (
-    <select
-      value={value} onChange={e => onChange(e.target.value)}
-      className={`${CONTROL} w-full`}
-    >
-      {options.map(o => (
-        <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
-  )
-}
 
-function Toggle({ label, checked, onChange, hint }) {
-  return (
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-sm text-content">{label}</p>
-        {hint && <Hint>{hint}</Hint>}
-      </div>
-      <button
-        type="button" onClick={() => onChange(!checked)}
-        className={`relative w-10 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
-      </button>
-    </div>
-  )
-}
 
 function StepHeader({ step, title, subtitle }) {
   return (
@@ -233,16 +183,14 @@ function BlueprintStack({ data, onChange, workspace }) {
           </label>
           {data.scaffold && (
             <div className="space-y-3 pl-6">
-              <div className="grid grid-cols-[1fr_8rem] gap-2 items-end">
-                <div>
-                  <Label>Target repository</Label>
+              <FormRow>
+                <Field span={3} label="Target repository">
                   <Input value={data.source_repo || ''} onChange={v => onChange('source_repo', v)} placeholder="https://github.com/org/app.git" />
-                </div>
-                <div>
-                  <Label>Branch</Label>
+                </Field>
+                <Field span={1} label="Branch">
                   <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="main" />
-                </div>
-              </div>
+                </Field>
+              </FormRow>
               <Hint>Create an <strong>empty</strong> repository on your provider first, then paste its URL here. Rigger pushes the scaffold to it.</Hint>
               <div>
                 <Label>Git provider <span className="font-normal normal-case text-content-faint">(auth for push)</span></Label>
@@ -293,20 +241,21 @@ function ScanStack({ data, onChange, workspace }) {
   }
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-[1fr_8rem_auto] gap-2 items-end">
-        <div>
-          <Label>Source repository</Label>
+      {/* The Scan button bottom-aligns with the inputs via self-end rather than
+          items-end on the row, so it stays put if either field ever grows a
+          hint (which the help-text preference can show or hide). */}
+      <FormRow>
+        <Field span={2} label="Source repository">
           <Input value={data.source_repo || ''} onChange={v => onChange('source_repo', v)} placeholder="https://github.com/org/app.git" />
-        </div>
-        <div>
-          <Label>Branch</Label>
+        </Field>
+        <Field span={1} label="Branch">
           <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="default branch" />
-        </div>
+        </Field>
         <Btn variant="primary" size="md" onClick={() => scan()} disabled={busy || !(data.source_repo || '').trim()}
-          >
+          className="sm:col-span-1 self-end">
           {busy ? 'Scanning…' : 'Scan'}
         </Btn>
-      </div>
+      </FormRow>
       <Hint>Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</Hint>
       <div>
         <Label>Source subdirectory <span className="font-normal normal-case text-content-faint">(optional)</span></Label>

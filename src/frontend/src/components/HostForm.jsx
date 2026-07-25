@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchManagedHostKey } from '../lib/api'
-import { Hint, Btn, CONTROL } from './ui'
+import { Hint, Btn, Label, Input } from './ui'
 
 // Shared Remote Host add/edit form, used by both the admin Settings page (global
 // hosts, with a workspace allowlist) and Manage Workspace (workspace-owned hosts).
@@ -14,24 +14,7 @@ import { Hint, Btn, CONTROL } from './ui'
 //   showGrants – render the "Offered to" workspace allowlist (admin/global only)
 //   workspaces – [{ key, name }] for the allowlist picker (when showGrants)
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder={placeholder} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}
-      {...rest}
-    />
-  )
-}
 
 export default function HostForm({ initial, onSave, onCancel, saving, showGrants = false, showBuildOnly = false, workspaces = [], onCheckImpact }) {
   const isEdit = !!initial?.id

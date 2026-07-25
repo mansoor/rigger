@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint, Btn, CONTROL } from './ui'
+import { Hint, Btn, CONTROL, Label, Input, Select, Toggle } from './ui'
 
 // Shared Backup Target add/edit form (S3 / SFTP), used by both the admin Settings
 // page (global targets, with a workspace allowlist) and Manage Workspace
@@ -10,43 +10,9 @@ import { Hint, Btn, CONTROL } from './ui'
 const S3_DEFAULT = { endpoint: '', bucket: '', region: 'us-east-1', access_key: '', secret_key: '', path_prefix: 'backups/', use_ssl: true }
 const SFTP_DEFAULT = { host: '', port: 22, username: '', auth_type: 'password', password: '', private_key: '', remote_path: '/backups' }
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text' }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`${CONTROL} w-full`}
-    />
-  )
-}
 
-function Select({ value, onChange, options, disabled }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  )
-}
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <button type="button" onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}>
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
-      </button>
-      <span className="text-sm text-content">{label}</span>
-    </label>
-  )
-}
 
 export default function BackupTargetForm({ initial, onSave, onCancel, saving, showGrants = false, workspaces = [] }) {
   const isEdit = !!initial?.id
@@ -127,7 +93,7 @@ export default function BackupTargetForm({ initial, onSave, onCancel, saving, sh
               <Input value={cfg.secret_key} onChange={v => setField('secret_key', v)} type="password" placeholder="••••••••" />
             </div>
           </div>
-          <Toggle checked={cfg.use_ssl} onChange={v => setField('use_ssl', v)} label="Use SSL/TLS" />
+          <Toggle switchFirst checked={cfg.use_ssl} onChange={v => setField('use_ssl', v)} label="Use SSL/TLS" />
         </div>
       )}
 

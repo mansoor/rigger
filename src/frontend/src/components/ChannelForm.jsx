@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint, Btn, CONTROL } from './ui'
+import { Hint, Btn, Label, Input, Select, Toggle } from './ui'
 
 // Shared Notification Channel add/edit form (Apprise / Email), used by both the
 // admin Settings page (global channels, with a workspace allowlist) and Manage
@@ -14,43 +14,9 @@ discord://webhook_id/webhook_token
 tgram://bot_token/chat_id
 json://hooks.example.com/webhook`
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text' }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`${CONTROL} w-full`}
-    />
-  )
-}
 
-function Select({ value, onChange, options, disabled }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  )
-}
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <button type="button" onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}>
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
-      </button>
-      {label && <span className="text-sm text-content">{label}</span>}
-    </label>
-  )
-}
 
 export default function ChannelForm({ initial, onSave, onCancel, saving, showGrants = false, workspaces = [] }) {
   const isEdit = !!initial?.id
@@ -148,11 +114,11 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
               <Input value={cfg.to} onChange={v => setField('to', v)} placeholder="you@example.com, oncall@example.com" />
             </div>
           </div>
-          <Toggle checked={cfg.use_tls} onChange={v => setField('use_tls', v)} label="Use STARTTLS (recommended)" />
+          <Toggle switchFirst checked={cfg.use_tls} onChange={v => setField('use_tls', v)} label="Use STARTTLS (recommended)" />
         </div>
       )}
 
-      <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
+      <Toggle switchFirst checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
 
       {showGrants && (
         <div className="rounded-lg border border-border-strong bg-canvas/60 p-3 space-y-2">

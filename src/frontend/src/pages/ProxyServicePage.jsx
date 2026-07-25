@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { Hint, CertBadge, Btn, IconBtn, CloseBtn, CONTROL } from '../components/ui'
+import { Hint, CertBadge, Btn, IconBtn, CloseBtn, CONTROL, Label, Input, Select, Toggle } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -14,34 +14,6 @@ import {
 // Rigger's Traefik. Independent of the project/workspace model.
 
 // ── primitives (local, matching the app's settings style) ──────────────────────
-function Label({ children }) {
-  return <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">{children}</label>
-}
-function Input({ value, onChange, placeholder, type = 'text', disabled }) {
-  return (
-    <input type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`} />
-  )
-}
-function Select({ value, onChange, options, disabled }) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}>
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  )
-}
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <button type="button" onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}>
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
-      </button>
-      <span className="text-sm text-content">{label}</span>
-    </label>
-  )
-}
 
 const TLS_OPTIONS = [
   { value: 'none', label: 'None (HTTP only)' },
@@ -298,7 +270,7 @@ function BackupRestoreCard() {
               <Label>Passphrase</Label>
               <Input type="password" value={impPass} onChange={setImpPass} placeholder="If the backup is encrypted" />
             </div>
-            <Toggle checked={replace} onChange={setReplace} label="Overwrite routes/lists with the same name" />
+            <Toggle switchFirst checked={replace} onChange={setReplace} label="Overwrite routes/lists with the same name" />
             {impErr && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-2.5 py-1.5">{impErr}</p>}
             <Btn size="xs" onClick={doImport} disabled={importing}>{importing ? 'Restoring…' : '⭱ Restore'}</Btn>
 
@@ -358,7 +330,7 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
-        <Toggle checked={r.enabled} onChange={onToggle} label="" />
+        <Toggle switchFirst checked={r.enabled} onChange={onToggle} label="" />
         <Btn size="xs" variant="ghost" onClick={onEdit}>Edit</Btn>
         <Btn size="xs" variant="ghost" onClick={onDelete}>✕</Btn>
       </div>
@@ -390,11 +362,11 @@ function PluginsCard({ plugins }) {
       <Hint className="mb-1">Optional WAF, asset cache, and GeoIP country blocking — attachable per route / access list / hosted env once enabled. Managed from here; no docker-compose edit.</Hint>
       <p className="text-[11px] text-warning-fg mb-3">⚠ Enabling or disabling a plugin restarts the reverse proxy — a few seconds of downtime for ALL routed apps. Per-route attach afterwards is instant.{mut.isPending && ' · applying…'}</p>
       <div className="flex gap-6 flex-wrap items-center">
-        <Toggle checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
+        <Toggle switchFirst checked={!!plugins.waf_enabled} onChange={v => mut.mutate({ waf_enabled: v })} label="Web application firewall (Coraza)" />
         {plugins.cache_supported
-          ? <Toggle checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
+          ? <Toggle switchFirst checked={!!plugins.cache_enabled} onChange={v => mut.mutate({ cache_enabled: v })} label="Cache assets (Souin)" />
           : <span className="inline-flex items-center gap-1.5 text-sm text-content-faint" title="Souin is incompatible with Traefik's Yaegi plugin interpreter">🚫 Cache assets <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-overlay/50 text-content-muted">unavailable</span></span>}
-        <Toggle checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
+        <Toggle switchFirst checked={!!plugins.geoip_enabled} onChange={v => mut.mutate({ geoip_enabled: v })} label="GeoIP blocking (geoblock)" />
       </div>
       <Hint tone="faint" className="text-[11px] mt-2">Pinned: Coraza {plugins.waf_version} · geoblock {plugins.geoip_version} — fetched from their module source when the proxy starts. WAF + GeoIP are verified working.{!plugins.cache_supported && <> <span className="text-warning-fg">Asset cache (Souin) is disabled — it panics under Traefik&apos;s plugin interpreter (Yaegi), which would drop every routed app. For caching, put a CDN (e.g. Cloudflare) in front, or run a dedicated cache sidecar (Varnish / Nginx).</span></>}</Hint>
 
@@ -586,7 +558,7 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
               ))}
               <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add user</button>
             </div>
-            <div className="mt-2"><Toggle checked={!!f.pass_auth} onChange={v => set('pass_auth', v)} label="Forward the Authorization header to the upstream" /></div>
+            <div className="mt-2"><Toggle switchFirst checked={!!f.pass_auth} onChange={v => set('pass_auth', v)} label="Forward the Authorization header to the upstream" /></div>
           </div>
 
           <div className="border-t border-border pt-3">
@@ -933,7 +905,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 </>
               )}
 
-              <Toggle checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Block common exploits (security headers)" />
+              <Toggle switchFirst checked={!!f.security_headers} onChange={v => set('security_headers', v)} label="Block common exploits (security headers)" />
             </div>
           )}
           </>)}
@@ -999,8 +971,8 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
             </div>
             {tlsOn && (
               <div className="flex gap-6">
-                <Toggle checked={!!f.force_https} onChange={v => set('force_https', v)} label="Force HTTPS" />
-                <Toggle checked={f.hsts_seconds > 0} onChange={v => set('hsts_seconds', v ? 31536000 : 0)} label="HSTS" />
+                <Toggle switchFirst checked={!!f.force_https} onChange={v => set('force_https', v)} label="Force HTTPS" />
+                <Toggle switchFirst checked={f.hsts_seconds > 0} onChange={v => set('hsts_seconds', v ? 31536000 : 0)} label="HSTS" />
               </div>
             )}
             {(f.tls_mode === 'le-http' || f.tls_mode === 'le-dns') && (
@@ -1027,9 +999,9 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
           {activeTab === 'advanced' && !isRedirect && (
             <div className="space-y-4">
               <div className="flex flex-col gap-2">
-                <Toggle checked={!!f.pass_host_header} onChange={v => set('pass_host_header', v)} label="Pass host header" />
-                {f.path_prefix && <Toggle checked={!!f.strip_prefix} onChange={v => set('strip_prefix', v)} label="Strip path prefix" />}
-                <Toggle checked={!!f.insecure_skip_verify} onChange={v => set('insecure_skip_verify', v)} label="Allow self-signed upstream" />
+                <Toggle switchFirst checked={!!f.pass_host_header} onChange={v => set('pass_host_header', v)} label="Pass host header" />
+                {f.path_prefix && <Toggle switchFirst checked={!!f.strip_prefix} onChange={v => set('strip_prefix', v)} label="Strip path prefix" />}
+                <Toggle switchFirst checked={!!f.insecure_skip_verify} onChange={v => set('insecure_skip_verify', v)} label="Allow self-signed upstream" />
               </div>
               <div className="border-t border-border pt-3">
                 <div className="flex items-center gap-2 mb-2">
@@ -1039,10 +1011,10 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 </div>
                 <div className="space-y-1.5">
                   {plugins?.waf_enabled
-                    ? <Toggle checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
+                    ? <Toggle switchFirst checked={!!f.waf} onChange={v => set('waf', v)} label="Web application firewall (WAF)" />
                     : <Hint tone="faint">WAF — enable the plugin on the Proxy Service page first to use it here.</Hint>}
                   {plugins?.cache_enabled
-                    ? <Toggle checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
+                    ? <Toggle switchFirst checked={!!f.cache} onChange={v => set('cache', v)} label="Cache assets" />
                     : <Hint tone="faint">{plugins?.cache_supported === false
                         ? 'Cache assets — unavailable (Souin is incompatible with Traefik’s plugin interpreter). Use a CDN or cache sidecar instead.'
                         : 'Cache assets — enable the plugin on the Proxy Service page first to use it here.'}</Hint>}

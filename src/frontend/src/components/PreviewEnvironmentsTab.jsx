@@ -5,7 +5,7 @@ import {
   createPreviewWebhook, deletePreviewWebhook,
   redeployPreview, teardownPreview, setPreviewWritebackToken,
 } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, Field } from './ui'
 
 // Preview / PR environments tab (inside Edit Project). Opt-in per project: a
 // signed webhook drives ephemeral pr{n} envs cloned from a template env, deployed
@@ -41,15 +41,6 @@ const STATUS_STYLES = {
   torn_down: 'bg-surface-raised text-content-faint',
 }
 
-function Field({ label, hint, children }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-semibold text-content-subtle uppercase tracking-wider">{label}</span>
-      <div className="mt-1">{children}</div>
-      {hint && <Hint>{hint}</Hint>}
-    </label>
-  )
-}
 
 const inputCls = 'w-full px-3 py-2 bg-surface-raised border border-border rounded-lg text-sm text-content focus:border-brand-400 focus:outline-none'
 

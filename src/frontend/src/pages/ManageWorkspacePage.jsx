@@ -28,7 +28,7 @@ import {
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { WS_ROLES, wsRoleOptions } from '../lib/roles'
-import { Hint, Checkbox, Btn, IconBtn, CloseBtn, CONTROL } from '../components/ui'
+import { Hint, Checkbox, Btn, IconBtn, CloseBtn, CONTROL, Field, FormRow, ReadOnly } from '../components/ui'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -385,24 +385,23 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
     <section>
       <h2 className="text-sm font-semibold text-content mb-3">General</h2>
       <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-        <div className="grid sm:grid-cols-5 gap-4">
-          <div className="sm:col-span-4">
-            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
+        {/* Same 3+1 split as the project form's name + key row, so the two
+            screens read as the same form. */}
+        <FormRow>
+          <Field span={3} label="Display name" hint="1–32 chars; editable anytime.">
             <input
               value={name} onChange={e => setName(e.target.value)} maxLength={32}
               className={`${CONTROL} w-full`}
             />
-            <Hint>1–32 chars; editable anytime.</Hint>
-          </div>
-          <div className="sm:col-span-1">
-            <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Key <span className="font-normal normal-case text-content-faint">(fixed)</span></label>
-            <input
-              value={workspace} readOnly disabled
-              className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed"
-            />
-            <Hint>Fixed identity.</Hint>
-          </div>
-        </div>
+          </Field>
+          <Field
+            span={1}
+            label={<>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></>}
+            hint="Fixed identity."
+          >
+            <ReadOnly title="Fixed after creation — the workspace's folder / URL identity">{workspace}</ReadOnly>
+          </Field>
+        </FormRow>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex items-center gap-3">
           <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!ok || !dirty || mut.isPending}

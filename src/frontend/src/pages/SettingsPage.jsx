@@ -37,53 +37,13 @@ import {
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
-import { Hint, Btn, CloseBtn, CONTROL } from '../components/ui'
+import { Hint, Btn, CloseBtn, CONTROL, CONTROL_H, Label, LabelSpacer, Input, Select, Toggle } from '../components/ui'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-function Label({ children, required }) {
-  return (
-    <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">
-      {children}{required && <span className="text-danger-fg ml-0.5">*</span>}
-    </label>
-  )
-}
 
-function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest }) {
-  return (
-    <input
-      type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder={placeholder} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}
-      {...rest}
-    />
-  )
-}
 
-function Select({ value, onChange, options, disabled }) {
-  return (
-    <select
-      value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className={`${CONTROL} w-full disabled:opacity-50`}
-    >
-      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  )
-}
 
-function Toggle({ checked, onChange, label }) {
-  return (
-    <label className="flex items-center gap-2 cursor-pointer select-none">
-      <button
-        type="button" onClick={() => onChange(!checked)}
-        className={`relative w-9 h-5 rounded-full transition-colors ${checked ? 'bg-brand-600' : 'bg-surface-overlay'}`}
-      >
-        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
-      </button>
-      <span className="text-sm text-content">{label}</span>
-    </label>
-  )
-}
 
 
 function EmptyState({ icon, title, description, action }) {
@@ -1222,10 +1182,10 @@ function GeneralTab() {
             </div>
           </div>
           <div className="space-y-2">
-            <Toggle checked={pwUpper}  onChange={setPwUpper}  label="Require an uppercase letter" />
-            <Toggle checked={pwLower}  onChange={setPwLower}  label="Require a lowercase letter" />
-            <Toggle checked={pwNumber} onChange={setPwNumber} label="Require a number" />
-            <Toggle checked={pwSymbol} onChange={setPwSymbol} label="Require a symbol" />
+            <Toggle switchFirst checked={pwUpper}  onChange={setPwUpper}  label="Require an uppercase letter" />
+            <Toggle switchFirst checked={pwLower}  onChange={setPwLower}  label="Require a lowercase letter" />
+            <Toggle switchFirst checked={pwNumber} onChange={setPwNumber} label="Require a number" />
+            <Toggle switchFirst checked={pwSymbol} onChange={setPwSymbol} label="Require a symbol" />
           </div>
         </div>
       </div>
@@ -1382,14 +1342,21 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4 items-end">
+      {/* The toggle lines up with the input via a label spacer + control-height
+          box. It used to be `items-end` with a pb-2 nudge, which only landed
+          while the neighbouring hint was visible — turning help text off moved
+          the toggle relative to the field. */}
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <Label>Cooldown (minutes)</Label>
           <Input value={cooldown} onChange={v => setCooldown(v)} type="number" placeholder="15" />
           <Hint tone="faint">Minimum gap before re-firing for the same target.</Hint>
         </div>
-        <div className="pb-2">
-          <Toggle checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
+        <div>
+          <LabelSpacer />
+          <div className={`flex items-center ${CONTROL_H}`}>
+            <Toggle switchFirst checked={enabled} onChange={setEnabled} label={enabled ? 'Enabled' : 'Disabled'} />
+          </div>
         </div>
       </div>
 
@@ -1504,7 +1471,7 @@ function RulesTab() {
                   {r.notify_channel_ids?.length > 0 && <span className="text-content-muted"> · 🔔 {r.notify_channel_ids.length}</span>}
                 </p>
               </div>
-              <Toggle checked={r.enabled} onChange={() => toggleMut.mutate(r)} label="" />
+              <Toggle switchFirst checked={r.enabled} onChange={() => toggleMut.mutate(r)} label="" />
               <div className="flex items-center gap-2">
                 <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: r })}>Edit</Btn>
                 <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(r)}>Delete</Btn>
@@ -1634,7 +1601,7 @@ function NotificationsTab() {
                 {ts?.loading && <span className="text-xs text-content-subtle">Sending…</span>}
                 {ts?.ok && <span className="text-xs text-success-fg">✓ Sent</span>}
                 {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
-                <Toggle checked={ch.enabled} onChange={() => toggleMut.mutate(ch)} label="" />
+                <Toggle switchFirst checked={ch.enabled} onChange={() => toggleMut.mutate(ch)} label="" />
                 <div className="flex items-center gap-2">
                   <Btn variant="ghost" size="xs" onClick={() => handleTest(ch.id)} disabled={ts?.loading}>Test</Btn>
                   <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: ch })}>Edit</Btn>
@@ -1813,7 +1780,7 @@ export function AppearanceTab() {
         title="Help text"
         description="Show the explanatory hints under fields and section descriptions across the app. Turn off for a denser interface once you know your way around — warnings and errors always stay visible. Also toggleable from the top bar."
       >
-        <Toggle
+        <Toggle switchFirst
           checked={prefs.helpText !== false}
           onChange={v => setPrefs({ helpText: v })}
           label={prefs.helpText !== false ? 'Help text shown' : 'Help text hidden'}
@@ -1885,12 +1852,12 @@ export function LogsTerminalTab() {
         description="How log views open by default. You can still toggle these per-view from the log toolbar — your last choice is remembered here."
       >
         <div className="space-y-3">
-          <Toggle
+          <Toggle switchFirst
             checked={prefs.logWrap}
             onChange={v => setPrefs({ logWrap: v })}
             label="Wrap long lines"
           />
-          <Toggle
+          <Toggle switchFirst
             checked={prefs.logRowNumbers}
             onChange={v => setPrefs({ logRowNumbers: v })}
             label="Show line numbers"
@@ -2187,7 +2154,7 @@ function SystemEmailTab() {
           <div><Label>From address</Label><Input value={f.from} onChange={v => set('from', v)} placeholder="Rigger <noreply@example.com>" /></div>
           <div><Label>Public base URL</Label><Input value={f.base_url} onChange={v => set('base_url', v)} placeholder="https://rigger.example.com" /></div>
         </div>
-        <Toggle checked={f.tls} onChange={v => set('tls', v)} label="Use STARTTLS (recommended; port 465 uses implicit TLS)" />
+        <Toggle switchFirst checked={f.tls} onChange={v => set('tls', v)} label="Use STARTTLS (recommended; port 465 uses implicit TLS)" />
         <Hint tone="faint">Base URL is used to build links in emails; leave blank to derive from the request host.</Hint>
         <div className="flex items-center gap-3">
           <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save'}</Btn>
