@@ -272,10 +272,20 @@ func (r *runner) compose(args ...string) error {
 		}
 	}
 	full := append([]string{"compose", "-p", r.stack, "-f", "docker-compose.yml"}, args...)
-	return executor.Default(r.opts.Exec).Docker(executor.Spec{
+	// Tee stderr so a failure can be explained. The raw daemon message for a
+	// container bound to a deleted network is opaque, and no retry of the same
+	// command can fix it — see stalenet.go.
+	tail := newTailWriter(r.opts.Stderr, 8<<10)
+	err := executor.Default(r.opts.Exec).Docker(executor.Spec{
 		Args: full, Dir: r.envDir, Env: r.opts.EnvVars,
-		Stdout: r.opts.Stdout, Stderr: r.opts.Stderr,
+		Stdout: r.opts.Stdout, Stderr: tail,
 	})
+	if err != nil {
+		if hint := networkAttachHint(tail.String()); hint != "" {
+			return fmt.Errorf("%w\n\n%s", err, hint)
+		}
+	}
+	return err
 }
 
 // composeOutput runs a compose command and captures stdout (no streaming).
@@ -480,6 +490,11 @@ func (r *runner) refresh() error {
 	if err := writeFile(r.composePath, content); err != nil {
 		return err
 	}
+	// Refresh is the "make reality match config" action, so it is where a stack
+	// whose containers point at a deleted network gets repaired. Plain up can't:
+	// compose hashes the network NAME, so it sees those containers as current
+	// and only starts them, which fails. See stalenet.go.
+	r.recreateStaleNetworkContainers()
 	return r.up()
 }
 
