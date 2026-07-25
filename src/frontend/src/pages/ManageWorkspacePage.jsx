@@ -28,7 +28,7 @@ import {
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { WS_ROLES, wsRoleOptions } from '../lib/roles'
-import { Hint, Checkbox, Btn, IconBtn, CloseBtn } from '../components/ui'
+import { Hint, Checkbox, Btn, IconBtn, CloseBtn, CONTROL } from '../components/ui'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -162,13 +162,13 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">ACME email</label>
           <input value={acme} onChange={e => setAcme(e.target.value)} type="email" placeholder="ops@example.com"
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL} w-full`} />
           <Hint>Default Let's Encrypt registration email for this workspace's certificates. Overrides the instance-wide email (Settings → General); a project environment can override it again in its SSL settings. Blank inherits the global default.</Hint>
         </div>
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Apps base domain</label>
           <input value={domain} onChange={e => setDomain(e.target.value)} placeholder="inherits the global default (Settings → General)"
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL} w-full`} />
           <Hint>Overrides the instance-wide <strong>Apps base domain</strong> (Settings → General) for this workspace only. Domain-routed environments get a URL of <code className="font-mono">{'{workspace}-{project}-{env}'}.{domain.trim() || '{base}'}</code> with an automatic Let&apos;s Encrypt cert. Leave blank to inherit the global default (or the auto-URL/<code className="font-mono">*.localhost</code> fallback when none is set). Needs a wildcard DNS record (<code className="font-mono">*.{domain.trim() || '{base}'}</code> → this host).</Hint>
         </div>
         {/* Wildcard cert provider — shown when this workspace overrides the base domain
@@ -179,7 +179,7 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
           <div>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Wildcard cert (DNS-01)</label>
             <select value={dnsProvider} onChange={e => setDnsProvider(e.target.value)}
-              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+              className={`${CONTROL} w-full`}>
               <option value="">Inherit global (Settings → General — per-host HTTP-01 unless the global picks Cloudflare)</option>
               <option value="cloudflare">Cloudflare — one wildcard cert for *.{domain.trim()}</option>
             </select>
@@ -188,7 +188,7 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
                 <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Cloudflare API token</label>
                 <input type="password" value={dnsToken} onChange={e => setDnsToken(e.target.value)}
                   placeholder="paste a Zone:DNS:Edit + Zone:Read token"
-                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+                  className={`${CONTROL} w-full font-mono`} />
                 <Hint>Scoped to <code className="font-mono">{domain.trim()}</code> (Cloudflare → My Profile → API Tokens, <strong>Zone:DNS:Edit</strong> + <strong>Zone:Read</strong>). Rigger issues a single <code className="font-mono">*.{domain.trim()}</code> cert under this workspace&apos;s own zone, out-of-band (no Traefik restart, no clash with the global token). Stored <strong>encrypted at rest</strong> and never shown again — leave the masked value to keep the current token. Leave blank to fall back to the global Cloudflare token.</Hint>
               </div>
             ) : (
@@ -209,7 +209,7 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
           <div>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Auto-URL fallback (when no base domain)</label>
             <select value={autoMode} onChange={e => setAutoMode(e.target.value)}
-              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+              className={`${CONTROL} w-full`}>
               <option value="">Inherit global (Settings → General)</option>
               <option value="localhost">localhost (host-only — not reachable from other machines)</option>
               <option value="sslip">sslip.io (recommended — {'{label}'}.&lt;ip&gt;.sslip.io)</option>
@@ -221,7 +221,7 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
               <div className="mt-2">
                 <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Auto-URL host / IP</label>
                 <input value={autoHost} onChange={e => setAutoHost(e.target.value)} placeholder="inherits global App host (Settings → General)"
-                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+                  className={`${CONTROL} w-full font-mono`} />
                 <Hint>The IP embedded in the magic-DNS name for this workspace&apos;s LOCAL envs — e.g. <code className="font-mono">myws-myapp-dev.{(autoHost.trim() || '10.10.10.111')}.{autoMode === 'nip' ? 'nip.io' : autoMode === 'traefikme' ? 'traefik.me' : 'sslip.io'}</code>. Blank inherits the global App host. (Remote-host envs always use their own host&apos;s address.)</Hint>
               </div>
             )}
@@ -276,14 +276,14 @@ function WorkspaceTierOrder({ workspace, qc }) {
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">Tier order</label>
           <textarea value={tiers} onChange={e => setTiers(e.target.value)} rows={2}
             placeholder="dev, staging, qa, uat, preprod, prod"
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL} w-full font-mono`} />
           <Hint>Tier names from lowest to highest (comma or newline). Used to auto-guess each project's deploy order (dev → prod) for the release pipeline. A project can override with an explicit order. Leave blank for the built-in default.</Hint>
         </div>
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1.5">Environments allowed to wipe data</label>
           <textarea value={wipe} onChange={e => setWipe(e.target.value)} rows={1}
             placeholder="dev, test"
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL} w-full font-mono`} />
           <Hint>Environments whose application <strong className="text-content-muted">data</strong> may be wiped (reset for dev/test) from a project's Danger Zone — by a workspace admin, with a typed confirmation + password. Leave blank to disable everywhere. <strong className="text-content-muted">Do not list production.</strong></Hint>
         </div>
         <div className="flex items-center gap-3">
@@ -390,7 +390,7 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Display name</label>
             <input
               value={name} onChange={e => setName(e.target.value)} maxLength={32}
-              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
+              className={`${CONTROL} w-full`}
             />
             <Hint>1–32 chars; editable anytime.</Hint>
           </div>
@@ -1668,7 +1668,7 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
             <div className="space-y-2">
               {f.rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className={`${CONTROL} w-full`}>
                     <option value="allow">Allow</option><option value="deny">Deny</option>
                   </select>
                   <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4" className={aclInput} />
@@ -1681,7 +1681,7 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
           <div className="border-t border-border pt-3">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">GeoIP country policy</label>
             <div className="grid grid-cols-2 gap-3 mt-1">
-              <select value={f.geo_mode} onChange={e => set('geo_mode', e.target.value)} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+              <select value={f.geo_mode} onChange={e => set('geo_mode', e.target.value)} className={`${CONTROL} w-full`}>
                 <option value="off">Off</option><option value="allow">Allow only these countries</option><option value="block">Block these countries</option>
               </select>
               <input value={f.countriesText} onChange={e => set('countriesText', e.target.value)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} className={aclInput} />
@@ -2003,7 +2003,7 @@ function TransferModal({ workspace, projects, others, onClose, onDone }) {
         <div>
           <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Target workspace</label>
           <select value={target} onChange={e => setTarget(e.target.value)}
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+            className={`${CONTROL} w-full`}>
             {others.map(o => <option key={o.key} value={o.key}>{o.name} ({o.key})</option>)}
           </select>
         </div>
@@ -2104,7 +2104,7 @@ function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) 
       <div>
         <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Target workspace</label>
         <select value={target} onChange={e => setTarget(e.target.value)}
-          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+          className={`${CONTROL} w-full`}>
           {others.map(o => <option key={o.key} value={o.key}>{o.name} ({o.key})</option>)}
         </select>
       </div>

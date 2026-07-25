@@ -4,7 +4,7 @@ import {
   fetchProjectNotes, fetchProjectNote, createProjectNote, saveProjectNote,
   deleteProjectNote, renderProjectNotes,
 } from '../lib/api'
-import { Hint, Btn, IconBtn } from './ui'
+import { Hint, Btn, IconBtn, CONTROL_SM, CONTROL } from './ui'
 
 // Project Wiki / Notes tab. Multiple NAMED Markdown docs (one file each in the
 // project's notes/ dir); each note's name is a sub-tab. Markdown is rendered +
@@ -150,7 +150,7 @@ export default function ProjectNotesTab({ workspace, name }) {
         <div className="flex items-center flex-wrap gap-2 border-b border-border mb-4 min-h-[2.75rem] py-1">
           <label htmlFor="note-name" className="text-[11px] font-semibold uppercase tracking-wider text-content-muted shrink-0">Note name</label>
           <input id="note-name" value={draftName} onChange={e => setDraftName(e.target.value)} placeholder="Note name"
-            className="w-48 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 shrink-0" />
+            className={`${CONTROL} w-48 shrink-0`} />
           <div className="flex items-center gap-2 ml-auto shrink-0">
             <Btn variant="dangerSubtle" size="sm" onClick={remove} disabled={busy} >Delete</Btn>
             <Btn variant="secondary" size="sm" onClick={() => { setEditing(false); setError('') }} disabled={busy}
@@ -172,7 +172,7 @@ export default function ProjectNotesTab({ workspace, name }) {
                 <input value={newName} onChange={e => setNewName(e.target.value)} autoFocus
                   onKeyDown={e => { if (e.key === 'Enter') addNote(); if (e.key === 'Escape') { setAdding(false); setNewName('') } }}
                   placeholder="Note name" disabled={busy}
-                  className="w-36 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                  className={`${CONTROL_SM} w-36`} />
                 <Btn variant="primary" size="xs" onClick={addNote} disabled={busy || !newName.trim()} >Add</Btn>
                 <IconBtn variant="ghost" size="xs" onClick={() => { setAdding(false); setNewName('') }} >×</IconBtn>
               </div>

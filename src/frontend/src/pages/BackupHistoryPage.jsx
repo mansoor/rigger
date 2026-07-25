@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchBackups, syncEnvBackup } from '../lib/api'
 import Layout from '../components/Layout'
 import { useWorkspaceStore } from '../store/workspace'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, CONTROL } from '../components/ui'
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -125,7 +125,7 @@ export default function BackupHistoryPage() {
             placeholder="Filter by workspace or env…"
             value={filter}
             onChange={e => setFilter(e.target.value)}
-            className="px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 w-56"
+            className={`${CONTROL} w-56`}
           />
         </div>
 

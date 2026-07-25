@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { Hint, CertBadge, Btn, IconBtn, CloseBtn } from '../components/ui'
+import { Hint, CertBadge, Btn, IconBtn, CloseBtn, CONTROL } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -20,13 +20,13 @@ function Label({ children }) {
 function Input({ value, onChange, placeholder, type = 'text', disabled }) {
   return (
     <input type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50" />
+      className={`${CONTROL} w-full disabled:opacity-50`} />
   )
 }
 function Select({ value, onChange, options, disabled }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50">
+      className={`${CONTROL} w-full disabled:opacity-50`}>
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   )
@@ -410,7 +410,7 @@ function PluginsCard({ plugins }) {
           <div className="flex items-center gap-2">
             <input type="password" value={geoToken} onChange={e => { setGeoToken(e.target.value); setGeoMsg(null) }}
               placeholder={plugins.geoip_token_set ? 'token saved — paste to replace, or just refresh' : 'IP2Location LITE download token'}
-              className="flex-1 bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} flex-1`} />
             <Btn variant="primary" size="md" onClick={() => { setGeoMsg(null); geoMut.mutate() }}
               disabled={geoMut.isPending || (!geoToken.trim() && !plugins.geoip_token_set)}
               className="shrink-0">
@@ -578,9 +578,9 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
               {f.users.map((u, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <input value={u.user} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
-                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                    className={`${CONTROL} flex-1`} />
                   <input type="password" value={u.password} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
-                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                    className={`${CONTROL} flex-1`} />
                   <IconBtn variant="dangerGhost" size="xs" onClick={() => set('users', f.users.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
@@ -595,11 +595,11 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
             <div className="space-y-2">
               {f.rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                  <select value={r.action} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, action: e.target.value } : x))} className={`${CONTROL} w-full`}>
                     <option value="allow">Allow</option><option value="deny">Deny</option>
                   </select>
                   <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4"
-                    className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                    className={`${CONTROL} flex-1`} />
                   <IconBtn variant="dangerGhost" size="xs" onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
@@ -805,14 +805,14 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
               <div className="space-y-2">
                 {f.upstreams.map((u, i) => (
                   <div key={i} className="flex items-center gap-2">
-                    <select value={u.scheme} onChange={e => setUp(i, 'scheme', e.target.value)} className="px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                    <select value={u.scheme} onChange={e => setUp(i, 'scheme', e.target.value)} className={`${CONTROL} w-full`}>
                       <option value="http">http</option><option value="https">https</option>
                     </select>
                     <input value={u.host} onChange={e => setUp(i, 'host', e.target.value)} placeholder="192.168.1.50"
-                      className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                      className={`${CONTROL} flex-1`} />
                     <span className="text-content-muted">:</span>
                     <input value={u.port} onChange={e => setUp(i, 'port', e.target.value)} placeholder="8096"
-                      className="w-20 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                      className={`${CONTROL} w-20`} />
                     <IconBtn variant="dangerGhost" size="xs" onClick={() => set('upstreams', f.upstreams.filter((_, j) => j !== i))} title="Remove"
                       >🗑</IconBtn>
                   </div>
@@ -868,9 +868,9 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                   {f.auth_users.map((u, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <input value={u.user} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username"
-                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                        className={`${CONTROL} flex-1`} />
                       <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
-                        className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
+                        className={`${CONTROL} flex-1`} />
                       <IconBtn variant="dangerGhost" size="xs" onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} >🗑</IconBtn>
                     </div>
                   ))}
@@ -947,22 +947,22 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                   <div key={i} className="border border-border rounded-lg p-3 space-y-2 bg-surface-raised/30">
                     <div className="flex items-center gap-2">
                       <input value={l.path} onChange={e => setLoc(i, 'path', e.target.value)} placeholder="/path"
-                        className="w-28 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                        className={`${CONTROL} w-28`} />
                       <input value={l.forward_path || ''} onChange={e => setLoc(i, 'forward_path', e.target.value)} placeholder="forward to /sub (optional)"
-                        className="flex-1 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                        className={`${CONTROL} flex-1`} />
                       <IconBtn variant="dangerGhost" size="xs" onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} title="Remove location" >🗑</IconBtn>
                     </div>
                     <div className="space-y-1.5 pl-1">
                       {(l.upstreams || []).map((u, k) => (
                         <div key={k} className="flex items-center gap-2">
-                          <select value={u.scheme || 'http'} onChange={e => setLocUp(i, k, 'scheme', e.target.value)} className="px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm">
+                          <select value={u.scheme || 'http'} onChange={e => setLocUp(i, k, 'scheme', e.target.value)} className={`${CONTROL} w-full`}>
                             <option value="http">http</option><option value="https">https</option>
                           </select>
                           <input value={u.host} onChange={e => setLocUp(i, k, 'host', e.target.value)} placeholder="10.0.0.5"
-                            className="flex-1 min-w-[90px] px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                            className={`${CONTROL} flex-1 min-w-[90px]`} />
                           <span className="text-content-muted">:</span>
                           <input value={u.port} onChange={e => setLocUp(i, k, 'port', e.target.value)} placeholder="80"
-                            className="w-16 px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+                            className={`${CONTROL} w-16`} />
                           <IconBtn variant="dangerGhost" size="xs" onClick={() => setLoc(i, 'upstreams', l.upstreams.filter((_, m) => m !== k))} title="Remove upstream"
                              disabled={l.upstreams.length <= 1}>🗑</IconBtn>
                         </div>
@@ -991,9 +991,9 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
               {f.tls_mode === 'custom' && (
                 <div className="col-span-2 grid grid-cols-1 gap-2">
                   <textarea value={f.tls_cert_pem || ''} onChange={e => set('tls_cert_pem', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" rows={3}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono focus:outline-none focus:border-brand-500" />
+                    className={`${CONTROL} w-full font-mono`} />
                   <textarea value={f.tls_key || ''} onChange={e => set('tls_key', e.target.value)} placeholder={isEdit ? 'private key (leave blank to keep)' : '-----BEGIN PRIVATE KEY-----'} rows={3}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono focus:outline-none focus:border-brand-500" />
+                    className={`${CONTROL} w-full font-mono`} />
                 </div>
               )}
             </div>

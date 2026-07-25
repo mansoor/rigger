@@ -19,7 +19,7 @@ import SettingsPage from './pages/SettingsPage'
 import HousekeepingPage from './pages/HousekeepingPage'
 import ToolsPage from './pages/ToolsPage'
 import ProxyServicePage from './pages/ProxyServicePage'
-import { Btn } from './components/ui'
+import { Btn, CONTROL } from './components/ui'
 
 function RequireAuth({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -72,7 +72,7 @@ function ForcePasswordChange() {
               <div key={label}>
                 <label className="block text-sm font-medium text-content mb-1">{label}</label>
                 <input type="password" value={val} onChange={e => set(e.target.value)} required
-                  className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500 transition-colors" />
+                  className={`${CONTROL} w-full`} />
               </div>
             ))}
             <Btn variant="primary" size="md" type="submit" disabled={busy} className="w-full mt-2">

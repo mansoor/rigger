@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { Btn, CloseBtn } from './ui'
+import { Btn, CloseBtn, CONTROL } from './ui'
 
 export default function TerminalModal({ workspace, wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
@@ -188,7 +188,7 @@ export default function TerminalModal({ workspace, wsName, envName, initialServi
               value={service}
               onChange={e => { setService(e.target.value); disconnect() }}
               disabled={isLoading || connected || connecting}
-              className="bg-surface-raised border border-border-strong text-content-strong text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-brand-500 disabled:opacity-50"
+              className={`${CONTROL} w-full disabled:opacity-50`}
             >
               {isLoading
                 ? <option value="">Loading…</option>

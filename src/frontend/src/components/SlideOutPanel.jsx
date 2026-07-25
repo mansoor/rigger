@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchAllActivity, fetchBackups, fetchWorkspaces, openActionSocket, deleteBackup,
   syncEnvBackup, verifyRestore, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
-import { Btn, IconBtn } from './ui'
+import { Btn, IconBtn, CONTROL } from './ui'
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -56,12 +56,12 @@ function FilterBar({ workspaceFilter, setWorkspaceFilter, typeFilter, setTypeFil
         placeholder="Filter by workspace…"
         value={workspaceFilter}
         onChange={e => setWorkspaceFilter(e.target.value)}
-        className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500"
+        className={`${CONTROL} flex-1`}
       />
       <select
         value={typeFilter}
         onChange={e => setTypeFilter(e.target.value)}
-        className="px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content focus:outline-none focus:border-brand-500"
+        className={`${CONTROL} w-full`}
       >
         <option value="all">All types</option>
         <option value="image">Image stacks / Compose</option>

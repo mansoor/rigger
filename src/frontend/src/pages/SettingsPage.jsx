@@ -37,7 +37,7 @@ import {
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
-import { Hint, Btn, CloseBtn } from '../components/ui'
+import { Hint, Btn, CloseBtn, CONTROL } from '../components/ui'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest 
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-50"
+      className={`${CONTROL} w-full disabled:opacity-50`}
       {...rest}
     />
   )
@@ -64,7 +64,7 @@ function Select({ value, onChange, options, disabled }) {
   return (
     <select
       value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50"
+      className={`${CONTROL} w-full disabled:opacity-50`}
     >
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
@@ -1017,7 +1017,7 @@ function DomainsTab() {
             <div>
               <Label>Wildcard cert (DNS-01)</Label>
               <select value={dnsProvider} onChange={e => setDnsProvider(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-raised border border-border rounded-lg text-sm text-content">
+                className={`${CONTROL} w-full`}>
                 <option value="">Per-host certs (HTTP-01 — needs public port 80)</option>
                 <option value="cloudflare">Cloudflare — one wildcard cert for *.{appsBaseDomain.trim()}</option>
               </select>
@@ -1059,7 +1059,7 @@ function DomainsTab() {
           <div>
             <Label>Auto-URL fallback (when no base domain)</Label>
             <select value={autoUrlMode} onChange={e => setAutoUrlMode(e.target.value)}
-              className="w-full px-3 py-2 bg-surface-raised border border-border rounded-lg text-sm text-content">
+              className={`${CONTROL} w-full`}>
               <option value="localhost">localhost (host-only — not reachable from other machines)</option>
               <option value="sslip">sslip.io (recommended — {'{label}'}.&lt;ip&gt;.sslip.io)</option>
               <option value="nip">nip.io</option>

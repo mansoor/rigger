@@ -12,7 +12,7 @@ import ThemeToggle from './ThemeToggle'
 import HelpToggle from './HelpToggle'
 import KeyField from './KeyField'
 import RequestAccessModal from './RequestAccessModal'
-import { Hint, Btn, CloseBtn } from './ui'
+import { Hint, Btn, CloseBtn, CONTROL } from './ui'
 import { AppearanceTab, LogsTerminalTab } from '../pages/SettingsPage'
 
 // Sidebar scroll position, preserved across Layout remounts (each page mounts its own
@@ -205,7 +205,7 @@ function NewWorkspaceModal({ onClose, onCreated }) {
           <input
             autoFocus value={name} onChange={e => setName(e.target.value)} required maxLength={32}
             placeholder="e.g. Acme Corporation"
-            className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
+            className={`${CONTROL} w-full`}
           />
         </div>
         <KeyField type="workspace" name={name} label="Workspace key" onChange={(k, v) => { setKey(k); setKeyValid(v) }} />
@@ -259,7 +259,7 @@ function ChangePasswordModal({ onClose }) {
               <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">{label}</label>
               <input
                 type="password" value={val} onChange={e => set(e.target.value)} required
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
+                className={`${CONTROL} w-full`}
               />
             </div>
           )
@@ -805,7 +805,7 @@ function AccountSecurity({ onDone }) {
           <div key={label}>
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">{label}</label>
             <input type="password" value={val} onChange={e => set(e.target.value)} required
-              className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full`} />
           </div>
         )
       })}

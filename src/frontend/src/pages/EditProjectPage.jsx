@@ -21,7 +21,7 @@ import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 import { useConfirm } from '../context/ConfirmContext'
-import { Label, Input, Toggle, Select, Hint, Field, FormRow, ReadOnly, Btn, IconBtn, CloseBtn } from '../components/ui'
+import { Label, Input, Toggle, Select, Hint, Field, FormRow, ReadOnly, Btn, IconBtn, CloseBtn, CONTROL, CONTROL_SM } from '../components/ui'
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
@@ -599,7 +599,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
             value={img.healthcheck || ''}
             onChange={e => upd('healthcheck', e.target.value)}
             placeholder="curl -sf http://localhost/health || exit 1"
-            className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono placeholder-content-subtle focus:outline-none focus:border-brand-500"
+            className={`${CONTROL} w-full font-mono`}
           />
         </div>
         {/* Time parameters — only shown when a command is set */}
@@ -637,7 +637,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                           [key]: stored,
                         })
                       }}
-                      className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500"
+                      className={`${CONTROL} w-full font-mono`}
                     />
                   </div>
                 )
@@ -1985,7 +1985,7 @@ function NewEnvVarsEditor({ cfg, onChange }) {
         <span className="font-mono text-xs text-content w-40 shrink-0 truncate">{k}</span>
         <input type={secret && !reveal ? 'password' : 'text'} value={v}
           onChange={e => setVar(k, e.target.value)}
-          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+          className={`${CONTROL_SM} flex-1 font-mono`} />
         <IconBtn variant="dangerGhost" size="xs" onClick={() => removeVar(k)}
           ><TrashIcon /></IconBtn>
       </div>
@@ -2030,10 +2030,10 @@ function NewEnvVarsEditor({ cfg, onChange }) {
             </button>
             <input type="text" placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
-              className="w-40 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL_SM} w-40 font-mono`} />
             <input type="text" placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && addVar()}
-              className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL_SM} flex-1 font-mono`} />
             <button type="button" onClick={addVar}
               className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-2">Add</button>
           </div>
@@ -2232,7 +2232,7 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
           value={marked ? '' : (edits[k] ?? (show ? val : ''))}
           disabled={marked}
           onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40"
+          className={`${CONTROL_SM} flex-1 font-mono disabled:opacity-40`}
         />
         <button type="button" onClick={() => toggleDelete(k)}
           className={`shrink-0 w-5 h-5 flex items-center justify-center rounded text-xs transition-colors ${
@@ -2306,10 +2306,10 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
             </button>
             <input type="text" placeholder="NEW_KEY" value={newKey}
               onChange={e => setNewKey(e.target.value)}
-              className="w-32 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL_SM} w-32 font-mono`} />
             <input type={newSecret ? 'password' : (reveal ? 'text' : 'password')} placeholder="value" value={newVal}
               onChange={e => setNewVal(e.target.value)}
-              className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL_SM} flex-1 font-mono`} />
             <Btn variant="secondary" size="xs" onClick={() => newKey.trim() && handleSave()}
               disabled={!newKey.trim() || saveMut.isPending}
               className="shrink-0">
@@ -3454,7 +3454,7 @@ function DangerZone({ name, envNames = [] }) {
             </div>
             <div className="ml-6 shrink-0 flex items-center gap-2">
               <select value={wipeEnv} onChange={e => setWipeEnv(e.target.value)}
-                className="px-2.5 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+                className={`${CONTROL} w-full`}>
                 {wipeableEnvs.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
               <Btn variant="dangerSubtle" size="md" onClick={openWipe} >

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchServiceConsole, fetchStorageBuckets, createStorageBucket } from '../lib/api'
 import { DatabasePanel, CopyBtn, SecretValue } from './DatabaseInfoModal'
-import { Hint, Btn, CloseBtn } from './ui'
+import { Hint, Btn, CloseBtn, CONTROL } from './ui'
 
 // ServiceConsoleModal — per-env Managed Service Console (P4). A tabbed view over every
 // managed service enabled for the environment: the database (rich Connection/Manage
@@ -221,7 +221,7 @@ function BucketManager({ workspace, name, env, canManage }) {
         <div className="flex items-center gap-2 pt-1">
           <input value={newName} onChange={e => { setNewName(e.target.value); setErr('') }}
             placeholder="new-bucket-name"
-            className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL} flex-1 font-mono`} />
           <Btn variant="primary" size="xs" disabled={!valid || createMut.isPending} onClick={() => createMut.mutate()}
             >
             {createMut.isPending ? 'Creating…' : '+ Create'}

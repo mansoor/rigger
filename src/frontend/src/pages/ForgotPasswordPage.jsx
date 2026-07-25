@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { forgotPassword } from '../lib/api'
-import { Btn } from '../components/ui'
+import { Btn, CONTROL } from '../components/ui'
 
 // Self-service "forgot password" request. Always shows the same generic success
 // message regardless of whether the email is registered (the server never reveals
@@ -68,7 +68,7 @@ export default function ForgotPasswordPage() {
                   <label className="block text-sm font-medium text-content mb-1">Email</label>
                   <input
                     type="email" value={email} onChange={e => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                    className={`${CONTROL} w-full`}
                     autoFocus required
                   />
                 </div>

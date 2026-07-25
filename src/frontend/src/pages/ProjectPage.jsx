@@ -16,7 +16,7 @@ import RollbackModal from '../components/RollbackModal'
 import ServiceConsoleModal from '../components/ServiceConsoleModal'
 import MaintenanceModal from '../components/MaintenanceModal'
 import Sparkline from '../components/Sparkline'
-import { Hint, Btn, IconBtn, CloseBtn } from '../components/ui'
+import { Hint, Btn, IconBtn, CloseBtn, CONTROL_SM } from '../components/ui'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
 
@@ -1101,7 +1101,7 @@ function ReleasePipeline({ ws }) {
         <div className="flex items-center gap-2 shrink-0">
           {pipes.length > 1 && (
             <select value={pipeline?.id || ''} onChange={e => setSelId(Number(e.target.value))}
-              className="px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content">
+              className={`${CONTROL_SM} w-full`}>
               {pipes.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           )}
@@ -1287,7 +1287,7 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
             <select
               value={tail}
               onChange={e => { const v = Number(e.target.value); setTail(v); try { localStorage.setItem('rigger:actionlog:tail', String(v)) } catch {} }}
-              className="bg-surface-raised border border-border-strong text-content rounded px-1.5 py-0.5 focus:outline-none focus:border-brand-500"
+              className={`${CONTROL_SM} w-full`}
             >
               {TAIL_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'All' : n}</option>)}
             </select>
@@ -1705,7 +1705,7 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
         <div className="relative shrink-0">
           <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
             placeholder="Filter lines…"
-            className="w-44 px-3 py-1 text-xs bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 font-mono" />
+            className={`${CONTROL_SM} w-44 font-mono`} />
           {filter && <button onClick={() => setFilter('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content text-xs">×</button>}
         </div>
 
@@ -1722,7 +1722,7 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-xs text-content-faint">show</span>
           <select value={rowLimit} onChange={e => setRowLimit(Number(e.target.value))}
-            className="text-xs bg-surface-raised border border-border-strong rounded px-1.5 py-1 text-content focus:outline-none focus:border-brand-500">
+            className={`${CONTROL_SM} w-full`}>
             {ROW_LIMIT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
@@ -1802,7 +1802,7 @@ function LogViewer({ wsName, envs }) {
             <div className="relative">
               <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
                 placeholder="filter…"
-                className="w-28 px-2 py-0.5 text-xs bg-surface-raised border border-border-strong rounded text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 font-mono" />
+                className={`${CONTROL_SM} w-28 font-mono`} />
               {filter && <button onClick={() => setFilter('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-subtle hover:text-content text-xs">×</button>}
             </div>
 
@@ -2014,7 +2014,7 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
                     value={markedForDelete ? '' : (edits[k] ?? (reveal && !secret ? info.value : ''))}
                     disabled={markedForDelete}
                     onChange={e => setEdits(p => ({ ...p, [k]: e.target.value }))}
-                    className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className={`${CONTROL_SM} flex-1 font-mono disabled:opacity-40 disabled:cursor-not-allowed`}
                   />
                 )}
                 <button type="button" onClick={() => toggleDelete(k)}
@@ -2072,11 +2072,11 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
           <input type="text" placeholder="NEW_KEY" value={newKey}
             onChange={e => setNewKey(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
-            className="w-40 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL_SM} w-40 font-mono`} />
           <input type={newSecret ? 'password' : 'text'} placeholder="value" value={newVal}
             onChange={e => setNewVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
-            className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+            className={`${CONTROL_SM} flex-1 font-mono`} />
           <Btn variant="secondary" size="xs" onClick={() => { if (newKey.trim()) handleSave() }}
             disabled={!newKey.trim() || mutation.isPending}
             className="shrink-0">Add</Btn>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { resetPassword, fetchPasswordPolicy } from '../lib/api'
-import { Btn } from '../components/ui'
+import { Btn, CONTROL } from '../components/ui'
 
 // Builds the human-readable requirement list from the active password policy.
 function policyHints(p) {
@@ -79,7 +79,7 @@ export default function ResetPasswordPage() {
                   <label className="block text-sm font-medium text-content mb-1">New password</label>
                   <input
                     type="password" value={password} onChange={e => setPassword(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                    className={`${CONTROL} w-full`}
                     autoFocus required
                   />
                 </div>
@@ -87,7 +87,7 @@ export default function ResetPasswordPage() {
                   <label className="block text-sm font-medium text-content mb-1">Confirm password</label>
                   <input
                     type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                    className={`${CONTROL} w-full`}
                     required
                   />
                 </div>

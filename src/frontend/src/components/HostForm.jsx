@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchManagedHostKey } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CONTROL } from './ui'
 
 // Shared Remote Host add/edit form, used by both the admin Settings page (global
 // hosts, with a workspace allowlist) and Manage Workspace (workspace-owned hosts).
@@ -27,7 +27,7 @@ function Input({ value, onChange, placeholder, type = 'text', disabled, ...rest 
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors disabled:opacity-50"
+      className={`${CONTROL} w-full disabled:opacity-50`}
       {...rest}
     />
   )

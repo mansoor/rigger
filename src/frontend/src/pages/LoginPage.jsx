@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import api from '../lib/api'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, CONTROL } from '../components/ui'
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
@@ -72,7 +72,7 @@ export default function LoginPage() {
               <label className="block text-sm font-medium text-content mb-1">Email</label>
               <input
                 type="email" value={email} onChange={e => setEmail(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                className={`${CONTROL} w-full`}
                 autoFocus required
               />
             </div>
@@ -80,7 +80,7 @@ export default function LoginPage() {
               <label className="block text-sm font-medium text-content mb-1">Password</label>
               <input
                 type="password" value={password} onChange={e => setPassword(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors"
+                className={`${CONTROL} w-full`}
                 required
               />
             </div>

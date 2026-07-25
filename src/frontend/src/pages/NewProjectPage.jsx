@@ -19,7 +19,7 @@ import { BackupScheduleEditor } from '../components/BackupSchedules'
 import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
-import { Hint, Btn, IconBtn } from '../components/ui'
+import { Hint, Btn, IconBtn, CONTROL, CONTROL_SM } from '../components/ui'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ function Select({ value, onChange, options }) {
   return (
     <select
       value={value} onChange={e => onChange(e.target.value)}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
+      className={`${CONTROL} w-full`}
     >
       {options.map(o => (
         <option key={o.value} value={o.value}>{o.label}</option>
@@ -130,7 +130,7 @@ function Step1({ data, onChange, errors, onConflict, workspace, defaultHostId })
         <select
           value={String(data.default_host_id || 0)}
           onChange={e => onChange('default_host_id', Number(e.target.value))}
-          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 transition-colors"
+          className={`${CONTROL} w-full`}
         >
           <option value="0">Local control plane</option>
           {hosts.filter(h => !h.build_only).map(h => <option key={h.id} value={String(h.id)}>{h.name} — {h.address}</option>)}
@@ -1011,7 +1011,7 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange =
             <span className="font-mono text-xs text-content w-40 shrink-0 truncate flex items-center gap-1">{k}{overrides && <span className="text-[9px] uppercase tracking-wide text-accent-text not-italic" title="Overrides a shared variable for this environment">ovr</span>}</span>
             <input
               type={secret ? 'password' : 'text'} value={v} onChange={e => update(k, e.target.value)}
-              className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
+              className={`${CONTROL_SM} flex-1 font-mono`}
             />
             <IconBtn variant="dangerGhost" size="xs" onClick={() => remove(k)} ><TrashIcon /></IconBtn>
           </div>
@@ -1025,12 +1025,12 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange =
         <input
           type="text" placeholder="KEY" value={newKey} onChange={e => setNewKey(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
-          className="w-40 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
+          className={`${CONTROL_SM} w-40 font-mono`}
         />
         <input
           type={newSecret ? 'password' : 'text'} placeholder="value" value={newVal} onChange={e => setNewVal(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && add()}
-          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
+          className={`${CONTROL_SM} flex-1 font-mono`}
         />
         <button type="button" onClick={add} className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-2">Add</button>
       </div>
@@ -1619,13 +1619,13 @@ function VolumeEditor({ volumes, onChange }) {
           <input
             type="text" value={vol.name} onChange={e => update(i, 'name', e.target.value)}
             placeholder="./volumes/db_data or db_data"
-            className="flex-1 px-2 py-1.5 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
+            className={`${CONTROL} flex-1 font-mono`}
           />
           <span className="text-content-faint text-xs shrink-0">→</span>
           <input
             type="text" value={vol.mountPath} onChange={e => update(i, 'mountPath', e.target.value)}
             placeholder="/var/lib/mysql"
-            className="flex-1 px-2 py-1.5 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
+            className={`${CONTROL} flex-1 font-mono`}
           />
           <IconBtn variant="dangerGhost" size="xs" onClick={() => remove(i)} ><TrashIcon /></IconBtn>
         </div>
@@ -1805,7 +1805,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
       <div className="w-1/2">
         <Label>Restart policy</Label>
         <select value={img.restart || 'unless-stopped'} onChange={e => upd('restart', e.target.value)}
-          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+          className={`${CONTROL} w-full`}>
           {RESTART_OPTIONS_WIZ.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
@@ -1921,7 +1921,7 @@ function NamedVolumeEditor({ volumes, onChange }) {
         <input type="text" value={newName} onChange={e => setNewName(e.target.value.replace(/[./\\]/g,''))}
           onKeyDown={e => e.key === 'Enter' && add()}
           placeholder="volume_name (no paths)"
-          className="flex-1 px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
+          className={`${CONTROL} flex-1 font-mono`} />
         <button type="button" onClick={add}
           className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-3 transition-colors">Add</button>
       </div>

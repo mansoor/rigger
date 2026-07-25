@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
-import { Hint, Btn, CloseBtn } from './ui'
+import { Hint, Btn, CloseBtn, CONTROL } from './ui'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
 export function humanBytes(n) {
@@ -415,7 +415,7 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
           <div className="flex items-center gap-2">
             <input value={newName} onChange={e => { setNewName(e.target.value); setErr(''); if (withUser && !newUser) setNewUser(e.target.value ? `${e.target.value}_user` : '') }}
               placeholder={unit === 'database' ? 'new_database' : 'new_schema'}
-              className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} flex-1 font-mono`} />
             <Btn variant="primary" size="xs" disabled={!schemaValid || !userValid || createMut.isPending} onClick={() => createMut.mutate()}
               >
               {createMut.isPending ? 'Creating…' : '+ Create'}
@@ -428,7 +428,7 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
           {withUser && (
             <input value={newUser} onChange={e => { setNewUser(e.target.value); setErr('') }}
               placeholder="username"
-              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full font-mono`} />
           )}
           {created && (
             <div className="rounded-lg border border-success-border/50 bg-success-subtle/30 p-2 text-xs space-y-1">

@@ -33,6 +33,24 @@ export function Hint({ children, className = '', tone = 'subtle' }) {
   return <p className={`${size} ${color} ${margin} ${className}`.replace(/\s+/g, ' ').trim()}>{children}</p>
 }
 
+// ── Control class strings ──────────────────────────────────────────────────────
+// Input/Select/Textarea below are the preferred API. But plenty of controls in
+// the app stay raw <input>/<select> for real reasons — uncontrolled fields, refs,
+// inline editors with bespoke event wiring — and those had drifted into ~77
+// different class strings: same control, different height, radius and text size
+// depending on the screen. These constants let a raw element be pixel-identical
+// to a kit one without restating the recipe.
+//
+// CONTROL is the standard form field. CONTROL_SM is the compact variant for
+// controls that sit inline in a dense table or list row.
+export const CONTROL =
+  'px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm ' +
+  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors'
+
+export const CONTROL_SM =
+  'px-2 py-1 bg-surface-raised border border-border-strong rounded text-content-strong text-sm ' +
+  'placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors'
+
 // ── Primitives ─────────────────────────────────────────────────────────────────
 export function Label({ children, required, htmlFor }) {
   return (
@@ -47,7 +65,7 @@ export function Input({ value, onChange, placeholder, type = 'text', className =
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
-      className={`w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors ${className}`}
+      className={`w-full ${CONTROL} ${className}`}
       {...rest}
     />
   )
@@ -58,7 +76,7 @@ export function Textarea({ value, onChange, placeholder, rows = 4, className = '
     <textarea
       value={value ?? ''} onChange={e => onChange(e.target.value)}
       placeholder={placeholder} rows={rows}
-      className={`w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500 transition-colors ${className}`}
+      className={`w-full ${CONTROL} ${className}`}
       {...rest}
     />
   )
@@ -67,7 +85,7 @@ export function Textarea({ value, onChange, placeholder, rows = 4, className = '
 export function Select({ value, onChange, options, className = '', ...rest }) {
   return (
     <select value={value ?? ''} onChange={e => onChange(e.target.value)}
-      className={`w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 ${className}`}
+      className={`w-full ${CONTROL} ${className}`}
       {...rest}>
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>

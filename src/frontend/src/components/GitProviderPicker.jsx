@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspaceGitProviders, createWorkspaceGitProvider } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CONTROL } from './ui'
 
 // GitProviderPicker selects the workspace Git provider used to clone a PRIVATE
 // source repo (sets the project's git_provider_id). It can inline-create a provider
@@ -33,7 +33,7 @@ export default function GitProviderPicker({ workspace, value, onChange }) {
         <select
           value={String(value || 0)}
           onChange={e => onChange(Number(e.target.value))}
-          className="flex-1 bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500">
+          className={`${CONTROL} flex-1`}>
           <option value="0">Public repo — no credentials</option>
           {providers.map(p => (
             <option key={p.id} value={String(p.id)}>

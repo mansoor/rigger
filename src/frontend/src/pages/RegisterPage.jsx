@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchRegisterInfo, completeRegistration } from '../lib/api'
 import { useAuthStore } from '../store/auth'
-import { Btn } from '../components/ui'
+import { Btn, CONTROL } from '../components/ui'
 
 // Invite registration (Phase 5.1b). The invitee arrives via an emailed/shared
 // link (/register?token=...), sets a password (+optional phone), and is logged in.
@@ -69,22 +69,22 @@ export default function RegisterPage() {
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Display name <span className="text-content-subtle font-normal">(optional)</span></label>
                   <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500" />
+                    className={`${CONTROL} w-full`} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Password</label>
                   <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoFocus
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500" required />
+                    className={`${CONTROL} w-full`} required />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Confirm password</label>
                   <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500" required />
+                    className={`${CONTROL} w-full`} required />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Phone <span className="text-content-subtle font-normal">(optional, for SMS alerts)</span></label>
                   <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100"
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500" />
+                    className={`${CONTROL} w-full`} />
                 </div>
                 <Btn variant="primary" size="md" type="submit" disabled={loading} className="w-full">
                   {loading ? 'Finishing…' : 'Complete registration'}

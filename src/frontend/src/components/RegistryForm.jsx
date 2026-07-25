@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CONTROL } from './ui'
 
 // Shared Docker Registry add/edit form, used by both the admin Settings page
 // (global registries, with a workspace allowlist) and Manage Workspace
@@ -19,7 +19,7 @@ function Input({ value, onChange, placeholder, type = 'text' }) {
   return (
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors"
+      className={`${CONTROL} w-full`}
     />
   )
 }

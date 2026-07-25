@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
-import { Hint, Btn, CloseBtn } from '../components/ui'
+import { Hint, Btn, CloseBtn, CONTROL } from '../components/ui'
 import {
   fetchHousekeepingStatus, fetchHousekeepingLog,
   fetchHousekeepingImages, fetchStoppedContainers, fetchDanglingVolumes,
@@ -789,13 +789,13 @@ function AutomationTab({ hostPrivileged }) {
             <label className="block text-xs text-content-muted mb-1">Max Age (days)</label>
             <input type="number" value={journalCfg.max_age_days}
               onChange={e => setJournalCfg(c => ({ ...c, max_age_days: parseInt(e.target.value) || 14 }))}
-              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full`} />
           </div>
           <div>
             <label className="block text-xs text-content-muted mb-1">Max Size (GB)</label>
             <input type="number" value={journalCfg.max_size_gb}
               onChange={e => setJournalCfg(c => ({ ...c, max_size_gb: parseInt(e.target.value) || 2 }))}
-              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full`} />
           </div>
         </div>
         <Btn variant="primary" size="xs" onClick={() => jrnlMut.mutate()} disabled={jrnlMut.isPending}
@@ -815,13 +815,13 @@ function AutomationTab({ hostPrivileged }) {
             <label className="block text-xs text-content-muted mb-1">Max Age (days unaccessed)</label>
             <input type="number" value={tmpCfg.max_age_days}
               onChange={e => setTmpCfg(c => ({ ...c, max_age_days: parseInt(e.target.value) || 7 }))}
-              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full`} />
           </div>
           <div>
             <label className="block text-xs text-content-muted mb-1">Exclude patterns (comma-separated)</label>
             <input type="text" value={tmpCfg.exclude} onChange={e => setTmpCfg(c => ({ ...c, exclude: e.target.value }))}
               placeholder="*.sock, *.lock"
-              className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
+              className={`${CONTROL} w-full`} />
           </div>
         </div>
         <Btn variant="primary" size="xs" onClick={() => tmpMut.mutate()} disabled={tmpMut.isPending}

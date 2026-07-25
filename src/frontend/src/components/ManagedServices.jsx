@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import DatabaseSelect from './DatabaseSelect'
-import { Hint } from './ui'
+import { Hint, CONTROL } from './ui'
 
 // ManagedServices is the shared editor for a project's managed services (database,
 // Redis, object/file storage). They are PROJECT-level — consistent across every
@@ -253,7 +253,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
               value={v.storagePath || ''}
               placeholder="/var/www/html/storage"
               onChange={e => set({ storagePath: e.target.value })}
-              className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+              className={`${CONTROL} w-full font-mono`}
             />
             <Hint>A persistent volume is mounted here so uploads survive redeploys. Default suits Laravel; change it to match your app’s upload/storage directory.</Hint>
           </div>
@@ -268,7 +268,7 @@ export default function ManagedServices({ value, onChange, showWebSql = false, r
                 value={v.storageBucket || ''}
                 placeholder={`${resourcePrefix || '<project>'}-<env>  (auto)`}
                 onChange={e => set({ storageBucket: e.target.value })}
-                className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm font-mono text-content focus:outline-none focus:border-brand-500"
+                className={`${CONTROL} w-full font-mono`}
               />
               <Hint>Created automatically on first deploy. Leave blank to derive it as <code className="font-mono">{`{project}-{env}`}</code>; the environment is always appended.</Hint>
             </div>

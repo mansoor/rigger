@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
-import { Btn } from '../components/ui'
+import { Btn, CONTROL } from '../components/ui'
 
 export default function SetupPage() {
   const [email, setEmail]       = useState('')
@@ -69,25 +69,25 @@ export default function SetupPage() {
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Email</label>
                   <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
+                    className={`${CONTROL} w-full`}
                     autoFocus required />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Display name <span className="text-content-subtle font-normal">(optional)</span></label>
                   <input type="text" value={username} onChange={e => setUsername(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
+                    className={`${CONTROL} w-full`}
                     placeholder="defaults to the part before @" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Password</label>
                   <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
+                    className={`${CONTROL} w-full`}
                     required />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-content mb-1">Confirm password</label>
                   <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                    className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
+                    className={`${CONTROL} w-full`}
                     required />
                 </div>
                 <Btn variant="primary" size="md" type="submit" disabled={loading} className="w-full">

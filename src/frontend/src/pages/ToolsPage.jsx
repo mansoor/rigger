@@ -3,7 +3,7 @@ import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import DropZone from '../components/DropZone'
 import TemplateBrowserModal from '../components/TemplateBrowserModal'
-import { Hint, Btn, CloseBtn } from '../components/ui'
+import { Hint, Btn, CloseBtn, CONTROL, CONTROL_SM } from '../components/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
@@ -441,7 +441,7 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
             <div>
               <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1">Project</label>
               <select value={ws} onChange={e => { setWs(e.target.value); setEnv('') }}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+                className={`${CONTROL} w-full`}>
                 {workspaces.map(w => <option key={w.name} value={w.name}>{w.name}</option>)}
               </select>
             </div>
@@ -450,7 +450,7 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
                 Environment <span className="normal-case font-normal text-content-subtle">(for env-var defaults)</span>
               </label>
               <select value={chosenEnv} onChange={e => setEnv(e.target.value)}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
+                className={`${CONTROL} w-full`}>
                 {envs.map(en => <option key={en} value={en}>{en}</option>)}
               </select>
             </div>
@@ -1016,14 +1016,14 @@ function ComposeToTemplate() {
                         <input
                           type="text" value={row.path} placeholder="prometheus.yml (path relative to the env dir)"
                           onChange={e => applyFiles(sfRows.map((r, j) => j === i ? { ...r, path: e.target.value } : r))}
-                          className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono focus:outline-none focus:border-brand-500" />
+                          className={`${CONTROL_SM} flex-1 font-mono`} />
                         <Btn variant="dangerSubtle" size="xs" title="Remove file" onClick={() => applyFiles(sfRows.filter((_, j) => j !== i))}
                           className="shrink-0">✕</Btn>
                       </div>
                       <textarea
                         value={row.content} rows={6} spellCheck={false} placeholder={"global:\n  scrape_interval: 15s"}
                         onChange={e => applyFiles(sfRows.map((r, j) => j === i ? { ...r, content: e.target.value } : r))}
-                        className="w-full px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono leading-relaxed focus:outline-none focus:border-brand-500" />
+                        className={`${CONTROL} w-full font-mono leading-relaxed`} />
                     </div>
                   ))}
                   {sfRows.length > 0 && (
@@ -1468,7 +1468,7 @@ function WorkspaceBackup() {
         <select
           value={selectedWs}
           onChange={e => { setSelectedWs(e.target.value); setSnapMsg(null); setBkpMsg(null); setBackupErr(null); setActiveJobId(null) }}
-          className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500"
+          className={`${CONTROL} w-full`}
         >
           <option value="">— select project —</option>
           {workspaces.map(ws => <option key={ws.name} value={ws.name}>{ws.config?.project?.name || ws.name} ({ws.name})</option>)}
@@ -1497,7 +1497,7 @@ function WorkspaceBackup() {
                 value={snapName}
                 onChange={e => setSnapName(e.target.value)}
                 placeholder={selectedWs ? `${currentWs}_${selectedWs}_<timestamp>.rps` : 'auto: <workspace>_<project>_<timestamp>.rps'}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
+                className={`${CONTROL} w-full`}
               />
             </div>
             <button onClick={takeSnapshot} disabled={!selectedWs || snapBusy} className={createBtnClass(!!selectedWs && !snapBusy)}>
@@ -1563,7 +1563,7 @@ function WorkspaceBackup() {
                 value={bkpName}
                 onChange={e => setBkpName(e.target.value)}
                 placeholder={selectedWs ? `${currentWs}_${selectedWs}-<timestamp>.rpb` : 'auto: <workspace>_<project>-<timestamp>.rpb'}
-                className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm placeholder-content-subtle focus:outline-none focus:border-brand-500"
+                className={`${CONTROL} w-full`}
               />
             </div>
             <button onClick={startBackup} disabled={!selectedWs || isRunning} className={createBtnClass(!!selectedWs && !isRunning)}>

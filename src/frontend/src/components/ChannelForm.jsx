@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CONTROL } from './ui'
 
 // Shared Notification Channel add/edit form (Apprise / Email), used by both the
 // admin Settings page (global channels, with a workspace allowlist) and Manage
@@ -26,7 +26,7 @@ function Input({ value, onChange, placeholder, type = 'text' }) {
   return (
     <input
       type={type} value={value ?? ''} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong placeholder-content-subtle text-sm focus:outline-none focus:border-brand-500 transition-colors"
+      className={`${CONTROL} w-full`}
     />
   )
 }
@@ -34,7 +34,7 @@ function Input({ value, onChange, placeholder, type = 'text' }) {
 function Select({ value, onChange, options, disabled }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
-      className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 disabled:opacity-50">
+      className={`${CONTROL} w-full disabled:opacity-50`}>
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   )
