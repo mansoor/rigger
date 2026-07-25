@@ -21,7 +21,7 @@ import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 import { useConfirm } from '../context/ConfirmContext'
-import { Label, Input, Toggle, Select, Hint } from '../components/ui'
+import { Label, Input, Toggle, Select, Hint, Field, FormRow, ReadOnly, Btn } from '../components/ui'
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
@@ -892,11 +892,10 @@ function SeedDatabaseCard({ workspace, name, seed, database, envNames, onToggleA
       </label>
       <div className="flex flex-wrap gap-2">
         {envNames.map(env => (
-          <button key={env} type="button" disabled={!!busyEnv}
-            onClick={() => runImport(env, false)}
-            className="px-2.5 py-1 text-xs rounded-md border border-border hover:bg-surface-hover disabled:opacity-50">
+          <Btn variant="outline" size="xs" key={env} disabled={!!busyEnv} onClick={() => runImport(env, false)}
+            >
             {busyEnv === env ? 'Importing…' : `Import now → ${env}`}
-          </button>
+          </Btn>
         ))}
       </div>
       {msg && <p className={`text-xs ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.text}</p>}
@@ -1033,11 +1032,10 @@ function ScanRepoModal({ gitRepo, gitBranch, gitProviderId = 0, images, onApply,
         </div>
 
         <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content">Cancel</button>
-          <button type="button" onClick={apply} disabled={busy || !!err || pickedCount === 0}
-            className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          <Btn variant="ghost" size="sm" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="sm" onClick={apply} disabled={busy || !!err || pickedCount === 0} >
             Merge {pickedCount > 0 ? pickedCount : ''} selected
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -1068,15 +1066,14 @@ function ImagesEditor({ images, onChange, gitRepo, gitBranch, gitProviderId = 0,
         <Hint>Containers that make up the stack — click one to expand.</Hint>
         <div className="flex items-center gap-2 shrink-0">
           {gitRepo && (
-            <button type="button" onClick={() => setScanning(true)} title="Re-detect the stack from the source repository"
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content-subtle hover:text-content hover:border-brand-600 transition-colors">
+            <Btn variant="outline" size="xs" onClick={() => setScanning(true)} title="Re-detect the stack from the source repository"
+              className="hover:border-brand-600">
               ⟳ Scan repo
-            </button>
+            </Btn>
           )}
-          <button type="button" onClick={addService}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+          <Btn variant="primary" size="xs" onClick={addService} >
             + Add service
-          </button>
+          </Btn>
         </div>
       </div>
       {scanning && (
@@ -1263,15 +1260,15 @@ function ProcessesSettings({ cfg, onChange }) {
 
       <div className="flex items-center gap-2 flex-wrap">
         {presets.map(pr => (
-          <button key={pr.label} type="button" onClick={() => addProc(pr.value)}
-            className="text-xs px-2 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
+          <Btn variant="secondary" size="xs" key={pr.label} onClick={() => addProc(pr.value)}
+            >
             {pr.label}
-          </button>
+          </Btn>
         ))}
-        <button type="button" onClick={() => addProc()}
-          className="text-xs px-2 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="xs" onClick={() => addProc()}
+          >
           + custom
-        </button>
+        </Btn>
       </div>
     </div>
   )
@@ -1314,10 +1311,9 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
         </div>
         <Toggle label="Regenerate secrets" hint="Fresh DB passwords / tokens for the new env (recommended)" checked={regen} onChange={setRegen} />
         {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2 whitespace-pre-wrap">{err}</p>}
-        <button onClick={go} disabled={!valid || busy}
-          className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+        <Btn variant="primary" size="md" onClick={go} disabled={!valid || busy} className="w-full">
           {busy ? 'Copying…' : 'Copy environment'}
-        </button>
+        </Btn>
       </div>
     </div>
   )
@@ -2105,10 +2101,10 @@ function CustomDomainsPanel({ workspaceName, envName }) {
 
       <div className="flex gap-2">
         <div className="flex-1"><Input value={newDomain} onChange={setNewDomain} placeholder="app.example.com" /></div>
-        <button type="button" onClick={() => newDomain.trim() && add.mutate()} disabled={add.isPending || !newDomain.trim()}
-          className="shrink-0 px-3 py-2 text-xs font-medium bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50">
+        <Btn variant="primary" size="xs" onClick={() => newDomain.trim() && add.mutate()} disabled={add.isPending || !newDomain.trim()}
+          className="shrink-0">
           {add.isPending ? 'Adding…' : 'Add domain'}
-        </button>
+        </Btn>
       </div>
       {msg && <p className={`text-xs mt-1 ${msg.err ? 'text-warning-fg' : 'text-success-fg'}`}>{msg.text}</p>}
 
@@ -2131,15 +2127,15 @@ function CustomDomainsPanel({ workspaceName, envName }) {
                   ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-success-subtle text-success-fg">✓ verified{d.is_primary ? ' · canonical' : ''}</span>
                   : <span className="text-[11px] px-1.5 py-0.5 rounded bg-warning-subtle text-warning-fg">pending</span>}
                 {!d.verified && (
-                  <button type="button" onClick={() => verify(d.id)} disabled={busy === d.id}
-                    className="text-[11px] px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50">
+                  <Btn variant="outline" size="xs" onClick={() => verify(d.id)} disabled={busy === d.id}
+                    >
                     {busy === d.id ? 'Checking…' : 'Verify'}
-                  </button>
+                  </Btn>
                 )}
-                <button type="button" onClick={() => setExpanded(expanded === d.id ? null : d.id)}
-                  className="text-[11px] px-2 py-1 rounded border border-border hover:bg-surface-hover">
+                <Btn variant="outline" size="xs" onClick={() => setExpanded(expanded === d.id ? null : d.id)}
+                  >
                   {expanded === d.id ? 'Hide' : 'How to'}
-                </button>
+                </Btn>
                 <button type="button" onClick={() => del.mutate(d.id)} title="Remove"
                   className="text-[11px] px-2 py-1 rounded border border-border text-warning-fg hover:bg-warning/10">✕</button>
               </div>
@@ -2317,19 +2313,18 @@ function EnvVarsInline({ workspaceName, envName, deployment }) {
             <input type={newSecret ? 'password' : (reveal ? 'text' : 'password')} placeholder="value" value={newVal}
               onChange={e => setNewVal(e.target.value)}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-xs text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-            <button type="button" onClick={() => newKey.trim() && handleSave()}
+            <Btn variant="secondary" size="xs" onClick={() => newKey.trim() && handleSave()}
               disabled={!newKey.trim() || saveMut.isPending}
-              className="px-2.5 py-1 bg-surface-overlay hover:bg-surface-overlay disabled:opacity-40 text-content-strong text-xs rounded transition-colors shrink-0">
+              className="shrink-0">
               Add
-            </button>
+            </Btn>
           </div>
 
           {/* Save */}
           <div className="flex items-center gap-3">
-            <button type="button" onClick={handleSave} disabled={saveMut.isPending}
-              className="px-3 py-1.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors">
+            <Btn variant="primary" size="xs" onClick={handleSave} disabled={saveMut.isPending} >
               {saveMut.isPending ? 'Saving…' : 'Save changes'}
-            </button>
+            </Btn>
             {saveMut.isSuccess && <span className="text-success-fg text-xs">Saved ✓</span>}
             {saveMut.isError   && <span className="text-danger-fg text-xs">Failed</span>}
           </div>
@@ -2500,10 +2495,9 @@ function RoutesTab({ routes, images, baseDomain = '', onChange }) {
 
       {catchAlls > 1 && <div className="text-xs text-danger-fg">Only one catch-all route (path “/”) is allowed.</div>}
 
-      <button type="button" onClick={add}
-        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+      <Btn variant="primary" size="xs" onClick={add} >
         + Add route
-      </button>
+      </Btn>
     </div>
   )
 }
@@ -2703,14 +2697,13 @@ export default function EditProjectPage() {
             >
               Cancel
             </button>
-            <button
-              onClick={() => { setSaveError(''); mutation.mutate() }}
+            <Btn variant="primary" size="md" onClick={() => { setSaveError(''); mutation.mutate() }}
               disabled={mutation.isPending || !dirty}
               title={!dirty ? 'No changes to save' : undefined}
-              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors"
+              
             >
               {mutation.isPending ? 'Saving…' : 'Save changes'}
-            </button>
+            </Btn>
           </div>
         </div>
 
@@ -2742,25 +2735,20 @@ export default function EditProjectPage() {
         <section className="mb-6">
           <h2 className="text-sm font-semibold text-content mb-3">Project</h2>
           <div className="bg-surface border border-border rounded-xl p-5 space-y-4">
-            <div className="grid sm:grid-cols-5 gap-4">
-              <div className="sm:col-span-4">
-                <Label>Project name</Label>
-                {/* Editable display label — reusable across workspaces. The key and
-                    resource prefix (below) are the immutable identity. */}
+            {/* Editable display label — reusable across workspaces. The key and
+                resource prefix (below) are the immutable identity. */}
+            <FormRow>
+              <Field span={3} label="Project name" hint="A display label — editable; may repeat across workspaces.">
                 <Input value={project?.name} onChange={v => setProject(p => ({ ...p, name: v }))} />
-                <Hint>A display label — editable; may repeat across workspaces.</Hint>
-              </div>
-              <div className="sm:col-span-1">
-                <Label>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></Label>
-                <div
-                  title="Fixed after creation — the project's folder / URL identity"
-                  className="w-full px-3 py-2 bg-surface-raised/60 border border-border-strong rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
-                >
-                  {name}
-                </div>
-                <Hint>Fixed identity.</Hint>
-              </div>
-            </div>
+              </Field>
+              <Field
+                span={1}
+                label={<>Key <span className="font-normal normal-case text-content-faint">(fixed)</span></>}
+                hint="Fixed identity."
+              >
+                <ReadOnly title="Fixed after creation — the project's folder / URL identity">{name}</ReadOnly>
+              </Field>
+            </FormRow>
             {/* Registry only applies to stacks that BUILD images. Pull-only stacks
                 (image/prebuilt) and database-hosting stacks don't push, so hide it. */}
             {(images || []).some(s => s.build) && (
@@ -2777,17 +2765,18 @@ export default function EditProjectPage() {
 
             {/* Source repository — one repo per project; build services build from
                 a subdir of it (cloned into the build context before build). */}
-            <div className="grid sm:grid-cols-[1fr_auto] gap-4">
-              <div>
-                <Label>Source repository <span className="font-normal normal-case text-content-faint">(for build services)</span></Label>
+            <FormRow>
+              <Field
+                span={3}
+                label={<>Source repository <span className="font-normal normal-case text-content-faint">(for build services)</span></>}
+                hint="One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL."
+              >
                 <Input value={project?.git_repo} onChange={v => setProject(p => ({ ...p, git_repo: v }))} placeholder="https://github.com/org/repo.git" />
-                <Hint>One repo per project; each build service's context is a subdirectory. Cloned/pulled before each build. Public HTTPS or token URL.</Hint>
-              </div>
-              <div className="sm:w-40">
-                <Label>Default branch</Label>
+              </Field>
+              <Field span={1} label="Default branch">
                 <Input value={project?.git_branch} onChange={v => setProject(p => ({ ...p, git_branch: v }))} placeholder="main" />
-              </div>
-            </div>
+              </Field>
+            </FormRow>
 
             {/* Git provider — credentials to clone a PRIVATE source repo (Phase 12). */}
             <div>
@@ -2801,33 +2790,22 @@ export default function EditProjectPage() {
                 each environment's route-preview row, in the Environments tab). */}
 
             {/* Resource prefix — immutable Docker name prefix ({workspace}_{project}). */}
-            <div>
-              <Label>Resource prefix</Label>
-              <div
-                title="Fixed after creation — the Docker stack / container / volume / network name prefix"
-                className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
-              >
+            <Field label="Resource prefix" hint="Fixed after creation — the Docker stack, container, volume and network name prefix.">
+              <ReadOnly title="Fixed after creation — the Docker stack / container / volume / network name prefix">
                 {project?.resource_prefix || `${workspace}_${name}`}
-              </div>
-              <Hint>Fixed after creation — the Docker stack, container, volume and network name prefix.</Hint>
-            </div>
+              </ReadOnly>
+            </Field>
 
             {/* Workspace folder — read-only. Prefer the host-side path (the bind-
                 mount source); fall back to the in-container path if unresolved. */}
-            <div>
-              <Label>Project folder</Label>
-              <div
-                title={ws?.host_path || ws?.path || ''}
-                className="w-full px-3 py-2 bg-surface-raised/40 border border-border-strong/60 rounded-lg text-content-muted text-sm font-mono cursor-not-allowed select-all truncate"
-              >
-                {ws?.host_path || ws?.path || '—'}
-              </div>
-              <Hint>
-                {ws?.host_path
-                  ? 'Location on the host — holds config, compose files and bind-mounted volumes.'
-                  : 'Path inside the Rigger container. Set HOST_WORKSPACES_DIR to show the host path.'}
-              </Hint>
-            </div>
+            <Field
+              label="Project folder"
+              hint={ws?.host_path
+                ? 'Location on the host — holds config, compose files and bind-mounted volumes.'
+                : 'Path inside the Rigger container. Set HOST_WORKSPACES_DIR to show the host path.'}
+            >
+              <ReadOnly title={ws?.host_path || ws?.path || ''}>{ws?.host_path || ws?.path || '—'}</ReadOnly>
+            </Field>
           </div>
         </section>
         )}
@@ -2876,15 +2854,14 @@ export default function EditProjectPage() {
             <h2 className="text-sm font-semibold text-content">Environments</h2>
             <div className="flex items-center gap-2 shrink-0">
               {currentEnvNames.length > 1 && (
-                <button type="button" onClick={() => setReorderOpen(true)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content hover:bg-surface-raised transition-colors">
+                <Btn variant="secondary" size="xs" onClick={() => setReorderOpen(true)}
+                  >
                   ⇅ Reorder
-                </button>
+                </Btn>
               )}
-              <button type="button" onClick={addEnv}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+              <Btn variant="primary" size="xs" onClick={addEnv} >
                 + Add environment
-              </button>
+              </Btn>
             </div>
           </div>
           {reorderOpen && (
@@ -2995,8 +2972,8 @@ export default function EditProjectPage() {
             </div>
             <p className="text-sm text-content-muted">You have unsaved changes to <strong className="text-content">{name}</strong>. Leaving now will discard them.</p>
             <div className="flex gap-3">
-              <button onClick={() => { setConfirmCancel(false); leave() }} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Discard &amp; leave</button>
-              <button onClick={() => setConfirmCancel(false)} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors">Keep editing</button>
+              <Btn variant="ghost" size="md" onClick={() => { setConfirmCancel(false); leave() }} className="flex-1">Discard &amp; leave</Btn>
+              <Btn variant="secondary" size="md" onClick={() => setConfirmCancel(false)} >Keep editing</Btn>
             </div>
           </div>
         </div>
@@ -3033,8 +3010,8 @@ function MigrateWarning({ what, from, to, warnings, onConfirm, onCancel }) {
         </ul>
         <PortWarnings warnings={warnings} />
         <div className="flex gap-3 pt-1">
-          <button onClick={onConfirm} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Move</button>
-          <button onClick={onCancel} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors">Cancel</button>
+          <Btn variant="ghost" size="md" onClick={onConfirm} className="flex-1">Move</Btn>
+          <Btn variant="secondary" size="md" onClick={onCancel} >Cancel</Btn>
         </div>
       </div>
     </div>
@@ -3162,13 +3139,12 @@ function EnvHostsSection({ name }) {
                   <option value="">Move to…</option>
                   {opts.map(o => <option key={o.id} value={String(o.id)}>{o.label}</option>)}
                 </select>
-                <button
-                  onClick={() => requestChange(env)}
+                <Btn variant="ghost" size="md" onClick={() => requestChange(env)}
                   disabled={running || (target[env] ?? '') === ''}
-                  className="shrink-0 px-3 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                  className="shrink-0"
                 >
                   Change
-                </button>
+                </Btn>
               </div>
             )
           })}
@@ -3229,10 +3205,10 @@ function BuildHostSection({ name }) {
           {hosts.map(h => <option key={h.id} value={String(h.id)}>{h.name} ({h.address})</option>)}
         </select>
         <div className="flex items-center gap-3">
-          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            >
             {mut.isPending ? 'Saving…' : 'Save build host'}
-          </button>
+          </Btn>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
           {mut.isError && <span className="text-xs text-danger-fg">{mut.error?.response?.data?.error || 'Failed'}</span>}
         </div>
@@ -3309,13 +3285,12 @@ function MigrateSection({ name }) {
                 <option value="">Select a target…</option>
                 {options.map(o => <option key={o.id} value={String(o.id)}>{o.label}</option>)}
               </select>
-              <button
-                onClick={() => setConfirming(true)}
+              <Btn variant="ghost" size="md" onClick={() => setConfirming(true)}
                 disabled={running || target === ''}
-                className="shrink-0 px-4 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+                className="shrink-0"
               >
                 {running ? 'Migrating…' : 'Migrate'}
-              </button>
+              </Btn>
             </div>
             {err && <p className="text-sm text-danger-fg">✗ {err}</p>}
             <MigrationProgress jobId={jobId} onDone={onJobDone} />
@@ -3407,7 +3382,7 @@ function ConfirmSentence({ sentence }) {
   return (
     <div className="flex items-start gap-2">
       <code className="flex-1 bg-canvas border border-border rounded-lg px-2.5 py-1.5 text-[12px] font-mono text-content break-all select-all">{sentence}</code>
-      <button type="button" onClick={copy} className="shrink-0 px-2.5 py-1.5 text-xs bg-surface-raised hover:bg-surface-overlay text-content rounded-lg">{copied ? '✓' : 'Copy'}</button>
+      <Btn variant="secondary" size="xs" onClick={copy} className="shrink-0">{copied ? '✓' : 'Copy'}</Btn>
     </div>
   )
 }
@@ -3485,10 +3460,9 @@ function DangerZone({ name, envNames = [] }) {
                 className="px-2.5 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500">
                 {wipeableEnvs.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
-              <button onClick={openWipe}
-                className="px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors">
+              <Btn variant="dangerSubtle" size="md" onClick={openWipe} >
                 Wipe data
-              </button>
+              </Btn>
             </div>
           </div>
         )}
@@ -3499,12 +3473,11 @@ function DangerZone({ name, envNames = [] }) {
             <p className="text-sm text-content">Delete this project</p>
             <Hint className="mt-0.5">Permanently removes all files, configs, and backups for <strong className="text-content-muted">{name}</strong>. Running containers are not stopped automatically.</Hint>
           </div>
-          <button
-            onClick={() => { setDelOpen(true); setDelConfirm(''); setDelPassword(''); setDelError('') }}
-            className="ml-6 shrink-0 px-4 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors"
+          <Btn variant="dangerSubtle" size="md" onClick={() => { setDelOpen(true); setDelConfirm(''); setDelPassword(''); setDelError('') }}
+            className="ml-6 shrink-0"
           >
             Delete project
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -3522,8 +3495,8 @@ function DangerZone({ name, envNames = [] }) {
                 {wipeError && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{wipeError}</p>}
                 <div className="flex justify-end items-center gap-3">
                   {wipeMut.isPending && <span className="text-xs text-content-subtle">Working… safe to leave this page.</span>}
-                  <button onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
-                    className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Done</button>
+                  <Btn variant="secondary" size="md" onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
+                    >Done</Btn>
                 </div>
               </>
             ) : (
@@ -3547,13 +3520,13 @@ function DangerZone({ name, envNames = [] }) {
                     className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-danger transition-colors" />
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={() => wipeMut.mutate()}
+                  <Btn variant="danger" size="md" onClick={() => wipeMut.mutate()}
                     disabled={wipeMut.isPending || wipeConfirm.trim() !== wipeSentence || !wipePassword}
-                    className="flex-1 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+                    className="flex-1">
                     {wipeMut.isPending ? 'Wiping & redeploying…' : 'Wipe data'}
-                  </button>
-                  <button onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
-                    className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Cancel</button>
+                  </Btn>
+                  <Btn variant="secondary" size="md" onClick={() => setWipeOpen(false)} disabled={wipeMut.isPending}
+                    >Cancel</Btn>
                 </div>
               </>
             )}
@@ -3588,15 +3561,14 @@ function DangerZone({ name, envNames = [] }) {
                 className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-danger transition-colors" />
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => delMut.mutate()}
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate()}
                 disabled={delMut.isPending || delConfirm.trim() !== deleteSentence || !delPassword}
-                className="flex-1 bg-red-700 hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                className="flex-1"
               >
                 {delMut.isPending ? 'Deleting…' : 'Delete permanently'}
-              </button>
-              <button onClick={() => setDelOpen(false)} disabled={delMut.isPending}
-                className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg disabled:opacity-50">Cancel</button>
+              </Btn>
+              <Btn variant="secondary" size="md" onClick={() => setDelOpen(false)} disabled={delMut.isPending}
+                >Cancel</Btn>
             </div>
           </div>
         </div>

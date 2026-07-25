@@ -6,7 +6,7 @@ import {
   setWorkspaceApiKeyEnabled, deleteWorkspaceApiKey,
   fetchWorkspaces, fetchProjects,
 } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // ApiKeysManager renders the API-key list + create flow. Used in two places:
 //   • Admin → API Keys      (workspace = null) — global keys, any-workspace project scope.
@@ -56,7 +56,7 @@ export default function ApiKeysManager({ workspace = null }) {
             {' '}<a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300">View API docs ↗</a>
           </Hint>
         </div>
-        <button onClick={() => setModal(true)} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white">＋ New API key</button>
+        <Btn variant="primary" size="sm" onClick={() => setModal(true)} >＋ New API key</Btn>
       </div>
 
       {keys.length === 0 ? (
@@ -87,8 +87,8 @@ export default function ApiKeysManager({ workspace = null }) {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => toggleMut.mutate({ id: k.id, enabled: !k.enabled })} className="px-2.5 py-1 rounded text-xs text-content-subtle hover:text-content-strong hover:bg-surface-raised">{k.enabled ? 'Disable' : 'Enable'}</button>
-                <button onClick={() => setDeleting(k)} className="px-2.5 py-1 rounded text-xs text-danger-fg hover:bg-danger-subtle/30">Delete</button>
+                <Btn variant="secondary" size="xs" onClick={() => toggleMut.mutate({ id: k.id, enabled: !k.enabled })} >{k.enabled ? 'Disable' : 'Enable'}</Btn>
+                <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(k)} >Delete</Btn>
               </div>
             </div>
           ))}
@@ -109,8 +109,8 @@ export default function ApiKeysManager({ workspace = null }) {
             <h3 className="font-semibold text-content-strong mb-2">Delete API key</h3>
             <p className="text-sm text-content-subtle mb-5">Delete <strong className="text-content">{deleting.name}</strong>? Any client using it will immediately get 401. This can’t be undone.</p>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setDeleting(null)} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content-strong">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending} className="px-3 py-1.5 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 text-white">{delMut.isPending ? 'Deleting…' : 'Delete'}</button>
+              <Btn variant="ghost" size="sm" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="sm" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending} >{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
             </div>
           </div>
         </div>
@@ -276,8 +276,8 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
         </div>
 
         <div className="flex justify-end gap-2 mt-6">
-          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content-strong">Cancel</button>
-          <button onClick={submit} disabled={createMut.isPending} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white">{createMut.isPending ? 'Creating…' : 'Create key'}</button>
+          <Btn variant="ghost" size="sm" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="sm" onClick={submit} disabled={createMut.isPending} >{createMut.isPending ? 'Creating…' : 'Create key'}</Btn>
         </div>
       </div>
     </div>
@@ -294,9 +294,9 @@ function RevealApiKeyModal({ apiKey, onClose }) {
         <p className="text-sm text-content-subtle mb-3">Copy this key now — it will <strong className="text-content">not be shown again</strong>. Send it as <code className="font-mono text-xs">Authorization: Bearer &lt;key&gt;</code>.</p>
         <div className="flex items-center gap-2 bg-surface-raised border border-border-strong rounded-lg p-3">
           <code className="flex-1 font-mono text-xs text-content-strong break-all">{apiKey.token}</code>
-          <button onClick={copy} className="px-2.5 py-1 rounded text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white shrink-0">{copied ? '✓ Copied' : 'Copy'}</button>
+          <Btn variant="primary" size="xs" onClick={copy} className="shrink-0">{copied ? '✓ Copied' : 'Copy'}</Btn>
         </div>
-        <div className="flex justify-end mt-5"><button onClick={onClose} className="px-4 py-1.5 rounded-lg text-sm font-medium bg-brand-600 hover:bg-brand-700 text-white">Done</button></div>
+        <div className="flex justify-end mt-5"><Btn variant="primary" size="sm" onClick={onClose} >Done</Btn></div>
       </div>
     </div>
   )

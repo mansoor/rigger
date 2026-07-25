@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/auth'
 import api from '../lib/api'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 
 export default function LoginPage() {
   const [email, setEmail]       = useState('')
@@ -97,12 +97,11 @@ export default function LoginPage() {
                 <Hint>Enter the 6-digit code from your authenticator app, or one of your recovery codes.</Hint>
               </div>
             )}
-            <button
-              type="submit" disabled={loading}
-              className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2"
+            <Btn variant="primary" size="md" type="submit" disabled={loading}
+              className="w-full mt-2"
             >
               {loading ? 'Signing in…' : needCode ? 'Verify' : 'Sign in'}
-            </button>
+            </Btn>
           </form>
 
           <div className="mt-4 text-center">

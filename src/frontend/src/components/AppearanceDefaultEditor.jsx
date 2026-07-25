@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { THEMES, FONT_SANS_OPTIONS, FONT_MONO_OPTIONS, DENSITY_OPTIONS } from '../theme/themes'
+import { Btn } from './ui'
 
 const FIELD = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
 const LBL = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
@@ -70,14 +71,12 @@ export default function AppearanceDefaultEditor({ value, onSave, saving, savedOk
         {sel('Density', 'density', DENSITY_OPTIONS, 'Inherit')}
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={!dirty || saving}
-          className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+        <Btn variant="primary" size="md" onClick={save} disabled={!dirty || saving} >
           {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button onClick={clearAll} disabled={saving}
-          className="text-sm font-medium px-3 py-2 rounded-lg border border-border-strong text-content-muted hover:text-content transition-colors">
+        </Btn>
+        <Btn variant="outline" size="md" onClick={clearAll} disabled={saving} >
           Clear (inherit)
-        </button>
+        </Btn>
         {savedOk && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
       </div>
     </div>

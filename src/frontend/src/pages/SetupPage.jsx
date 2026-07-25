@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
+import { Btn } from '../components/ui'
 
 export default function SetupPage() {
   const [email, setEmail]       = useState('')
@@ -50,10 +51,10 @@ export default function SetupPage() {
                   </div>
                 </>
               )}
-              <button onClick={() => navigate('/login', { state: { message: 'Account created — please sign in.' } })}
-                className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg transition-colors">
+              <Btn variant="primary" size="md" onClick={() => navigate('/login', { state: { message: 'Account created — please sign in.' } })}
+                className="w-full">
                 Go to sign in
-              </button>
+              </Btn>
             </div>
           ) : (
             <>
@@ -89,10 +90,9 @@ export default function SetupPage() {
                     className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500"
                     required />
                 </div>
-                <button type="submit" disabled={loading}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors">
+                <Btn variant="primary" size="md" type="submit" disabled={loading} className="w-full">
                   {loading ? 'Creating account…' : 'Create admin account'}
-                </button>
+                </Btn>
               </form>
             </>
           )}

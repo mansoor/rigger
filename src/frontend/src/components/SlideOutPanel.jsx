@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchAllActivity, fetchBackups, fetchWorkspaces, openActionSocket, deleteBackup,
   syncEnvBackup, verifyRestore, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
+import { Btn } from './ui'
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -217,13 +218,12 @@ function RestoreModal({ snap, onClose }) {
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-border shrink-0 flex justify-end">
-          <button
-            onClick={onClose}
+          <Btn variant="secondary" size="sm" onClick={onClose}
             disabled={!done}
-            className="px-4 py-1.5 text-sm font-medium rounded-lg transition-colors disabled:opacity-40 bg-surface-overlay hover:bg-surface-overlay text-content-strong"
+            
           >
             {done ? 'Close' : 'Running…'}
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -261,18 +261,16 @@ function RestoreConfirmModal({ snap, onConfirm, onClose }) {
         </div>
 
         <div className="flex gap-2 justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-surface-overlay hover:bg-surface-overlay text-content-strong transition-colors"
+          <Btn variant="secondary" size="md" onClick={onClose}
+            
           >
             Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-red-700 hover:bg-red-600 text-white transition-colors"
+          </Btn>
+          <Btn variant="danger" size="md" onClick={onConfirm}
+            
           >
             Restore
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -376,23 +374,21 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                   </div>
                 </button>
                 {/* Sync-to-remote button */}
-                <button
-                  onClick={e => { e.stopPropagation(); setSyncErr(''); syncMut.mutate(snap) }}
+                <Btn variant="secondary" size="xs" onClick={e => { e.stopPropagation(); setSyncErr(''); syncMut.mutate(snap) }}
                   disabled={syncMut.isPending && syncingKey(syncMut.variables || {}) === key}
-                  className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+                  className="shrink-0"
                   title="Push this snapshot to the workspace's remote backup target"
                 >
                   {syncMut.isPending && syncingKey(syncMut.variables || {}) === key ? '…' : 'Sync'}
-                </button>
+                </Btn>
                 {/* Verify (restore dry-run) button */}
-                <button
-                  onClick={e => { e.stopPropagation(); setVerify({ key }); verifyMut.mutate(snap) }}
+                <Btn variant="secondary" size="xs" onClick={e => { e.stopPropagation(); setVerify({ key }); verifyMut.mutate(snap) }}
                   disabled={verifyMut.isPending && syncingKey(verifyMut.variables || {}) === key}
-                  className="shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+                  className="shrink-0"
                   title="Dry-run: check this snapshot is complete and restorable"
                 >
                   {verifyMut.isPending && syncingKey(verifyMut.variables || {}) === key ? '…' : 'Verify'}
-                </button>
+                </Btn>
                 {/* Restore button */}
                 <button
                   onClick={e => { e.stopPropagation(); setConfirmSnap(snap) }}
@@ -402,13 +398,12 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
                   Restore
                 </button>
                 {/* Delete button */}
-                <button
-                  onClick={e => { e.stopPropagation(); setDeleteConfirm(snap) }}
-                  className="shrink-0 px-2 py-1 text-xs font-medium rounded-lg bg-danger-subtle/50 hover:bg-danger-subtle/60 text-danger-fg border border-danger-border/50 transition-colors"
+                <Btn variant="dangerSubtle" size="xs" onClick={e => { e.stopPropagation(); setDeleteConfirm(snap) }}
+                  className="shrink-0"
                   title="Delete this backup snapshot"
                 >
                   ✕
-                </button>
+                </Btn>
               </div>
 
               {/* Restore-verify report (11c) */}
@@ -482,19 +477,17 @@ function BackupContent({ workspaceFilter, typeFilter, wsTypes }) {
               This will permanently delete the snapshot and all its files. This cannot be undone.
             </p>
             <div className="flex gap-3">
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="flex-1 py-2 rounded-lg border border-border-strong text-content hover:bg-surface-raised text-sm transition-colors"
+              <Btn variant="secondary" size="md" onClick={() => setDeleteConfirm(null)}
+                className="flex-1"
               >
                 Cancel
-              </button>
-              <button
-                onClick={() => deleteMut.mutate(deleteConfirm)}
+              </Btn>
+              <Btn variant="danger" size="md" onClick={() => deleteMut.mutate(deleteConfirm)}
                 disabled={deleteMut.isPending}
-                className="flex-1 py-2 rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+                className="flex-1"
               >
                 {deleteMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
             {deleteMut.isError && (
               <p className="text-xs text-danger-fg mt-3">{deleteMut.error?.response?.data?.error || 'Delete failed'}</p>
@@ -613,13 +606,12 @@ function AlertsContent() {
           />
           Show resolved
         </label>
-        <button
-          onClick={() => dismissAllMut.mutate()}
+        <Btn variant="secondary" size="xs" onClick={() => dismissAllMut.mutate()}
           disabled={events.length === 0 || dismissAllMut.isPending}
-          className="text-xs font-medium px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content disabled:opacity-40 transition-colors"
+          
         >
           {dismissAllMut.isPending ? 'Dismissing…' : 'Dismiss all'}
-        </button>
+        </Btn>
       </div>
 
       {isLoading ? (

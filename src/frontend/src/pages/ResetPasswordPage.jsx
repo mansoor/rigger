@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { resetPassword, fetchPasswordPolicy } from '../lib/api'
+import { Btn } from '../components/ui'
 
 // Builds the human-readable requirement list from the active password policy.
 function policyHints(p) {
@@ -95,12 +96,11 @@ export default function ResetPasswordPage() {
                     {policyHints(policy).map(h => <li key={h}>{h}</li>)}
                   </ul>
                 )}
-                <button
-                  type="submit" disabled={loading}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2"
+                <Btn variant="primary" size="md" type="submit" disabled={loading}
+                  className="w-full mt-2"
                 >
                   {loading ? 'Saving…' : 'Set new password'}
-                </button>
+                </Btn>
               </form>
             </>
           )}

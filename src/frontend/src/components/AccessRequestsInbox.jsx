@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchPendingAccessRequests, approveAccessRequest, rejectAccessRequest } from '../lib/api'
+import { Btn } from './ui'
 
 // AccessRequestsInbox lists pending access requests the caller can act on. The
 // backend already scopes the list (super-admin: all; workspace admin: their
@@ -38,10 +39,10 @@ export default function AccessRequestsInbox({ wsKey }) {
             {r.message && <p className="text-xs text-content-muted mt-1 italic">“{r.message}”</p>}
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => approveMut.mutate(r.id)} disabled={busy(r.id)}
-              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white">Approve</button>
-            <button onClick={() => rejectMut.mutate(r.id)} disabled={busy(r.id)}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-raised hover:bg-surface-overlay border border-border-strong text-content">Reject</button>
+            <Btn variant="ghost" size="xs" onClick={() => approveMut.mutate(r.id)} disabled={busy(r.id)}
+              >Approve</Btn>
+            <Btn variant="secondary" size="xs" onClick={() => rejectMut.mutate(r.id)} disabled={busy(r.id)}
+              >Reject</Btn>
           </div>
         </div>
       ))}

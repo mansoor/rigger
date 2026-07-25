@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchBackups, syncEnvBackup } from '../lib/api'
 import Layout from '../components/Layout'
 import { useWorkspaceStore } from '../store/workspace'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B'
@@ -56,14 +56,13 @@ function SnapshotRow({ snap, isOpen, onToggle }) {
           </div>
         </button>
         <div className="pr-5 pl-2 shrink-0">
-          <button
-            onClick={() => syncMut.mutate()}
+          <Btn variant="secondary" size="xs" onClick={() => syncMut.mutate()}
             disabled={syncMut.isPending}
             title="Push this snapshot to the workspace's remote backup target"
-            className="text-xs font-medium px-2.5 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50 transition-colors"
+            
           >
             {syncMut.isPending ? 'Syncing…' : 'Sync'}
-          </button>
+          </Btn>
         </div>
       </div>
 

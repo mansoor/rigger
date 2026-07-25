@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 import {
   fetchHousekeepingStatus, fetchHousekeepingLog,
   fetchHousekeepingImages, fetchStoppedContainers, fetchDanglingVolumes,
@@ -276,13 +276,12 @@ function UnusedImagesSection() {
                 <p className="text-xs text-content-muted">
                   {selectedIDs.length} selected · {fmtBytes(selectedSize)} to free
                 </p>
-                <button
-                  onClick={() => purgeMut.mutate()}
+                <Btn variant="danger" size="xs" onClick={() => purgeMut.mutate()}
                   disabled={selectedIDs.length === 0 || purgeMut.isPending}
-                  className="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors"
+                  
                 >
                   {purgeMut.isPending ? 'Purging…' : 'Approve & Purge Images'}
-                </button>
+                </Btn>
               </div>
             </>
           )}
@@ -368,13 +367,12 @@ function StoppedContainersSection() {
                   placeholder="PRUNE"
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-danger"
                 />
-                <button
-                  onClick={() => purgeMut.mutate()}
+                <Btn variant="danger" size="xs" onClick={() => purgeMut.mutate()}
                   disabled={confirm !== 'PRUNE' || purgeMut.isPending}
-                  className="px-4 py-2 bg-red-700 hover:bg-red-600 disabled:opacity-40 text-white text-xs font-semibold rounded-lg transition-colors"
+                  
                 >
                   {purgeMut.isPending ? 'Removing…' : `Remove ${containers.length} container(s)`}
-                </button>
+                </Btn>
               </div>
             </>
           )}
@@ -491,11 +489,10 @@ function VolumePurgingSection() {
                     {selectedNames.length} volume(s) selected for destruction. Hold the button for 3 seconds to authorize.
                   </p>
                   <div className="relative">
-                    <button
-                      onMouseDown={startHold} onMouseUp={stopHold} onMouseLeave={stopHold}
+                    <Btn variant="danger" size="md" onMouseDown={startHold} onMouseUp={stopHold} onMouseLeave={stopHold}
                       onTouchStart={startHold} onTouchEnd={stopHold}
                       disabled={purgeMut.isPending}
-                      className="w-full py-3 bg-red-800 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors relative overflow-hidden select-none"
+                      className="w-full relative overflow-hidden"
                     >
                       <div
                         className="absolute inset-y-0 left-0 bg-red-600/60 transition-all"
@@ -506,7 +503,7 @@ function VolumePurgingSection() {
                          holdProgress > 0 ? `Hold… ${Math.ceil((100 - holdProgress) / 33)}s` :
                          '⚠ Authorize Irreversible Volume Destruction'}
                       </span>
-                    </button>
+                    </Btn>
                   </div>
                 </div>
               )}
@@ -581,13 +578,12 @@ function BuildCacheSection({ docker }) {
             </div>
           </div>
 
-          <button
-            onClick={() => purgeMut.mutate()}
+          <Btn variant="ghost" size="md" onClick={() => purgeMut.mutate()}
             disabled={!sliderUnlocked || purgeMut.isPending}
-            className="w-full py-2.5 bg-amber-700 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors"
+            className="w-full"
           >
             {purgeMut.isPending ? 'Cleaning…' : 'Execute Global System Clean'}
-          </button>
+          </Btn>
 
           {output && <OutputModal title="Build Cache Purge Output" output={output} onClose={() => setOutput(null)} />}
         </div>
@@ -664,21 +660,21 @@ function KernelCleanupSection() {
                 ))}
               </div>
               {selectedPkgs.length > 0 && confirmStep === 0 && (
-                <button onClick={() => setConfirmStep(1)}
-                  className="px-4 py-2 bg-amber-700 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg">
+                <Btn variant="ghost" size="xs" onClick={() => setConfirmStep(1)}
+                  >
                   Remove {selectedPkgs.length} kernel(s)
-                </button>
+                </Btn>
               )}
               {confirmStep === 1 && (
                 <div className="space-y-2 p-3 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
                   <p className="text-xs text-warning-fg">This will permanently remove: {selectedPkgs.join(', ')}</p>
                   <div className="flex gap-2">
-                    <button onClick={() => setConfirmStep(0)} className="px-3 py-1.5 text-xs bg-surface-overlay hover:bg-surface-overlay text-content-strong rounded-lg">Cancel</button>
-                    <button onClick={() => { setConfirmStep(2); cleanMut.mutate() }}
+                    <Btn variant="secondary" size="xs" onClick={() => setConfirmStep(0)} >Cancel</Btn>
+                    <Btn variant="danger" size="xs" onClick={() => { setConfirmStep(2); cleanMut.mutate() }}
                       disabled={cleanMut.isPending}
-                      className="px-3 py-1.5 text-xs bg-red-700 hover:bg-red-600 text-white rounded-lg disabled:opacity-50">
+                      >
                       {cleanMut.isPending ? 'Removing…' : 'Confirm Removal'}
-                    </button>
+                    </Btn>
                   </div>
                 </div>
               )}
@@ -775,10 +771,10 @@ function AutomationTab({ hostPrivileged }) {
           </div>
           <span className="text-xs text-success-fg bg-success-subtle/30 px-2 py-0.5 rounded-full">Auto-safe</span>
         </div>
-        <button onClick={() => aptMut.mutate()} disabled={aptMut.isPending}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors">
+        <Btn variant="primary" size="xs" onClick={() => aptMut.mutate()} disabled={aptMut.isPending}
+          >
           {aptMut.isPending ? 'Running…' : 'Run Now'}
-        </button>
+        </Btn>
         {aptMut.isSuccess && <p className="text-xs text-success-fg">✓ Completed</p>}
       </div>
 
@@ -802,10 +798,10 @@ function AutomationTab({ hostPrivileged }) {
               className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
           </div>
         </div>
-        <button onClick={() => jrnlMut.mutate()} disabled={jrnlMut.isPending}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors">
+        <Btn variant="primary" size="xs" onClick={() => jrnlMut.mutate()} disabled={jrnlMut.isPending}
+          >
           {jrnlMut.isPending ? 'Running…' : 'Apply Vacuum'}
-        </button>
+        </Btn>
       </div>
 
       {/* Temp cleanup config */}
@@ -828,10 +824,10 @@ function AutomationTab({ hostPrivileged }) {
               className="w-full px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
           </div>
         </div>
-        <button onClick={() => tmpMut.mutate()} disabled={tmpMut.isPending}
-          className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors">
+        <Btn variant="primary" size="xs" onClick={() => tmpMut.mutate()} disabled={tmpMut.isPending}
+          >
           {tmpMut.isPending ? 'Cleaning…' : 'Clean /tmp'}
-        </button>
+        </Btn>
       </div>
 
       {/* Log table */}
@@ -948,20 +944,18 @@ function MigrationLeftoversTab() {
                   {' · '}stack <code className="font-mono">{it.stack}</code>
                 </p>
               </div>
-              <button
-                onClick={() => dismiss.mutate(it.id)}
+              <Btn variant="ghost" size="md" onClick={() => dismiss.mutate(it.id)}
                 disabled={busy !== null}
-                className="shrink-0 px-3 py-2 text-sm text-content-muted hover:text-content rounded-lg transition-colors disabled:opacity-40"
+                className="shrink-0"
               >
                 Dismiss
-              </button>
-              <button
-                onClick={() => setConfirm(it)}
+              </Btn>
+              <Btn variant="dangerSubtle" size="md" onClick={() => setConfirm(it)}
                 disabled={busy !== null}
-                className="shrink-0 px-3 py-2 bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg hover:text-danger-fg text-sm font-medium rounded-lg border border-danger-border/50 transition-colors disabled:opacity-40"
+                className="shrink-0"
               >
                 {busy === it.id ? 'Cleaning…' : 'Clean up'}
-              </button>
+              </Btn>
             </div>
           ))}
         </div>
@@ -981,8 +975,8 @@ function MigrationLeftoversTab() {
               <code className="font-mono text-xs"> .env</code> secrets. <strong className="text-danger-fg block mt-1">This cannot be undone.</strong>
             </p>
             <div className="flex gap-3">
-              <button onClick={doClean} className="flex-1 bg-red-700 hover:bg-red-600 text-white text-sm font-semibold py-2 rounded-lg transition-colors">Wipe permanently</button>
-              <button onClick={() => setConfirm(null)} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg transition-colors">Cancel</button>
+              <Btn variant="danger" size="md" onClick={doClean} className="flex-1">Wipe permanently</Btn>
+              <Btn variant="secondary" size="md" onClick={() => setConfirm(null)} >Cancel</Btn>
             </div>
           </div>
         </div>

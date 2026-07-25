@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchManagedHostKey } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Shared Remote Host add/edit form, used by both the admin Settings page (global
 // hosts, with a workspace allowlist) and Manage Workspace (workspace-owned hosts).
@@ -204,10 +204,10 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
           </p>
           <div className="flex items-start gap-2">
             <pre className="flex-1 overflow-auto bg-canvas border border-border rounded-lg p-2 text-[11px] font-mono text-content whitespace-pre-wrap">{installCmd || 'Loading Rigger public key…'}</pre>
-            <button type="button" onClick={() => copy(installCmd)} disabled={!installCmd}
-              className="shrink-0 px-2.5 py-1.5 text-xs bg-surface-raised hover:bg-surface-overlay text-content rounded-lg disabled:opacity-40">
+            <Btn variant="secondary" size="xs" onClick={() => copy(installCmd)} disabled={!installCmd}
+              className="shrink-0">
               {copied ? '✓' : 'Copy'}
-            </button>
+            </Btn>
           </div>
           <Hint>
             2. Then add the host and click <strong className="text-content-muted">Test</strong>. The host only needs Docker + SSH.
@@ -338,12 +338,10 @@ export default function HostForm({ initial, onSave, onCancel, saving, showGrants
       )}
 
       <div className="flex gap-2 justify-end pt-2">
-        <button type="button" onClick={onCancel}
-          className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-surface-overlay hover:bg-surface-overlay text-content disabled:opacity-50">Cancel</button>
-        <button type="submit" disabled={saving}
-          className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
+        <Btn variant="secondary" size="md" onClick={onCancel} >Cancel</Btn>
+        <Btn variant="primary" size="md" type="submit" disabled={saving} >
           {saving ? 'Saving…' : checking ? 'Checking…' : (impact && impact.length && autoRefresh) ? 'Save & refresh' : isEdit ? 'Save changes' : 'Add host'}
-        </button>
+        </Btn>
       </div>
     </form>
   )

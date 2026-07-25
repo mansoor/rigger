@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Reusable per-environment backup schedule editor (Phase 11 per-env redesign).
 // Used in the New Workspace wizard and Edit Workspace. Schedules use the same
@@ -102,8 +102,8 @@ function ScheduleForm({ initial, services, targets, onSave, onCancel }) {
           Enabled
         </label>
         <div className="flex gap-2">
-          <button type="button" onClick={onCancel} className="px-3 py-1.5 text-xs rounded-lg border border-border-strong text-content-muted hover:text-content">Cancel</button>
-          <button type="button" onClick={() => onSave(s)} className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium">Save schedule</button>
+          <Btn variant="outline" size="xs" onClick={onCancel} >Cancel</Btn>
+          <Btn variant="primary" size="xs" onClick={() => onSave(s)} >Save schedule</Btn>
         </div>
       </div>
     </div>
@@ -135,8 +135,8 @@ export function BackupScheduleEditor({ schedules = [], onChange, services = [], 
               <p className="text-sm font-medium text-content-strong truncate">{sched.name || 'Unnamed schedule'}</p>
               <p className="text-xs text-content-subtle truncate">{svcLabel(sched)} · {freqLabel(sched.interval_hours)} · {targetName(sched.target_id)} · keep {sched.retention}</p>
             </div>
-            <button type="button" onClick={() => setEditIdx(i)} className="text-xs px-2 py-1 rounded-lg border border-border-strong text-content-muted hover:text-content">Edit</button>
-            <button type="button" onClick={() => remove(i)} className="text-xs px-2 py-1 rounded-lg border border-danger-border/60 text-danger-fg hover:bg-danger-subtle/40">✕</button>
+            <Btn variant="outline" size="xs" onClick={() => setEditIdx(i)} >Edit</Btn>
+            <Btn variant="dangerSubtle" size="xs" onClick={() => remove(i)} >✕</Btn>
           </div>
         )
       ))}

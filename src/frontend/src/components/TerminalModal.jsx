@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
+import { Btn } from './ui'
 
 export default function TerminalModal({ workspace, wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
@@ -204,20 +205,18 @@ export default function TerminalModal({ workspace, wsName, envName, initialServi
 
             {/* Connect / Disconnect */}
             {!connected ? (
-              <button
-                onClick={connect}
+              <Btn variant="ghost" size="xs" onClick={connect}
                 disabled={!canConnect}
-                className="px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40 text-white text-xs font-medium rounded-lg transition-colors"
+                
               >
                 {connecting ? 'Connecting…' : 'Connect'}
-              </button>
+              </Btn>
             ) : (
-              <button
-                onClick={disconnect}
-                className="px-3 py-1.5 bg-danger-subtle/70 hover:bg-danger/20 text-danger-fg text-xs font-medium rounded-lg transition-colors"
+              <Btn variant="dangerSubtle" size="xs" onClick={disconnect}
+                
               >
                 Disconnect
-              </button>
+              </Btn>
             )}
 
             {/* Connected indicator */}

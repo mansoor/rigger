@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
 export function humanBytes(n) {
@@ -24,11 +24,10 @@ export function CopyBtn({ value }) {
   const [done, setDone] = useState(false)
   if (!value) return null
   return (
-    <button type="button" title="Copy"
-      onClick={async () => { try { await navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1200) } catch { /* clipboard unavailable */ } }}
-      className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+    <Btn variant="secondary" size="xs" title="Copy" onClick={async () => { try { await navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 1200) } catch { /* clipboard unavailable */ } }}
+      className="shrink-0">
       {done ? '✓' : '⧉'}
-    </button>
+    </Btn>
   )
 }
 
@@ -47,10 +46,10 @@ export function SecretValue({ value, canReveal = false, showAll = false }) {
   return (
     <>
       <code className="flex-1 break-all font-mono text-content-strong select-all">{visible ? value : '••••••••'}</code>
-      <button type="button" onClick={() => setShow(s => !s)} title={visible ? 'Hide' : 'Reveal'}
-        className="shrink-0 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+      <Btn variant="secondary" size="xs" onClick={() => setShow(s => !s)} title={visible ? 'Hide' : 'Reveal'}
+        className="shrink-0">
         {visible ? '🙈' : '👁'}
-      </button>
+      </Btn>
       <CopyBtn value={value} />
     </>
   )
@@ -241,10 +240,10 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
           </div>
           <div className="flex items-center gap-3">
             {canReveal && (
-              <button type="button" onClick={() => setShowAll(v => !v)}
-                className="px-2 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[11px]">
+              <Btn variant="secondary" size="xs" onClick={() => setShowAll(v => !v)}
+                >
                 {showAll ? 'Hide all secrets' : 'Reveal all secrets'}
-              </button>
+              </Btn>
             )}
             <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
           </div>
@@ -377,8 +376,8 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
                         <td className="px-3 py-1.5 text-right">
                           {s.name === info.database || (info.engine === 'postgres' && s.name === 'public')
                             ? <span className="text-content-faint text-[10px]" title="The primary application database can't be deleted">—</span>
-                            : <button type="button" title={`Delete ${s.name}`} onClick={() => { setDelName(s.name); setDelTyped(''); setDelErr('') }}
-                                className="px-1.5 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/50 text-xs">🗑</button>}
+                            : <Btn variant="dangerSubtle" size="xs" title={`Delete ${s.name}`} onClick={() => { setDelName(s.name); setDelTyped(''); setDelErr('') }}
+                                >🗑</Btn>}
                         </td>
                       )}
                     </tr>
@@ -399,12 +398,12 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
           <div className="flex items-center gap-2">
             <input value={delTyped} onChange={e => { setDelTyped(e.target.value); setDelErr('') }} placeholder={delName} autoFocus
               className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-danger" />
-            <button type="button" disabled={delTyped !== delName || deleteMut.isPending} onClick={() => deleteMut.mutate()}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-danger text-white disabled:opacity-50">
+            <Btn variant="danger" size="xs" disabled={delTyped !== delName || deleteMut.isPending} onClick={() => deleteMut.mutate()}
+              >
               {deleteMut.isPending ? 'Deleting…' : 'Delete'}
-            </button>
-            <button type="button" onClick={() => { setDelName(''); setDelTyped(''); setDelErr('') }}
-              className="text-xs px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
+            </Btn>
+            <Btn variant="secondary" size="xs" onClick={() => { setDelName(''); setDelTyped(''); setDelErr('') }}
+              >Cancel</Btn>
           </div>
           {delErr && <p className="text-xs text-danger-fg">{delErr}</p>}
         </section>
@@ -417,11 +416,10 @@ function ManageTab({ workspace, name, env, info, canManage, openAdminer, webSqlE
             <input value={newName} onChange={e => { setNewName(e.target.value); setErr(''); if (withUser && !newUser) setNewUser(e.target.value ? `${e.target.value}_user` : '') }}
               placeholder={unit === 'database' ? 'new_database' : 'new_schema'}
               className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-            <button type="button" disabled={!schemaValid || !userValid || createMut.isPending}
-              onClick={() => createMut.mutate()}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
+            <Btn variant="primary" size="xs" disabled={!schemaValid || !userValid || createMut.isPending} onClick={() => createMut.mutate()}
+              >
               {createMut.isPending ? 'Creating…' : '+ Create'}
-            </button>
+            </Btn>
           </div>
           <label className="flex items-center gap-2 text-xs text-content-muted cursor-pointer">
             <input type="checkbox" checked={withUser} onChange={e => setWithUser(e.target.checked)} className="w-3.5 h-3.5 accent-brand-500" />

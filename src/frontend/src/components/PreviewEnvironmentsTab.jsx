@@ -5,7 +5,7 @@ import {
   createPreviewWebhook, deletePreviewWebhook,
   redeployPreview, teardownPreview, setPreviewWritebackToken,
 } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Preview / PR environments tab (inside Edit Project). Opt-in per project: a
 // signed webhook drives ephemeral pr{n} envs cloned from a template env, deployed
@@ -181,10 +181,10 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
         </label>
 
         <div className="flex items-center gap-3">
-          <button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
-            className="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold disabled:opacity-40">
+          <Btn variant="primary" size="md" onClick={() => saveMut.mutate()} disabled={saveMut.isPending}
+            >
             {saveMut.isPending ? 'Saving…' : 'Save settings'}
-          </button>
+          </Btn>
           {saveMut.isSuccess && <span className="text-xs text-success-fg">Saved.</span>}
           {saveMut.isError && <span className="text-xs text-danger-fg">{saveMut.error?.response?.data?.error || 'Save failed.'}</span>}
         </div>
@@ -206,10 +206,9 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
             <p className="text-warning-fg font-semibold mb-1">Copy this URL now — it won't be shown again:</p>
             <div className="flex items-start gap-2">
               <code className="flex-1 font-mono break-all text-content-strong select-all">{newUrl}</code>
-              <button onClick={copyUrl} title="Copy URL"
-                className="shrink-0 px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
+              <Btn variant="secondary" size="xs" onClick={copyUrl} title="Copy URL" className="shrink-0">
                 {copied ? '✓ Copied' : '⧉ Copy'}
-              </button>
+              </Btn>
             </div>
           </div>
         )}
@@ -222,7 +221,7 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
             <span className="text-content-faint">{h.provider}</span>
             <span className="text-content-faint">· created {new Date(h.created_at).toLocaleDateString()}</span>
             {h.last_triggered_at && <span className="text-content-faint">· last fired {new Date(h.last_triggered_at).toLocaleString()}</span>}
-            <button onClick={() => delHook.mutate(h.id)} className="ml-auto text-danger-fg hover:bg-danger-subtle/40 px-1.5 py-0.5 rounded">Delete</button>
+            <Btn variant="dangerSubtle" size="xs" onClick={() => delHook.mutate(h.id)} className="ml-auto">Delete</Btn>
           </div>
         ))}
       </div>
@@ -242,11 +241,11 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
           <div className="flex items-center gap-2">
             <input type="password" autoComplete="off" className={inputCls} placeholder={data?.has_writeback_token ? '•••••••• (leave blank to keep, type to replace)' : 'ghp_…'}
               value={tokenInput} onChange={e => setTokenInput(e.target.value)} />
-            <button onClick={() => saveToken.mutate(tokenInput)} disabled={saveToken.isPending || !tokenInput}
-              className="shrink-0 px-3 py-2 rounded-lg bg-brand-500 hover:bg-brand-400 text-white text-sm font-semibold disabled:opacity-40">Save token</button>
+            <Btn variant="primary" size="md" onClick={() => saveToken.mutate(tokenInput)} disabled={saveToken.isPending || !tokenInput}
+              className="shrink-0">Save token</Btn>
             {data?.has_writeback_token && (
-              <button onClick={() => saveToken.mutate('')} disabled={saveToken.isPending}
-                className="shrink-0 px-3 py-2 rounded-lg text-danger-fg hover:bg-danger-subtle/40 text-sm">Clear</button>
+              <Btn variant="dangerSubtle" size="md" onClick={() => saveToken.mutate('')} disabled={saveToken.isPending}
+                className="shrink-0">Clear</Btn>
             )}
           </div>
         </div>
@@ -264,10 +263,10 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
             <span className={`px-1.5 py-0.5 rounded ${STATUS_STYLES[p.status] || 'bg-surface-raised text-content-faint'}`}>{p.status}</span>
             {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300 truncate max-w-[14rem]">{p.url}</a>}
             <div className="ml-auto flex items-center gap-2">
-              <button onClick={() => redeploy.mutate(p.pr_number)} disabled={redeploy.isPending}
-                className="px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content disabled:opacity-40">Redeploy</button>
-              <button onClick={() => teardown.mutate(p.pr_number)} disabled={teardown.isPending}
-                className="px-1.5 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/40">Tear down</button>
+              <Btn variant="secondary" size="xs" onClick={() => redeploy.mutate(p.pr_number)} disabled={redeploy.isPending}
+                >Redeploy</Btn>
+              <Btn variant="dangerSubtle" size="xs" onClick={() => teardown.mutate(p.pr_number)} disabled={teardown.isPending}
+                >Tear down</Btn>
             </div>
           </div>
         ))}

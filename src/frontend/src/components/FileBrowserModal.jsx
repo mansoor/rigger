@@ -5,6 +5,7 @@ import {
   deleteContainerFile, uploadContainerFile, downloadContainerFile,
   renameContainerFile, chmodContainerFile, mkdirContainerDir, newContainerFile,
 } from '../lib/api'
+import { Btn } from './ui'
 
 // FileBrowserModal — Wave D. Browse, view, edit, upload, download, rename,
 // chmod, create and delete files inside a container, on whichever daemon it runs
@@ -300,10 +301,10 @@ export default function FileBrowserModal({ workspace, wsName, env, service, shor
                 <p className="text-xs text-warning-fg/80 mb-4">This removes the directory and everything inside it.</p>
               )}
               <div className="flex justify-end gap-2">
-                <button onClick={() => setConfirmDel(null)}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
-                <button onClick={() => onDelete(confirmDel)} disabled={busy}
-                  className="px-3 py-1.5 text-xs rounded-lg bg-danger-subtle/80 hover:bg-danger/20 text-danger-fg disabled:opacity-40">Delete</button>
+                <Btn variant="secondary" size="xs" onClick={() => setConfirmDel(null)}
+                  >Cancel</Btn>
+                <Btn variant="dangerSubtle" size="xs" onClick={() => onDelete(confirmDel)} disabled={busy}
+                  >Delete</Btn>
               </div>
             </div>
           </div>
@@ -331,9 +332,8 @@ function PromptDialog({ title, label, initial, placeholder, confirmLabel = 'OK',
           onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onCancel() }}
           className="w-full bg-canvas border border-border-strong rounded-lg px-2.5 py-1.5 text-sm text-content font-mono focus:outline-none focus:border-brand-500" />
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onCancel} className="px-3 py-1.5 text-xs rounded-lg bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
-          <button onClick={submit} disabled={busy}
-            className="px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40">{confirmLabel}</button>
+          <Btn variant="secondary" size="xs" onClick={onCancel} >Cancel</Btn>
+          <Btn variant="primary" size="xs" onClick={submit} disabled={busy} >{confirmLabel}</Btn>
         </div>
       </div>
     </div>
@@ -344,19 +344,18 @@ function FileViewer({ view, editing, draft, setDraft, onEdit, onCancel, onSave, 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border shrink-0">
-        <button onClick={onBack} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content">← Back</button>
+        <Btn variant="secondary" size="xs" onClick={onBack} >← Back</Btn>
         <span className="font-mono text-xs text-content truncate">{view.path}</span>
         {view.truncated && <span className="text-xs text-warning-fg/80">· truncated</span>}
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={onDownloadPath} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content-muted">↓ Download</button>
+          <Btn variant="secondary" size="xs" onClick={onDownloadPath} >↓ Download</Btn>
           {!view.binary && !view.truncated && !editing && (
-            <button onClick={onEdit} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content">Edit</button>
+            <Btn variant="secondary" size="xs" onClick={onEdit} >Edit</Btn>
           )}
           {editing && (
             <>
-              <button onClick={onCancel} className="px-2 py-0.5 text-xs rounded bg-surface-raised hover:bg-surface-overlay text-content-muted">Cancel</button>
-              <button onClick={onSave} disabled={busy}
-                className="px-2.5 py-0.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40">Save</button>
+              <Btn variant="secondary" size="xs" onClick={onCancel} >Cancel</Btn>
+              <Btn variant="primary" size="xs" onClick={onSave} disabled={busy} >Save</Btn>
             </>
           )}
         </div>

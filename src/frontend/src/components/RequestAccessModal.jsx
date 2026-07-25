@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchAccessTargets, createAccessRequest, fetchMyAccessRequests } from '../lib/api'
 import { wsRoleOptions } from '../lib/roles'
 import RoleHelp from './RoleHelp'
+import { Btn } from './ui'
 
 const STATUS_BADGE = {
   pending:  'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
@@ -83,10 +84,10 @@ export default function RequestAccessModal({ onClose }) {
           </div>
           {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
           <div className="flex gap-2 justify-end">
-            <button type="button" onClick={onClose} className="px-4 py-2 bg-surface-raised hover:bg-surface-overlay text-content text-sm rounded-lg">Close</button>
-            <button type="submit" disabled={mut.isPending} className="px-4 py-2 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">
+            <Btn variant="secondary" size="md" onClick={onClose} >Close</Btn>
+            <Btn variant="primary" size="md" type="submit" disabled={mut.isPending} >
               {mut.isPending ? 'Submitting…' : 'Submit request'}
-            </button>
+            </Btn>
           </div>
         </form>
 

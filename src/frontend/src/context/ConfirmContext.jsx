@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchConfirmSettings } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceStore } from '../store/workspace'
+import { Btn } from '../components/ui'
 
 // confirm(opts) → Promise<boolean>. opts: { title, message, confirmLabel,
 // cancelLabel, danger }. When the global "Confirm destructive actions" setting
@@ -74,12 +75,11 @@ export function ConfirmProvider({ children }) {
             <h3 className="font-semibold text-content-strong">{dialog.title || 'Are you sure?'}</h3>
             {dialog.message && <p className="text-sm text-content-muted leading-relaxed">{dialog.message}</p>}
             <div className="flex justify-end gap-3 pt-1">
-              <button
-                onClick={() => close(false)}
-                className="px-4 py-2 text-sm rounded-lg border border-border-strong bg-surface-raised hover:bg-surface-overlay text-content transition-colors"
+              <Btn variant="secondary" size="md" onClick={() => close(false)}
+                
               >
                 {dialog.cancelLabel || 'Cancel'}
-              </button>
+              </Btn>
               <button
                 onClick={() => close(true)}
                 className={`px-4 py-2 text-sm font-semibold rounded-lg text-content-strong transition-colors ${

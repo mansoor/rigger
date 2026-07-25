@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { putEnvOrder } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // EnvReorderModal lets an operator set the explicit deploy-tier order of a
 // project's environments (low → high), which drives the release pipeline and the
@@ -71,14 +71,13 @@ export default function EnvReorderModal({ workspace, name, envNames = [], onClos
             Reset to auto
           </button>
           <div className="flex items-center gap-2">
-            <button type="button" onClick={onClose} disabled={saving}
-              className="px-3 py-1.5 rounded-lg text-sm border border-border-strong text-content hover:bg-surface-raised transition-colors">
+            <Btn variant="secondary" size="sm" onClick={onClose} disabled={saving} >
               Cancel
-            </button>
-            <button type="button" onClick={() => save(order)} disabled={saving}
-              className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+            </Btn>
+            <Btn variant="primary" size="sm" onClick={() => save(order)} disabled={saving}
+              >
               {saving ? 'Saving…' : 'Save order'}
-            </button>
+            </Btn>
           </div>
         </div>
       </div>

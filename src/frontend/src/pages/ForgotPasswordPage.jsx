@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { forgotPassword } from '../lib/api'
+import { Btn } from '../components/ui'
 
 // Self-service "forgot password" request. Always shows the same generic success
 // message regardless of whether the email is registered (the server never reveals
@@ -45,12 +46,11 @@ export default function ForgotPasswordPage() {
                 If an account exists for that email, we’ve sent a password reset link.
                 Check your inbox — the link expires in 1 hour.
               </div>
-              <button
-                onClick={() => navigate('/login')}
-                className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-lg transition-colors"
+              <Btn variant="primary" size="md" onClick={() => navigate('/login')}
+                className="w-full"
               >
                 Back to sign in
-              </button>
+              </Btn>
             </div>
           ) : (
             <>
@@ -72,12 +72,11 @@ export default function ForgotPasswordPage() {
                     autoFocus required
                   />
                 </div>
-                <button
-                  type="submit" disabled={loading}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2"
+                <Btn variant="primary" size="md" type="submit" disabled={loading}
+                  className="w-full mt-2"
                 >
                   {loading ? 'Sending…' : 'Send reset link'}
-                </button>
+                </Btn>
               </form>
               <div className="mt-4 text-center">
                 <button

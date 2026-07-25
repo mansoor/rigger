@@ -3,7 +3,7 @@ import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import DropZone from '../components/DropZone'
 import TemplateBrowserModal from '../components/TemplateBrowserModal'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
@@ -455,10 +455,10 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
               </select>
             </div>
             {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
-            <button onClick={() => onLoad(ws, chosenEnv)} disabled={!ws || busy}
-              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+            <Btn variant="primary" size="md" onClick={() => onLoad(ws, chosenEnv)} disabled={!ws || busy}
+              className="w-full">
               {busy ? 'Loading…' : 'Load into editor'}
-            </button>
+            </Btn>
           </>
         )}
       </div>
@@ -1017,8 +1017,8 @@ function ComposeToTemplate() {
                           type="text" value={row.path} placeholder="prometheus.yml (path relative to the env dir)"
                           onChange={e => applyFiles(sfRows.map((r, j) => j === i ? { ...r, path: e.target.value } : r))}
                           className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-xs font-mono focus:outline-none focus:border-brand-500" />
-                        <button type="button" title="Remove file" onClick={() => applyFiles(sfRows.filter((_, j) => j !== i))}
-                          className="text-content-subtle hover:text-danger-fg shrink-0 px-1.5 py-1 rounded hover:bg-danger-subtle/30">✕</button>
+                        <Btn variant="dangerSubtle" size="xs" title="Remove file" onClick={() => applyFiles(sfRows.filter((_, j) => j !== i))}
+                          className="shrink-0">✕</Btn>
                       </div>
                       <textarea
                         value={row.content} rows={6} spellCheck={false} placeholder={"global:\n  scrape_interval: 15s"}

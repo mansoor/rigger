@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchServiceConsole, fetchStorageBuckets, createStorageBucket } from '../lib/api'
 import { DatabasePanel, CopyBtn, SecretValue } from './DatabaseInfoModal'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // ServiceConsoleModal — per-env Managed Service Console (P4). A tabbed view over every
 // managed service enabled for the environment: the database (rich Connection/Manage
@@ -59,10 +59,10 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
           </div>
           <div className="flex items-center gap-3">
             {canReveal && (
-              <button type="button" onClick={() => setReveal(v => !v)}
-                className="px-2 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[11px]">
+              <Btn variant="secondary" size="xs" onClick={() => setReveal(v => !v)}
+                >
                 {reveal ? 'Hide all secrets' : 'Reveal all secrets'}
-              </button>
+              </Btn>
             )}
             <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
           </div>
@@ -222,10 +222,10 @@ function BucketManager({ workspace, name, env, canManage }) {
           <input value={newName} onChange={e => { setNewName(e.target.value); setErr('') }}
             placeholder="new-bucket-name"
             className="flex-1 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-          <button type="button" disabled={!valid || createMut.isPending} onClick={() => createMut.mutate()}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
+          <Btn variant="primary" size="xs" disabled={!valid || createMut.isPending} onClick={() => createMut.mutate()}
+            >
             {createMut.isPending ? 'Creating…' : '+ Create'}
-          </button>
+          </Btn>
         </div>
       )}
       {canManage && <Hint tone="faint" className="text-[11px]">Names: 3–63 chars, lowercase letters, digits, dots and hyphens (S3 naming).</Hint>}

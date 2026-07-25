@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { verifyEmail } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { Btn } from '../components/ui'
 
 // Email verification landing (Phase 5.1b): /verify-email?token=...
 export default function VerifyEmailPage() {
@@ -34,7 +35,7 @@ export default function VerifyEmailPage() {
               <div className="text-4xl">✓</div>
               <h2 className="text-lg font-semibold text-content-strong">Email verified</h2>
               <p className="text-sm text-content-muted">Your email address is confirmed.</p>
-              <button onClick={() => navigate('/')} className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg">Continue</button>
+              <Btn variant="primary" size="md" onClick={() => navigate('/')} className="w-full">Continue</Btn>
             </>
           )}
           {state === 'error' && (
@@ -42,7 +43,7 @@ export default function VerifyEmailPage() {
               <div className="text-4xl opacity-60">⚠</div>
               <h2 className="text-lg font-semibold text-content-strong">Verification failed</h2>
               <p className="text-sm text-content-muted">This link is invalid or has expired. You can request a new one from your profile.</p>
-              <button onClick={() => navigate('/')} className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg">Go to Rigger</button>
+              <Btn variant="primary" size="md" onClick={() => navigate('/')} className="w-full">Go to Rigger</Btn>
             </>
           )}
         </div>

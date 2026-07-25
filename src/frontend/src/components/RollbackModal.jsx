@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchDeployHistory, rollbackEnv } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Phase 9e — Rollback dialog. For custom stacks it lists the env's deploy history
 // and pins a chosen prior image set on confirm. For image stacks (no per-env image
@@ -38,7 +38,7 @@ export default function RollbackModal({ workspace, name, envName, isImage, onClo
             <p>This is an <strong className="text-content">image-type</strong> environment. Its image tags are fixed in the project config (not per-environment), so there's no previous image to redeploy.</p>
             <p>To revert an image-app environment, <strong className="text-content">restore a data/config snapshot</strong> from this environment's Backups instead. Note that a restore rolls back <em>data</em>, which is a different operation from a code rollback.</p>
             <div className="flex justify-end pt-2">
-              <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content text-sm">Close</button>
+              <Btn variant="secondary" size="sm" onClick={onClose} >Close</Btn>
             </div>
           </div>
         ) : (
@@ -69,11 +69,11 @@ export default function RollbackModal({ workspace, name, envName, isImage, onClo
               {err && <div className="px-3 py-2 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm whitespace-pre-wrap">{err}</div>}
             </div>
             <div className="flex items-center justify-end gap-3 px-5 py-3 border-t border-border">
-              <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content text-sm">Cancel</button>
-              <button onClick={() => picked && rbMut.mutate(picked)} disabled={!picked || rbMut.isPending}
-                className="px-4 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
+              <Btn variant="secondary" size="sm" onClick={onClose} >Cancel</Btn>
+              <Btn variant="primary" size="sm" onClick={() => picked && rbMut.mutate(picked)} disabled={!picked || rbMut.isPending}
+                >
                 {rbMut.isPending ? 'Rolling back…' : 'Roll back & redeploy'}
-              </button>
+              </Btn>
             </div>
           </>
         )}

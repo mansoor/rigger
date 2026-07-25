@@ -12,7 +12,7 @@ import ThemeToggle from './ThemeToggle'
 import HelpToggle from './HelpToggle'
 import KeyField from './KeyField'
 import RequestAccessModal from './RequestAccessModal'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 import { AppearanceTab, LogsTerminalTab } from '../pages/SettingsPage'
 
 // Sidebar scroll position, preserved across Layout remounts (each page mounts its own
@@ -114,14 +114,13 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onMa
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors max-w-[220px]"
+      <Btn variant="secondary" size="sm" onClick={() => setOpen(o => !o)}
+        className="max-w-[220px]"
       >
         <span className="text-xs text-content-subtle uppercase tracking-wider shrink-0">WS</span>
         <span className="font-semibold truncate">{currentLabel || 'Select workspace'}</span>
         <span className="text-xs text-content-faint shrink-0">▾</span>
-      </button>
+      </Btn>
       {open && (
         <div className="absolute left-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[240px] py-1 overflow-hidden">
           <div className="max-h-72 overflow-y-auto">
@@ -210,12 +209,11 @@ function NewWorkspaceModal({ onClose, onCreated }) {
           />
         </div>
         <KeyField type="workspace" name={name} label="Workspace key" onChange={(k, v) => { setKey(k); setKeyValid(v) }} />
-        <button
-          type="submit" disabled={mutation.isPending || !nameOk || !keyValid}
-          className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+        <Btn variant="primary" size="md" type="submit" disabled={mutation.isPending || !nameOk || !keyValid}
+          className="w-full"
         >
           {mutation.isPending ? 'Creating…' : 'Create workspace'}
-        </button>
+        </Btn>
       </form>
     </div>
   )
@@ -266,12 +264,11 @@ function ChangePasswordModal({ onClose }) {
             </div>
           )
         })}
-        <button
-          type="submit" disabled={mutation.isPending}
-          className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+        <Btn variant="primary" size="md" type="submit" disabled={mutation.isPending}
+          className="w-full"
         >
           {mutation.isPending ? 'Saving…' : 'Update password'}
-        </button>
+        </Btn>
       </form>
     </div>
   )
@@ -293,16 +290,15 @@ function UserMenu({ user, onLogout }) {
   return (
     <>
       <div ref={ref} className="relative">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className="flex items-center gap-2 px-3 py-1.5 text-sm text-content-muted hover:text-content-strong rounded-lg hover:bg-surface-raised transition-colors"
+        <Btn variant="secondary" size="sm" onClick={() => setOpen(o => !o)}
+          
         >
           <span className="w-6 h-6 rounded-full bg-brand-700 text-white text-xs font-bold flex items-center justify-center shrink-0">
             {user?.sub?.[0]?.toUpperCase() || '?'}
           </span>
           <span>{user?.sub}</span>
           <span className="text-xs text-content-faint">▾</span>
-        </button>
+        </Btn>
 
         {open && (
           <div className="absolute right-0 top-full mt-1 z-30 bg-surface-raised border border-border-strong rounded-xl shadow-xl min-w-[180px] py-1 overflow-hidden">
@@ -403,8 +399,8 @@ function ProfileModal({ user, onClose }) {
             </div>
           )}
           <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Close</button>
-            <button type="submit" disabled={busy} className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">{busy ? 'Saving…' : 'Save'}</button>
+            <Btn variant="secondary" size="md" onClick={onClose} >Close</Btn>
+            <Btn variant="primary" size="md" type="submit" disabled={busy} >{busy ? 'Saving…' : 'Save'}</Btn>
           </div>
         </form>
       </div>
@@ -523,17 +519,16 @@ export default function Layout({ children }) {
               canManage={canAdminWs}
               canCreate={isAdmin}
             />
-            <button
-              onClick={() => setPaletteOpen(true)}
+            <Btn variant="secondary" size="md" onClick={() => setPaletteOpen(true)}
               title="Search (Ctrl/Cmd K)"
-              className="flex items-center gap-2 ml-2 px-3 py-2 w-64 text-sm text-content-subtle rounded-lg border border-border-strong hover:bg-surface-raised hover:text-content transition-colors"
+              className="ml-2 w-64"
             >
               <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.3-4.3M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
               </svg>
               <span>Search…</span>
               <kbd className="ml-auto text-[10px] text-content-faint border border-border-strong rounded px-1 py-0.5">⌘K</kbd>
-            </button>
+            </Btn>
           </div>
           <div className="flex items-center gap-1">
             <NavBtn to="/" label="Dashboard" />
@@ -643,12 +638,11 @@ function NoAccess() {
         <p className="text-sm text-content-muted mt-2">
           You don't have access to any workspace or project. Please contact your administrator to get access.
         </p>
-        <button
-          onClick={() => setReqOpen(true)}
-          className="mt-5 px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold rounded-lg transition-colors"
+        <Btn variant="primary" size="md" onClick={() => setReqOpen(true)}
+          className="mt-5"
         >
           Request access
-        </button>
+        </Btn>
         <p className="text-xs text-content-faint mt-4">
           Once you've been added to a workspace, it will appear in the selector at the top-left.
         </p>
@@ -743,7 +737,7 @@ function AccountGeneral({ user }) {
         <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
         {msg && <p className="text-xs text-content-muted">{msg}</p>}
         {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a></div>}
-        <button type="submit" disabled={busy} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{busy ? 'Saving…' : 'Save profile'}</button>
+        <Btn variant="primary" size="md" type="submit" disabled={busy} >{busy ? 'Saving…' : 'Save profile'}</Btn>
       </form>
       <AccountConfirmPref lbl={lbl} field={inp} />
     </div>
@@ -815,7 +809,7 @@ function AccountSecurity({ onDone }) {
           </div>
         )
       })}
-      <button type="submit" disabled={mutation.isPending} className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">{mutation.isPending ? 'Saving…' : 'Update password'}</button>
+      <Btn variant="primary" size="md" type="submit" disabled={mutation.isPending} >{mutation.isPending ? 'Saving…' : 'Update password'}</Btn>
     </form>
     <TwoFactorSection />
     </div>
@@ -840,9 +834,9 @@ function RecoveryCodeList({ codes, onDone }) {
         {codes.map(c => <span key={c} className="select-all">{c}</span>)}
       </div>
       <div className="flex gap-2 pt-1">
-        <button onClick={copy} className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">Copy</button>
-        <button onClick={download} className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">Download</button>
-        <button onClick={onDone} className="text-sm bg-brand-600 hover:bg-brand-700 text-white font-semibold rounded-lg px-3 py-1.5">I've saved them</button>
+        <Btn variant="secondary" size="sm" onClick={copy} >Copy</Btn>
+        <Btn variant="secondary" size="sm" onClick={download} >Download</Btn>
+        <Btn variant="primary" size="sm" onClick={onDone} >I've saved them</Btn>
       </div>
     </div>
   )
@@ -915,10 +909,10 @@ function TwoFactorSection() {
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       {!enabled && !enroll && (
-        <button onClick={() => beginMut.mutate()} disabled={beginMut.isPending}
-          className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+        <Btn variant="primary" size="md" onClick={() => beginMut.mutate()} disabled={beginMut.isPending}
+          >
           {beginMut.isPending ? 'Starting…' : 'Enable 2FA'}
-        </button>
+        </Btn>
       )}
 
       {!enabled && enroll && (
@@ -930,29 +924,29 @@ function TwoFactorSection() {
           <div className="px-3 py-2 bg-surface-raised border border-border rounded-lg font-mono text-sm break-all select-all">{enroll.secret}</div>
           {codeInput}
           <div className="flex gap-2">
-            <button onClick={() => enableMut.mutate()} disabled={enableMut.isPending || code.length !== 6}
-              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+            <Btn variant="primary" size="md" onClick={() => enableMut.mutate()} disabled={enableMut.isPending || code.length !== 6}
+              >
               {enableMut.isPending ? 'Verifying…' : 'Verify & enable'}
-            </button>
-            <button onClick={() => { setEnroll(null); setCode(''); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
+            </Btn>
+            <Btn variant="ghost" size="md" onClick={() => { setEnroll(null); setCode(''); setError('') }} >Cancel</Btn>
           </div>
         </div>
       )}
 
       {enabled && !regen && (
         <div className="space-y-3">
-          <button onClick={() => { setRegen(true); setCode(''); setError('') }}
-            className="text-sm bg-surface-raised border border-border rounded-lg px-3 py-1.5 hover:bg-surface-hover">
+          <Btn variant="secondary" size="sm" onClick={() => { setRegen(true); setCode(''); setError('') }}
+            >
             Regenerate recovery codes
-          </button>
+          </Btn>
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">Enter a current code to disable</label>
             {codeInput}
             <div>
-              <button onClick={() => disableMut.mutate()} disabled={disableMut.isPending || code.length < 6}
-                className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+              <Btn variant="danger" size="md" onClick={() => disableMut.mutate()} disabled={disableMut.isPending || code.length < 6}
+                >
                 {disableMut.isPending ? 'Disabling…' : 'Disable 2FA'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -964,11 +958,11 @@ function TwoFactorSection() {
           <Hint>This invalidates your existing recovery codes.</Hint>
           {codeInput}
           <div className="flex gap-2">
-            <button onClick={() => regenMut.mutate()} disabled={regenMut.isPending || code.length < 6}
-              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+            <Btn variant="primary" size="md" onClick={() => regenMut.mutate()} disabled={regenMut.isPending || code.length < 6}
+              >
               {regenMut.isPending ? 'Generating…' : 'Generate new codes'}
-            </button>
-            <button onClick={() => { setRegen(false); setCode(''); setError('') }} className="text-sm text-content-muted hover:text-content px-3 py-2">Cancel</button>
+            </Btn>
+            <Btn variant="ghost" size="md" onClick={() => { setRegen(false); setCode(''); setError('') }} >Cancel</Btn>
           </div>
         </div>
       )}

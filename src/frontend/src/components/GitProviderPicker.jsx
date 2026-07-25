@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspaceGitProviders, createWorkspaceGitProvider } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // GitProviderPicker selects the workspace Git provider used to clone a PRIVATE
 // source repo (sets the project's git_provider_id). It can inline-create a provider
@@ -41,10 +41,10 @@ export default function GitProviderPicker({ workspace, value, onChange }) {
             </option>
           ))}
         </select>
-        <button type="button" onClick={() => setAdding(a => !a)}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised">
+        <Btn variant="secondary" size="md" onClick={() => setAdding(a => !a)}
+          className="shrink-0">
           {adding ? 'Cancel' : '＋ New'}
-        </button>
+        </Btn>
       </div>
       <Hint>For a private repository, pick (or add) a Git provider. Manage them in Workspace → Git.</Hint>
 
@@ -62,10 +62,10 @@ export default function GitProviderPicker({ workspace, value, onChange }) {
           <textarea readOnly value={createdKey.public_key} rows={3} onFocus={e => e.target.select()}
             className="w-full bg-surface border border-border rounded px-2 py-1.5 text-[11px] font-mono text-content break-all" />
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => navigator.clipboard?.writeText(createdKey.public_key)}
-              className="px-2.5 py-1 text-xs rounded border border-border-strong text-content hover:bg-surface-raised">Copy</button>
-            <button type="button" onClick={() => setCreatedKey(null)}
-              className="px-2.5 py-1 text-xs rounded bg-brand-600 hover:bg-brand-700 text-white">Done</button>
+            <Btn variant="secondary" size="xs" onClick={() => navigator.clipboard?.writeText(createdKey.public_key)}
+              >Copy</Btn>
+            <Btn variant="primary" size="xs" onClick={() => setCreatedKey(null)}
+              >Done</Btn>
           </div>
         </div>
       )}
@@ -96,11 +96,10 @@ function InlineCreate({ onCreate, saving, error }) {
         : <Hint tone="faint" className="text-[11px]">Rigger generates a deploy keypair; the public key shows after saving — add it to your provider as a read-only deploy key.</Hint>}
       {error && <p className="text-xs text-danger-fg">{error}</p>}
       <div className="flex justify-end">
-        <button type="button" disabled={!canSave || saving}
-          onClick={() => onCreate({ name: name.trim(), kind, host: host.trim(), secret })}
-          className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+        <Btn variant="primary" size="xs" disabled={!canSave || saving} onClick={() => onCreate({ name: name.trim(), kind, host: host.trim(), secret })}
+          >
           {saving ? 'Saving…' : kind === 'ssh_key' ? 'Generate & use' : 'Add & use'}
-        </button>
+        </Btn>
       </div>
     </div>
   )

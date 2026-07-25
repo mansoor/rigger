@@ -4,6 +4,7 @@ import {
   fetchContainerInspect, fetchContainerStats, fetchContainerTop, fetchContainerHistory,
 } from '../lib/api'
 import Sparkline from './Sparkline'
+import { Btn } from './ui'
 
 const TABS = ['Overview', 'Resources', 'Network', 'Mounts', 'Processes', 'Environment', 'Labels', 'Health', 'Security', 'Layers', 'JSON']
 
@@ -392,11 +393,10 @@ function Processes({ top }) {
 function CopyBtn({ text }) {
   const [copied, setCopied] = useState(false)
   return (
-    <button type="button"
-      onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }}
-      className="text-xs px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
+    <Btn variant="secondary" size="xs" onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* ignore */ } }}
+      >
       {copied ? 'Copied ✓' : 'Copy'}
-    </button>
+    </Btn>
   )
 }
 

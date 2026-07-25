@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { fetchRegisterInfo, completeRegistration } from '../lib/api'
 import { useAuthStore } from '../store/auth'
+import { Btn } from '../components/ui'
 
 // Invite registration (Phase 5.1b). The invitee arrives via an emailed/shared
 // link (/register?token=...), sets a password (+optional phone), and is logged in.
@@ -55,7 +56,7 @@ export default function RegisterPage() {
           {loadErr ? (
             <div className="space-y-4">
               <div className="px-4 py-3 bg-danger-subtle border border-danger-border text-danger-fg rounded-lg text-sm">{loadErr}</div>
-              <button onClick={() => navigate('/login')} className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg">Go to sign in</button>
+              <Btn variant="primary" size="md" onClick={() => navigate('/login')} className="w-full">Go to sign in</Btn>
             </div>
           ) : !info ? (
             <p className="text-sm text-content-subtle text-center">Loading…</p>
@@ -85,10 +86,9 @@ export default function RegisterPage() {
                   <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100"
                     className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500" />
                 </div>
-                <button type="submit" disabled={loading}
-                  className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors">
+                <Btn variant="primary" size="md" type="submit" disabled={loading} className="w-full">
                   {loading ? 'Finishing…' : 'Complete registration'}
-                </button>
+                </Btn>
               </form>
             </>
           )}

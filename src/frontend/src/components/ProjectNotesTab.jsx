@@ -4,7 +4,7 @@ import {
   fetchProjectNotes, fetchProjectNote, createProjectNote, saveProjectNote,
   deleteProjectNote, renderProjectNotes,
 } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Project Wiki / Notes tab. Multiple NAMED Markdown docs (one file each in the
 // project's notes/ dir); each note's name is a sub-tab. Markdown is rendered +
@@ -152,12 +152,10 @@ export default function ProjectNotesTab({ workspace, name }) {
           <input id="note-name" value={draftName} onChange={e => setDraftName(e.target.value)} placeholder="Note name"
             className="w-48 px-3 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500 shrink-0" />
           <div className="flex items-center gap-2 ml-auto shrink-0">
-            <button onClick={remove} disabled={busy}
-              className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg transition-colors disabled:opacity-50">Delete</button>
-            <button onClick={() => { setEditing(false); setError('') }} disabled={busy}
-              className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-surface-overlay text-content hover:bg-surface-raised transition-colors disabled:opacity-50">Cancel</button>
-            <button onClick={save} disabled={busy}
-              className="text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
+            <Btn variant="dangerSubtle" size="sm" onClick={remove} disabled={busy} >Delete</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => { setEditing(false); setError('') }} disabled={busy}
+              >Cancel</Btn>
+            <Btn variant="primary" size="sm" onClick={save} disabled={busy} >{busy ? 'Saving…' : 'Save'}</Btn>
           </div>
         </div>
       ) : (
@@ -175,18 +173,16 @@ export default function ProjectNotesTab({ workspace, name }) {
                   onKeyDown={e => { if (e.key === 'Enter') addNote(); if (e.key === 'Escape') { setAdding(false); setNewName('') } }}
                   placeholder="Note name" disabled={busy}
                   className="w-36 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                <button onClick={addNote} disabled={busy || !newName.trim()}
-                  className="px-2 py-1 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold disabled:opacity-50">Add</button>
+                <Btn variant="primary" size="xs" onClick={addNote} disabled={busy || !newName.trim()} >Add</Btn>
                 <button onClick={() => { setAdding(false); setNewName('') }} className="px-1.5 text-content-subtle hover:text-content-strong text-sm">×</button>
               </div>
             ) : (
-              <button onClick={() => setAdding(true)} title="Add a note"
-                className="shrink-0 px-3 py-2.5 text-sm font-medium text-content-subtle hover:text-brand-400 transition-colors">＋ Add</button>
+              <Btn variant="ghost" size="md" onClick={() => setAdding(true)} title="Add a note"
+                className="shrink-0">＋ Add</Btn>
             )}
           </div>
           {notes.length > 0 && (
-            <button onClick={startEdit} disabled={!note}
-              className="shrink-0 mb-1.5 text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">Edit</button>
+            <Btn variant="primary" size="sm" onClick={startEdit} disabled={!note} className="shrink-0 mb-1.5">Edit</Btn>
           )}
         </div>
       )}
@@ -218,8 +214,8 @@ export default function ProjectNotesTab({ workspace, name }) {
         <div className="bg-surface border border-border rounded-xl p-10 text-center">
           <p className="text-3xl mb-2">📝</p>
           <p className="text-sm text-content-subtle">No notes yet. Add a project wiki, runbook, or any documentation in Markdown.</p>
-          <button onClick={() => setAdding(true)}
-            className="mt-4 text-sm font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">Add your first note</button>
+          <Btn variant="primary" size="sm" onClick={() => setAdding(true)}
+            className="mt-4">Add your first note</Btn>
         </div>
       ) : noteQ.isLoading ? (
         <p className="text-sm text-content-subtle py-8 text-center">Loading…</p>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchWorkspaceRegistries, createWorkspaceRegistry, testRegistryCredentials } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // RegistryPicker — the container-registry selector shared by the New Project
 // wizard and Edit Project. It lists the workspace's saved registries in a
@@ -182,14 +182,12 @@ export default function RegistryPicker({ workspace, value, onChange, defaultRegi
                 Saved to this workspace so the build can authenticate and push. The password field accepts a token / API key.
               </Hint>
               <div className="flex items-center gap-2">
-                <button type="button" onClick={doTest} disabled={!canTest}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-50 transition-colors">
+                <Btn variant="secondary" size="xs" onClick={doTest} disabled={!canTest} >
                   {busy === 'test' ? 'Testing…' : 'Test'}
-                </button>
-                <button type="button" onClick={doSave} disabled={!canSave}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50 transition-colors">
+                </Btn>
+                <Btn variant="primary" size="xs" onClick={doSave} disabled={!canSave} >
                   {busy === 'save' ? 'Saving…' : 'Save & use'}
-                </button>
+                </Btn>
               </div>
             </>
           )}

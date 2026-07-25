@@ -6,6 +6,7 @@ import {
   installHostEdge, installWorkspaceHostEdge,
   createHostWorkspacesDir, createWorkspaceHostWorkspacesDir,
 } from '../lib/api'
+import { Btn } from './ui'
 
 // HostComponents is the single place to see and provision what a host needs to run
 // workloads: Docker (info), Nixpacks (build backend), the Traefik edge (routing), and
@@ -44,10 +45,9 @@ export default function HostComponents({ hostId, workspace = null }) {
         <span className={`ml-2 text-xs ${ok ? 'text-success-fg' : warn ? 'text-warning-fg' : 'text-content-subtle'}`}>{value}</span>
       </div>
       {onAct && !unreachable && (
-        <button onClick={onAct} disabled={!!busy}
-          className="shrink-0 px-2.5 py-1 rounded bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold disabled:opacity-50">
+        <Btn variant="primary" size="xs" onClick={onAct} disabled={!!busy} className="shrink-0">
           {busy === actKey ? 'Working…' : actLabel}
-        </button>
+        </Btn>
       )}
     </div>
   )

@@ -28,7 +28,7 @@ import {
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { WS_ROLES, wsRoleOptions } from '../lib/roles'
-import { Hint, Checkbox } from '../components/ui'
+import { Hint, Checkbox, Btn } from '../components/ui'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -239,10 +239,10 @@ function WorkspaceDomainsSettings({ workspace, qc }) {
           />
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            >
             {mut.isPending ? 'Saving…' : 'Save'}
-          </button>
+          </Btn>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
       </div>
@@ -287,10 +287,10 @@ function WorkspaceTierOrder({ workspace, qc }) {
           <Hint>Environments whose application <strong className="text-content-muted">data</strong> may be wiped (reset for dev/test) from a project's Danger Zone — by a workspace admin, with a typed confirmation + password. Leave blank to disable everywhere. <strong className="text-content-muted">Do not list production.</strong></Hint>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            >
             {mut.isPending ? 'Saving…' : 'Save'}
-          </button>
+          </Btn>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
       </div>
@@ -405,12 +405,11 @@ function GeneralSection({ workspace, ws, qc, setCurrent }) {
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => mut.mutate()} disabled={!ok || !dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors"
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!ok || !dirty || mut.isPending}
+            
           >
             {mut.isPending ? 'Saving…' : 'Save'}
-          </button>
+          </Btn>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
       </div>
@@ -470,8 +469,7 @@ function MembersSection({ workspace, projects, qc }) {
         <select value={addRole} onChange={e => setAddRole(e.target.value)} className={sel}>
           {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
-        <button onClick={addMember} disabled={!addUid || setMut.isPending}
-          className="px-3 py-1.5 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Add</button>
+        <Btn variant="primary" size="sm" onClick={addMember} disabled={!addUid || setMut.isPending} >Add</Btn>
         {addable.length === 0 && <span className="text-xs text-content-faint">All users are already members or global admins. Invite more from Admin → Users.</span>}
       </div>
 
@@ -495,10 +493,10 @@ function MembersSection({ workspace, projects, qc }) {
                   <select value={m.role} onChange={e => setMut.mutate({ uid: m.user_id, role: e.target.value })} className={sel}>
                     {MEMBER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
-                  <button onClick={() => setExpanded(x => x === m.user_id ? null : m.user_id)}
-                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Per-project</button>
-                  <button onClick={() => rmMut.mutate(m.user_id)}
-                    className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Remove</button>
+                  <Btn variant="secondary" size="xs" onClick={() => setExpanded(x => x === m.user_id ? null : m.user_id)}
+                    >Per-project</Btn>
+                  <Btn variant="danger" size="xs" onClick={() => rmMut.mutate(m.user_id)}
+                    >Remove</Btn>
                 </div>
 
                 {expanded === m.user_id && (
@@ -510,8 +508,8 @@ function MembersSection({ workspace, projects, qc }) {
                         <select value={o.role} onChange={e => ovSet.mutate({ uid: m.user_id, proj: o.proj_key, role: e.target.value })} className={sel}>
                           {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
-                        <button onClick={() => ovRm.mutate({ uid: m.user_id, proj: o.proj_key })}
-                          className="px-2 py-1 text-xs rounded-lg text-content-muted hover:text-danger-fg">✕</button>
+                        <Btn variant="dangerGhost" size="xs" onClick={() => ovRm.mutate({ uid: m.user_id, proj: o.proj_key })}
+                          >✕</Btn>
                       </div>
                     ))}
                     <AddOverride projects={projects.filter(p => !m.overrides.some(o => o.proj_key === p.name))}
@@ -541,8 +539,8 @@ function AddOverride({ projects, onAdd }) {
       <select value={role} onChange={e => setRole(e.target.value)} className={sel}>
         {OVERRIDE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
       </select>
-      <button onClick={() => { if (proj) { onAdd(proj, role); setProj('') } }} disabled={!proj}
-        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-40">Add</button>
+      <Btn variant="secondary" size="xs" onClick={() => { if (proj) { onAdd(proj, role); setProj('') } }} disabled={!proj}
+        >Add</Btn>
     </div>
   )
 }
@@ -622,10 +620,10 @@ function WorkspaceDefaults({ workspace, qc }) {
           <Hint tone="faint" className="text-[11px]">Where image builds run for this workspace's projects (overridable per project). A dedicated builder must push to a registry the deploy targets can pull — set a system registry. Applies live, not just to new projects.</Hint>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!dirty || mut.isPending}
+            >
             {mut.isPending ? 'Saving…' : 'Save'}
-          </button>
+          </Btn>
           {mut.isSuccess && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
         </div>
       </div>
@@ -705,10 +703,10 @@ function HostsSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Remote hosts</h2>
           <Hint className="mt-0.5">Hosts this workspace can deploy to: its own plus any shared by an administrator.</Hint>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+          className="shrink-0">
           ＋ Add host
-        </button>
+        </Btn>
       </div>
 
       {postSave && (
@@ -748,23 +746,23 @@ function HostsSection({ workspace, qc }) {
                     {ts?.ok && ts.edgeRunning === false && (
                       <span className="text-xs text-warning-fg flex items-center gap-1.5" title="No Traefik edge on this host — web-routed apps deployed here won't be reachable until it's installed.">
                         ⚠ no Traefik edge
-                        <button onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
-                          className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                        <Btn variant="primary" size="xs" onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
+                          >
                           {ts.edgeBusy ? 'Installing…' : 'Install edge'}
-                        </button>
+                        </Btn>
                       </span>
                     )}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
-                    <button onClick={() => handleTest(host.id)} disabled={ts?.loading}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
-                    <button onClick={() => setHealth(host)}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Manage</button>
+                    <Btn variant="secondary" size="xs" onClick={() => handleTest(host.id)} disabled={ts?.loading}
+                      >Test</Btn>
+                    <Btn variant="secondary" size="xs" onClick={() => setHealth(host)}
+                      >Manage</Btn>
                     {owned ? (
                       <>
-                        <button onClick={() => setModal({ editing: host })}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                        <button onClick={() => setDeleting(host)}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                        <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: host })}
+                          >Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={() => setDeleting(host)}
+                          >Delete</Btn>
                       </>
                     ) : (
                       <span className="text-[11px] text-content-faint px-2">read-only</span>
@@ -808,11 +806,11 @@ function HostsSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Environments bound to this host will need to be repointed. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -863,10 +861,10 @@ function RegistriesSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Docker registries</h2>
           <Hint className="mt-0.5">Registries this workspace's projects can pull/push images from: its own plus any shared by an administrator. Mark one of your own <span className="text-content-muted font-medium">system</span> to use it for projects here that set no registry (overrides the global default).</Hint>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+          className="shrink-0">
           ＋ Add registry
-        </button>
+        </Btn>
       </div>
 
       <div className="bg-surface border border-border rounded-xl">
@@ -898,17 +896,17 @@ function RegistriesSection({ workspace, qc }) {
                     {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
                     {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
-                    <button onClick={() => handleTest(r.id)} disabled={ts?.loading}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    <Btn variant="secondary" size="xs" onClick={() => handleTest(r.id)} disabled={ts?.loading}
+                      >Test</Btn>
                     {owned ? (
                       <>
-                        <button onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
+                        <Btn variant="secondary" size="xs" onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
                           title={r.system ? 'Stop using this as the workspace system registry' : 'Use for this workspace\'s projects that set no registry'}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">{r.system ? 'Unset system' : 'Set system'}</button>
-                        <button onClick={() => setModal({ editing: r })}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                        <button onClick={() => setDeleting(r)}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                          >{r.system ? 'Unset system' : 'Set system'}</Btn>
+                        <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: r })}
+                          >Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={() => setDeleting(r)}
+                          >Delete</Btn>
                       </>
                     ) : (
                       <span className="text-[11px] text-content-faint px-2">read-only</span>
@@ -944,11 +942,11 @@ function RegistriesSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Projects referencing this registry will need a different one. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -1034,14 +1032,13 @@ function GitSection({ workspace, qc }) {
           <Hint className="mt-0.5">Credentials this workspace's projects use to clone <span className="text-content-muted font-medium">private</span> repositories — an HTTPS token, or an SSH deploy key Rigger generates for you. Select one on a project's source in New / Edit Project. Secrets are encrypted at rest and never shown again.</Hint>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={connectGitHub} disabled={connecting}
-            className="px-3 py-2 text-sm font-medium rounded-lg bg-[#24292f] hover:bg-black text-white disabled:opacity-50 transition-colors">
+          <Btn variant="ghost" size="md" onClick={connectGitHub} disabled={connecting} >
             {connecting ? 'Connecting…' : ' Connect GitHub'}
-          </button>
-          <button onClick={() => setModal('new')}
-            className="px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+          </Btn>
+          <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+            >
             ＋ Add provider
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -1074,21 +1071,21 @@ function GitSection({ workspace, qc }) {
                     {ts?.ok && <span className="text-xs text-success-fg">✓ Access OK</span>}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
                     {p.kind === 'ssh_key' && p.public_key && (
-                      <button onClick={() => setCreatedKey({ name: p.name, public_key: p.public_key })}
-                        className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Show key</button>
+                      <Btn variant="secondary" size="xs" onClick={() => setCreatedKey({ name: p.name, public_key: p.public_key })}
+                        >Show key</Btn>
                     )}
                     {p.kind === 'github_app' && owned && !ghMeta(p).installation_id && (
                       <button onClick={() => finishInstall(p.id)}
                         className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-brand-600 hover:bg-surface-raised">Finish install</button>
                     )}
-                    <button onClick={() => handleTest(p.id)} disabled={ts?.loading}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    <Btn variant="secondary" size="xs" onClick={() => handleTest(p.id)} disabled={ts?.loading}
+                      >Test</Btn>
                     {owned ? (
                       <>
-                        <button onClick={() => setModal({ editing: p })}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                        <button onClick={() => setDeleting(p)}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                        <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: p })}
+                          >Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={() => setDeleting(p)}
+                          >Delete</Btn>
                       </>
                     ) : <span className="text-[11px] text-content-faint px-2">read-only</span>}
                   </div>
@@ -1117,10 +1114,10 @@ function GitSection({ workspace, qc }) {
             <textarea readOnly value={createdKey.public_key} rows={3}
               className="w-full bg-surface-raised border border-border rounded-lg px-3 py-2 text-xs font-mono text-content break-all" onFocus={e => e.target.select()} />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { navigator.clipboard?.writeText(createdKey.public_key) }}
-                className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Copy</button>
-              <button onClick={() => setCreatedKey(null)}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white">Done</button>
+              <Btn variant="secondary" size="md" onClick={() => { navigator.clipboard?.writeText(createdKey.public_key) }}
+                >Copy</Btn>
+              <Btn variant="primary" size="md" onClick={() => setCreatedKey(null)}
+                >Done</Btn>
             </div>
           </div>
         </div>
@@ -1132,11 +1129,11 @@ function GitSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Projects using this provider will fail to clone their private repo until pointed at another. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -1251,11 +1248,10 @@ function GitProviderModal({ initial, onSave, onClose, saving, error }) {
 
         {error && <p className="text-xs text-danger-fg">{error}</p>}
         <div className="flex gap-2 justify-end pt-1">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-          <button onClick={submit} disabled={!canSave || saving}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          <Btn variant="secondary" size="md" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="md" onClick={submit} disabled={!canSave || saving} >
             {saving ? 'Saving…' : editing ? 'Save' : kind === 'ssh_key' ? 'Generate & save' : 'Add provider'}
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -1303,10 +1299,10 @@ function BackupTargetsSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Backup targets</h2>
           <Hint className="mt-0.5">Off-site destinations this workspace's environments can back up to: its own plus any shared by an administrator.</Hint>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+          className="shrink-0">
           ＋ Add target
-        </button>
+        </Btn>
       </div>
 
       <div className="bg-surface border border-border rounded-xl">
@@ -1338,14 +1334,14 @@ function BackupTargetsSection({ workspace, qc }) {
                     {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
                     {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
-                    <button onClick={() => handleTest(t.id)} disabled={ts?.loading}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    <Btn variant="secondary" size="xs" onClick={() => handleTest(t.id)} disabled={ts?.loading}
+                      >Test</Btn>
                     {owned ? (
                       <>
-                        <button onClick={() => setModal({ editing: t })}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                        <button onClick={() => setDeleting(t)}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                        <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: t })}
+                          >Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={() => setDeleting(t)}
+                          >Delete</Btn>
                       </>
                     ) : (
                       <span className="text-[11px] text-content-faint px-2">read-only</span>
@@ -1381,11 +1377,11 @@ function BackupTargetsSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Backup schedules pointing at this target will fall back to local. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -1441,10 +1437,10 @@ function NotificationsSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Notification channels</h2>
           <Hint className="mt-0.5">Where this workspace's alerts are delivered: its own channels plus any shared by an administrator. Assign them to rules on the Alert Rules tab.</Hint>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+          className="shrink-0">
           ＋ Add channel
-        </button>
+        </Btn>
       </div>
 
       <div className="bg-surface border border-border rounded-xl">
@@ -1477,14 +1473,14 @@ function NotificationsSection({ workspace, qc }) {
                     {ts?.loading && <span className="text-xs text-content-subtle">Sending…</span>}
                     {ts?.ok && <span className="text-xs text-success-fg">✓ Sent</span>}
                     {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
-                    <button onClick={() => handleTest(ch.id)} disabled={ts?.loading}
-                      className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50">Test</button>
+                    <Btn variant="secondary" size="xs" onClick={() => handleTest(ch.id)} disabled={ts?.loading}
+                      >Test</Btn>
                     {owned ? (
                       <>
-                        <button onClick={() => setModal({ editing: ch })}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                        <button onClick={() => setDeleting(ch)}
-                          className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                        <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: ch })}
+                          >Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={() => setDeleting(ch)}
+                          >Delete</Btn>
                       </>
                     ) : (
                       <span className="text-[11px] text-content-faint px-2">read-only</span>
@@ -1520,11 +1516,11 @@ function NotificationsSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Alert rules using this channel will stop notifying it. This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -1565,7 +1561,7 @@ function AccessListsSection({ workspace, qc }) {
           <h2 className="text-sm font-semibold text-content">Access lists</h2>
           <Hint className="mt-0.5">Reusable basic-auth users + IP allow/deny + GeoIP country policy, private to this workspace. Attach one to a project environment under Edit Project → Security.</Hint>
         </div>
-        <button onClick={() => setModal('new')} className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">＋ Add access list</button>
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')} className="shrink-0">＋ Add access list</Btn>
       </div>
       <div className="bg-surface border border-border rounded-xl">
         {isLoading ? <p className="p-5 text-sm text-content-subtle">Loading…</p>
@@ -1589,8 +1585,8 @@ function AccessListsSection({ workspace, qc }) {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => setModal({ editing: a })} className="px-2.5 py-1 text-xs rounded-md border border-border-strong text-content hover:bg-surface-raised">Edit</button>
-                      <button onClick={() => setDeleting(a)} className="px-2.5 py-1 text-xs rounded-md text-content-faint hover:text-rose-600">Delete</button>
+                      <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: a })} >Edit</Btn>
+                      <Btn variant="ghost" size="xs" onClick={() => setDeleting(a)} >Delete</Btn>
                     </div>
                   </div>
                 )
@@ -1606,8 +1602,8 @@ function AccessListsSection({ workspace, qc }) {
             <h3 className="font-semibold text-content-strong">Delete access list “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Any environment using it becomes publicly accessible (no auth/IP restriction) on next deploy.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending} className="px-3 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50">{delMut.isPending ? 'Deleting…' : 'Delete'}</button>
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="ghost" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending} >{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
             </div>
           </div>
         </div>
@@ -1695,8 +1691,8 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
           {err && <p className="text-sm text-rose-600 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-lg px-3 py-2">{err}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
-          <button onClick={onClose} className="px-3 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-          <button onClick={() => { setErr(''); if (!f.name.trim()) { setErr('Name is required'); return } save.mutate() }} disabled={save.isPending} className="px-3 py-2 text-sm rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">{save.isPending ? 'Saving…' : 'Save access list'}</button>
+          <Btn variant="secondary" size="md" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="md" onClick={() => { setErr(''); if (!f.name.trim()) { setErr('Name is required'); return } save.mutate() }} disabled={save.isPending} >{save.isPending ? 'Saving…' : 'Save access list'}</Btn>
         </div>
       </div>
     </div>
@@ -1827,10 +1823,10 @@ function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, savin
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
-        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-        <button type="submit" disabled={saving} className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+        <Btn variant="secondary" size="md" onClick={onCancel} >Cancel</Btn>
+        <Btn variant="primary" size="md" type="submit" disabled={saving} >
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add rule'}
-        </button>
+        </Btn>
       </div>
     </form>
   )
@@ -1869,10 +1865,10 @@ function AlertRulesSection({ workspace, projects, qc }) {
           <h2 className="text-sm font-semibold text-content">Alert rules</h2>
           <Hint className="mt-0.5">Per-project conditions for this workspace, evaluated every 60s. Host/infra rules are managed globally in Settings.</Hint>
         </div>
-        <button onClick={() => setModal('new')}
-          className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors">
+        <Btn variant="secondary" size="md" onClick={() => setModal('new')}
+          className="shrink-0">
           ＋ Add rule
-        </button>
+        </Btn>
       </div>
 
       <div className="bg-surface border border-border rounded-xl">
@@ -1898,8 +1894,8 @@ function AlertRulesSection({ workspace, projects, qc }) {
                   <input type="checkbox" checked={r.enabled} onChange={() => toggleMut.mutate(r)} className="accent-brand-500" />
                 </label>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setModal({ editing: r })} className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Edit</button>
-                  <button onClick={() => setDeleting(r)} className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-danger-fg hover:bg-danger/20">Delete</button>
+                  <Btn variant="secondary" size="xs" onClick={() => setModal({ editing: r })} >Edit</Btn>
+                  <Btn variant="danger" size="xs" onClick={() => setDeleting(r)} >Delete</Btn>
                 </div>
               </div>
             ))}
@@ -1931,11 +1927,11 @@ function AlertRulesSection({ workspace, projects, qc }) {
             <h3 className="font-semibold text-content-strong">Delete “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">This cannot be undone.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setDeleting(null)} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-              <button onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
-                className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+              <Btn variant="secondary" size="md" onClick={() => setDeleting(null)} >Cancel</Btn>
+              <Btn variant="danger" size="md" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}
+                >
                 {delMut.isPending ? 'Deleting…' : 'Delete'}
-              </button>
+              </Btn>
             </div>
           </div>
         </div>
@@ -1955,20 +1951,20 @@ function DangerZone({ workspace, ws, projects, others, qc, setCurrent, navigate 
             <p className="text-sm font-medium text-content-strong">Transfer projects to another workspace</p>
             <Hint className="mt-0.5">Move all (or selected) projects to another workspace, then remove this one. Containers keep running (their resource prefix is unchanged).</Hint>
           </div>
-          <button onClick={() => setMode('transfer')} disabled={projects.length === 0 || others.length === 0}
-            className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg border border-border-strong text-content hover:bg-surface-raised disabled:opacity-40 transition-colors">
+          <Btn variant="secondary" size="md" onClick={() => setMode('transfer')} disabled={projects.length === 0 || others.length === 0}
+            className="shrink-0">
             Transfer…
-          </button>
+          </Btn>
         </div>
         <div className="p-5 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-content-strong">Delete this workspace</p>
             <Hint className="mt-0.5">Stops and removes every project, environment, container, network and volume in this workspace, then deletes it. Cannot be undone.</Hint>
           </div>
-          <button onClick={() => setMode('delete')}
-            className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-red-800 hover:bg-red-700 text-white transition-colors">
+          <Btn variant="danger" size="md" onClick={() => setMode('delete')}
+            className="shrink-0">
             Delete…
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -2026,11 +2022,11 @@ function TransferModal({ workspace, projects, others, onClose, onDone }) {
         </div>
         {err && <p className="text-sm text-danger-fg">{err}</p>}
         <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
-          <button onClick={() => mut.mutate()} disabled={!target || chosen.length === 0 || mut.isPending}
-            className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+          <Btn variant="secondary" size="md" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="md" onClick={() => mut.mutate()} disabled={!target || chosen.length === 0 || mut.isPending}
+            >
             {mut.isPending ? 'Transferring…' : `Transfer ${chosen.length}`}
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -2084,7 +2080,7 @@ function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) 
         </button>
       </div>
       <div className="flex justify-end pt-1">
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>
+        <Btn variant="secondary" size="md" onClick={onClose} >Cancel</Btn>
       </div>
     </>)
   }
@@ -2098,7 +2094,7 @@ function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) 
           (via <span className="text-content">Request access</span> in your account menu) before deleting this one — or choose Destroy to remove everything.
         </p>
         <div className="flex gap-2 justify-end">
-          <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
+          <Btn variant="secondary" size="md" onClick={() => setStep('choose')} >Back</Btn>
         </div>
       </>)
     }
@@ -2114,11 +2110,11 @@ function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) 
       </div>
       {err && <p className="text-sm text-danger-fg">{err}</p>}
       <div className="flex gap-2 justify-end">
-        <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
-        <button onClick={() => transferMut.mutate()} disabled={!target || transferMut.isPending}
-          className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">
+        <Btn variant="secondary" size="md" onClick={() => setStep('choose')} >Back</Btn>
+        <Btn variant="primary" size="md" onClick={() => transferMut.mutate()} disabled={!target || transferMut.isPending}
+          >
           {transferMut.isPending ? 'Transferring…' : 'Transfer & delete'}
-        </button>
+        </Btn>
       </div>
     </>)
   }
@@ -2138,12 +2134,12 @@ function DeleteModal({ workspace, ws, projects, others = [], onClose, onDone }) 
     {err && <p className="text-sm text-danger-fg">{err}</p>}
     <div className="flex gap-2 justify-end">
       {hasProjects
-        ? <button onClick={() => setStep('choose')} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Back</button>
-        : <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:bg-surface-raised">Cancel</button>}
-      <button onClick={() => destroyMut.mutate()} disabled={confirm !== workspace || destroyMut.isPending}
-        className="px-4 py-2 text-sm font-semibold rounded-lg bg-red-800 hover:bg-red-700 disabled:opacity-40 text-white">
+        ? <Btn variant="secondary" size="md" onClick={() => setStep('choose')} >Back</Btn>
+        : <Btn variant="secondary" size="md" onClick={onClose} >Cancel</Btn>}
+      <Btn variant="danger" size="md" onClick={() => destroyMut.mutate()} disabled={confirm !== workspace || destroyMut.isPending}
+        >
         {destroyMut.isPending ? 'Deleting…' : 'Delete workspace'}
-      </button>
+      </Btn>
     </div>
   </>)
 }

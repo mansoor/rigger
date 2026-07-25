@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { Hint, CertBadge } from '../components/ui'
+import { Hint, CertBadge, Btn } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -41,15 +41,6 @@ function Toggle({ checked, onChange, label }) {
       <span className="text-sm text-content">{label}</span>
     </label>
   )
-}
-function Btn({ onClick, disabled, variant = 'primary', children, type = 'button' }) {
-  const variants = {
-    primary: 'bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50',
-    secondary: 'bg-surface-overlay text-content disabled:opacity-50',
-    danger: 'bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg disabled:opacity-50',
-    ghost: 'text-content-muted hover:text-content-strong hover:bg-surface-raised',
-  }
-  return <button type={type} onClick={onClick} disabled={disabled} className={`font-semibold rounded-lg px-3 py-1.5 text-xs transition-colors ${variants[variant]}`}>{children}</button>
 }
 
 const TLS_OPTIONS = [
@@ -160,7 +151,7 @@ export default function ProxyServicePage() {
                 <span className="text-sm font-semibold text-content-strong">Routes</span>
                 <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">hostname → upstream</span>
               </div>
-              <Btn onClick={() => setModal('new')}>＋ Add route</Btn>
+              <Btn size="xs" onClick={() => setModal('new')}>＋ Add route</Btn>
             </div>
             {realRoutes.length === 0 ? (
               <p className="text-sm text-content-subtle px-4 py-6 text-center">No proxy routes yet. Add a route to send a hostname to a service anywhere on your network.</p>
@@ -198,8 +189,8 @@ export default function ProxyServicePage() {
             <h3 className="font-semibold text-content-strong">Delete route “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Traffic to {deleting.host || 'this host'} stops being proxied.</p>
             <div className="flex gap-2 justify-end">
-              <Btn variant="secondary" onClick={() => setDeleting(null)}>Cancel</Btn>
-              <Btn variant="danger" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}>{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
+              <Btn size="xs" variant="secondary" onClick={() => setDeleting(null)}>Cancel</Btn>
+              <Btn size="xs" variant="dangerSubtle" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}>{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
             </div>
           </div>
         </div>
@@ -291,7 +282,7 @@ function BackupRestoreCard() {
               <Input type="password" value={expPass} onChange={setExpPass} placeholder="Protects private keys in the bundle" />
             </div>
             {expErr && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-2.5 py-1.5">{expErr}</p>}
-            <Btn onClick={doExport} disabled={exporting}>{exporting ? 'Preparing…' : '⭳ Download backup'}</Btn>
+            <Btn size="xs" onClick={doExport} disabled={exporting}>{exporting ? 'Preparing…' : '⭳ Download backup'}</Btn>
           </div>
 
           {/* Import */}
@@ -309,7 +300,7 @@ function BackupRestoreCard() {
             </div>
             <Toggle checked={replace} onChange={setReplace} label="Overwrite routes/lists with the same name" />
             {impErr && <p className="text-xs text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-2.5 py-1.5">{impErr}</p>}
-            <Btn onClick={doImport} disabled={importing}>{importing ? 'Restoring…' : '⭱ Restore'}</Btn>
+            <Btn size="xs" onClick={doImport} disabled={importing}>{importing ? 'Restoring…' : '⭱ Restore'}</Btn>
 
             {summary && (
               <div className="text-xs space-y-2 border-t border-border pt-3">
@@ -368,8 +359,8 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         <Toggle checked={r.enabled} onChange={onToggle} label="" />
-        <Btn variant="ghost" onClick={onEdit}>Edit</Btn>
-        <Btn variant="ghost" onClick={onDelete}>✕</Btn>
+        <Btn size="xs" variant="ghost" onClick={onEdit}>Edit</Btn>
+        <Btn size="xs" variant="ghost" onClick={onDelete}>✕</Btn>
       </div>
     </div>
   )
@@ -420,11 +411,11 @@ function PluginsCard({ plugins }) {
             <input type="password" value={geoToken} onChange={e => { setGeoToken(e.target.value); setGeoMsg(null) }}
               placeholder={plugins.geoip_token_set ? 'token saved — paste to replace, or just refresh' : 'IP2Location LITE download token'}
               className="flex-1 bg-surface-raised border border-border rounded-lg px-3 py-2 text-sm text-content focus:outline-none focus:border-brand-500" />
-            <button type="button" onClick={() => { setGeoMsg(null); geoMut.mutate() }}
+            <Btn variant="primary" size="md" onClick={() => { setGeoMsg(null); geoMut.mutate() }}
               disabled={geoMut.isPending || (!geoToken.trim() && !plugins.geoip_token_set)}
-              className="px-3 py-2 text-sm font-medium rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white shrink-0">
+              className="shrink-0">
               {geoMut.isPending ? 'Downloading…' : db.present ? 'Refresh' : 'Download'}
-            </button>
+            </Btn>
           </div>
           {geoMsg?.ok && <p className="text-[11px] text-brand-400 mt-1">Database updated.</p>}
           {geoMsg?.error && <p className="text-[11px] text-danger-fg mt-1">{geoMsg.error}</p>}
@@ -464,7 +455,7 @@ function DefaultRouteCard({ route }) {
         )}
       </div>
       <div className="flex items-center gap-3 mt-3">
-        <Btn onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save default'}</Btn>
+        <Btn size="xs" onClick={() => mut.mutate()} disabled={mut.isPending}>{mut.isPending ? 'Saving…' : 'Save default'}</Btn>
         {saved && <span className="text-xs text-success-fg">✓ Saved</span>}
       </div>
     </div>
@@ -500,7 +491,7 @@ function AccessListsCard({ accessLists, plugins }) {
           <span className="text-sm font-semibold text-content-strong">Access lists</span>
           <span className="text-[11px] text-content-muted bg-surface-overlay/50 px-1.5 py-0.5 rounded">reusable auth + IP rules</span>
         </div>
-        <Btn onClick={() => setModal('new')}>＋ Add access list</Btn>
+        <Btn size="xs" onClick={() => setModal('new')}>＋ Add access list</Btn>
       </div>
       {accessLists.length === 0 ? (
         <p className="text-sm text-content-subtle px-4 py-6 text-center">No access lists yet. Create one to reuse the same basic-auth users and IP rules across multiple routes.</p>
@@ -523,8 +514,8 @@ function AccessListsCard({ accessLists, plugins }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <Btn variant="ghost" onClick={() => setModal({ editing: a })}>Edit</Btn>
-                  <Btn variant="ghost" onClick={() => setDeleting(a)}>✕</Btn>
+                  <Btn size="xs" variant="ghost" onClick={() => setModal({ editing: a })}>Edit</Btn>
+                  <Btn size="xs" variant="ghost" onClick={() => setDeleting(a)}>✕</Btn>
                 </div>
               </div>
             )
@@ -538,8 +529,8 @@ function AccessListsCard({ accessLists, plugins }) {
             <h3 className="font-semibold text-content-strong">Delete access list “{deleting.name}”?</h3>
             <p className="text-sm text-content-muted">Routes using it become publicly accessible (no auth/IP restriction) until reconfigured.</p>
             <div className="flex gap-2 justify-end">
-              <Btn variant="secondary" onClick={() => setDeleting(null)}>Cancel</Btn>
-              <Btn variant="danger" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}>{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
+              <Btn size="xs" variant="secondary" onClick={() => setDeleting(null)}>Cancel</Btn>
+              <Btn size="xs" variant="dangerSubtle" onClick={() => delMut.mutate(deleting.id)} disabled={delMut.isPending}>{delMut.isPending ? 'Deleting…' : 'Delete'}</Btn>
             </div>
           </div>
         </div>
@@ -640,8 +631,8 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
           )}
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
-          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save access list'}</Btn>
+          <Btn size="xs" variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn size="xs" onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save access list'}</Btn>
         </div>
       </div>
     </div>
@@ -1069,12 +1060,12 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
         </div>
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-border">
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            {!isRedirect && <Btn variant="ghost" onClick={runTest} disabled={test?.loading}>{test?.loading ? 'Testing…' : '⚡ Test upstream'}</Btn>}
+            {!isRedirect && <Btn size="xs" variant="ghost" onClick={runTest} disabled={test?.loading}>{test?.loading ? 'Testing…' : '⚡ Test upstream'}</Btn>}
             {test && <TestToast test={test} onClose={() => showTest(null)} />}
           </div>
           <div className="flex gap-2 shrink-0">
-            <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-            <Btn onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save route'}</Btn>
+            <Btn size="xs" variant="secondary" onClick={onClose}>Cancel</Btn>
+            <Btn size="xs" onClick={trySave} disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save route'}</Btn>
           </div>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Btn } from './ui'
 
 const FIELD = 'w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500'
 const LBL = 'block text-xs font-semibold text-content-muted uppercase tracking-wider mb-1'
@@ -66,10 +67,9 @@ export default function ConfirmDefaultEditor({ value, onSave, saving, savedOk, a
         </div>
       )}
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={!dirty || saving}
-          className="bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+        <Btn variant="primary" size="md" onClick={save} disabled={!dirty || saving} >
           {saving ? 'Saving…' : 'Save'}
-        </button>
+        </Btn>
         {savedOk && !dirty && <span className="text-xs text-success-fg">✓ Saved</span>}
       </div>
     </div>

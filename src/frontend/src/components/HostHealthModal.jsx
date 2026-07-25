@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchHostStats, fetchWorkspaceHostStats } from '../lib/api'
 import HostComponents from './HostComponents'
+import { Btn } from './ui'
 
 // HostHealthModal is the single per-host detail view used by BOTH admin Settings →
 // Remote Hosts and Workspace Settings → Remote Hosts. It shows the provisionable
@@ -66,7 +67,7 @@ export default function HostHealthModal({ host, workspace = null, onClose }) {
           </div>
 
           <div className="flex justify-end">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised">Close</button>
+            <Btn variant="secondary" size="sm" onClick={onClose} >Close</Btn>
           </div>
         </div>
       </div>

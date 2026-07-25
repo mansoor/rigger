@@ -19,6 +19,7 @@ import SettingsPage from './pages/SettingsPage'
 import HousekeepingPage from './pages/HousekeepingPage'
 import ToolsPage from './pages/ToolsPage'
 import ProxyServicePage from './pages/ProxyServicePage'
+import { Btn } from './components/ui'
 
 function RequireAuth({ children }) {
   const token = useAuthStore((s) => s.token)
@@ -74,10 +75,9 @@ function ForcePasswordChange() {
                   className="w-full px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong focus:outline-none focus:border-brand-500 transition-colors" />
               </div>
             ))}
-            <button type="submit" disabled={busy}
-              className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-semibold rounded-lg transition-colors mt-2">
+            <Btn variant="primary" size="md" type="submit" disabled={busy} className="w-full mt-2">
               {busy ? 'Saving…' : 'Change password'}
-            </button>
+            </Btn>
           </form>
           <div className="mt-4 text-center">
             <button type="button" onClick={() => logout()} className="text-sm text-content-muted hover:text-content underline">

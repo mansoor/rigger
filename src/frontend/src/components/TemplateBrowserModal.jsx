@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Sentinel category value for "templates with no categories".
 export const UNCATEGORIZED = '__uncat__'
@@ -137,8 +137,8 @@ export default function TemplateBrowserModal({ templates = [], selected, onSelec
                 ? <p className="text-sm text-content-muted truncate"><span className="text-brand-400">✓</span> <strong className="text-content-strong">{pending.label}</strong> — click OK to use it.</p>
                 : (footer || <p className="text-sm text-content-subtle">Pick a template, then click OK.</p>)}
             </div>
-            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm border border-border-strong text-content-muted hover:text-content-strong hover:border-border-strong transition-colors shrink-0">Cancel</button>
-            <button type="button" onClick={confirm} disabled={!pending} className="px-5 py-2 rounded-lg text-sm font-medium bg-brand-600 text-white hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0">OK</button>
+            <Btn variant="outline" size="md" onClick={onClose} className="shrink-0">Cancel</Btn>
+            <Btn variant="primary" size="md" onClick={confirm} disabled={!pending} className="shrink-0">OK</Btn>
           </div>
         ) : (
           footer && <div className="px-5 py-3 border-t border-border bg-surface-raised/30">{footer}</div>

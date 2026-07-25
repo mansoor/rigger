@@ -1,4 +1,5 @@
 import { Component } from 'react'
+import { Btn } from './ui'
 
 // ErrorBoundary catches render-time exceptions in the routed page subtree so a
 // single broken view degrades to a recoverable message instead of white-screening
@@ -31,18 +32,16 @@ export default class ErrorBoundary extends Component {
             {String(error?.stack || error)}
           </pre>
           <div className="flex gap-2">
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 text-sm font-semibold rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
+            <Btn variant="primary" size="md" onClick={() => window.location.reload()}
+              
             >
               Reload
-            </button>
-            <button
-              onClick={() => this.setState({ error: null })}
-              className="px-4 py-2 text-sm rounded-lg border border-border-strong text-content hover:text-content-strong hover:bg-surface-raised transition-colors"
+            </Btn>
+            <Btn variant="secondary" size="md" onClick={() => this.setState({ error: null })}
+              
             >
               Try again
-            </button>
+            </Btn>
           </div>
         </div>
       </div>

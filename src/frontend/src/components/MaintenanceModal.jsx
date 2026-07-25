@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchMaintenance, setMaintenance } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // unix seconds → value for <input type="datetime-local"> (local time), and back.
 function toLocalInput(unix) {
@@ -131,16 +131,14 @@ export default function MaintenanceModal({ workspace, name, envName, canOp, onCl
         )}
 
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border">
-          <button onClick={onTurnOff} disabled={!canOp || save.isPending}
-            className="px-3 py-1.5 rounded-lg text-sm bg-surface-raised hover:bg-surface-overlay text-content disabled:opacity-50">
+          <Btn variant="secondary" size="sm" onClick={onTurnOff} disabled={!canOp || save.isPending} >
             Turn off
-          </button>
+          </Btn>
           <div className="flex gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm bg-surface-raised hover:bg-surface-overlay text-content">Cancel</button>
-            <button onClick={onSave} disabled={!canOp || save.isPending}
-              className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
+            <Btn variant="secondary" size="sm" onClick={onClose} >Cancel</Btn>
+            <Btn variant="primary" size="sm" onClick={onSave} disabled={!canOp || save.isPending} >
               {save.isPending ? 'Saving…' : 'Save'}
-            </button>
+            </Btn>
           </div>
         </div>
       </div>

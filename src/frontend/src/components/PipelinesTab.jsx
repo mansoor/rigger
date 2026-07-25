@@ -7,7 +7,7 @@ import {
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
   suggestPipeline, fetchWorkspaceNotificationChannels,
 } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
 // ordered list of stages; each stage maps to a deploy/build/restart/backup action
@@ -93,19 +93,17 @@ export default function PipelinesTab({ workspace, name, envNames = [], serviceNa
           <Hint>Chain deploy, build, test and backup steps into a one-click run.</Hint>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setGen({ target: null })}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border-strong text-content hover:bg-surface-raised transition-colors"
+          <Btn variant="secondary" size="xs" onClick={() => setGen({ target: null })}
+            
             title="Generate a release pipeline from this project's environments"
           >
             ✨ Generate from environments
-          </button>
-          <button
-            onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
+          </Btn>
+          <Btn variant="primary" size="xs" onClick={() => setEditing({ name: '', enabled: true, stages: [blankStage(envNames[0])] })}
+            
           >
             + Add pipeline
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -223,16 +221,15 @@ function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDele
         </div>
         <div className="flex flex-col items-end gap-1.5 shrink-0">
           <div className="flex items-center gap-2">
-            <button onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <Btn variant="primary" size="xs" onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
+              >
               {active ? '▶ Running…' : '▶ Run'}
-            </button>
+            </Btn>
             {onRegenerate && (
-              <button onClick={onRegenerate} title="Regenerate this pipeline's stages from the current environments"
-                className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">🔄</button>
+              <Btn variant="secondary" size="xs" onClick={onRegenerate} title="Regenerate this pipeline's stages from the current environments" >🔄</Btn>
             )}
-            <button onClick={onEdit} className="text-xs px-2.5 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Edit</button>
-            <button onClick={onDelete} className="text-xs px-2.5 py-1.5 rounded-lg text-danger-fg hover:bg-danger-subtle/40 transition-colors">Delete</button>
+            <Btn variant="secondary" size="xs" onClick={onEdit} >Edit</Btn>
+            <Btn variant="dangerSubtle" size="xs" onClick={onDelete} >Delete</Btn>
           </div>
           {latestRun && (
             <button onClick={() => setOpenRunId(latestRun.id)}
@@ -297,10 +294,9 @@ function Webhooks({ workspace, name, pipelineId }) {
           <p className="text-warning-fg font-semibold mb-1">Copy this URL now — it won't be shown again:</p>
           <div className="flex items-start gap-2">
             <code className="flex-1 font-mono break-all text-content-strong select-all">{newToken}</code>
-            <button onClick={copyUrl} title="Copy URL"
-              className="shrink-0 px-2 py-1 rounded bg-surface-raised hover:bg-surface-overlay text-content transition-colors">
+            <Btn variant="secondary" size="xs" onClick={copyUrl} title="Copy URL" className="shrink-0">
               {copied ? '✓ Copied' : '⧉ Copy'}
-            </button>
+            </Btn>
           </div>
         </div>
       )}
@@ -315,7 +311,7 @@ function Webhooks({ workspace, name, pipelineId }) {
             <span className="font-mono text-content-muted">hook #{h.id}</span>
             <span className="text-content-faint">created {new Date(h.created_at).toLocaleDateString()}</span>
             {h.last_triggered_at && <span className="text-content-faint">· last fired {new Date(h.last_triggered_at).toLocaleString()}</span>}
-            <button onClick={() => delMut.mutate(h.id)} className="ml-auto text-danger-fg hover:bg-danger-subtle/40 px-1.5 py-0.5 rounded">Delete</button>
+            <Btn variant="dangerSubtle" size="xs" onClick={() => delMut.mutate(h.id)} className="ml-auto">Delete</Btn>
           </div>
         ))
       )}
@@ -362,10 +358,10 @@ function RunHistory({ workspace, name, pipeline }) {
           <span className="text-content-faint">· {r.username || 'system'}</span>
           {r.status === 'awaiting' && (
             <span className="flex items-center gap-1.5 ml-2">
-              <button onClick={() => approveMut.mutate(r.id)} disabled={approveMut.isPending}
-                className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white font-semibold disabled:opacity-40">Approve</button>
-              <button onClick={() => rejectMut.mutate(r.id)} disabled={rejectMut.isPending}
-                className="px-2 py-0.5 rounded text-danger-fg hover:bg-danger-subtle/40">Reject</button>
+              <Btn variant="primary" size="xs" onClick={() => approveMut.mutate(r.id)} disabled={approveMut.isPending}
+                >Approve</Btn>
+              <Btn variant="dangerSubtle" size="xs" onClick={() => rejectMut.mutate(r.id)} disabled={rejectMut.isPending}
+                >Reject</Btn>
             </span>
           )}
           <div className="flex flex-wrap gap-1 ml-auto items-center">
@@ -374,10 +370,10 @@ function RunHistory({ workspace, name, pipeline }) {
                 {STAGE_ICON[s.type] || '•'}
               </span>
             ))}
-            <button onClick={() => setLogRun(r.id)} title="View saved run logs"
-              className="ml-1 px-1.5 py-0.5 rounded bg-surface-raised hover:bg-surface-overlay text-content-subtle hover:text-content text-[10px]">
+            <Btn variant="secondary" size="xs" onClick={() => setLogRun(r.id)} title="View saved run logs"
+              className="ml-1">
               Logs
-            </button>
+            </Btn>
           </div>
         </div>
       ))}
@@ -567,26 +563,24 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
             {query && (
               <div className="flex items-center gap-0.5 shrink-0">
                 <span className="text-[10px] text-content-faint tabular-nums w-12 text-center">{occTotal ? `${activeIdx + 1}/${occTotal}` : '0/0'}</span>
-                <button onClick={() => gotoMatch(-1)} disabled={!occTotal} title="Previous match (Shift+Enter)"
-                  className="text-xs px-1.5 py-1 rounded border border-border-strong text-content-muted hover:text-content disabled:opacity-40">↑</button>
-                <button onClick={() => gotoMatch(1)} disabled={!occTotal} title="Next match (Enter)"
-                  className="text-xs px-1.5 py-1 rounded border border-border-strong text-content-muted hover:text-content disabled:opacity-40">↓</button>
+                <Btn variant="outline" size="xs" onClick={() => gotoMatch(-1)} disabled={!occTotal} title="Previous match (Shift+Enter)"
+                  >↑</Btn>
+                <Btn variant="outline" size="xs" onClick={() => gotoMatch(1)} disabled={!occTotal} title="Next match (Enter)"
+                  >↓</Btn>
               </div>
             )}
             <button onClick={() => setWrap(v => !v)} title="Toggle soft-wrap"
               className={`text-[11px] px-2 py-1 rounded border shrink-0 ${wrap ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}>↩ Wrap</button>
             <button onClick={() => setNums(v => !v)} title="Toggle line numbers"
               className={`text-[11px] px-2 py-1 rounded border shrink-0 ${nums ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}># Lines</button>
-            <button onClick={downloadLog} title="Download the full log"
-              className="text-[11px] px-2 py-1 rounded border border-border-strong text-content-muted hover:text-content hover:border-brand-600 shrink-0">⬇ Download</button>
+            <Btn variant="outline" size="xs" onClick={downloadLog} title="Download the full log" className="hover:border-brand-600 shrink-0">⬇ Download</Btn>
             {(overall === 'running' || overall === 'awaiting') && (
-              <button
-                onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
+              <Btn variant="dangerSubtle" size="xs" onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
                 disabled={cancelMut.isPending}
-                className="text-[11px] px-2 py-1 rounded border border-danger-border text-danger-fg hover:bg-danger-subtle disabled:opacity-50"
+                
                 title="Force-stop this running pipeline">
                 {cancelMut.isPending ? 'Cancelling…' : '■ Cancel'}
-              </button>
+              </Btn>
             )}
             <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
           </div>
@@ -671,10 +665,10 @@ function PipelineEditor({ draft, workspace, envNames, serviceNames = [], onChang
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-content">{draft.id ? 'Edit pipeline' : 'New pipeline'}</h2>
         <div className="flex gap-2">
-          <button onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Cancel</button>
-          <button onClick={onSave} disabled={saving} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white transition-colors">
+          <Btn variant="secondary" size="xs" onClick={onCancel} >Cancel</Btn>
+          <Btn variant="primary" size="xs" onClick={onSave} disabled={saving} >
             {saving ? 'Saving…' : 'Save pipeline'}
-          </button>
+          </Btn>
         </div>
       </div>
 
@@ -871,9 +865,9 @@ function StageRow({ idx, count, stage, envNames, serviceNames = [], onChange, on
           </>
         )}
         <div className="ml-auto flex items-center gap-1">
-          <button onClick={() => onMove(-1)} disabled={idx === 0} className="text-xs px-1.5 py-1 rounded text-content-faint hover:text-content disabled:opacity-30">↑</button>
-          <button onClick={() => onMove(1)} disabled={idx === count - 1} className="text-xs px-1.5 py-1 rounded text-content-faint hover:text-content disabled:opacity-30">↓</button>
-          <button onClick={onRemove} className="text-xs px-1.5 py-1 rounded text-danger-fg hover:bg-danger-subtle/40">✕</button>
+          <Btn variant="ghost" size="xs" onClick={() => onMove(-1)} disabled={idx === 0} >↑</Btn>
+          <Btn variant="ghost" size="xs" onClick={() => onMove(1)} disabled={idx === count - 1} >↓</Btn>
+          <Btn variant="dangerSubtle" size="xs" onClick={onRemove} >✕</Btn>
         </div>
       </div>
       {stage.type === 'test' && (
@@ -1001,12 +995,10 @@ function GeneratePipelineDialog({ workspace, name, envNames = [], target = null,
           {err && <p className="text-xs text-danger-fg">{err}</p>}
         </div>
         <div className="px-5 py-4 border-t border-border flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={busy}
-            className="px-3 py-1.5 rounded-lg text-sm border border-border-strong text-content hover:bg-surface-raised transition-colors">Cancel</button>
-          <button type="button" onClick={generate} disabled={busy}
-            className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+          <Btn variant="secondary" size="sm" onClick={onClose} disabled={busy} >Cancel</Btn>
+          <Btn variant="primary" size="sm" onClick={generate} disabled={busy} >
             {busy ? (target ? 'Regenerating…' : 'Generating…') : (target ? 'Regenerate' : 'Generate')}
-          </button>
+          </Btn>
         </div>
       </div>
     </div>

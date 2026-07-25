@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // Shared Notification Channel add/edit form (Apprise / Email), used by both the
 // admin Settings page (global channels, with a workspace allowlist) and Manage
@@ -188,12 +188,10 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
       {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
 
       <div className="flex gap-2 justify-end pt-2">
-        <button type="button" onClick={onCancel}
-          className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-surface-overlay hover:bg-surface-overlay text-content disabled:opacity-50">Cancel</button>
-        <button type="submit" disabled={saving}
-          className="font-semibold rounded-lg transition-colors px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50">
+        <Btn variant="secondary" size="md" onClick={onCancel} >Cancel</Btn>
+        <Btn variant="primary" size="md" type="submit" disabled={saving} >
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add channel'}
-        </button>
+        </Btn>
       </div>
     </form>
   )

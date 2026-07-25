@@ -37,7 +37,7 @@ import {
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -85,22 +85,6 @@ function Toggle({ checked, onChange, label }) {
   )
 }
 
-function Btn({ onClick, disabled, variant = 'primary', children, type = 'button', size = 'md' }) {
-  const base = 'font-semibold rounded-lg transition-colors focus:outline-none'
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm' }
-  const variants = {
-    primary:   'bg-brand-600 hover:bg-brand-700 text-white disabled:opacity-50',
-    secondary: 'bg-surface-overlay hover:bg-surface-overlay text-content disabled:opacity-50',
-    danger:    'bg-danger-subtle/60 hover:bg-danger/20 text-danger-fg disabled:opacity-50',
-    ghost:     'text-content-muted hover:text-content-strong hover:bg-surface-raised disabled:opacity-50',
-  }
-  return (
-    <button type={type} onClick={onClick} disabled={disabled}
-      className={`${base} ${sizes[size]} ${variants[variant]}`}>
-      {children}
-    </button>
-  )
-}
 
 function EmptyState({ icon, title, description, action }) {
   return (
@@ -121,7 +105,7 @@ function ConfirmDeleteModal({ name, onConfirm, onClose, loading }) {
         <p className="text-sm text-content-muted">This cannot be undone.</p>
         <div className="flex gap-2 justify-end pt-2">
           <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
-          <Btn variant="danger" onClick={onConfirm} disabled={loading}>
+          <Btn variant="dangerSubtle" onClick={onConfirm} disabled={loading}>
             {loading ? 'Deleting…' : 'Delete'}
           </Btn>
         </div>
@@ -215,9 +199,9 @@ function BackupTargetsTab() {
                 {testStatus[t.id]?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
                 {testStatus[t.id]?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
                 {testStatus[t.id]?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={testStatus[t.id].error}>{testStatus[t.id].error}</span>}
-                <Btn variant="ghost" size="sm" onClick={() => handleTest(t.id)} disabled={testStatus[t.id]?.loading}>Test</Btn>
-                <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: t })}>Edit</Btn>
-                <Btn variant="danger" size="sm" onClick={() => setDeleting(t)}>Delete</Btn>
+                <Btn variant="ghost" size="xs" onClick={() => handleTest(t.id)} disabled={testStatus[t.id]?.loading}>Test</Btn>
+                <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: t })}>Edit</Btn>
+                <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(t)}>Delete</Btn>
               </div>
             </div>
           ))}
@@ -309,8 +293,8 @@ function ManagedRegistryCard({ onChanged }) {
             <Btn onClick={() => act.mutate('up')} disabled={act.isPending}>{act.isPending ? 'Starting…' : st?.exists ? 'Start registry' : 'Run managed registry'}</Btn>
           ) : (
             <div className="flex items-center gap-2">
-              <Btn variant="ghost" size="sm" onClick={() => act.mutate('gc')} disabled={act.isPending} title="Reclaim space from deleted/overwritten tags">Garbage-collect</Btn>
-              <Btn variant="danger" size="sm" onClick={() => act.mutate('down')} disabled={act.isPending}>Stop</Btn>
+              <Btn variant="ghost" size="xs" onClick={() => act.mutate('gc')} disabled={act.isPending} title="Reclaim space from deleted/overwritten tags">Garbage-collect</Btn>
+              <Btn variant="dangerSubtle" size="xs" onClick={() => act.mutate('down')} disabled={act.isPending}>Stop</Btn>
             </div>
           )}
         </div>
@@ -363,7 +347,7 @@ function ManagedMetricsCard() {
         <div className="flex flex-col items-end gap-2 shrink-0">
           {!running
             ? <Btn onClick={() => act.mutate('up')} disabled={act.isPending}>{act.isPending ? 'Starting…' : st?.exists ? 'Start' : 'Enable'}</Btn>
-            : <Btn variant="danger" size="sm" onClick={() => act.mutate('down')} disabled={act.isPending}>Disable</Btn>}
+            : <Btn variant="dangerSubtle" size="xs" onClick={() => act.mutate('down')} disabled={act.isPending}>Disable</Btn>}
         </div>
       </div>
       {msg && <p className={`text-xs mt-2 ${msg.ok ? 'text-success-fg' : 'text-danger-fg'}`}>{msg.ok ? '✓ ' : '✗ '}{msg.text}</p>}
@@ -460,15 +444,15 @@ function RegistriesTab() {
                   {ts?.loading && <span className="text-xs text-content-subtle">Testing…</span>}
                   {ts?.ok && <span className="text-xs text-success-fg">✓ Connected</span>}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[180px] truncate" title={ts.error}>{ts.error}</span>}
-                  <Btn variant="ghost" size="sm" onClick={() => handleTest(r.id)} disabled={ts?.loading}>Test</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => handleTest(r.id)} disabled={ts?.loading}>Test</Btn>
                   {r.owner_scope === 'global' && (
-                    <Btn variant="ghost" size="sm" onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
+                    <Btn variant="ghost" size="xs" onClick={() => sysMut.mutate({ id: r.id, system: !r.system })} disabled={sysMut.isPending}
                       title={r.system ? 'Stop using this as the system registry' : 'Use wherever a project sets no registry'}>
                       {r.system ? 'Unset system' : 'Set system'}
                     </Btn>
                   )}
-                  <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: r })}>Edit</Btn>
-                  <Btn variant="danger" size="sm" onClick={() => setDeleting(r)}>Delete</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: r })}>Edit</Btn>
+                  <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(r)}>Delete</Btn>
                 </div>
               </div>
             )
@@ -650,27 +634,27 @@ function HostsTab() {
                   {ts?.ok && ts.dirMissing && (
                     <span className="text-xs text-warning-fg flex items-center gap-1.5" title={`Rigger workspaces directory does not exist on the remote: ${ts.dir}`}>
                       ✓ Connected · workspaces dir missing
-                      <button onClick={() => handleCreateDir(host.id)} disabled={ts.dirBusy}
-                        className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                      <Btn variant="primary" size="xs" onClick={() => handleCreateDir(host.id)} disabled={ts.dirBusy}
+                        >
                         {ts.dirBusy ? 'Creating…' : 'Create it now'}
-                      </button>
+                      </Btn>
                     </span>
                   )}
                   {ts?.ok && !ts.dirMissing && ts.edgeRunning === false && (
                     <span className="text-xs text-warning-fg flex items-center gap-1.5" title="No Traefik edge on this host — web-routed apps deployed here won't be reachable until it's installed. Standalone or Swarm is auto-detected.">
                       ⚠ no Traefik edge
-                      <button onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
-                        className="px-2 py-0.5 rounded bg-brand-600 hover:bg-brand-700 text-white text-[11px] font-semibold disabled:opacity-50">
+                      <Btn variant="primary" size="xs" onClick={() => handleInstallEdge(host.id)} disabled={ts.edgeBusy}
+                        >
                         {ts.edgeBusy ? 'Installing…' : 'Install edge'}
-                      </button>
+                      </Btn>
                     </span>
                   )}
                   {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
-                  <Btn variant="ghost" size="sm" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
-                  <Btn variant="ghost" size="sm" onClick={() => setHealth(host)}>Health</Btn>
-                  <Btn variant="ghost" size="sm" onClick={() => setScanning(host)}>Scan</Btn>
-                  <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: host })}>Edit</Btn>
-                  <Btn variant="danger" size="sm" onClick={() => setDeleting(host)}>Delete</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => handleTest(host.id)} disabled={ts?.loading}>Test</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => setHealth(host)}>Health</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => setScanning(host)}>Scan</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: host })}>Edit</Btn>
+                  <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(host)}>Delete</Btn>
                 </div>
               </div>
             )
@@ -984,18 +968,18 @@ function DomainsTab() {
           <div className="flex gap-2">
             <Input value={appHost} onChange={onHostChange} onBlur={() => checkImpact(appHost)}
               placeholder="192.168.1.50 or host.example.com" />
-            <button type="button" onClick={() => detectMut.mutate()} disabled={detectMut.isPending}
-              className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover disabled:opacity-50"
+            <Btn variant="secondary" size="xs" onClick={() => detectMut.mutate()} disabled={detectMut.isPending}
+              className="shrink-0"
               title="Query the Docker host for its real outbound IP">
               {detectMut.isPending ? 'Detecting…' : 'Detect'}
-            </button>
+            </Btn>
             {typeof window !== 'undefined' && window.location?.hostname &&
              window.location.hostname !== appHost.trim() && (
-              <button type="button" onClick={() => { onHostChange(window.location.hostname); checkImpact(window.location.hostname) }}
-                className="shrink-0 px-3 py-2 text-xs font-medium bg-surface-raised border border-border rounded-lg text-content hover:bg-surface-hover"
+              <Btn variant="secondary" size="xs" onClick={() => { onHostChange(window.location.hostname); checkImpact(window.location.hostname) }}
+                className="shrink-0"
                 title="Use the address your browser reached Rigger at">
                 Use {window.location.hostname}
-              </button>
+              </Btn>
             )}
           </div>
           {detectErr && <p className="text-xs text-warning-fg mt-1">{detectErr}</p>}
@@ -1522,8 +1506,8 @@ function RulesTab() {
               </div>
               <Toggle checked={r.enabled} onChange={() => toggleMut.mutate(r)} label="" />
               <div className="flex items-center gap-2">
-                <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: r })}>Edit</Btn>
-                <Btn variant="danger" size="sm" onClick={() => setDeleting(r)}>Delete</Btn>
+                <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: r })}>Edit</Btn>
+                <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(r)}>Delete</Btn>
               </div>
             </div>
           ))}
@@ -1652,9 +1636,9 @@ function NotificationsTab() {
                 {ts?.error && <span className="text-xs text-danger-fg max-w-[200px] truncate" title={ts.error}>{ts.error}</span>}
                 <Toggle checked={ch.enabled} onChange={() => toggleMut.mutate(ch)} label="" />
                 <div className="flex items-center gap-2">
-                  <Btn variant="ghost" size="sm" onClick={() => handleTest(ch.id)} disabled={ts?.loading}>Test</Btn>
-                  <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: ch })}>Edit</Btn>
-                  <Btn variant="danger" size="sm" onClick={() => setDeleting(ch)}>Delete</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => handleTest(ch.id)} disabled={ts?.loading}>Test</Btn>
+                  <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: ch })}>Edit</Btn>
+                  <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(ch)}>Delete</Btn>
                 </div>
               </div>
             )
@@ -2111,9 +2095,9 @@ function UsersTab() {
             </div>
             <div className="flex items-center gap-2">
               {u.status === 'invited'
-                ? <Btn variant="ghost" size="sm" onClick={() => resendMut.mutate(u.id)} disabled={resendMut.isPending}>Resend invite</Btn>
-                : <Btn variant="ghost" size="sm" onClick={() => setModal({ editing: u })}>Edit</Btn>}
-              <Btn variant="danger" size="sm" onClick={() => setDeleting(u)} disabled={me?.uid === u.id}>Delete</Btn>
+                ? <Btn variant="ghost" size="xs" onClick={() => resendMut.mutate(u.id)} disabled={resendMut.isPending}>Resend invite</Btn>
+                : <Btn variant="ghost" size="xs" onClick={() => setModal({ editing: u })}>Edit</Btn>}
+              <Btn variant="dangerSubtle" size="xs" onClick={() => setDeleting(u)} disabled={me?.uid === u.id}>Delete</Btn>
             </div>
           </div>
         ))}
@@ -2330,10 +2314,9 @@ function UpdatesTab() {
               </p>
             )}
           </div>
-          <button onClick={runCheck} disabled={checking || restarting}
-            className="shrink-0 text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+          <Btn variant="primary" size="md" onClick={runCheck} disabled={checking || restarting} className="shrink-0">
             {checking ? 'Checking…' : 'Check for updates'}
-          </button>
+          </Btn>
         </div>
 
         {isDev && (
@@ -2364,10 +2347,10 @@ function UpdatesTab() {
                   </div>
                 )}
                 <div className="flex items-center gap-3 flex-wrap">
-                  <button onClick={() => doApply(eff.latest)} disabled={busy || restarting}
-                    className="text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50">
+                  <Btn variant="primary" size="md" onClick={() => doApply(eff.latest)} disabled={busy || restarting}
+                    >
                     {busy ? 'Starting…' : `Update to ${eff.latest}`}
-                  </button>
+                  </Btn>
                   {eff.html_url && <a href={eff.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
                 </div>
                 <Hint tone="faint" className="text-[11px]">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></Hint>
@@ -2425,10 +2408,10 @@ function DockerUpdatesCard() {
           <h3 className="text-sm font-semibold text-content-strong">Docker Engine</h3>
           <Hint className="text-xs mt-0.5">Engine version on this machine and each registered host. Latest release: {data?.latest || '—'}{data?.latest_error ? ' (couldn’t check)' : ''}</Hint>
         </div>
-        <button onClick={() => refetch()} disabled={isFetching}
-          className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-border hover:bg-surface-raised text-content-strong transition-colors disabled:opacity-50">
+        <Btn variant="secondary" size="xs" onClick={() => refetch()} disabled={isFetching}
+          className="shrink-0">
           {isFetching ? 'Refreshing…' : 'Refresh'}
-        </button>
+        </Btn>
       </div>
 
       {isLoading && <p className="text-sm text-content-subtle">Loading…</p>}
@@ -2496,10 +2479,9 @@ function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
           // it's current). Otherwise say so, rather than a misleading Update button.
           if (onUpdate) {
             if (row.update_available || !latestKnown) {
-              return <button onClick={onUpdate}
-                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+              return <Btn variant="primary" size="xs" onClick={onUpdate} >
                 Update Docker
-              </button>
+              </Btn>
             }
             return <span className="text-[11px] text-success-fg">✓ Up to date</span>
           }
@@ -2614,10 +2596,9 @@ function DockerUpdateModal({ target, onClose }) {
             {err && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{err}</p>}
             <div className="flex justify-end gap-3">
               <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-              <button onClick={start}
-                className="text-sm font-semibold px-3 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors">
+              <Btn variant="primary" size="md" onClick={start} >
                 Update Docker now
-              </button>
+              </Btn>
             </div>
           </div>
         )}

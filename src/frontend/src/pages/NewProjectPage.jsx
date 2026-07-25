@@ -19,7 +19,7 @@ import { BackupScheduleEditor } from '../components/BackupSchedules'
 import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -302,10 +302,10 @@ function ScanStack({ data, onChange, workspace }) {
           <Label>Branch</Label>
           <Input value={data.source_branch || ''} onChange={v => onChange('source_branch', v)} placeholder="default branch" />
         </div>
-        <button type="button" onClick={() => scan()} disabled={busy || !(data.source_repo || '').trim()}
-          className="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm font-semibold">
+        <Btn variant="primary" size="md" onClick={() => scan()} disabled={busy || !(data.source_repo || '').trim()}
+          >
           {busy ? 'Scanning…' : 'Scan'}
-        </button>
+        </Btn>
       </div>
       <Hint>Public HTTPS URL, or pick a Git provider below for a private repo (token or SSH deploy key).</Hint>
       <div>
@@ -807,18 +807,16 @@ function ComposeImportModal({ images, onApply, onClose }) {
         <div className="px-5 py-4 overflow-y-auto flex-1 flex flex-col space-y-3">
           {/* Toolbar: paste from clipboard, or pull from a URL */}
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={pasteClipboard}
-              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">
+            <Btn variant="outline" size="sm" onClick={pasteClipboard} className="shrink-0 hover:border-brand-500">
               📋 Paste from clipboard
-            </button>
+            </Btn>
             <div className="flex items-center gap-2 flex-1 min-w-[16rem]">
               <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://…/docker-compose.yml"
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); fetchUrl() } }}
                 className="flex-1 px-3 py-1.5 bg-surface border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-              <button type="button" onClick={fetchUrl} disabled={fetching || !url.trim()}
-                className="shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 disabled:opacity-40 transition-colors">
+              <Btn variant="outline" size="sm" onClick={fetchUrl} disabled={fetching || !url.trim()} className="shrink-0 hover:border-brand-500">
                 {fetching ? 'Fetching…' : 'Fetch URL'}
-              </button>
+              </Btn>
             </div>
           </div>
           <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} spellCheck={false}
@@ -834,10 +832,10 @@ function ComposeImportModal({ images, onApply, onClose }) {
           )}
         </div>
         <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-lg text-sm text-content-subtle hover:text-content">Cancel</button>
+          <Btn variant="ghost" size="sm" onClick={onClose} >Cancel</Btn>
           {preview
-            ? <button type="button" onClick={apply} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 text-white">Apply {preview.mapped.imgs.length} service{preview.mapped.imgs.length !== 1 ? 's' : ''}</button>
-            : <button type="button" onClick={parse} disabled={busy || !text.trim()} className="px-4 py-1.5 rounded-lg text-sm font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">{busy ? 'Parsing…' : 'Parse'}</button>}
+            ? <Btn variant="primary" size="sm" onClick={apply} >Apply {preview.mapped.imgs.length} service{preview.mapped.imgs.length !== 1 ? 's' : ''}</Btn>
+            : <Btn variant="primary" size="sm" onClick={parse} disabled={busy || !text.trim()} >{busy ? 'Parsing…' : 'Parse'}</Btn>}
         </div>
       </div>
     </div>
@@ -982,11 +980,9 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange =
               placeholder={'# paste KEY=VALUE lines\nDATABASE_URL=postgres://…\nSECRET_KEY=…'}
               className="w-full h-40 px-2 py-1.5 bg-surface border border-border-strong rounded text-content-strong font-mono text-xs leading-relaxed focus:outline-none focus:border-brand-500 resize-y" />
             <div className="flex items-center gap-2">
-              <button type="button" onClick={pasteBulkClipboard}
-                className="px-2.5 py-1 rounded text-xs font-medium border border-border-strong text-content-subtle hover:text-content hover:border-brand-500 transition-colors">📋 Clipboard</button>
+              <Btn variant="outline" size="xs" onClick={pasteBulkClipboard} className="hover:border-brand-500">📋 Clipboard</Btn>
               <span className="text-[11px] text-content-faint flex-1">{bulkCount > 0 ? `${bulkCount} variable${bulkCount !== 1 ? 's' : ''} found — credential-looking keys will be flagged secret.` : 'One KEY=VALUE per line; # comments and blanks are ignored.'}</span>
-              <button type="button" onClick={importBulk} disabled={bulkCount === 0}
-                className="px-3 py-1 rounded text-xs font-semibold bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white">Import {bulkCount > 0 ? bulkCount : ''}</button>
+              <Btn variant="primary" size="xs" onClick={importBulk} disabled={bulkCount === 0} >Import {bulkCount > 0 ? bulkCount : ''}</Btn>
             </div>
           </div>
         )}
@@ -2296,10 +2292,9 @@ function ScaffoldResultCard({ workspace, projectKey }) {
     <div className="bg-surface border border-border rounded-xl p-4 space-y-3 text-left">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-content-strong">Start developing ({info.framework})</p>
-        <button type="button" onClick={dl} disabled={zipBusy}
-          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border-strong text-content hover:border-brand-600 disabled:opacity-40 transition-colors">
+        <Btn variant="outline" size="xs" onClick={dl} disabled={zipBusy} className="hover:border-brand-600">
           {zipBusy ? 'Preparing…' : '↓ Download as ZIP'}
-        </button>
+        </Btn>
       </div>
       <div className="space-y-2">
         {info.pushed ? (
@@ -2436,12 +2431,11 @@ function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorksp
       )}
 
       {isFailure && (
-        <button
-          onClick={onGoBack}
-          className="w-full py-2.5 border border-border-strong hover:border-border-strong text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+        <Btn variant="outline" size="md" onClick={onGoBack}
+          className="w-full hover:border-border-strong"
         >
           ← Go back &amp; fix
-        </button>
+        </Btn>
       )}
 
       {isSuccess && payload.scaffold && (
@@ -2451,34 +2445,30 @@ function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorksp
       {isSuccess && (
         <div className="space-y-2.5">
           {/* Primary action — open the new project. */}
-          <button
-            onClick={onDone}
-            className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white font-medium rounded-lg transition-colors"
+          <Btn variant="primary" size="md" onClick={onDone}
+            className="w-full"
           >
             Open project →
-          </button>
+          </Btn>
           {/* Secondary actions. "Deploy project" only for pull-only stacks. */}
           <div className="flex flex-wrap gap-2.5">
             {deployable && (
-              <button
-                onClick={onDeployProject}
-                className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+              <Btn variant="secondary" size="md" onClick={onDeployProject}
+                className="flex-1 min-w-[8rem]"
               >
                 Deploy project
-              </button>
+              </Btn>
             )}
-            <button
-              onClick={onEditProject}
-              className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+            <Btn variant="secondary" size="md" onClick={onEditProject}
+              className="flex-1 min-w-[8rem]"
             >
               Edit project
-            </button>
-            <button
-              onClick={onBackToWorkspace}
-              className="flex-1 min-w-[8rem] py-2.5 border border-border-strong hover:bg-surface-overlay text-content hover:text-content-strong font-medium rounded-lg transition-colors"
+            </Btn>
+            <Btn variant="secondary" size="md" onClick={onBackToWorkspace}
+              className="flex-1 min-w-[8rem]"
             >
               Back to workspace
-            </button>
+            </Btn>
           </div>
         </div>
       )}
@@ -2780,7 +2770,7 @@ export default function NewProjectPage() {
           <span className="absolute left-1/2 -translate-x-1/2 text-sm font-semibold text-content-strong">New Project</span>
           {step < 7
             ? <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-warning-border/60 bg-warning-subtle/30 hover:bg-warning/20 text-warning-fg transition-colors">Cancel</button>
-            : <button onClick={() => navigate(-1)} className="text-sm font-medium px-4 py-1.5 rounded-lg border border-border-strong bg-surface-raised hover:bg-surface-overlay text-content transition-colors">Close</button>
+            : <Btn variant="secondary" size="sm" onClick={() => navigate(-1)} >Close</Btn>
           }
         </div>
       </nav>

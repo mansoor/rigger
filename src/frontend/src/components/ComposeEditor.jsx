@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCompose } from '../lib/api'
-import { Hint } from './ui'
+import { Hint, Btn } from './ui'
 
 // ── Clipboard helper — works on HTTP (no secure context required) ─────────────
 
@@ -94,13 +94,12 @@ export default function ComposeEditor({ workspace, name, env, onClose, onRefresh
           </div>
           <div className="flex items-center gap-2">
             {onRefresh && (
-              <button
-                onClick={() => { onRefresh(); onClose() }}
-                className="text-sm font-medium px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors"
+              <Btn variant="primary" size="sm" onClick={() => { onRefresh(); onClose() }}
+                
                 title="Regenerate docker-compose.yml from config.json and deploy"
               >
                 Refresh
-              </button>
+              </Btn>
             )}
             <button
               onClick={handleCopy}

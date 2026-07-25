@@ -16,7 +16,7 @@ import RollbackModal from '../components/RollbackModal'
 import ServiceConsoleModal from '../components/ServiceConsoleModal'
 import MaintenanceModal from '../components/MaintenanceModal'
 import Sparkline from '../components/Sparkline'
-import { Hint } from '../components/ui'
+import { Hint, Btn } from '../components/ui'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
 
@@ -1000,14 +1000,13 @@ function ManualBackupModal({ name, envName, onClose, onRun }) {
         )}
 
         <div className="flex justify-end gap-2 mt-4">
-          <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg border border-border-strong text-content-muted hover:text-content">Cancel</button>
-          <button
-            onClick={() => onRun(servicesArg)}
+          <Btn variant="outline" size="sm" onClick={onClose} >Cancel</Btn>
+          <Btn variant="primary" size="sm" onClick={() => onRun(servicesArg)}
             disabled={!isLoading && services.length > 0 && sel.length === 0}
-            className="px-4 py-1.5 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white font-medium"
+            
           >
             Back up
-          </button>
+          </Btn>
         </div>
       </div>
     </div>
@@ -1108,10 +1107,10 @@ function ReleasePipeline({ ws }) {
           )}
           {pipeline && canOp && (
             <div className="flex flex-col items-end gap-1">
-              <button onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              <Btn variant="primary" size="xs" onClick={() => runMut.mutate()} disabled={active || runMut.isPending}
+                >
                 {active ? '▶ Running…' : '▶ Run'}
-              </button>
+              </Btn>
               {latestRun && (
                 <button onClick={() => setOpenRunId(latestRun.id)}
                   className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
@@ -1153,8 +1152,8 @@ function ReleasePipeline({ ws }) {
             <div className="flex items-center justify-between bg-warning-subtle/40 border border-warning-border/50 rounded-lg px-4 py-2.5 mb-4">
               <span className="text-xs text-warning-fg">Awaiting approval at a gate.</span>
               <div className="flex gap-2">
-                <button onClick={() => approveMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-green-600 hover:bg-green-700 text-white">Approve</button>
-                <button onClick={() => rejectMut.mutate(latestRun.id)} className="text-xs font-semibold px-3 py-1 rounded bg-surface-overlay text-content hover:text-content-strong">Reject</button>
+                <Btn variant="ghost" size="xs" onClick={() => approveMut.mutate(latestRun.id)} >Approve</Btn>
+                <Btn variant="secondary" size="xs" onClick={() => rejectMut.mutate(latestRun.id)} >Reject</Btn>
               </div>
             </div>
           )}
@@ -2006,8 +2005,8 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
                 {lockedValue ? (
                   <div className="flex-1 flex items-center gap-2">
                     <span className="flex-1 px-2 py-1 text-sm text-content-subtle italic select-none">stored in Docker secret</span>
-                    <button type="button" onClick={() => { setRotateKey(k); setRotateVal('') }}
-                      className="shrink-0 px-2 py-1 text-xs rounded bg-surface-overlay hover:bg-surface-overlay text-content-strong">Rotate</button>
+                    <Btn variant="secondary" size="xs" onClick={() => { setRotateKey(k); setRotateVal('') }}
+                      className="shrink-0">Rotate</Btn>
                   </div>
                 ) : (
                   <input
@@ -2054,12 +2053,11 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
               <input type="password" autoFocus value={rotateVal} onChange={e => setRotateVal(e.target.value)}
                 placeholder="new value"
                 className="flex-1 px-2 py-1 bg-surface border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-              <button type="button" disabled={!rotateVal || rotateMut.isPending}
-                onClick={() => rotateMut.mutate({ key: rotateKey, value: rotateVal })}
-                className="px-3 py-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white text-sm rounded">
-                {rotateMut.isPending ? 'Rotating…' : 'Rotate'}</button>
-              <button type="button" onClick={() => setRotateKey(null)}
-                className="px-3 py-1 bg-surface-overlay hover:bg-surface-overlay text-content-strong text-sm rounded">Cancel</button>
+              <Btn variant="primary" size="xs" disabled={!rotateVal || rotateMut.isPending} onClick={() => rotateMut.mutate({ key: rotateKey, value: rotateVal })}
+                >
+                {rotateMut.isPending ? 'Rotating…' : 'Rotate'}</Btn>
+              <Btn variant="secondary" size="xs" onClick={() => setRotateKey(null)}
+                >Cancel</Btn>
             </div>
             {rotateMut.isError && <p className="text-danger-fg text-xs mt-2">{rotateMut.error?.response?.data?.error || 'Rotation failed'}</p>}
           </div>
@@ -2080,9 +2078,9 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
             onChange={e => setNewVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && newKey.trim() && handleSave()}
             className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500" />
-          <button type="button" onClick={() => { if (newKey.trim()) handleSave() }}
+          <Btn variant="secondary" size="xs" onClick={() => { if (newKey.trim()) handleSave() }}
             disabled={!newKey.trim() || mutation.isPending}
-            className="px-3 py-1 bg-surface-overlay hover:bg-surface-overlay disabled:opacity-40 text-content-strong text-sm rounded transition-colors shrink-0">Add</button>
+            className="shrink-0">Add</Btn>
         </div>
 
         {/* Refresh hint */}
@@ -2091,10 +2089,9 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
         </p>
 
         <div className="flex items-center gap-3 mt-3">
-          <button onClick={handleSave} disabled={mutation.isPending}
-            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+          <Btn variant="primary" size="md" onClick={handleSave} disabled={mutation.isPending} >
             {mutation.isPending ? 'Saving…' : 'Save changes'}
-          </button>
+          </Btn>
           {mutation.isSuccess && <span className="text-success-fg text-sm">Saved ✓</span>}
           {mutation.isError && <span className="text-danger-fg text-sm">{mutation.error?.response?.data?.error || 'Failed'}</span>}
           {mutation.data?.warning && <span className="text-warning-fg text-sm">⚠ {mutation.data.warning}</span>}
