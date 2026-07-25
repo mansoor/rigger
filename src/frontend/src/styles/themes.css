@@ -41,6 +41,7 @@
   --accent-fg:        255 255 255;   /* text on accent fill */
   --accent-subtle:    22 78 99;      /* brand-900 — tinted accent bg */
   --accent-text:      34 211 238;    /* brand-400 — accent-colored text */
+  --accent-text-hover: 103 232 249;  /* brand-300 — accent text, hovered (brighter on dark) */
 
   /* Status — solid / subtle bg / border / fg (text on subtle). */
   --success:          52 211 153;    /* green-400 */
@@ -102,6 +103,7 @@
   --accent-fg:        255 255 255;   /* white text on accent fill */
   --accent-subtle:    207 250 254;   /* brand-100 — tinted accent bg */
   --accent-text:      14 116 144;    /* brand-700 — accent text on light */
+  --accent-text-hover: 21 94 117;    /* brand-800 — accent text, hovered (darker on light) */
 
   /* Status — re-tuned for light (text-700 on -50 tint, -200 border). */
   --success:          22 163 74;     /* green-600 */

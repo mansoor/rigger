@@ -16,7 +16,7 @@ import RollbackModal from '../components/RollbackModal'
 import ServiceConsoleModal from '../components/ServiceConsoleModal'
 import MaintenanceModal from '../components/MaintenanceModal'
 import Sparkline from '../components/Sparkline'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, IconBtn, CloseBtn } from '../components/ui'
 
 // ── Metrics history (Phase 6d) ──────────────────────────────────────────────────
 
@@ -68,7 +68,7 @@ function StatusBadge({ label, color }) {
     running:  'bg-green-500/20 text-success-fg border-success/30',
     partial:  'bg-amber-500/20 text-warning-fg border-warning/30',
     building: 'bg-amber-500/20 text-warning-fg border-warning/30',
-    working:  'bg-brand-500/20 text-brand-300 border-brand-500/30',
+    working:  'bg-brand-500/20 text-accent-text border-brand-500/30',
     stopped:  'bg-red-500/15 text-danger-fg border-danger/30',
     unknown:  'bg-surface-overlay/40 text-content-subtle border-border-strong/30',
   }
@@ -179,7 +179,7 @@ function UrlBadge({ href, reachable, mono, children }) {
   }
   return (
     <a href={href} target="_blank" rel="noreferrer" title={`Open ${href}`}
-      className={`${base} bg-surface-raised hover:bg-brand-900 text-content-muted hover:text-brand-300 border-border-strong hover:border-brand-600`}>
+      className={`${base} bg-surface-raised hover:bg-brand-900 text-content-muted hover:text-accent-text-hover border-border-strong hover:border-brand-600`}>
       {children}
     </a>
   )
@@ -278,7 +278,7 @@ function AccessUrls({ urls, reachable }) {
         <div className="absolute right-0 top-full mt-1 z-20 bg-surface-raised border border-border-strong rounded-lg shadow-xl py-1 min-w-[160px]">
           {urls.map((u, i) => reachable ? (
             <a key={i} href={u.href} target="_blank" rel="noreferrer"
-              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-content hover:bg-surface-overlay hover:text-brand-300 transition-colors">
+              className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs font-mono text-content hover:bg-surface-overlay hover:text-accent-text-hover transition-colors">
               <span className="truncate">{u.label}</span><span className="opacity-60">↗</span>
             </a>
           ) : (
@@ -977,7 +977,7 @@ function ManualBackupModal({ name, envName, onClose, onRun }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="font-semibold text-content-strong">Back up {envName}</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl leading-none">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <Hint className="mb-3">Choose which services' data to include.</Hint>
 
@@ -1113,7 +1113,7 @@ function ReleasePipeline({ ws }) {
               </Btn>
               {latestRun && (
                 <button onClick={() => setOpenRunId(latestRun.id)}
-                  className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
+                  className="text-[11px] text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1">
                   {active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
                   View log
                 </button>
@@ -1126,7 +1126,7 @@ function ReleasePipeline({ ws }) {
       {!pipeline ? (
         <div className="text-sm text-content-subtle">
           No pipeline yet —{' '}
-          <button onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} className="text-brand-400 hover:text-brand-300">
+          <button onClick={() => navigate(`/workspaces/${workspace}/projects/${name}/edit`)} className="text-accent-text hover:text-accent-text-hover">
             generate one
           </button>{' '}
           in Edit Project → Pipelines.
@@ -1292,12 +1292,11 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
               {TAIL_OPTIONS.map(n => <option key={n} value={n}>{n === 0 ? 'All' : n}</option>)}
             </select>
           </label>
-          <button onClick={loadHistory} title="Refresh history from the server"
-            className="p-1 rounded text-content-subtle hover:text-content hover:bg-surface-raised transition-colors">
+          <IconBtn variant="ghost" size="xs" onClick={loadHistory} title="Refresh history from the server" >
             <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v5h-5" />
             </svg>
-          </button>
+          </IconBtn>
           {entries.length > 0 && (
             <button
               onClick={async () => {
@@ -1326,7 +1325,7 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
           shown.map((it, i) =>
             it.type === 'header' ? (
               <div key={i} className="mt-3 first:mt-0 flex flex-wrap items-center gap-x-2 border-t border-border pt-2">
-                <span className="text-brand-300 font-semibold">▶ {it.action}{it.env ? ` · ${it.env}` : ''}</span>
+                <span className="text-accent-text font-semibold">▶ {it.action}{it.env ? ` · ${it.env}` : ''}</span>
                 <span className="text-content-faint">·</span>
                 <span className="text-content-subtle">{it.user}</span>
                 <span className="text-content-faint">·</span>
@@ -1671,7 +1670,7 @@ function LogModal({ wsName, envs, initialEnv, initialContainers, onClose }) {
 
   const toggleBtn = (active, onClick, label, title) => (
     <button onClick={onClick} title={title}
-      className={`text-xs px-2 py-1 rounded border transition-colors shrink-0 ${active ? 'border-brand-600 text-brand-400 bg-brand-950' : 'border-border-strong text-content-subtle hover:text-content'}`}>
+      className={`text-xs px-2 py-1 rounded border transition-colors shrink-0 ${active ? 'border-brand-600 text-accent-text bg-brand-950' : 'border-border-strong text-content-subtle hover:text-content'}`}>
       {label}
     </button>
   )
@@ -1959,7 +1958,7 @@ function EnvVarsModal({ name, env, deployment, onClose }) {
           <div className="flex items-center gap-2">
             <button onClick={() => setShowAudit(s => !s)} title="Secret audit trail"
               className={`text-xs px-2 py-1 rounded transition-colors ${showAudit ? 'bg-surface-overlay text-content-strong' : 'text-content-subtle hover:text-content-strong hover:bg-surface-raised'}`}>🕓 Audit</button>
-            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl leading-none">×</button>
+            <CloseBtn onClick={onClose} />
           </div>
         </div>
 
@@ -2419,11 +2418,11 @@ function BuildMenu({ version, onBuild, pipelines = [], linkedId, onSetLink, onRu
             <div className="border-t border-border my-1" />
             <div className="px-3 py-1 text-[11px] uppercase tracking-wide text-content-faint">Build button runs</div>
             <button onClick={() => { setOpen(false); onSetLink(0) }} className={item}>
-              <span>Build (raw)</span>{!linkedId && <span className="text-xs text-brand-400">✓</span>}
+              <span>Build (raw)</span>{!linkedId && <span className="text-xs text-accent-text">✓</span>}
             </button>
             {pipelines.map(p => (
               <button key={p.id} onClick={() => { setOpen(false); onSetLink(p.id) }} className={item}>
-                <span className="truncate">{p.name}</span>{linkedId === p.id && <span className="text-xs text-brand-400">✓</span>}
+                <span className="truncate">{p.name}</span>{linkedId === p.id && <span className="text-xs text-accent-text">✓</span>}
               </button>
             ))}
           </>)}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchDeployHistory, rollbackEnv } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // Phase 9e — Rollback dialog. For custom stacks it lists the env's deploy history
 // and pins a chosen prior image set on confirm. For image stacks (no per-env image
@@ -30,7 +30,7 @@ export default function RollbackModal({ workspace, name, envName, isImage, onClo
       <div className="bg-surface border border-border-strong rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <h3 className="font-semibold text-content-strong">↩ Rollback — {envName}</h3>
-          <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         {isImage ? (

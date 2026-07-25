@@ -1,4 +1,5 @@
 import { useTheme } from '../theme/ThemeProvider'
+import { IconBtn } from './ui'
 
 // Quick light/dark switch in the top nav. Sets an explicit theme (leaving
 // "System"); finer control (System, fonts, log size) lives in Settings →
@@ -9,11 +10,10 @@ export default function ThemeToggle() {
   const next = isDark ? 'light' : 'dark'
 
   return (
-    <button
-      onClick={() => setPrefs({ theme: next })}
+    <IconBtn variant="ghost" size="md" onClick={() => setPrefs({ theme: next })}
       title={`Switch to ${next} theme`}
       aria-label={`Switch to ${next} theme`}
-      className="flex items-center justify-center w-9 h-8 rounded-lg text-content-muted hover:text-content-strong hover:bg-surface-raised transition-colors"
+      
     >
       {isDark ? (
         // Sun — click to go light
@@ -27,6 +27,6 @@ export default function ThemeToggle() {
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
         </svg>
       )}
-    </button>
+    </IconBtn>
   )
 }

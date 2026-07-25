@@ -33,7 +33,7 @@ function WorkspaceVersionCard({ ws }) {
       <div className="px-5 py-4 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="w-2 h-2 rounded-full bg-brand-500 shrink-0" />
-          <Link to={`/workspaces/${ws.name}`} className="text-sm font-semibold text-content-strong hover:text-brand-400 transition-colors">
+          <Link to={`/workspaces/${ws.name}`} className="text-sm font-semibold text-content-strong hover:text-accent-text transition-colors">
             {ws.name}
           </Link>
           <span className={`text-xs px-2 py-0.5 rounded-full ${type === 'image' ? 'bg-info-subtle text-info-fg' : 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'}`}>

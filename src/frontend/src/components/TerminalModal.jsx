@@ -7,7 +7,7 @@ import { useAuthStore } from '../store/auth'
 import { useTheme } from '../theme/ThemeProvider'
 import { xtermOptions, applyXterm } from '../theme/xterm'
 import '@xterm/xterm/css/xterm.css'
-import { Btn } from './ui'
+import { Btn, CloseBtn } from './ui'
 
 export default function TerminalModal({ workspace, wsName, envName, initialService, onClose }) {
   const token      = useAuthStore(s => s.token)
@@ -228,13 +228,7 @@ export default function TerminalModal({ workspace, wsName, envName, initialServi
             )}
 
             {/* Close */}
-            <button
-              onClick={() => { disconnect(); onClose() }}
-              className="ml-1 text-content-subtle hover:text-content-strong text-lg leading-none transition-colors"
-              title="Close terminal"
-            >
-              ×
-            </button>
+            <CloseBtn onClick={() => { disconnect(); onClose() }} title="Close terminal" />
           </div>
         </div>
 

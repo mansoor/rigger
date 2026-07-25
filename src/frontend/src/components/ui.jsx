@@ -244,6 +244,36 @@ export function Btn({ variant = 'secondary', size = 'md', type = 'button', class
   )
 }
 
+// CloseBtn: the dismiss control on a modal/panel header. Renders its own glyph —
+// call sites had drifted to two different characters (× and ✕) at two different
+// sizes across 37 dialogs. Also supplies the aria-label none of them had.
+export function CloseBtn({ label = 'Close', className = '', ...rest }) {
+  return (
+    <button
+      type="button" aria-label={label} title={label}
+      className={`inline-flex items-center justify-center shrink-0 w-8 h-8 rounded-md text-xl leading-none text-content-subtle hover:text-content-strong hover:bg-surface-raised transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 ${className}`.trim()}
+      {...rest}
+    >
+      ×
+    </button>
+  )
+}
+
+// LinkBtn: an inline, box-less text action ("Add variable", "Show advanced").
+// Uses the accent-TEXT token rather than raw brand-400 so it stays readable on
+// the light theme, where bright cyan on white fails contrast badly.
+export function LinkBtn({ size = 'xs', className = '', children, ...rest }) {
+  return (
+    <button
+      type="button"
+      className={`inline-flex items-center gap-1 ${size === 'sm' ? 'text-sm' : 'text-xs'} text-accent-text hover:text-accent-text-hover hover:underline transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60 disabled:opacity-50 disabled:cursor-not-allowed ${className}`.trim()}
+      {...rest}
+    >
+      {children}
+    </button>
+  )
+}
+
 // IconBtn: square icon-only button (✕, trash, reorder arrows). Fixed box so a
 // column of them lines up regardless of glyph width.
 const ICON_SIZE = { xs: 'w-6 h-6 text-xs', sm: 'w-7 h-7 text-sm', md: 'w-8 h-8 text-sm' }

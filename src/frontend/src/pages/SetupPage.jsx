@@ -47,7 +47,7 @@ export default function SetupPage() {
                 <>
                   <p className="text-sm text-content-muted">No system email is configured yet, so open this link to verify your address (you can also do this later from your profile):</p>
                   <div className="bg-surface-raised border border-border-strong rounded-lg p-3 text-xs font-mono break-all text-content">
-                    <a className="text-brand-400 hover:underline" href={done.verify_link}>{done.verify_link}</a>
+                    <a className="text-accent-text hover:underline" href={done.verify_link}>{done.verify_link}</a>
                   </div>
                 </>
               )}

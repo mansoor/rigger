@@ -4,7 +4,7 @@ import {
   fetchProjectNotes, fetchProjectNote, createProjectNote, saveProjectNote,
   deleteProjectNote, renderProjectNotes,
 } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, IconBtn } from './ui'
 
 // Project Wiki / Notes tab. Multiple NAMED Markdown docs (one file each in the
 // project's notes/ dir); each note's name is a sub-tab. Markdown is rendered +
@@ -174,7 +174,7 @@ export default function ProjectNotesTab({ workspace, name }) {
                   placeholder="Note name" disabled={busy}
                   className="w-36 px-2 py-1 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
                 <Btn variant="primary" size="xs" onClick={addNote} disabled={busy || !newName.trim()} >Add</Btn>
-                <button onClick={() => { setAdding(false); setNewName('') }} className="px-1.5 text-content-subtle hover:text-content-strong text-sm">×</button>
+                <IconBtn variant="ghost" size="xs" onClick={() => { setAdding(false); setNewName('') }} >×</IconBtn>
               </div>
             ) : (
               <Btn variant="ghost" size="md" onClick={() => setAdding(true)} title="Add a note"

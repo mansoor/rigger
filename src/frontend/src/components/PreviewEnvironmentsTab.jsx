@@ -35,8 +35,8 @@ const DEFAULTS = {
 
 const STATUS_STYLES = {
   running: 'bg-success-subtle/50 text-success-fg',
-  creating: 'bg-brand-500/20 text-brand-300',
-  updating: 'bg-brand-500/20 text-brand-300',
+  creating: 'bg-brand-500/20 text-accent-text',
+  updating: 'bg-brand-500/20 text-accent-text',
   failed: 'bg-danger-subtle/50 text-danger-fg',
   torn_down: 'bg-surface-raised text-content-faint',
 }
@@ -198,7 +198,7 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
             <Hint>Add this URL as a <code className="font-mono">pull_request</code> webhook in your repo settings.</Hint>
           </div>
           <button onClick={() => addHook.mutate()} disabled={addHook.isPending}
-            className="text-xs font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-40">+ Add webhook</button>
+            className="text-xs font-semibold text-accent-text hover:text-accent-text-hover disabled:opacity-40">+ Add webhook</button>
         </div>
 
         {newUrl && (
@@ -261,7 +261,7 @@ export default function PreviewEnvironmentsTab({ workspace, name, envNames = [] 
             <span className="font-mono text-content font-semibold">PR #{p.pr_number}</span>
             <span className="font-mono text-content-muted truncate max-w-[10rem]" title={p.branch}>{p.branch}</span>
             <span className={`px-1.5 py-0.5 rounded ${STATUS_STYLES[p.status] || 'bg-surface-raised text-content-faint'}`}>{p.status}</span>
-            {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300 truncate max-w-[14rem]">{p.url}</a>}
+            {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="text-accent-text hover:text-accent-text-hover truncate max-w-[14rem]">{p.url}</a>}
             <div className="ml-auto flex items-center gap-2">
               <Btn variant="secondary" size="xs" onClick={() => redeploy.mutate(p.pr_number)} disabled={redeploy.isPending}
                 >Redeploy</Btn>

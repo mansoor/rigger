@@ -27,7 +27,7 @@ export function TemplateCard({ tmpl, selected, onClick, onDoubleClick }) {
               title={`Open ${tmpl.website} in a new tab`}
               onClick={e => { e.stopPropagation(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') }}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); window.open(tmpl.website, '_blank', 'noopener,noreferrer') } }}
-              className="text-content-faint hover:text-brand-400 cursor-pointer shrink-0"
+              className="text-content-faint hover:text-accent-text cursor-pointer shrink-0"
               aria-label="Open project website"
             >
               <svg viewBox="0 0 20 20" className="w-3.5 h-3.5 inline-block align-middle" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -134,7 +134,7 @@ export default function TemplateBrowserModal({ templates = [], selected, onSelec
           <div className="px-5 py-3 border-t border-border bg-surface-raised/30 flex items-center gap-3">
             <div className="min-w-0 flex-1">
               {pending
-                ? <p className="text-sm text-content-muted truncate"><span className="text-brand-400">✓</span> <strong className="text-content-strong">{pending.label}</strong> — click OK to use it.</p>
+                ? <p className="text-sm text-content-muted truncate"><span className="text-accent-text">✓</span> <strong className="text-content-strong">{pending.label}</strong> — click OK to use it.</p>
                 : (footer || <p className="text-sm text-content-subtle">Pick a template, then click OK.</p>)}
             </div>
             <Btn variant="outline" size="md" onClick={onClose} className="shrink-0">Cancel</Btn>

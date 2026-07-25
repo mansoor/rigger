@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchAllActivity, fetchBackups, fetchWorkspaces, openActionSocket, deleteBackup,
   syncEnvBackup, verifyRestore, fetchAlertEvents, dismissAlert, dismissAllAlerts } from '../lib/api'
-import { Btn } from './ui'
+import { Btn, IconBtn } from './ui'
 
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 
@@ -41,7 +41,7 @@ const CMD_COLOR = {
   restart: 'bg-amber-400/20 text-warning-fg',
   update:  'bg-amber-400/20 text-warning-fg',
   backup:  'bg-surface-overlay/20  text-content-muted',
-  build:   'bg-brand-500/20 text-brand-400',
+  build:   'bg-brand-500/20 text-accent-text',
   promote: 'bg-purple-500/20 text-purple-400',
   delete:  'bg-red-700/20   text-danger',
 }
@@ -207,7 +207,7 @@ function RestoreModal({ snap, onClose }) {
             <div key={i} className={`leading-5 whitespace-pre-wrap ${
               line.includes('ERROR') || line.includes('error') ? 'text-danger-fg' :
               line.includes('✓') || line.includes('Complete') || line.includes('restored') ? 'text-success-fg' :
-              line.includes('⚑') || line.includes('Step') ? 'text-brand-400 font-semibold' :
+              line.includes('⚑') || line.includes('Step') ? 'text-accent-text font-semibold' :
               line.includes('⚠') || line.includes('WARN') ? 'text-warning-fg' :
               'text-content'
             }`}>
@@ -653,14 +653,13 @@ function AlertsContent() {
                     {resolved && ev.resolved_at && <span> · cleared {timeAgo(ev.resolved_at)}</span>}
                   </p>
                 </div>
-                <button
-                  onClick={() => dismissMut.mutate(ev.id)}
+                <IconBtn variant="ghost" size="sm" onClick={() => dismissMut.mutate(ev.id)}
                   disabled={dismissMut.isPending}
                   title="Dismiss"
-                  className="shrink-0 text-content-faint hover:text-content transition-colors text-lg leading-none px-1"
+                  
                 >
                   ×
-                </button>
+                </IconBtn>
               </div>
             )
           })}

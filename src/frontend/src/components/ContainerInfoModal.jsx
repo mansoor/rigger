@@ -4,7 +4,7 @@ import {
   fetchContainerInspect, fetchContainerStats, fetchContainerTop, fetchContainerHistory,
 } from '../lib/api'
 import Sparkline from './Sparkline'
-import { Btn } from './ui'
+import { Btn, IconBtn } from './ui'
 
 const TABS = ['Overview', 'Resources', 'Network', 'Mounts', 'Processes', 'Environment', 'Labels', 'Health', 'Security', 'Layers', 'JSON']
 
@@ -477,7 +477,7 @@ export default function ContainerInfoModal({ workspace, wsName, env, service, sh
             <h3 className="text-sm font-semibold text-content-strong">{short}</h3>
             <span className="text-xs text-content-subtle font-mono truncate">{service}</span>
           </div>
-          <button onClick={onClose} className="text-content-subtle hover:text-content text-lg leading-none px-1">×</button>
+          <IconBtn variant="ghost" size="sm" onClick={onClose} >×</IconBtn>
         </div>
         {/* Tabs */}
         <div className="flex gap-1 px-3 pt-2 border-b border-border overflow-x-auto shrink-0">

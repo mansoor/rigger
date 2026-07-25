@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { putEnvOrder } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, IconBtn } from './ui'
 
 // EnvReorderModal lets an operator set the explicit deploy-tier order of a
 // project's environments (low → high), which drives the release pipeline and the
@@ -54,10 +54,10 @@ export default function EnvReorderModal({ workspace, name, envNames = [], onClos
               <span className="text-xs text-content-faint w-5 text-right tabular-nums">{i + 1}</span>
               <span className="text-sm font-medium text-content-strong flex-1 truncate">{env}</span>
               <div className="flex items-center gap-1 shrink-0">
-                <button type="button" disabled={i === 0} onClick={() => move(i, i - 1)}
-                  className="px-1.5 text-content-subtle hover:text-content-strong disabled:opacity-30 disabled:cursor-not-allowed">↑</button>
-                <button type="button" disabled={i === order.length - 1} onClick={() => move(i, i + 1)}
-                  className="px-1.5 text-content-subtle hover:text-content-strong disabled:opacity-30 disabled:cursor-not-allowed">↓</button>
+                <IconBtn variant="ghost" size="xs" disabled={i === 0} onClick={() => move(i, i - 1)}
+                  >↑</IconBtn>
+                <IconBtn variant="ghost" size="xs" disabled={i === order.length - 1} onClick={() => move(i, i + 1)}
+                  >↓</IconBtn>
               </div>
             </li>
           ))}

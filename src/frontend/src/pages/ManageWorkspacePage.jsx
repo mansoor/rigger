@@ -28,7 +28,7 @@ import {
 } from '../lib/api'
 import { useWorkspaceStore } from '../store/workspace'
 import { WS_ROLES, wsRoleOptions } from '../lib/roles'
-import { Hint, Checkbox, Btn } from '../components/ui'
+import { Hint, Checkbox, Btn, IconBtn, CloseBtn } from '../components/ui'
 
 const TABS = [
   { id: 'general',        label: 'General',          icon: '⚙' },
@@ -784,7 +784,7 @@ function HostsSection({ workspace, qc }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add host' : `Edit “${modal.editing.name}”`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <HostForm
               initial={modal === 'new' ? null : modal.editing}
@@ -924,7 +924,7 @@ function RegistriesSection({ workspace, qc }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add registry' : `Edit “${modal.editing.name}”`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <RegistryForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1191,7 +1191,7 @@ function GitProviderModal({ initial, onSave, onClose, saving, error }) {
       <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-lg mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">{editing ? `Edit “${initial.name}”` : 'Add Git provider'}</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         {!editing && (
@@ -1359,7 +1359,7 @@ function BackupTargetsSection({ workspace, qc }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add backup target' : `Edit “${modal.editing.name}”`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <BackupTargetForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1498,7 +1498,7 @@ function NotificationsSection({ workspace, qc }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add channel' : `Edit “${modal.editing.name}”`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <ChannelForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1638,7 +1638,7 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-xl my-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit access list — ${initial.name}` : 'Add access list'}</span>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <div className="px-5 py-4 space-y-4">
           <div>
@@ -1652,10 +1652,10 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
                 <div key={i} className="flex items-center gap-2">
                   <input value={u.user} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, user: e.target.value } : x))} placeholder="username" className={aclInput} />
                   <input type="password" value={u.password} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'} className={aclInput} />
-                  <button onClick={() => set('users', f.users.filter((_, j) => j !== i))} className="text-content-faint hover:text-rose-600 px-1.5">🗑</button>
+                  <IconBtn variant="dangerGhost" size="xs" onClick={() => set('users', f.users.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
-              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add user</button>
             </div>
             <label className="flex items-center gap-2 mt-2 text-sm text-content cursor-pointer">
               <input type="checkbox" checked={!!f.pass_auth} onChange={e => set('pass_auth', e.target.checked)} />
@@ -1672,10 +1672,10 @@ function AccessListWSModal({ workspace, plugins, initial, onClose, onSaved }) {
                     <option value="allow">Allow</option><option value="deny">Deny</option>
                   </select>
                   <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4" className={aclInput} />
-                  <button onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} className="text-content-faint hover:text-rose-600 px-1.5">🗑</button>
+                  <IconBtn variant="dangerGhost" size="xs" onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
-              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add IP rule</button>
+              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add IP rule</button>
             </div>
           </div>
           <div className="border-t border-border pt-3">
@@ -1811,7 +1811,7 @@ function WsRuleForm({ initial, meta, projects, channels, onSave, onCancel, savin
               const on = notifyIds.includes(ch.id)
               return (
                 <button key={ch.id} type="button" onClick={() => toggleChannel(ch.id)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${on ? 'bg-brand-600/20 border-brand-500 text-brand-300' : 'bg-surface-raised border-border-strong text-content-muted hover:text-content'}`}>
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${on ? 'bg-brand-600/20 border-brand-500 text-accent-text' : 'bg-surface-raised border-border-strong text-content-muted hover:text-content'}`}>
                   {on ? '✓ ' : ''}{ch.name}<span className="ml-1 text-content-subtle">{ch.type}</span>
                 </button>
               )
@@ -1908,7 +1908,7 @@ function AlertRulesSection({ workspace, projects, qc }) {
           <div className="bg-surface border border-border-strong rounded-2xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add alert rule' : `Edit “${modal.editing.name}”`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <WsRuleForm
               initial={modal === 'new' ? null : modal.editing}

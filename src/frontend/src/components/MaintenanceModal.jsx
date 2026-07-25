@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { fetchMaintenance, setMaintenance } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // unix seconds → value for <input type="datetime-local"> (local time), and back.
 function toLocalInput(unix) {
@@ -72,7 +72,7 @@ export default function MaintenanceModal({ workspace, name, envName, canOp, onCl
       <div className="bg-surface border border-border-strong rounded-xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <h3 className="font-semibold text-content-strong">🛠️ Maintenance — {envName}</h3>
-          <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         {isLoading ? (

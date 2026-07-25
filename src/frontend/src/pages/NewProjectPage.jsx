@@ -19,7 +19,7 @@ import { BackupScheduleEditor } from '../components/BackupSchedules'
 import DropZone from '../components/DropZone'
 import { portConflicts, hostPortsFromMappings } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, IconBtn } from '../components/ui'
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ function Toggle({ label, checked, onChange, hint }) {
 function StepHeader({ step, title, subtitle }) {
   return (
     <div className="mb-6">
-      <p className="text-xs font-semibold text-brand-400 uppercase tracking-wider mb-1">Step {step}</p>
+      <p className="text-xs font-semibold text-accent-text uppercase tracking-wider mb-1">Step {step}</p>
       <h2 className="text-xl font-semibold text-content-strong">{title}</h2>
       {subtitle && <p className="text-sm text-content-muted mt-0.5">{subtitle}</p>}
     </div>
@@ -493,7 +493,7 @@ function ScanReview({ data, onChange }) {
                       : s.image_from ? `worker → ${s.image_from}`
                       : `image ${s.image}${s.tag ? `:${s.tag}` : ''}`}
                   </span>
-                  {s.build?.method === 'nixpacks' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30">Nixpacks</span>}
+                  {s.build?.method === 'nixpacks' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-accent-text border border-brand-500/30">Nixpacks</span>}
                   {ports.length > 0 && <span className="text-content-subtle">:{ports.join(',')}</span>}
                   {meta.length > 0 && <span className="text-content-faint">· {meta.join(' · ')}</span>}
                   {s.web_routed && <span className="text-success-fg">web</span>}
@@ -1008,12 +1008,12 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange =
               className={`shrink-0 w-6 h-6 flex items-center justify-center rounded text-xs ${secret ? 'text-warning-fg' : 'text-content-faint hover:text-content'}`}>
               {secret ? '🔒' : '🔓'}
             </button>
-            <span className="font-mono text-xs text-content w-40 shrink-0 truncate flex items-center gap-1">{k}{overrides && <span className="text-[9px] uppercase tracking-wide text-brand-400 not-italic" title="Overrides a shared variable for this environment">ovr</span>}</span>
+            <span className="font-mono text-xs text-content w-40 shrink-0 truncate flex items-center gap-1">{k}{overrides && <span className="text-[9px] uppercase tracking-wide text-accent-text not-italic" title="Overrides a shared variable for this environment">ovr</span>}</span>
             <input
               type={secret ? 'password' : 'text'} value={v} onChange={e => update(k, e.target.value)}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
             />
-            <button type="button" onClick={() => remove(k)} className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+            <IconBtn variant="dangerGhost" size="xs" onClick={() => remove(k)} ><TrashIcon /></IconBtn>
           </div>
         )
       })}
@@ -1032,7 +1032,7 @@ function EnvVarEditor({ envVars, secretKeys = [], onChange, onSecretKeysChange =
           onKeyDown={e => e.key === 'Enter' && add()}
           className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
         />
-        <button type="button" onClick={add} className="text-xs text-brand-400 hover:text-brand-300 shrink-0 px-2">Add</button>
+        <button type="button" onClick={add} className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-2">Add</button>
       </div>
     </div>
   )
@@ -1104,7 +1104,7 @@ function TemplatePickerSection({ templates, selected, onSelect }) {
           <p className="text-xs font-semibold text-content-subtle uppercase tracking-wider mb-2">Selected template</p>
           <TemplateCard tmpl={selectedTmpl} selected onClick={() => setModalOpen(true)} />
           <p className="mt-2 text-xs text-content-subtle flex items-center gap-1.5">
-            <span className="text-brand-400">✓</span>
+            <span className="text-accent-text">✓</span>
             Env vars and volumes are pre-filled in the Services step. Review secrets before creating.
           </p>
         </div>
@@ -1445,7 +1445,7 @@ function EnvForm({ env, idx, onChange, onRemove, canRemove, stackType, sharedVar
                 <input type="checkbox" checked={tosAccepted}
                   onChange={e => { setTosAccepted(e.target.checked); if (!e.target.checked) upd('ssl_enabled', false) }}
                   className="w-3.5 h-3.5 accent-brand-500 shrink-0" />
-                <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Terms of Service</a></span>
+                <span>I agree to the Let&apos;s Encrypt <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-accent-text hover:underline">Terms of Service</a></span>
               </label>
             </div>
             <Hint tone="faint" className="text-[11px]">Account/recovery contact for the cert — blank inherits the {acmeDefault ? 'workspace' : 'instance'} default. Port 80 must be reachable for the HTTP-01 challenge.</Hint>
@@ -1515,7 +1515,7 @@ function EnvVarsSection({ vars, secretKeys = [], onChange, onSecretKeysChange, d
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
         {sharedKeys.length > 0 && <span className="ml-1 text-content-faint normal-case font-normal">{sharedKeys.length} shared</span>}
-        {count > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">· {count} set</span>}
+        {count > 0 && <span className="ml-1 text-accent-text normal-case font-normal">· {count} set</span>}
         {secretCount > 0 && <span className="ml-1 text-warning-fg normal-case font-normal">· {secretCount} 🔒</span>}
         <span className="ml-auto text-content-faint normal-case font-normal">per-environment .env</span>
       </button>
@@ -1627,7 +1627,7 @@ function VolumeEditor({ volumes, onChange }) {
             placeholder="/var/lib/mysql"
             className="flex-1 px-2 py-1.5 bg-surface-raised border border-border-strong rounded text-sm text-content-strong font-mono focus:outline-none focus:border-brand-500"
           />
-          <button type="button" onClick={() => remove(i)} className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+          <IconBtn variant="dangerGhost" size="xs" onClick={() => remove(i)} ><TrashIcon /></IconBtn>
         </div>
       ))}
       <Hint tone="faint">
@@ -1635,7 +1635,7 @@ function VolumeEditor({ volumes, onChange }) {
       </Hint>
       <button
         type="button" onClick={add}
-        className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+        className="text-xs text-accent-text hover:text-accent-text-hover transition-colors"
       >
         + Add volume
       </button>
@@ -1751,7 +1751,7 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
               <input type="text" value={row.container} placeholder="80"
                 onChange={e => syncPorts(portRows.map((x,j) => j===ri?{...x,container:e.target.value}:x))}
                 className={`flex-1 ${monoInput}`} />
-              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-content-muted hover:text-brand-400' : 'text-content-faint cursor-not-allowed'}`}>
+              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-content-muted hover:text-accent-text' : 'text-content-faint cursor-not-allowed'}`}>
                 <input
                   type="checkbox"
                   checked={!!row.link}
@@ -1762,13 +1762,13 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
                 <span className="text-sm">🔗</span>
               </label>
               {portRows.length > 1 && (
-                <button type="button" onClick={() => syncPorts(portRows.filter((_,j)=>j!==ri))}
-                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+                <IconBtn variant="dangerGhost" size="xs" onClick={() => syncPorts(portRows.filter((_,j)=>j!==ri))}
+                  ><TrashIcon /></IconBtn>
               )}
             </div>
           ))}
           <button type="button" onClick={() => setPortRows(r => [...r, {host:'',container:'',link:false}])}
-            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            className="text-xs text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1 mt-1">
             <span className="text-base leading-none">＋</span> Add port mapping
           </button>
         </div>
@@ -1790,12 +1790,12 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
                 onChange={e => syncVols(volRows.map((x,j) => j===ri?{...x,path:e.target.value}:x))}
                 className={`flex-1 ${monoInput}`} />
               <VolModeToggle mode={row.mode || 'rw'} onChange={m => syncVols(volRows.map((x,j) => j===ri?{...x,mode:m}:x))} />
-              <button type="button" onClick={() => syncVols(volRows.filter((_,j)=>j!==ri))}
-                className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+              <IconBtn variant="dangerGhost" size="xs" onClick={() => syncVols(volRows.filter((_,j)=>j!==ri))}
+                ><TrashIcon /></IconBtn>
             </div>
           ))}
           <button type="button" onClick={() => setVolRows(r => [...r, {source:'./volumes/',path:'',mode:'rw'}])}
-            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            className="text-xs text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1 mt-1">
             <span className="text-base leading-none">＋</span> Add volume
           </button>
         </div>
@@ -1838,12 +1838,12 @@ function ServiceConfigCard({ img, idx, allImages, onChange }) {
               <input type="text" value={row.val} placeholder="value"
                 onChange={e => syncEnv(envRows.map((x, j) => j === ri ? { ...x, val: e.target.value } : x))}
                 className={`flex-1 ${monoInput}`} />
-              <button type="button" onClick={() => syncEnv(envRows.filter((_, j) => j !== ri))}
-                className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+              <IconBtn variant="dangerGhost" size="xs" onClick={() => syncEnv(envRows.filter((_, j) => j !== ri))}
+                ><TrashIcon /></IconBtn>
             </div>
           ))}
           <button type="button" onClick={() => setEnvRows(r => [...r, { key: '', val: '' }])}
-            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            className="text-xs text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1 mt-1">
             <span className="text-base leading-none">＋</span> Add variable
           </button>
         </div>
@@ -1913,8 +1913,8 @@ function NamedVolumeEditor({ volumes, onChange }) {
         <div key={i} className="flex items-center gap-2">
           <span className="px-1.5 py-0.5 rounded text-xs bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 shrink-0">named</span>
           <span className="text-xs font-mono text-content flex-1">{v.name}</span>
-          <button type="button" onClick={() => onChange(volumes.filter((_,j)=>j!==i))}
-            className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+          <IconBtn variant="dangerGhost" size="xs" onClick={() => onChange(volumes.filter((_,j)=>j!==i))}
+            ><TrashIcon /></IconBtn>
         </div>
       ))}
       <div className="flex gap-2">
@@ -1923,7 +1923,7 @@ function NamedVolumeEditor({ volumes, onChange }) {
           placeholder="volume_name (no paths)"
           className="flex-1 px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm font-mono focus:outline-none focus:border-brand-500" />
         <button type="button" onClick={add}
-          className="text-xs text-brand-400 hover:text-brand-300 shrink-0 px-3 transition-colors">Add</button>
+          className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-3 transition-colors">Add</button>
       </div>
     </div>
   )
@@ -2823,7 +2823,7 @@ export default function NewProjectPage() {
                   title={scanIncomplete ? 'Scan the repository first' : undefined}
                   className={`text-content-strong text-sm font-semibold px-6 py-2 rounded-lg transition-colors ${
                     (step === 1 && nameConflict) || scanIncomplete
-                      ? 'bg-brand-800 text-brand-400 cursor-not-allowed'
+                      ? 'bg-brand-800 text-accent-text cursor-not-allowed'
                       : 'bg-brand-600 hover:bg-brand-700'
                   }`}
                 >

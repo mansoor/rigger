@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchServiceConsole, fetchStorageBuckets, createStorageBucket } from '../lib/api'
 import { DatabasePanel, CopyBtn, SecretValue } from './DatabaseInfoModal'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // ServiceConsoleModal — per-env Managed Service Console (P4). A tabbed view over every
 // managed service enabled for the environment: the database (rich Connection/Manage
@@ -64,7 +64,7 @@ export default function ServiceConsoleModal({ workspace, name, env, hasManagedDB
                 {reveal ? 'Hide all secrets' : 'Reveal all secrets'}
               </Btn>
             )}
-            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+            <CloseBtn onClick={onClose} />
           </div>
         </div>
 

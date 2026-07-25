@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchAccessTargets, createAccessRequest, fetchMyAccessRequests } from '../lib/api'
 import { wsRoleOptions } from '../lib/roles'
 import RoleHelp from './RoleHelp'
-import { Btn } from './ui'
+import { Btn, CloseBtn } from './ui'
 
 const STATUS_BADGE = {
   pending:  'bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40',
@@ -51,7 +51,7 @@ export default function RequestAccessModal({ onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-5" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Request access</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         <form onSubmit={submit} className="space-y-4">

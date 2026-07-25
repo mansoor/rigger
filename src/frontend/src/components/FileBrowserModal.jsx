@@ -5,7 +5,7 @@ import {
   deleteContainerFile, uploadContainerFile, downloadContainerFile,
   renameContainerFile, chmodContainerFile, mkdirContainerDir, newContainerFile,
 } from '../lib/api'
-import { Btn } from './ui'
+import { Btn, IconBtn, CloseBtn } from './ui'
 
 // FileBrowserModal — Wave D. Browse, view, edit, upload, download, rename,
 // chmod, create and delete files inside a container, on whichever daemon it runs
@@ -95,8 +95,7 @@ function ActBtn({ title, onClick, hover = 'hover:text-content', children }) {
 }
 function ToolBtn({ title, onClick, disabled, children }) {
   return (
-    <button title={title} onClick={onClick} disabled={disabled}
-      className="p-1.5 rounded-lg bg-surface-raised hover:bg-surface-overlay text-content disabled:opacity-40 transition-colors">{children}</button>
+    <IconBtn variant="secondary" size="sm" title={title} onClick={onClick} disabled={disabled} >{children}</IconBtn>
   )
 }
 
@@ -208,7 +207,7 @@ export default function FileBrowserModal({ workspace, wsName, env, service, shor
             <ToolBtn title="Upload file" onClick={() => fileInputRef.current?.click()} disabled={busy}><UploadIcon /></ToolBtn>
             <input ref={fileInputRef} type="file" className="hidden" onChange={onUpload} />
             <ToolBtn title="Refresh" onClick={() => refetch()} disabled={busy}><span className="text-sm leading-none">⟳</span></ToolBtn>
-            <button onClick={onClose} className="ml-1 text-content-subtle hover:text-content-strong text-lg leading-none transition-colors" title="Close">×</button>
+            <CloseBtn onClick={onClose} title="Close" />
           </div>
         </div>
 

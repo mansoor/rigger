@@ -7,7 +7,7 @@ import {
   fetchPipelineWebhooks, createPipelineWebhook, deletePipelineWebhook,
   suggestPipeline, fetchWorkspaceNotificationChannels,
 } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // Phase 9 — Deployment Pipelines tab (inside Edit Project). A pipeline is an
 // ordered list of stages; each stage maps to a deploy/build/restart/backup action
@@ -233,7 +233,7 @@ function PipelineCard({ workspace, name, pipeline, envNames = [], onEdit, onDele
           </div>
           {latestRun && (
             <button onClick={() => setOpenRunId(latestRun.id)}
-              className="text-[11px] text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1">
+              className="text-[11px] text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1">
               {active && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
               View log
             </button>
@@ -286,7 +286,7 @@ function Webhooks({ workspace, name, pipelineId }) {
     <div className="mt-2 space-y-2 border-t border-border pt-2">
       <div className="flex items-center justify-between">
         <Hint>POST to a webhook URL to trigger this pipeline (e.g. from GitHub/Gitea on push).</Hint>
-        <button onClick={() => addMut.mutate()} disabled={addMut.isPending} className="text-xs font-semibold text-brand-400 hover:text-brand-300 disabled:opacity-40">+ Add webhook</button>
+        <button onClick={() => addMut.mutate()} disabled={addMut.isPending} className="text-xs font-semibold text-accent-text hover:text-accent-text-hover disabled:opacity-40">+ Add webhook</button>
       </div>
 
       {newToken && (
@@ -570,9 +570,9 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
               </div>
             )}
             <button onClick={() => setWrap(v => !v)} title="Toggle soft-wrap"
-              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${wrap ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}>↩ Wrap</button>
+              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${wrap ? 'border-brand-600 text-accent-text bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}>↩ Wrap</button>
             <button onClick={() => setNums(v => !v)} title="Toggle line numbers"
-              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${nums ? 'border-brand-600 text-brand-300 bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}># Lines</button>
+              className={`text-[11px] px-2 py-1 rounded border shrink-0 ${nums ? 'border-brand-600 text-accent-text bg-brand-500/10' : 'border-border-strong text-content-muted hover:text-content'}`}># Lines</button>
             <Btn variant="outline" size="xs" onClick={downloadLog} title="Download the full log" className="hover:border-brand-600 shrink-0">⬇ Download</Btn>
             {(overall === 'running' || overall === 'awaiting') && (
               <Btn variant="dangerSubtle" size="xs" onClick={() => { if (window.confirm('Force-stop this run? The in-flight step is killed; later steps are skipped.')) cancelMut.mutate() }}
@@ -582,7 +582,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                 {cancelMut.isPending ? 'Cancelling…' : '■ Cancel'}
               </Btn>
             )}
-            <button onClick={onClose} className="text-content-faint hover:text-content text-lg leading-none">✕</button>
+            <CloseBtn onClick={onClose} />
           </div>
         </div>
 
@@ -596,7 +596,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                   title={st === 'pending' ? 'Not started yet' : 'Jump to this stage’s log'}
                   className="flex flex-col items-center gap-1.5 min-w-[86px] group focus:outline-none">
                   <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-transform group-hover:scale-110 ${stepCls(st)}`}>{stepIcon(st)}</div>
-                  <span className="text-[10px] text-center leading-tight text-content group-hover:text-brand-300">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
+                  <span className="text-[10px] text-center leading-tight text-content group-hover:text-accent-text-hover">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
                 </button>
                 {i < count - 1 && <div className="h-0.5 w-6 shrink-0 mx-1 bg-surface-overlay" />}
               </div>
@@ -689,7 +689,7 @@ function PipelineEditor({ draft, workspace, envNames, serviceNames = [], onChang
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="block text-[11px] font-semibold uppercase tracking-wide text-content-muted">Stages</label>
-            <button onClick={addStage} className="text-xs font-semibold text-brand-400 hover:text-brand-300">+ Add stage</button>
+            <button onClick={addStage} className="text-xs font-semibold text-accent-text hover:text-accent-text-hover">+ Add stage</button>
           </div>
           <div className="space-y-2">
             {draft.stages.map((s, i) => (

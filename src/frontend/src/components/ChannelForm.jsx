@@ -112,7 +112,7 @@ export default function ChannelForm({ initial, onSave, onCancel, saving, showGra
           />
           <Hint>
             One Apprise URL per line. Delivered via the Apprise sidecar — see the{' '}
-            <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noreferrer" className="text-brand-400 hover:underline">Apprise wiki</a>{' '}
+            <a href="https://github.com/caronc/apprise/wiki" target="_blank" rel="noreferrer" className="text-accent-text hover:underline">Apprise wiki</a>{' '}
             for the URL format of each service.
           </Hint>
         </div>

@@ -14,7 +14,7 @@ export default function HelpToggle() {
       aria-label={on ? 'Hide help text' : 'Show help text'}
       aria-pressed={on}
       className={`flex items-center justify-center w-9 h-8 rounded-lg transition-colors ${
-        on ? 'text-brand-400 hover:bg-surface-raised' : 'text-content-muted hover:text-content-strong hover:bg-surface-raised'
+        on ? 'text-accent-text hover:bg-surface-raised' : 'text-content-muted hover:text-content-strong hover:bg-surface-raised'
       }`}
     >
       {/* Help / question-mark in a circle. A slash overlays it when help is hidden. */}

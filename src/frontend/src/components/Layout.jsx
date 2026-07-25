@@ -12,7 +12,7 @@ import ThemeToggle from './ThemeToggle'
 import HelpToggle from './HelpToggle'
 import KeyField from './KeyField'
 import RequestAccessModal from './RequestAccessModal'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 import { AppearanceTab, LogsTerminalTab } from '../pages/SettingsPage'
 
 // Sidebar scroll position, preserved across Layout remounts (each page mounts its own
@@ -146,7 +146,7 @@ function WorkspaceSelector({ current, workspaces, onSelect, onNewWorkspace, onMa
             {canCreate && (
               <button
                 onClick={() => { setOpen(false); onNewWorkspace() }}
-                className="w-full text-left px-3 py-2 text-sm text-brand-400 hover:bg-surface-overlay transition-colors"
+                className="w-full text-left px-3 py-2 text-sm text-accent-text hover:bg-surface-overlay transition-colors"
               >
                 ＋ New workspace
               </button>
@@ -193,7 +193,7 @@ function NewWorkspaceModal({ onClose, onCreated }) {
       >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">New workspace</h3>
-          <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <p className="text-sm text-content-muted">
           A workspace groups related projects. The display name can be descriptive;
@@ -248,7 +248,7 @@ function ChangePasswordModal({ onClose }) {
       >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Change password</h3>
-          <button type="button" onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         {error && <p className="text-sm text-danger-fg bg-danger-subtle/40 border border-danger-border/50 rounded-lg px-3 py-2">{error}</p>}
         {['Current password', 'New password', 'Confirm new password'].map((label, i) => {
@@ -379,7 +379,7 @@ function ProfileModal({ user, onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Your profile</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         {user && user.ev === false && (
           <div className="flex items-center justify-between gap-2 px-3 py-2 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
@@ -395,7 +395,7 @@ function ProfileModal({ user, onClose }) {
           {link && (
             <div className="text-xs">
               <p className="text-content-muted mb-1">No system email configured — open this link to verify:</p>
-              <a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a>
+              <a href={link} className="text-accent-text hover:underline font-mono break-all">{link}</a>
             </div>
           )}
           <div className="flex justify-end gap-2 pt-1">
@@ -666,13 +666,13 @@ function AccountModal({ user, tab, setTab, onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-content-strong">Profile</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <div className="flex gap-1 border-b border-border mb-5">
           {tabs.map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                tab === t.id ? 'border-brand-500 text-brand-400' : 'border-transparent text-content-subtle hover:text-content'
+                tab === t.id ? 'border-brand-500 text-accent-text' : 'border-transparent text-content-subtle hover:text-content'
               }`}>
               {t.label}
             </button>
@@ -736,7 +736,7 @@ function AccountGeneral({ user }) {
         <div><label className={lbl}>Display name</label><input className={inp} value={username} onChange={e => setUsername(e.target.value)} /></div>
         <div><label className={lbl}>Phone (optional)</label><input className={inp} type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 0100" /></div>
         {msg && <p className="text-xs text-content-muted">{msg}</p>}
-        {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-brand-400 hover:underline font-mono break-all">{link}</a></div>}
+        {link && <div className="text-xs"><p className="text-content-muted mb-1">No system email configured — open this link to verify:</p><a href={link} className="text-accent-text hover:underline font-mono break-all">{link}</a></div>}
         <Btn variant="primary" size="md" type="submit" disabled={busy} >{busy ? 'Saving…' : 'Save profile'}</Btn>
       </form>
       <AccountConfirmPref lbl={lbl} field={inp} />

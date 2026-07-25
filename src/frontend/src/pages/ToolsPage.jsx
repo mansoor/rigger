@@ -3,7 +3,7 @@ import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
 import DropZone from '../components/DropZone'
 import TemplateBrowserModal from '../components/TemplateBrowserModal'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, CloseBtn } from '../components/ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   saveToolTemplate, fetchTemplates, fetchTemplateDraft, fetchTemplateRaw,
@@ -426,7 +426,7 @@ function SelectWorkspaceModal({ workspaces, busy, error, onLoad, onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Select an image project</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <Hint className="text-sm">
           Pulls the stack's images and environment-variable defaults (secrets masked) into the editor as a draft template.
@@ -533,7 +533,7 @@ function ComposeModal({ onLoad, onClose }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-3xl p-6 space-y-3" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Convert Docker Compose</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <Hint className="text-sm">
           Paste or import a <code className="font-mono text-xs">docker-compose.yml</code>; converting turns its services
@@ -545,7 +545,7 @@ function ComposeModal({ onLoad, onClose }) {
           <div className="flex items-center gap-2">
             <button onClick={paste} className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>⎘ Paste</button>
             <button onClick={() => fileRef.current?.click()} className={`${btnBase} border-border-strong text-content-muted hover:text-content hover:border-border-strong`}>↑ Import file</button>
-            <button onClick={() => { setInput(PLACEHOLDER); setError('') }} className="text-xs text-brand-400 hover:text-brand-300 transition-colors">Example</button>
+            <button onClick={() => { setInput(PLACEHOLDER); setError('') }} className="text-xs text-accent-text hover:text-accent-text-hover transition-colors">Example</button>
             <input ref={fileRef} type="file" accept=".yml,.yaml,.txt" onChange={importFile} className="hidden" />
           </div>
         </div>
@@ -978,7 +978,7 @@ function ComposeToTemplate() {
                     <a
                       href={parsed.website} target="_blank" rel="noopener noreferrer"
                       title={`Open ${parsed.website} in a new tab`}
-                      className="shrink-0 p-1.5 text-content-subtle hover:text-brand-400 border border-border-strong rounded-lg"
+                      className="shrink-0 p-1.5 text-content-subtle hover:text-accent-text border border-border-strong rounded-lg"
                       aria-label="Open website"
                     >
                       <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1006,8 +1006,8 @@ function ComposeToTemplate() {
                 <div className="px-3 pb-3 pt-0 space-y-3">
                   {sfRows.length === 0 && (
                     <p className="text-xs text-content-subtle">
-                      None yet. <button type="button" onClick={() => applyFiles([{ path: '', content: '' }])} className="text-brand-400 hover:text-brand-300">Add a file</button>
-                      {parsed?.files && Object.keys(parsed.files).length > 0 && <> or <button type="button" onClick={pullFiles} className="text-brand-400 hover:text-brand-300">pull the {Object.keys(parsed.files).length} already in the JSON</button></>}.
+                      None yet. <button type="button" onClick={() => applyFiles([{ path: '', content: '' }])} className="text-accent-text hover:text-accent-text-hover">Add a file</button>
+                      {parsed?.files && Object.keys(parsed.files).length > 0 && <> or <button type="button" onClick={pullFiles} className="text-accent-text hover:text-accent-text-hover">pull the {Object.keys(parsed.files).length} already in the JSON</button></>}.
                     </p>
                   )}
                   {sfRows.map((row, i) => (
@@ -1028,7 +1028,7 @@ function ComposeToTemplate() {
                   ))}
                   {sfRows.length > 0 && (
                     <div className="flex items-center gap-3">
-                      <button type="button" onClick={() => applyFiles([...sfRows, { path: '', content: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add file</button>
+                      <button type="button" onClick={() => applyFiles([...sfRows, { path: '', content: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add file</button>
                       <button type="button" onClick={pullFiles} className="text-xs text-content-subtle hover:text-content" title="Discard form edits and reload from the JSON above">⟲ Reload from JSON</button>
                     </div>
                   )}

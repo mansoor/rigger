@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
 import VerticalTabs from '../components/VerticalTabs'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, CloseBtn } from '../components/ui'
 import {
   fetchHousekeepingStatus, fetchHousekeepingLog,
   fetchHousekeepingImages, fetchStoppedContainers, fetchDanglingVolumes,
@@ -70,7 +70,7 @@ function OutputModal({ title, output, onClose }) {
       <div className="bg-surface border border-border rounded-2xl w-full max-w-2xl mx-4 flex flex-col shadow-2xl" style={{ maxHeight: '80vh' }}>
         <div className="flex justify-between items-center px-5 py-4 border-b border-border shrink-0">
           <h3 className="font-semibold text-content-strong text-sm">{title}</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <pre className="flex-1 overflow-auto p-4 text-xs text-content font-mono whitespace-pre-wrap bg-canvas rounded-b-2xl">
           {output || '(no output)'}
@@ -256,7 +256,7 @@ function UnusedImagesSection() {
             <>
               <div className="flex items-center justify-between mb-2">
                 <button onClick={() => setSelected(Object.fromEntries(unusedImages.map(i => [i.id, true])))}
-                  className="text-xs text-brand-400 hover:text-brand-300">Select all</button>
+                  className="text-xs text-accent-text hover:text-accent-text-hover">Select all</button>
                 <button onClick={() => setSelected({})} className="text-xs text-content-subtle hover:text-content">Clear</button>
               </div>
               <div className="space-y-1 max-h-64 overflow-y-auto">
@@ -640,7 +640,7 @@ function KernelCleanupSection() {
           {!isLoading && kernels.length === 0 && <p className="text-sm text-content-subtle">No kernel information available.</p>}
           {kernels.length > 0 && (
             <>
-              <p className="text-xs text-content-muted">Active kernel: <code className="font-mono text-brand-400">{kernelData.active}</code></p>
+              <p className="text-xs text-content-muted">Active kernel: <code className="font-mono text-accent-text">{kernelData.active}</code></p>
               <div className="space-y-1">
                 {kernels.map(k => (
                   <div key={k.package} className={`flex items-center gap-3 p-2.5 rounded-lg border ${k.locked ? 'border-border-strong/40 bg-surface-raised/20' : 'border-border-strong bg-surface-raised/40'}`}>
@@ -850,7 +850,7 @@ function AutomationTab({ hostPrivileged }) {
                     <tr key={i} className="hover:bg-surface-raised/40 cursor-pointer" onClick={() => setSelectedLog(entry)}>
                       <td className="px-3 py-2 font-mono text-content">{entry.task}</td>
                       <td className="px-3 py-2">
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${entry.trigger === 'cron' ? 'bg-surface-overlay text-content-muted' : 'bg-brand-900/50 text-brand-400'}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${entry.trigger === 'cron' ? 'bg-surface-overlay text-content-muted' : 'bg-brand-900/50 text-accent-text'}`}>
                           {entry.trigger}
                         </span>
                       </td>

@@ -60,6 +60,10 @@ export default {
           fg:             token('accent-fg'),
           subtle:         token('accent-subtle'),
           text:           token('accent-text'),
+          // Hover pair for accent-colored TEXT. Distinct from `hover` above,
+          // which is the hover for an accent *fill*: text needs to go brighter
+          // on dark and darker on light, a fill goes darker on both.
+          'text-hover':   token('accent-text-hover'),
         },
         // Status families — each: solid, subtle bg, border, fg (text on subtle).
         success: { DEFAULT: token('success'), subtle: token('success-subtle'), border: token('success-border'), fg: token('success-fg') },

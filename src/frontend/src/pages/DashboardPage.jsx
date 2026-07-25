@@ -179,7 +179,7 @@ function ProjectEnvDetails({ workspace, name, envHosts = {} }) {
               {e.deployment === 'swarm' ? 'Swarm' : 'Compose'}
             </span>
             {exposeMode === 'traefik' && route?.url
-              ? <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-brand-400 hover:underline truncate max-w-[300px]">{route.url}</a>
+              ? <a href={route.url} target="_blank" rel="noreferrer" className="font-mono text-accent-text hover:underline truncate max-w-[300px]">{route.url}</a>
               : hostPort ? <span className="font-mono text-content-muted">host port :{hostPort}</span>
               : <span className="text-content-faint">internal only</span>}
             {exposeMode === 'traefik' && <EnvCertBadge workspace={workspace} name={name} env={env} domain={route?.domain} />}
@@ -524,7 +524,7 @@ export default function DashboardPage() {
               Projects{current ? <span className="text-content-subtle font-normal"> · {current}</span> : null}
             </h2>
             {current && (
-              <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-brand-400 hover:text-brand-300 transition-colors font-medium">+ New project</Link>
+              <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-accent-text hover:text-accent-text-hover transition-colors font-medium">+ New project</Link>
             )}
           </div>
 
@@ -532,7 +532,7 @@ export default function DashboardPage() {
             <div className="px-5 py-10 text-center">
               <p className="text-sm text-content-subtle">{current ? `No projects in “${current}” yet.` : 'Select a workspace to see its projects.'}</p>
               {current && (
-                <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-brand-400 hover:text-brand-300 mt-2 inline-block">Create your first project →</Link>
+                <Link to={`/workspaces/${current}/projects/new`} className="text-xs text-accent-text hover:text-accent-text-hover mt-2 inline-block">Create your first project →</Link>
               )}
             </div>
           ) : (
@@ -568,7 +568,7 @@ export default function DashboardPage() {
                             className="text-content-faint hover:text-content-muted transition-transform shrink-0">
                             <svg className={`w-3.5 h-3.5 transition-transform ${expanded.has(prefix) ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor"><path d="M7 5l6 5-6 5V5z" /></svg>
                           </button>
-                          <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="font-medium text-content-strong group-hover:text-brand-400 transition-colors">
+                          <Link to={`/workspaces/${w.workspace}/projects/${w.name}`} className="font-medium text-content-strong group-hover:text-accent-text transition-colors">
                             {w.display_name || w.name}
                           </Link>
                           <span className="text-[10px] font-mono text-content-faint" title="Resource prefix">{prefix}</span>

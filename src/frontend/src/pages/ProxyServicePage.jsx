@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
-import { Hint, CertBadge, Btn } from '../components/ui'
+import { Hint, CertBadge, Btn, IconBtn, CloseBtn } from '../components/ui'
 import {
   fetchProxyRoutes, createProxyRoute, updateProxyRoute, deleteProxyRoute,
   testProxyRoute, fetchProxyCerts, fetchProxyPlugins, updateProxyPlugins, setProxyGeoIPDB,
@@ -342,15 +342,15 @@ function RouteRow({ r, plugins, accessLists = [], onToggle, onEdit, onDelete }) 
           {r.tls_mode !== 'none' && <Badge cls={tls.cls}>{tls.label}</Badge>}
           {r.tls_mode !== 'none' && r.cert && <CertBadge cert={r.cert} />}
           {acl
-            ? <Badge cls="bg-brand-600/15 text-brand-300">🔒 {acl.name}</Badge>
+            ? <Badge cls="bg-brand-600/15 text-accent-text">🔒 {acl.name}</Badge>
             : <>
-                {r.auth_mode === 'basic' && <Badge cls="bg-brand-600/15 text-brand-300">Basic auth</Badge>}
+                {r.auth_mode === 'basic' && <Badge cls="bg-brand-600/15 text-accent-text">Basic auth</Badge>}
                 {r.ip_allow && <Badge>IP allow</Badge>}
-                {r.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-brand-300">🌐 allow</Badge>}
+                {r.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-accent-text">🌐 allow</Badge>}
                 {r.geo_mode === 'block' && <Badge cls="bg-danger-subtle/50 text-danger-fg">🌐 deny</Badge>}
               </>}
           {r.hsts_seconds > 0 && <Badge>HSTS</Badge>}
-          {r.waf && plugins?.waf_enabled && <Badge cls="bg-brand-600/15 text-brand-300">WAF</Badge>}
+          {r.waf && plugins?.waf_enabled && <Badge cls="bg-brand-600/15 text-accent-text">WAF</Badge>}
           {r.cache && plugins?.cache_enabled && <Badge cls="bg-warning-subtle/50 text-warning-fg">Cache</Badge>}
         </div>
         <div className="text-xs text-content-subtle mt-0.5 font-mono truncate">
@@ -417,7 +417,7 @@ function PluginsCard({ plugins }) {
               {geoMut.isPending ? 'Downloading…' : db.present ? 'Refresh' : 'Download'}
             </Btn>
           </div>
-          {geoMsg?.ok && <p className="text-[11px] text-brand-400 mt-1">Database updated.</p>}
+          {geoMsg?.ok && <p className="text-[11px] text-accent-text mt-1">Database updated.</p>}
           {geoMsg?.error && <p className="text-[11px] text-danger-fg mt-1">{geoMsg.error}</p>}
           <Hint tone="faint" className="text-[11px] mt-1">Behind another proxy (NPM / Cloudflare)? GeoIP needs the real client IP — set Traefik forwardedHeaders trust for your proxy.</Hint>
         </div>
@@ -505,10 +505,10 @@ function AccessListsCard({ accessLists, plugins }) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-content-strong">{a.name}</span>
-                    {(a.users || []).length > 0 && <Badge cls="bg-brand-600/15 text-brand-300">{a.users.length} user{a.users.length > 1 ? 's' : ''}</Badge>}
+                    {(a.users || []).length > 0 && <Badge cls="bg-brand-600/15 text-accent-text">{a.users.length} user{a.users.length > 1 ? 's' : ''}</Badge>}
                     {allow > 0 && <Badge>{allow} allow</Badge>}
                     {deny > 0 && <Badge cls="bg-danger-subtle/50 text-danger-fg">{deny} deny</Badge>}
-                    {a.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-brand-300">🌐 allow {(a.countries || []).length}</Badge>}
+                    {a.geo_mode === 'allow' && <Badge cls="bg-brand-600/15 text-accent-text">🌐 allow {(a.countries || []).length}</Badge>}
                     {a.geo_mode === 'block' && <Badge cls="bg-danger-subtle/50 text-danger-fg">🌐 block {(a.countries || []).length}</Badge>}
                     {!a.pass_auth && <Badge>strips auth header</Badge>}
                   </div>
@@ -567,7 +567,7 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-xl my-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit access list — ${initial.name}` : 'Add access list'}</span>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <div className="px-5 py-4 space-y-4">
           <div><Label>Name</Label><Input value={f.name} onChange={v => set('name', v)} placeholder="Office + admins" /></div>
@@ -581,10 +581,10 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
                     className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
                   <input type="password" value={u.password} onChange={e => set('users', f.users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
                     className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                  <button onClick={() => set('users', f.users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                  <IconBtn variant="dangerGhost" size="xs" onClick={() => set('users', f.users.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
-              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+              <button onClick={() => set('users', [...f.users, { user: '', password: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add user</button>
             </div>
             <div className="mt-2"><Toggle checked={!!f.pass_auth} onChange={v => set('pass_auth', v)} label="Forward the Authorization header to the upstream" /></div>
           </div>
@@ -600,10 +600,10 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
                   </select>
                   <input value={r.address} onChange={e => set('rules', f.rules.map((x, j) => j === i ? { ...x, address: e.target.value } : x))} placeholder="192.168.0.0/16 or 203.0.113.4"
                     className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                  <button onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                  <IconBtn variant="dangerGhost" size="xs" onClick={() => set('rules', f.rules.filter((_, j) => j !== i))} >🗑</IconBtn>
                 </div>
               ))}
-              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add IP rule</button>
+              <button onClick={() => set('rules', [...f.rules, { action: 'allow', address: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add IP rule</button>
             </div>
           </div>
 
@@ -618,7 +618,7 @@ function AccessListModal({ initial, plugins, onClose, onSaved }) {
               <Input value={f.countriesText} onChange={v => set('countriesText', v)} placeholder="US, DE, GB" disabled={f.geo_mode === 'off'} />
             </div>
             <Hint tone="faint" className="text-[11px] mt-1">
-              Two-letter <a href="https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" target="_blank" rel="noreferrer" className="text-brand-400 underline">ISO country codes</a>, comma-separated.
+              Two-letter <a href="https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" target="_blank" rel="noreferrer" className="text-accent-text underline">ISO country codes</a>, comma-separated.
               {!plugins?.geoip_enabled && ' Enable the GeoIP plugin on the Proxy Service page for this to take effect.'}
             </Hint>
           </div>
@@ -770,7 +770,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-xl my-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <span className="font-semibold text-content-strong text-sm">{isEdit ? `Edit route — ${initial.name}` : 'Add route'}</span>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <div className="flex gap-1 px-5 border-b border-border">
           {tabs.map(t => <TabBtn key={t.id} active={activeTab === t.id} onClick={() => setTab(t.id)}>{t.label}</TabBtn>)}
@@ -813,12 +813,12 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                     <span className="text-content-muted">:</span>
                     <input value={u.port} onChange={e => setUp(i, 'port', e.target.value)} placeholder="8096"
                       className="w-20 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                    <button onClick={() => set('upstreams', f.upstreams.filter((_, j) => j !== i))} title="Remove"
-                      className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                    <IconBtn variant="dangerGhost" size="xs" onClick={() => set('upstreams', f.upstreams.filter((_, j) => j !== i))} title="Remove"
+                      >🗑</IconBtn>
                   </div>
                 ))}
                 <button onClick={() => set('upstreams', [...f.upstreams, { scheme: 'http', host: '', port: '' }])}
-                  className="text-xs text-brand-400 hover:text-brand-300">＋ Add upstream</button>
+                  className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add upstream</button>
               </div>
             </div>
           )}
@@ -871,10 +871,10 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                         className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
                       <input type="password" value={u.password} onChange={e => set('auth_users', f.auth_users.map((x, j) => j === i ? { ...x, password: e.target.value } : x))} placeholder={isEdit ? '(unchanged)' : 'password'}
                         className="flex-1 px-3 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm" />
-                      <button onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                      <IconBtn variant="dangerGhost" size="xs" onClick={() => set('auth_users', f.auth_users.filter((_, j) => j !== i))} >🗑</IconBtn>
                     </div>
                   ))}
-                  <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add user</button>
+                  <button onClick={() => set('auth_users', [...f.auth_users, { user: '', password: '' }])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add user</button>
                 </div>
               )}
 
@@ -950,7 +950,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                         className="w-28 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
                       <input value={l.forward_path || ''} onChange={e => setLoc(i, 'forward_path', e.target.value)} placeholder="forward to /sub (optional)"
                         className="flex-1 px-2 py-2 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                      <button onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} title="Remove location" className="text-content-faint hover:text-danger-fg px-1.5">🗑</button>
+                      <IconBtn variant="dangerGhost" size="xs" onClick={() => set('locations', f.locations.filter((_, j) => j !== i))} title="Remove location" >🗑</IconBtn>
                     </div>
                     <div className="space-y-1.5 pl-1">
                       {(l.upstreams || []).map((u, k) => (
@@ -963,16 +963,16 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                           <span className="text-content-muted">:</span>
                           <input value={u.port} onChange={e => setLocUp(i, k, 'port', e.target.value)} placeholder="80"
                             className="w-16 px-2 py-1.5 bg-surface-raised border border-border-strong rounded-lg text-content-strong text-sm focus:outline-none focus:border-brand-500" />
-                          <button onClick={() => setLoc(i, 'upstreams', l.upstreams.filter((_, m) => m !== k))} title="Remove upstream"
-                            className="text-content-faint hover:text-danger-fg px-1" disabled={l.upstreams.length <= 1}>🗑</button>
+                          <IconBtn variant="dangerGhost" size="xs" onClick={() => setLoc(i, 'upstreams', l.upstreams.filter((_, m) => m !== k))} title="Remove upstream"
+                             disabled={l.upstreams.length <= 1}>🗑</IconBtn>
                         </div>
                       ))}
-                      <button onClick={() => setLoc(i, 'upstreams', [...(l.upstreams || []), blankUpstream()])} className="text-xs text-brand-400 hover:text-brand-300">＋ Add upstream</button>
+                      <button onClick={() => setLoc(i, 'upstreams', [...(l.upstreams || []), blankUpstream()])} className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add upstream</button>
                     </div>
                   </div>
                 ))}
                 <button onClick={() => set('locations', [...(f.locations || []), blankLocation()])}
-                  className="text-xs text-brand-400 hover:text-brand-300">＋ Add location</button>
+                  className="text-xs text-accent-text hover:text-accent-text-hover">＋ Add location</button>
                 {(!f.locations || f.locations.length === 0) && <Hint>No custom locations — all traffic goes to the upstreams on the Basics tab.</Hint>}
               </div>
             </div>
@@ -1015,7 +1015,7 @@ function RouteModal({ initial, plugins, accessLists = [], onClose, onSaved }) {
                 </div>
                 <label className="flex items-start gap-2 cursor-pointer text-xs text-content pt-1">
                   <input type="checkbox" checked={!!f.accept_tos} onChange={e => set('accept_tos', e.target.checked)} className="mt-0.5" />
-                  <span>I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-brand-400 underline">Let's Encrypt Terms of Service</a>.</span>
+                  <span>I agree to the <a href="https://letsencrypt.org/repository/" target="_blank" rel="noreferrer" className="text-accent-text underline">Let's Encrypt Terms of Service</a>.</span>
                 </label>
               </div>
             )}

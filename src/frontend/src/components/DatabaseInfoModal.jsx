@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchDatabaseInfo, fetchDatabaseSchemas, createDatabaseSchema, deleteDatabaseSchema, fetchDatabaseUsers, createDatabaseUser, adminerLoginHTML } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // humanBytes renders a byte count compactly (e.g. 42 MB).
 export function humanBytes(n) {
@@ -245,7 +245,7 @@ export default function DatabaseInfoModal({ workspace, name, env, canReveal = fa
                 {showAll ? 'Hide all secrets' : 'Reveal all secrets'}
               </Btn>
             )}
-            <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-lg leading-none">✕</button>
+            <CloseBtn onClick={onClose} />
           </div>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">

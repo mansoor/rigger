@@ -37,7 +37,7 @@ import {
 } from '../theme/themes'
 import AppearanceDefaultEditor from '../components/AppearanceDefaultEditor'
 import ConfirmDefaultEditor from '../components/ConfirmDefaultEditor'
-import { Hint, Btn } from '../components/ui'
+import { Hint, Btn, CloseBtn } from '../components/ui'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -214,7 +214,7 @@ function BackupTargetsTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add backup target' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <BackupTargetForm
               initial={modal === 'new' ? null : modal.editing}
@@ -465,7 +465,7 @@ function RegistriesTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add registry' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <RegistryForm
               initial={modal === 'new' ? null : modal.editing}
@@ -667,7 +667,7 @@ function HostsTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add host' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <HostForm
               initial={modal === 'new' ? null : modal.editing}
@@ -752,7 +752,7 @@ function ScanHostModal({ host, onClose, onImported }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-content-strong">Scan "{host.name}"</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         {loading && <div className="py-8 text-center text-content-subtle text-sm">Scanning host…</div>}
@@ -1408,7 +1408,7 @@ function RuleForm({ initial, meta, workspaces, channels = [], onSave, onCancel, 
                 <button
                   key={ch.id} type="button" onClick={() => toggleChannel(ch.id)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                    on ? 'bg-brand-600/20 border-brand-500 text-brand-300'
+                    on ? 'bg-brand-600/20 border-brand-500 text-accent-text'
                        : 'bg-surface-raised border-border-strong text-content-muted hover:text-content'
                   }`}
                 >
@@ -1519,7 +1519,7 @@ function RulesTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add alert rule' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <RuleForm
               initial={modal === 'new' ? null : modal.editing}
@@ -1651,7 +1651,7 @@ function NotificationsTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Add notification channel' : `Edit "${modal.editing.name}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             <ChannelForm
               initial={modal === 'new' ? null : modal.editing}
@@ -2108,7 +2108,7 @@ function UsersTab() {
           <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
               <h3 className="font-semibold text-content-strong">{modal === 'new' ? 'Invite user' : `Edit "${modal.editing.email}"`}</h3>
-              <button onClick={() => setModal(null)} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+              <CloseBtn onClick={() => setModal(null)} />
             </div>
             {modal === 'new'
               ? <InviteForm onSave={(body) => inviteMut.mutateAsync(body)} onCancel={() => setModal(null)} saving={inviteMut.isPending} />
@@ -2351,7 +2351,7 @@ function UpdatesTab() {
                     >
                     {busy ? 'Starting…' : `Update to ${eff.latest}`}
                   </Btn>
-                  {eff.html_url && <a href={eff.html_url} target="_blank" rel="noreferrer" className="text-xs text-brand-400 hover:text-brand-300">View release on GitHub ↗</a>}
+                  {eff.html_url && <a href={eff.html_url} target="_blank" rel="noreferrer" className="text-xs text-accent-text hover:text-accent-text-hover">View release on GitHub ↗</a>}
                 </div>
                 <Hint tone="faint" className="text-[11px]">Or update manually: <code className="font-mono">cd &lt;install&gt;/src &amp;&amp; docker compose pull &amp;&amp; docker compose up -d</code></Hint>
               </>
@@ -2453,7 +2453,7 @@ function DockerHostRow({ row, onUpdate, updatableVia, latest }) {
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-content-strong truncate">{row.name}</span>
-          {row.is_rigger_host && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-300 border border-brand-500/30">Rigger host</span>}
+          {row.is_rigger_host && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-brand-500/15 text-accent-text border border-brand-500/30">Rigger host</span>}
           {row.update_available && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-success-subtle text-success-fg border border-success-border/60">{latestClean ? `update available → ${latestClean}` : 'update available'}</span>}
           {row.is_desktop && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-surface-raised text-content-muted border border-border">Docker Desktop</span>}
         </div>
@@ -2580,7 +2580,7 @@ function DockerUpdateModal({ target, onClose }) {
           <h3 className="font-semibold text-content-strong">Update Docker · {target.name}</h3>
           {/* Always closable — the update runs detached on the host, so dismissing
               this dialog never aborts it. */}
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         {step === 'confirm' && (

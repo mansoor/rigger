@@ -79,7 +79,7 @@ export default function KeyField({ type, name, workspace = '', onChange, label =
       <div className="flex items-center justify-between mb-1">
         <label className="block text-xs font-semibold text-content-muted uppercase tracking-wider">{label}</label>
         {!touched && key && <span className="text-[10px] text-content-faint">auto · {bounds.min}–{bounds.max} chars</span>}
-        {touched && <button type="button" onClick={() => setTouched(false)} className="text-[10px] text-brand-400 hover:text-brand-300">reset to auto</button>}
+        {touched && <button type="button" onClick={() => setTouched(false)} className="text-[10px] text-accent-text hover:text-accent-text-hover">reset to auto</button>}
       </div>
       <div className="relative">
         <input

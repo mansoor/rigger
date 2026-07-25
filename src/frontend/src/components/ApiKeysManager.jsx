@@ -6,7 +6,7 @@ import {
   setWorkspaceApiKeyEnabled, deleteWorkspaceApiKey,
   fetchWorkspaces, fetchProjects,
 } from '../lib/api'
-import { Hint, Btn } from './ui'
+import { Hint, Btn, CloseBtn } from './ui'
 
 // ApiKeysManager renders the API-key list + create flow. Used in two places:
 //   • Admin → API Keys      (workspace = null) — global keys, any-workspace project scope.
@@ -53,7 +53,7 @@ export default function ApiKeysManager({ workspace = null }) {
             {ws
               ? <>Programmatic access to <strong>this workspace’s</strong> projects via the <code className="font-mono text-xs">/api/v1</code> REST API.</>
               : <>Programmatic access to the <code className="font-mono text-xs">/api/v1</code> REST API — scoped, project-restricted, rate-limited.</>}
-            {' '}<a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-brand-400 hover:text-brand-300">View API docs ↗</a>
+            {' '}<a href="/api/v1/docs" target="_blank" rel="noreferrer" className="text-accent-text hover:text-accent-text-hover">View API docs ↗</a>
           </Hint>
         </div>
         <Btn variant="primary" size="sm" onClick={() => setModal(true)} >＋ New API key</Btn>
@@ -172,7 +172,7 @@ function CreateApiKeyModal({ workspace, groups, onClose, onCreated }) {
       <div className="bg-surface border border-border rounded-xl w-full max-w-2xl mx-4 p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-content-strong">New API key{ws ? ` · ${ws}` : ''}</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
 
         <div className="space-y-4">

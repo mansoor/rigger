@@ -21,7 +21,7 @@ import PortWarnings from '../components/PortWarnings'
 import { portConflicts, hostPortsFromConfig } from '../lib/ports'
 import { usePortConflicts } from '../hooks/usePortConflicts'
 import { useConfirm } from '../context/ConfirmContext'
-import { Label, Input, Toggle, Select, Hint, Field, FormRow, ReadOnly, Btn } from '../components/ui'
+import { Label, Input, Toggle, Select, Hint, Field, FormRow, ReadOnly, Btn, IconBtn, CloseBtn } from '../components/ui'
 
 const DEPLOYMENT_OPTIONS = [{ value: 'compose', label: 'Docker Compose' }, { value: 'swarm', label: 'Docker Swarm' }]
 
@@ -404,14 +404,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                 <input type="text" value={row.val}
                   onChange={e => { const r = argRows.map((x,j)=>j===ri?{...x,val:e.target.value}:x); syncArgs(r) }}
                   placeholder="${ROUTE_URL}/api" className={`flex-[2] ${monoInput}`} />
-                <button type="button" title="Remove build arg"
-                  onClick={() => { const r = argRows.filter((_,j)=>j!==ri); syncArgs(r.length ? r : [{ key:'', val:'' }]) }}
-                  className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+                <IconBtn variant="dangerGhost" size="xs" title="Remove build arg" onClick={() => { const r = argRows.filter((_,j)=>j!==ri); syncArgs(r.length ? r : [{ key:'', val:'' }]) }}
+                  >✕</IconBtn>
               </div>
             ))}
           </div>
           <button type="button" onClick={() => syncArgs([...argRows, { key:'', val:'' }])}
-            className="mt-2 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add build arg</button>
+            className="mt-2 text-xs text-accent-text hover:text-accent-text-hover transition-colors">+ Add build arg</button>
         </div>
         </>
       )}
@@ -523,7 +522,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                 onChange={e => { const r = portRows.map((x,j)=>j===ri?{...x,container:e.target.value}:x); syncPorts(r) }}
                 placeholder="80" className={`flex-1 ${monoInput}`} />
               {/* Link checkbox — only meaningful when a host port is set */}
-              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-content-muted hover:text-brand-400' : 'text-content-faint cursor-not-allowed'}`}>
+              <label title="Show as clickable link on env card" className={`flex items-center gap-1 shrink-0 cursor-pointer select-none ${row.host.trim() ? 'text-content-muted hover:text-accent-text' : 'text-content-faint cursor-not-allowed'}`}>
                 <input
                   type="checkbox"
                   checked={!!row.link}
@@ -534,13 +533,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                 <span className="text-sm">🔗</span>
               </label>
               {portRows.length > 1 && (
-                <button type="button" onClick={() => syncPorts(portRows.filter((_,j)=>j!==ri))}
-                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+                <IconBtn variant="dangerGhost" size="xs" onClick={() => syncPorts(portRows.filter((_,j)=>j!==ri))}
+                  ><TrashIcon /></IconBtn>
               )}
             </div>
           ))}
           <button type="button" onClick={() => setPortRows(r => [...r, { host: '', container: '', link: false }])}
-            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            className="text-xs text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1 mt-1">
             <span className="text-base leading-none">＋</span> Add port mapping
           </button>
         </div>
@@ -569,13 +568,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                   onChange={e => { const r = volumeRows.map((x,j)=>j===ri?{...x,path:e.target.value}:x); syncVolumes(r) }}
                   placeholder="/var/lib/data" className={`flex-1 ${monoInput}`} />
                 <VolModeToggle mode={row.mode || 'rw'} onChange={m => { const r = volumeRows.map((x,j)=>j===ri?{...x,mode:m}:x); syncVolumes(r) }} />
-                <button type="button" onClick={() => syncVolumes(volumeRows.filter((_,j)=>j!==ri))}
-                  className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+                <IconBtn variant="dangerGhost" size="xs" onClick={() => syncVolumes(volumeRows.filter((_,j)=>j!==ri))}
+                  ><TrashIcon /></IconBtn>
               </div>
             )
           })}
           <button type="button" onClick={() => setVolumeRows(r => [...r, { source: './volumes/', path: '', mode: 'rw' }])}
-            className="text-xs text-brand-400 hover:text-brand-300 transition-colors flex items-center gap-1 mt-1">
+            className="text-xs text-accent-text hover:text-accent-text-hover transition-colors flex items-center gap-1 mt-1">
             <span className="text-base leading-none">＋</span> Add volume
           </button>
         </div>
@@ -719,14 +718,13 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
                 <input type="text" value={row.path}
                   onChange={e => { const r = linkRows.map((x,j)=>j===ri?{...x,path:e.target.value}:x); syncLinks(r) }}
                   placeholder="/api" className={`w-20 ${monoInput}`} />
-                <button type="button" title="Remove link"
-                  onClick={() => { const r = linkRows.filter((_,j)=>j!==ri); syncLinks(r.length ? r : [{ env_var:'', service:'', port:'', path:'', scheme:'' }]) }}
-                  className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+                <IconBtn variant="dangerGhost" size="xs" title="Remove link" onClick={() => { const r = linkRows.filter((_,j)=>j!==ri); syncLinks(r.length ? r : [{ env_var:'', service:'', port:'', path:'', scheme:'' }]) }}
+                  >✕</IconBtn>
               </div>
             )
           })}
           <button type="button" onClick={() => syncLinks([...linkRows, { env_var:'', service:'', port:'', path:'', scheme:'' }])}
-            className="mt-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add service link</button>
+            className="mt-1 text-xs text-accent-text hover:text-accent-text-hover transition-colors">+ Add service link</button>
         </div>)}
       </div>
 
@@ -753,13 +751,12 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               <input type="text" value={row.val}
                 onChange={e => syncEnv(envRows.map((x,j)=>j===ri?{...x,val:e.target.value}:x))}
                 placeholder="debug   (or ${LOG_LEVEL})" className={`flex-[2] ${monoInput}`} />
-              <button type="button" title="Remove variable"
-                onClick={() => syncEnv(envRows.filter((_,j)=>j!==ri))}
-                className="shrink-0 text-content-faint hover:text-danger-fg transition-colors px-1">✕</button>
+              <IconBtn variant="dangerGhost" size="xs" title="Remove variable" onClick={() => syncEnv(envRows.filter((_,j)=>j!==ri))}
+                >✕</IconBtn>
             </div>
           ))}
           <button type="button" onClick={() => syncEnv([...envRows, { key:'', val:'' }])}
-            className="mt-1 text-xs text-brand-400 hover:text-brand-300 transition-colors">+ Add variable</button>
+            className="mt-1 text-xs text-accent-text hover:text-accent-text-hover transition-colors">+ Add variable</button>
         </div>
       </div>
 
@@ -1299,7 +1296,7 @@ function CopyEnvModal({ workspace, project, srcEnv, existingNames = [], onClose,
       <div className="bg-surface border border-border rounded-xl w-full max-w-md mx-4 p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-content-strong">Copy environment “{srcEnv}”</h3>
-          <button onClick={onClose} className="text-content-subtle hover:text-content-strong text-xl">×</button>
+          <CloseBtn onClick={onClose} />
         </div>
         <p className="text-sm text-content-subtle">
           Creates a new environment from <strong className="text-content">{srcEnv}</strong>’s configuration and env vars. Volume <strong className="text-content">data is not copied</strong> — the new env starts with fresh, empty volumes. The source is left untouched.
@@ -1424,7 +1421,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
           ) : (
             <span className="text-content-strong font-semibold text-base px-0 py-0.5 shrink-0" title="Environment name is fixed after creation">{envName}</span>
           )}
-          {isNew && <span className="text-xs text-brand-400 bg-brand-950 px-2 py-0.5 rounded-full shrink-0">new</span>}
+          {isNew && <span className="text-xs text-accent-text bg-brand-950 px-2 py-0.5 rounded-full shrink-0">new</span>}
           {!open && (
             <span className="text-xs text-content-subtle truncate cursor-pointer" onClick={() => setOpen(true)}>
               {cfg.deployment || 'compose'}{cfg.domain ? ` · ${cfg.domain}` : ''}
@@ -1440,7 +1437,7 @@ function EnvEditor({ envName, cfg, onChange, onRename, onRemove, isNew, projectT
               onClick={() => setCopyOpen(true)}
               disabled={dirty}
               title={dirty ? 'Save changes before copying' : 'Copy this environment to a new one'}
-              className={`text-xs transition-colors ${dirty ? 'text-content-faint cursor-not-allowed' : 'text-content-subtle hover:text-brand-400'}`}
+              className={`text-xs transition-colors ${dirty ? 'text-content-faint cursor-not-allowed' : 'text-content-subtle hover:text-accent-text'}`}
             >Copy</button>
           )}
           <button
@@ -1906,7 +1903,7 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-content-muted uppercase tracking-wider">Service overrides</span>
           {hasAny && (
-            <span className="text-xs px-1.5 py-0.5 rounded bg-brand-900 text-brand-400 border border-brand-700">active</span>
+            <span className="text-xs px-1.5 py-0.5 rounded bg-brand-900 text-accent-text border border-brand-700">active</span>
           )}
         </div>
         <span className="text-content-faint group-hover:text-content-muted text-xs transition-colors">{open ? '▲' : '▼'}</span>
@@ -1923,7 +1920,7 @@ function ServiceOverridesEditor({ imageNames, overrides, onChange }) {
             return (
               <div key={svcName}>
                 <label className="block text-xs font-medium text-content-muted mb-1.5">
-                  <span className="font-mono text-brand-400">{svcName}</span>
+                  <span className="font-mono text-accent-text">{svcName}</span>
                   <span className="text-content-faint ml-1">— env override</span>
                 </label>
                 <textarea
@@ -1989,8 +1986,8 @@ function NewEnvVarsEditor({ cfg, onChange }) {
         <input type={secret && !reveal ? 'password' : 'text'} value={v}
           onChange={e => setVar(k, e.target.value)}
           className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
-        <button type="button" onClick={() => removeVar(k)}
-          className="text-content-subtle hover:text-danger-fg transition-colors shrink-0 p-0.5 rounded hover:bg-danger-subtle/30"><TrashIcon /></button>
+        <IconBtn variant="dangerGhost" size="xs" onClick={() => removeVar(k)}
+          ><TrashIcon /></IconBtn>
       </div>
     )
   }
@@ -2001,7 +1998,7 @@ function NewEnvVarsEditor({ cfg, onChange }) {
         className="flex items-center gap-2 text-xs font-semibold text-content-muted uppercase tracking-wider hover:text-content transition-colors w-full">
         <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         Environment Variables
-        {entries.length > 0 && <span className="ml-1 text-brand-400 normal-case font-normal">{entries.length} inherited{secretKeys.length > 0 ? ` · ${secretKeys.length} 🔒` : ''}</span>}
+        {entries.length > 0 && <span className="ml-1 text-accent-text normal-case font-normal">{entries.length} inherited{secretKeys.length > 0 ? ` · ${secretKeys.length} 🔒` : ''}</span>}
         <span className="ml-auto text-content-faint normal-case font-normal">.env file</span>
       </button>
       {open && (
@@ -2038,7 +2035,7 @@ function NewEnvVarsEditor({ cfg, onChange }) {
               onKeyDown={e => e.key === 'Enter' && addVar()}
               className="flex-1 px-2 py-1 bg-surface-raised border border-border-strong rounded text-sm font-mono text-content-strong focus:outline-none focus:border-brand-500" />
             <button type="button" onClick={addVar}
-              className="text-xs text-brand-400 hover:text-brand-300 shrink-0 px-2">Add</button>
+              className="text-xs text-accent-text hover:text-accent-text-hover shrink-0 px-2">Add</button>
           </div>
         </div>
       )}
@@ -2875,7 +2872,7 @@ export default function EditProjectPage() {
           <Hint className="mb-3">
             {currentEnvNames.length} environment{currentEnvNames.length !== 1 ? 's' : ''} — click one to expand
             {currentEnvNames.some(e => !originalEnvNames.includes(e)) && (
-              <span className="ml-2 text-brand-400">· new environments need bootstrapping after save</span>
+              <span className="ml-2 text-accent-text">· new environments need bootstrapping after save</span>
             )}
           </Hint>
 
@@ -3005,7 +3002,7 @@ function MigrateWarning({ what, from, to, warnings, onConfirm, onCancel }) {
             <strong className="text-warning-fg">Data left on the source:</strong> {from} keeps the stopped
             containers, volumes (your data) and files (including <code className="font-mono">.env</code> secrets) —
             they are <strong>not</strong> deleted. If you plan to decommission {from}, wipe them afterward in{' '}
-            <a href="/housekeeping" className="text-brand-400 underline">Housekeeping → Migration leftovers</a>.
+            <a href="/housekeeping" className="text-accent-text underline">Housekeeping → Migration leftovers</a>.
           </li>
         </ul>
         <PortWarnings warnings={warnings} />
