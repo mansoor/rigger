@@ -32,9 +32,17 @@ type Spec struct {
 	Context context.Context
 }
 
+// waitDelay bounds how long Wait lingers after a cancelled command's process
+// group has been killed, waiting on the stdout/stderr copy goroutines.
+const waitDelay = 5 * time.Second
+
 // newCmd builds the exec.Cmd, applying Spec.Context and/or Spec.Timeout. A
 // cancellable command is created whenever either is set; the returned cancel must
 // be called by the caller (deferred) to release resources.
+//
+// Cancellable commands also get their own process group (see setProcGroup) so
+// cancellation reaches everything the command spawned — `docker compose` runs the
+// compose plugin as a subprocess, and killing only the parent orphans it.
 func newCmd(s Spec) (*exec.Cmd, context.CancelFunc) {
 	base := s.Context
 	if base == nil {
@@ -43,10 +51,14 @@ func newCmd(s Spec) (*exec.Cmd, context.CancelFunc) {
 	bin := BinOr(s.Bin)
 	if s.Timeout > 0 {
 		ctx, cancel := context.WithTimeout(base, s.Timeout)
-		return exec.CommandContext(ctx, bin, s.Args...), cancel //nolint:gosec
+		cmd := exec.CommandContext(ctx, bin, s.Args...) //nolint:gosec
+		setProcGroup(cmd)
+		return cmd, cancel
 	}
 	if s.Context != nil {
-		return exec.CommandContext(base, bin, s.Args...), func() {} //nolint:gosec
+		cmd := exec.CommandContext(base, bin, s.Args...) //nolint:gosec
+		setProcGroup(cmd)
+		return cmd, func() {}
 	}
 	return exec.Command(bin, s.Args...), func() {} //nolint:gosec
 }

@@ -84,7 +84,7 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	var outBuf bytes.Buffer
 	out := io.MultiWriter(fw, &cappedWriter{buf: &outBuf, cap: 128 * 1024})
 
-	runErr := h.bridge.Run(shell.RunOptions{
+	runOpts := shell.RunOptions{
 		Workspace: wsName,
 		Project:   name,
 		Command:   body.Command,
@@ -92,7 +92,14 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 		Extra:     body.Extra,
 		Stdout:    out,
 		Stderr:    out,
-	})
+	}
+	// Tie a following stream to the request, so `logs -f` dies when the client
+	// disconnects instead of streaming into a closed response forever. Only
+	// follow commands — a deploy must survive the user navigating away.
+	if isFollowCommand(body.Command) {
+		runOpts.Context = r.Context()
+	}
+	runErr := h.bridge.Run(runOpts)
 
 	var marker string
 	if runErr != nil {

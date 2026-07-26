@@ -2316,13 +2316,27 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	const outCap = 128 * 1024
 	pr, pw := io.Pipe()
 	done := make(chan struct{})
+
+	// A hijacked websocket is no longer managed by net/http, so r.Context() is
+	// NOT cancelled when the peer goes away — we have to notice ourselves.
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	defer cancelStream()
+
 	go func() {
 		defer close(done)
 		buf := make([]byte, 4096)
+		gone := false
 		for {
 			n, readErr := pr.Read(buf)
 			if n > 0 {
-				conn.WriteMessage(websocket.TextMessage, buf[:n]) //nolint:errcheck
+				if !gone {
+					if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
+						// Peer is gone. Stop writing and cancel the command, but keep
+						// draining the pipe so the producer never blocks on a full buffer.
+						gone = true
+						cancelStream()
+					}
+				}
 				if outBuf.Len() < outCap {
 					outBuf.Write(buf[:n])
 				}
@@ -2347,6 +2361,22 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		runOpts.ScheduleID = "manual"
 		runOpts.ScheduleName = "Manual backup"
 		runOpts.Trigger = "manual"
+	}
+	// Bind a following stream to the connection. The write path above catches a
+	// dead peer only when there is output to write, and an idle `logs -f` may
+	// produce none for hours — so also watch for the close frame. The client
+	// sends nothing after its opening request, so any read completing means the
+	// peer went away.
+	if isFollowCommand(req.Command) {
+		runOpts.Context = streamCtx
+		go func() {
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					cancelStream()
+					return
+				}
+			}
+		}()
 	}
 	runErr := h.bridge.Run(runOpts)
 	pw.Close()
