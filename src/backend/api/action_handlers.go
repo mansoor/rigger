@@ -12,6 +12,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/alerts"
 	"github.com/mansoor/rigger/ui/internal/auth"
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
+	"github.com/mansoor/rigger/ui/internal/progress"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
 )
@@ -79,10 +80,14 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering
 	fw := &flushWriter{w: w, f: flusher}
 
-	// Tee a bounded copy of the streamed output for the recorded history.
+	// Tee a bounded copy of the streamed output for the recorded history. The
+	// recorder sits behind a progress.Filter so the transient pull-progress lines
+	// stream to the client but never reach the stored run.
 	startedAt := time.Now()
 	var outBuf bytes.Buffer
-	out := io.MultiWriter(fw, &cappedWriter{buf: &outBuf, cap: 128 * 1024})
+	rec := progress.NewFilter(&cappedWriter{buf: &outBuf, cap: 128 * 1024})
+	// Collapse docker's per-layer pull chatter into one updating line.
+	out := progress.New(io.MultiWriter(fw, rec))
 
 	runOpts := shell.RunOptions{
 		Workspace: wsName,
@@ -132,6 +137,11 @@ func (h *Handler) ActionHTTP(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 	}
+	// Flush after every writer that streams through `out` (auto-seed, cert
+	// issuance) has finished, so no trailing partial line is dropped.
+	out.Flush() //nolint:errcheck
+	rec.Flush() //nolint:errcheck
+
 	fmt.Fprint(fw, marker)
 	outBuf.WriteString(marker)
 

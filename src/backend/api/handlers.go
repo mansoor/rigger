@@ -36,6 +36,7 @@ import (
 	"github.com/mansoor/rigger/ui/internal/imagecheck"
 	"github.com/mansoor/rigger/ui/internal/keygen"
 	"github.com/mansoor/rigger/ui/internal/notify"
+	"github.com/mansoor/rigger/ui/internal/progress"
 	"github.com/mansoor/rigger/ui/internal/scaffold"
 	"github.com/mansoor/rigger/ui/internal/settings"
 	"github.com/mansoor/rigger/ui/internal/shell"
@@ -2314,6 +2315,9 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	var outBuf bytes.Buffer
 	const outCap = 128 * 1024
+	// The recorded copy goes through a progress.Filter, so the transient
+	// pull-progress lines reach the browser but never the stored run.
+	rec := progress.NewFilter(&outBuf)
 	pr, pw := io.Pipe()
 	done := make(chan struct{})
 
@@ -2338,7 +2342,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				if outBuf.Len() < outCap {
-					outBuf.Write(buf[:n])
+					rec.Write(buf[:n]) //nolint:errcheck — drops transient progress lines
 				}
 			}
 			if readErr != nil {
@@ -2347,14 +2351,17 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	// Collapse docker's per-layer pull chatter into one updating line before it
+	// reaches the pipe, so both the browser and the recorder see the tidy stream.
+	col := progress.New(pw)
 	runOpts := shell.RunOptions{
 		Workspace: wsName,
 		Project:   name,
 		Command:   req.Command,
 		Env:       req.Env,
 		Extra:     req.Extra,
-		Stdout:    pw,
-		Stderr:    pw, // merged: errors appear inline with output, not silently dropped
+		Stdout:    col,
+		Stderr:    col, // merged: errors appear inline with output, not silently dropped
 	}
 	if req.Command == "backup" {
 		runOpts.Services = req.Services
@@ -2379,8 +2386,10 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 	runErr := h.bridge.Run(runOpts)
+	col.Flush() //nolint:errcheck — emit any trailing partial line before closing
 	pw.Close()
-	<-done // ensure all streamed output is captured before recording
+	<-done      // ensure all streamed output is captured before recording
+	rec.Flush() //nolint:errcheck
 
 	var marker string
 	if runErr != nil {

@@ -1244,10 +1244,26 @@ function ActionLog({ wsName, actionWs, actionMeta }) {
 
     const acc = []
     const onMsg = e => {
-      const newLines = String(e.data || '').split(/\r?\n/).filter(l => l !== '')
+      // The server marks progress updates with a leading \r (see internal/progress):
+      // they replace the previous transient row instead of stacking up, so a pull
+      // reads as one updating line rather than hundreds of layer messages.
+      const newLines = String(e.data || '').split('\n').filter(l => l !== '')
       if (!newLines.length) return
-      acc.push(...newLines)
-      setEntries(prev => cap([...prev, ...newLines.map(text => ({ type: 'out', text }))]))
+      acc.push(...newLines.filter(l => l[0] !== '\r'))
+      setEntries(prev => {
+        const next = [...prev]
+        for (const raw of newLines) {
+          const transient = raw[0] === '\r'
+          // Leading \r is the transient marker; a trailing one is just CRLF.
+          const text = (transient ? raw.slice(1) : raw).replace(/\r+$/, '')
+          if (transient && next.length && next[next.length - 1].transient) {
+            next[next.length - 1] = { type: 'out', text, transient: true }
+          } else {
+            next.push({ type: 'out', text, transient })
+          }
+        }
+        return cap(next)
+      })
     }
     const onEnd = () => {
       // The backend ends with a green ✓ or red ✗ marker line; treat ✗ as failure.
