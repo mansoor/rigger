@@ -86,7 +86,7 @@ Being clear up front so you can evaluate it honestly:
 - **It targets Docker and Docker Swarm only.** There is no Kubernetes, ECS or Cloud Run support, and none is planned. If you already run Kubernetes, Rigger is not what you want.
 - **It is not multi-tenant SaaS.** Workspaces scope and separate teams within one installation, but everyone shares one control plane and its Docker hosts.
 - **It is not a managed cloud.** You own the servers, the upgrades and the backups. Rigger automates them; it does not run them for you.
-- **Swarm support is single-cluster.** Rigger deploys stacks to a Swarm you initialise; it does not manage cluster membership.
+- **It does not build or manage your Swarm cluster.** Rigger deploys stacks to a Swarm you have already initialised and schedules across every node in it, but joining, promoting and draining nodes stay your job, with Docker's own tooling.
 
 ---
 
@@ -895,6 +895,7 @@ Worth knowing before you plan around them:
 - **Preview environments** support GitHub and Gitea webhooks; GitLab is not supported.
 - **Response caching** in the proxy service is unavailable — see [Proxy service](#proxy-service).
 - **Host-OS housekeeping** actions require a Linux host.
+- **Swarm data is node-local.** A multi-node Swarm schedules stateless services across the cluster freely, but named volumes use Docker's `local` driver and bind mounts exist only on the node Rigger synced files to. Anything holding data — or bind-mounting a config file — should carry a placement constraint pinning it to one node, or a rescheduled task will come up against an empty volume. Rigger already runs its managed databases single-instance for this reason, and honours per-service placement constraints, but it does not yet add that pin for you or show you the cluster's other nodes.
 
 ---
 
