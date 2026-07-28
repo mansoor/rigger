@@ -97,6 +97,9 @@ func (s *swarmRunner) deploy() error {
 	if err := s.ensureSynced(); err != nil {
 		return err
 	}
+	// On a multi-node cluster, name anything that keeps data on the node it lands
+	// on without being pinned there. Advisory only — see placement.go.
+	s.warnUnpinnedState()
 	// `docker stack deploy` does NOT read the env's .env for ${VAR} interpolation
 	// the way `docker compose` does — so the environment:/ports: ${VAR}
 	// placeholders would resolve to empty (breaking DB creds, ports, etc.).

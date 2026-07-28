@@ -253,7 +253,7 @@ func (h *Handler) provisionHostWorkspacesDir(host *settings.Host) hostSaveResp {
 func (h *Handler) provisionHostEdge(rh *remotehost.Client, host *settings.Host, out io.Writer) (edge.Result, error) {
 	swarm := host.SwarmManager
 	if info, perr := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); perr == nil {
-		state, mgr := parseSwarmInfo(info)
+		state, mgr, _ := parseSwarmInfo(info)
 		_ = settings.SetHostCapability(h.db, host.ID, state, mgr) //nolint:errcheck
 		swarm = mgr
 	}
@@ -372,8 +372,60 @@ type hostComponents struct {
 	EdgeRunning         bool   `json:"edge_running"`
 	SwarmState          string `json:"swarm_state,omitempty"`
 	SwarmManager        bool   `json:"swarm_manager"`
+	SwarmNodes          []swarmNode `json:"swarm_nodes,omitempty"`
 	WorkspacesDir       string `json:"workspaces_dir,omitempty"`
 	WorkspacesDirExists bool   `json:"workspaces_dir_exists"`
+}
+
+// swarmNode is one member of the cluster a manager host fronts. Registering a
+// manager tells you a Swarm exists; this tells you how big it is and whether
+// every node is actually able to take work — which is what decides where a
+// service can be scheduled.
+type swarmNode struct {
+	Hostname     string `json:"hostname"`
+	Status       string `json:"status"`        // Ready | Down | Unknown
+	Availability string `json:"availability"`  // Active | Pause | Drain
+	Role         string `json:"role"`          // manager | worker
+	Leader       bool   `json:"leader"`
+	Version      string `json:"version"`
+	Self         bool   `json:"self"` // the host we connected to
+}
+
+// parseSwarmNodes reads `docker node ls` in the pipe-delimited format requested
+// below. Malformed lines are skipped: an inventory is informational, and a
+// partial list beats failing the whole probe.
+//
+// selfID comes from `docker info` (.Swarm.NodeID). It can't be read from the
+// listing: docker marks the local node with a trailing "*" only in its default
+// table output, and drops that marker entirely under --format.
+func parseSwarmNodes(out, selfID string) []swarmNode {
+	var nodes []swarmNode
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(strings.TrimSpace(line), "|")
+		if len(f) < 5 || strings.TrimSpace(f[0]) == "" {
+			continue
+		}
+		// Tolerate the "*" anyway, in case a docker version ever emits it here.
+		id := strings.TrimSuffix(strings.TrimSpace(f[0]), "*")
+		id = strings.TrimSpace(id)
+		n := swarmNode{
+			Self:         selfID != "" && id == selfID,
+			Hostname:     strings.TrimSpace(f[1]),
+			Status:       strings.TrimSpace(f[2]),
+			Availability: strings.TrimSpace(f[3]),
+			Role:         "worker",
+		}
+		// ManagerStatus is blank for workers, else "Leader" / "Reachable" / "Unavailable".
+		if ms := strings.TrimSpace(f[4]); ms != "" {
+			n.Role = "manager"
+			n.Leader = strings.EqualFold(ms, "Leader")
+		}
+		if len(f) > 5 {
+			n.Version = strings.TrimSpace(f[5])
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes
 }
 
 // probeHostComponents gathers a host's component status in a single SSH connection.
@@ -396,9 +448,17 @@ func (h *Handler) probeHostComponents(id int64) (hostComponents, bool) {
 	if out, e := rh.RunCombined(`nixpacks --version 2>/dev/null`); e == nil {
 		c.NixpacksVersion = normalizeNixpacksVersion(strings.TrimSpace(out))
 	}
-	if info, e := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); e == nil {
-		c.SwarmState, c.SwarmManager = parseSwarmInfo(info)
+	var selfNodeID string
+	if info, e := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}|{{.Swarm.NodeID}}'`); e == nil {
+		c.SwarmState, c.SwarmManager, selfNodeID = parseSwarmInfo(info)
 		_ = settings.SetHostCapability(h.db, id, c.SwarmState, c.SwarmManager) //nolint:errcheck
+	}
+	// Only a manager can list the cluster; a worker's daemon refuses. Best-effort —
+	// the rest of the probe still reports if this fails.
+	if c.SwarmManager {
+		if out, e := rh.RunCombined(`docker node ls --format '{{.ID}}|{{.Hostname}}|{{.Status}}|{{.Availability}}|{{.ManagerStatus}}|{{.EngineVersion}}' 2>/dev/null`); e == nil {
+			c.SwarmNodes = parseSwarmNodes(out, selfNodeID)
+		}
 	}
 	ex := remotehost.NewRemote(rh, h.workspacesDir, c.WorkspacesDir)
 	c.EdgeRunning, _ = edge.Status(ex, c.SwarmManager)
@@ -525,7 +585,7 @@ func (h *Handler) testHostByID(w http.ResponseWriter, id int64) {
 	// a probe failure doesn't fail the Test (it just leaves the capability as-is).
 	swarmState, swarmManager := "", false
 	if info, perr := rh.RunCombined(`docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`); perr == nil {
-		swarmState, swarmManager = parseSwarmInfo(info)
+		swarmState, swarmManager, _ = parseSwarmInfo(info)
 		_ = settings.SetHostCapability(h.db, id, swarmState, swarmManager) //nolint:errcheck
 	}
 	// Also report whether the remote workspaces directory exists — a successful
@@ -583,13 +643,18 @@ func (h *Handler) SetHostBuildOnly(w http.ResponseWriter, r *http.Request) {
 
 // parseSwarmInfo parses `docker info --format '{{.Swarm.LocalNodeState}}|{{.Swarm.ControlAvailable}}'`
 // output (e.g. "active|true") into the node's swarm state and whether it is a manager.
-func parseSwarmInfo(out string) (state string, manager bool) {
-	parts := strings.SplitN(strings.TrimSpace(out), "|", 2)
+// parseSwarmInfo reads `docker info`'s swarm fields: node state, whether this node
+// is a manager, and its own node id (used to mark "this host" in the cluster list).
+func parseSwarmInfo(out string) (state string, manager bool, nodeID string) {
+	parts := strings.SplitN(strings.TrimSpace(out), "|", 3)
 	state = strings.TrimSpace(parts[0])
 	if len(parts) > 1 {
 		manager = strings.EqualFold(strings.TrimSpace(parts[1]), "true")
 	}
-	return state, manager
+	if len(parts) > 2 {
+		nodeID = strings.TrimSpace(parts[2])
+	}
+	return state, manager, nodeID
 }
 
 // dialHost loads a host, decrypts its key, dials it, and persists the TOFU
