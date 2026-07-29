@@ -280,6 +280,11 @@ func (o Options) buildService(cfg *wsconfig.Config, svc wsconfig.Service, srcDir
 	}
 	o.success("Built: %s", imgTag)
 
+	// A green build is not proof the app can run: Composer installs with
+	// --ignore-platform-reqs under Nixpacks, so a dependency needing a newer PHP
+	// than the image has only surfaces on the first request. Ask the image itself.
+	o.warnPlatformMismatch(svc.Name, imgTag, ctxDir, svc.Build.IsNixpacks())
+
 	if push {
 		o.info("Pushing %s...", imgTag)
 		if err := o.dockerRun("push", imgTag); err != nil {

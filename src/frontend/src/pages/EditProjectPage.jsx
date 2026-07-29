@@ -240,6 +240,13 @@ const RESTART_OPTIONS = [
   { value: 'no',             label: 'No (never restart)' },
 ]
 
+// Where each build backend puts the application, and therefore where a mounted
+// .env has to land. The Dockerfile templates use a webroot layout; Nixpacks
+// always builds into /app. The paths are absolute IN-IMAGE paths, so switching
+// backend without moving the mount delivers .env somewhere the app never reads.
+const DOCKERFILE_ENV_MOUNT = '/var/www/html/.env'
+const NIXPACKS_ENV_MOUNT = '/app/.env'
+
 // ServiceCard keeps local row state so empty rows added by + buttons survive
 // until the user types into them. Without local state, portRowsToFields() would
 // immediately filter out the empty new row and Add would appear broken.
@@ -358,7 +365,20 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Build method</Label>
             <Select value={img.build?.method === 'nixpacks' ? 'nixpacks' : 'dockerfile'}
-              onChange={v => upd('build', { ...(img.build || {}), method: v === 'nixpacks' ? 'nixpacks' : '' })}
+              onChange={v => {
+                const nix = v === 'nixpacks'
+                const next = { ...img, build: { ...(img.build || {}), method: nix ? 'nixpacks' : '' } }
+                // The two backends put the app in different places, and the .env mount
+                // is an absolute in-image path — so a mount left over from the other
+                // backend silently delivers .env where the app will never look for it
+                // (a Laravel app then dies on a missing APP_KEY). Move it with the
+                // switch, but only when it's still the other backend's default; a
+                // hand-set path is the operator's and stays untouched.
+                const cur = (img.env_file_mount || '').trim()
+                if (nix && cur === DOCKERFILE_ENV_MOUNT) next.env_file_mount = NIXPACKS_ENV_MOUNT
+                else if (!nix && cur === NIXPACKS_ENV_MOUNT) next.env_file_mount = DOCKERFILE_ENV_MOUNT
+                onUpdate(idx, next)
+              }}
               options={[{ value: 'dockerfile', label: 'Dockerfile' }, { value: 'nixpacks', label: 'Nixpacks (auto-detect)' }]} />
             <Hint>{img.build?.method === 'nixpacks'
               ? 'Nixpacks auto-detects the stack and builds — no Dockerfile needed. Build args below are passed as build-time env. A good fallback when a Dockerfile build fights you.'
@@ -374,7 +394,7 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
               // Pre-fill the in-image .env mount for templates with a known app root,
               // so the path isn't left blank and typo'd — a wrong/blank mount silently
               // breaks the app's environment (a Laravel app then 500s on APP_KEY).
-              const knownMounts = { laravel: '/var/www/html/.env' }
+              const knownMounts = { laravel: DOCKERFILE_ENV_MOUNT }
               if (knownMounts[v] && !(img.env_file_mount || '').trim()) {
                 next.env_file_mount = knownMounts[v]
                 next.env_file = true
@@ -439,7 +459,8 @@ function ServiceCard({ img, idx, allImages, onUpdate, onRemove, managedDeps = []
           checked={img.env_file !== false && serviceSource(img) !== 'image'}
           onChange={v => upd('env_file', v)} />
         {serviceSource(img) !== 'image'
-          ? <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)} placeholder="/var/www/html/.env — also mount as file (optional)" />
+          ? <Input value={img.env_file_mount} onChange={v => upd('env_file_mount', v)}
+              placeholder={`${img.build?.method === 'nixpacks' ? NIXPACKS_ENV_MOUNT : DOCKERFILE_ENV_MOUNT} — also mount as file (optional)`} />
           : <div />}
 
         {serviceSource(img) !== 'image' && (img.env_file_mount || '').trim()

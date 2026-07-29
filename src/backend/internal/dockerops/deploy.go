@@ -318,6 +318,8 @@ func (r *runner) up() error {
 		return nil
 	}
 	r.info("Deploying '%s' (compose)", r.stack)
+	// A .env mounted where the app can't read it fails silently — see envmount.go.
+	warnMisplacedEnvMounts(r.cfgBytes, r.info)
 	if err := r.compose("up", "-d", "--remove-orphans"); err != nil {
 		return err
 	}
