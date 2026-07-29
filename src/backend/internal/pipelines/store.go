@@ -78,14 +78,20 @@ type Pipeline struct {
 
 // StageResult is the recorded outcome of one stage within a run.
 type StageResult struct {
-	Type       string `json:"type"`
-	Env        string `json:"env"`
-	Label      string `json:"label"`
-	Status     string `json:"status"` // ok | fail | skipped
-	Output     string `json:"output"`
-	MS         int64  `json:"ms"`
-	StartedAt  int64  `json:"started_at,omitempty"`  // epoch ms (0 = not started / skipped)
-	FinishedAt int64  `json:"finished_at,omitempty"` // epoch ms (0 while running / skipped)
+	Type   string `json:"type"`
+	Env    string `json:"env"`
+	Label  string `json:"label"`
+	Status string `json:"status"` // ok | fail | skipped
+	Output string `json:"output"`
+	// Warnings are the ⚠ lines a SUCCEEDING stage emitted. A build that produces a
+	// working image but flags a problem the app will hit at runtime is still "ok",
+	// and its warning was previously buried under a hundred lines of BuildKit
+	// output beneath a green tick — read by nobody. Lifting them here lets the run
+	// summarise them at the end and the UI mark the stage.
+	Warnings   []string `json:"warnings,omitempty"`
+	MS         int64    `json:"ms"`
+	StartedAt  int64    `json:"started_at,omitempty"`  // epoch ms (0 = not started / skipped)
+	FinishedAt int64    `json:"finished_at,omitempty"` // epoch ms (0 while running / skipped)
 }
 
 // Run is one execution of a pipeline.

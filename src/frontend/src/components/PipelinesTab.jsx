@@ -387,6 +387,10 @@ function RunHistory({ workspace, name, pipeline }) {
 // stepCls / stepIcon map a run-stage status to the pipeline-graph node style.
 // Shared with the project-page release graph (imported there).
 export function stepCls(status) {
+  // 'warn' is a display-only status: the stage genuinely succeeded, but it said
+  // something worth acting on. Without this the run reads as unqualified green
+  // and the log stays collapsed, which is exactly how a real warning got missed.
+  if (status === 'warn') return 'bg-amber-400 border-warning text-amber-900'
   if (status === 'ok') return 'bg-green-500 border-success text-green-900'
   if (status === 'running') return 'bg-amber-400 border-warning text-amber-900 animate-pulse'
   if (status === 'awaiting') return 'bg-amber-400 border-warning text-amber-900'
@@ -395,6 +399,7 @@ export function stepCls(status) {
   return 'bg-surface-raised border-border-strong text-content-subtle' // skipped / pending
 }
 export function stepIcon(status) {
+  if (status === 'warn') return '⚠'
   if (status === 'ok') return '✓'
   if (status === 'fail' || status === 'rejected') return '✕'
   if (status === 'cancelled') return '■'
@@ -439,6 +444,11 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
   const count = Math.max(defs.length, res.length)
   const typeAt = (i) => res[i]?.type || defs[i]?.type
   const statusAt = (i) => res[i]?.status || 'pending'
+  // Display-only: a succeeded stage that emitted ⚠ lines shows as 'warn'. Kept
+  // separate from statusAt so nothing that branches on the real status (jump
+  // targets, search, download) changes behaviour.
+  const shownStatusAt = (i) =>
+    statusAt(i) === 'ok' && (res[i]?.warnings || []).length ? 'warn' : statusAt(i)
   const labelAt = (i) => res[i]?.label || (defs[i] ? stageSummary(defs[i]) : `stage ${i + 1}`)
   const overall = run?.status || 'running'
 
@@ -595,7 +605,7 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                 <button type="button" onClick={() => jumpTo(i)}
                   title={st === 'pending' ? 'Not started yet' : 'Jump to this stage’s log'}
                   className="flex flex-col items-center gap-1.5 min-w-[86px] group focus:outline-none">
-                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-transform group-hover:scale-110 ${stepCls(st)}`}>{stepIcon(st)}</div>
+                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-transform group-hover:scale-110 ${stepCls(shownStatusAt(i))}`}>{stepIcon(shownStatusAt(i))}</div>
                   <span className="text-[10px] text-center leading-tight text-content group-hover:text-accent-text-hover">{STAGE_ICON[typeAt(i)]} {labelAt(i)}</span>
                 </button>
                 {i < count - 1 && <div className="h-0.5 w-6 shrink-0 mx-1 bg-surface-overlay" />}
@@ -620,6 +630,12 @@ export function RunModal({ workspace, name, pipeline, runId, onClose }) {
                   <span className="text-xs">{STAGE_ICON[typeAt(i)] || '•'}</span>
                   <span className="text-xs font-medium text-content-strong">{labelAt(i)}</span>
                   <span className={`px-1.5 py-0.5 rounded border text-[10px] ${statusChipCls(st)}`}>{st === 'running' ? 'running…' : st}</span>
+                  {(r?.warnings || []).length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded border text-[10px] bg-warning-subtle text-warning-fg border-warning-border/60"
+                      title={r.warnings.join('\n')}>
+                      ⚠ {r.warnings.filter(w => w.includes('⚠')).length || 1} warning
+                    </span>
+                  )}
                   {r?.started_at ? (
                     <span className="text-[10px] text-content-faint">
                       {fmtClock(r.started_at)}{r.finished_at ? ` → ${fmtClock(r.finished_at)}` : ''}{r.ms ? ` · ${fmtDur(r.ms)}` : ''}

@@ -48,7 +48,12 @@ func ExtractToSrc(envDir, archivePath string, out io.Writer) (string, error) {
 
 	if want != "" && dirHasFiles(src) {
 		if got, _ := os.ReadFile(stampPath); string(got) == want {
+			// Say what this does NOT do. An uploaded project has no repo to pull
+			// from, so a rebuild cannot pick up a source edit — and someone
+			// rebuilding to apply a change reads a bare "unchanged ✓" as progress.
 			fmt.Fprintf(out, "✓ Uploaded source unchanged — reusing existing checkout\n")
+			fmt.Fprintf(out, "  (this project's source is an uploaded archive, so a rebuild can't pick up source\n")
+			fmt.Fprintf(out, "   edits — use Edit Project → Services → Replace Source to upload a new version)\n")
 			return src, nil
 		}
 	}

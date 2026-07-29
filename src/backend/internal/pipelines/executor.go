@@ -257,11 +257,26 @@ func Execute(ctx context.Context, bridge BridgeRunner, p Pipeline, out io.Writer
 			continue
 		}
 
-		fmt.Fprintf(mw, "\033[32m✓ %s ok\033[0m\n", label)
+		// A green stage can still have flagged something the app will hit later.
+		// Lift those out so the run can repeat them at the end and the UI can mark
+		// the stage — see warnings.go.
+		cur.Output = cw.String()
+		cur.Warnings = extractWarnings(cur.Output)
+		if n := countWarningHeadlines(cur.Warnings); n > 0 {
+			noun := "warning"
+			if n > 1 {
+				noun = "warnings"
+			}
+			fmt.Fprintf(mw, "\033[33m✓ %s ok — %d %s\033[0m\n", label, n, noun)
+		} else {
+			fmt.Fprintf(mw, "\033[32m✓ %s ok\033[0m\n", label)
+		}
 		cur.Status = "ok"
+		// Re-capture: the line just written is part of the stage's output too.
 		cur.Output = cw.String()
 		emit()
 	}
+	writeWarningSummary(out, results)
 	return results, outcome
 }
 
