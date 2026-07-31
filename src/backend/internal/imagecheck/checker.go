@@ -1,13 +1,14 @@
-// Package imagecheck queries Docker Hub to detect available image updates
-// for image-stack workspaces. Results are cached and refreshed hourly by
-// a background goroutine started in main.go.
+// Package imagecheck detects available image updates for the images an
+// environment runs. Results are cached and refreshed hourly by a background
+// goroutine started in main.go.
+//
+// Which images those are comes from the generated compose file (see refs.go),
+// and the registry each one lives in is discovered per reference rather than
+// assumed to be Docker Hub (see registry.go).
 package imagecheck
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -68,53 +69,11 @@ func (c *Cache) Invalidate(ws, proj, env string) {
 	delete(c.entries, cacheKey(ws, proj, env))
 }
 
-// ── Docker Hub API helpers ─────────────────────────────────────────────────────
+// ── Registry helpers ──────────────────────────────────────────────────────────
 
-func hubToken(repo string) string {
-	url := fmt.Sprintf("https://auth.docker.io/token?service=registry.docker.io&scope=repository:%s:pull", repo)
-	resp, err := http.Get(url) //nolint:gosec,noctx
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	var v struct{ Token string }
-	json.NewDecoder(resp.Body).Decode(&v) //nolint:errcheck
-	return v.Token
-}
-
-func normaliseRepo(image string) string {
-	if !strings.Contains(image, "/") {
-		return "library/" + image
-	}
-	return image
-}
-
-// remoteDigest fetches the manifest digest for image:tag from Docker Hub.
-func remoteDigest(image, tag string) string {
-	repo := normaliseRepo(image)
-	token := hubToken(repo)
-	if token == "" {
-		return ""
-	}
-	url := fmt.Sprintf("https://registry-1.docker.io/v2/%s/manifests/%s", repo, tag)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	// Accept manifest-list / OCI-index types first so multi-arch images return the
-	// SAME top-level digest that `docker` records locally in RepoDigests; otherwise
-	// a strict registry could hand back a single-arch digest that never matches.
-	req.Header.Set("Accept", strings.Join([]string{
-		"application/vnd.docker.distribution.manifest.list.v2+json",
-		"application/vnd.oci.image.index.v1+json",
-		"application/vnd.docker.distribution.manifest.v2+json",
-		"application/vnd.oci.image.manifest.v1+json",
-	}, ", "))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		return ""
-	}
-	resp.Body.Close()
-	return resp.Header.Get("Docker-Content-Digest")
-}
+// Registry access lives in registry.go: it discovers each registry's token
+// endpoint from the v2 API rather than assuming Docker Hub, so GHCR, quay.io,
+// lscr.io and private registries are reachable too.
 
 // localDigest gets the local image digest via docker CLI.
 func localDigest(imageRef string) string {
@@ -145,28 +104,14 @@ func newerStableTag(image, currentTag string) string {
 		return "" // current tag isn't a pure version (e.g. has a -variant suffix) — skip
 	}
 
-	repo := normaliseRepo(image)
-	token := hubToken(repo)
-	if token == "" {
+	tags := remoteTags(image)
+	if len(tags) == 0 {
 		return ""
 	}
-
-	url := fmt.Sprintf("https://registry-1.docker.io/v2/%s/tags/list", repo)
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		return ""
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-
-	var result struct{ Tags []string }
-	json.Unmarshal(body, &result) //nolint:errcheck
 
 	var best []int
 	var bestStr string
-	for _, t := range result.Tags {
+	for _, t := range tags {
 		cand := parseVersion(t)
 		if cand == nil { // not a pure stable version — skip
 			continue
