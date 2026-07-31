@@ -98,6 +98,9 @@ type Event struct {
 	ConditionType string     `json:"condition_type"`
 	Workspace     string     `json:"workspace"`
 	Env           string     `json:"env"`
+	// Host names the machine the condition was seen on ("" = control plane). Part
+	// of an event's identity, not decoration: a disk rule fires per host.
+	Host          string     `json:"host"`
 	Message       string     `json:"message"`
 	Severity      string     `json:"severity"`
 	Value         float64    `json:"value"`
@@ -273,7 +276,7 @@ func ListEvents(d *db.DB, opt ListEventsOptions) ([]Event, error) {
 	if !opt.IncludeDismissed {
 		where = append(where, "dismissed = 0")
 	}
-	q := `SELECT id, rule_id, rule_name, condition_type, project, env, message,
+	q := `SELECT id, rule_id, rule_name, condition_type, project, env, host, message,
 	             severity, value, fired_at, resolved_at, dismissed
 	      FROM alert_events`
 	if len(where) > 0 {
@@ -302,13 +305,13 @@ func ListEvents(d *db.DB, opt ListEventsOptions) ([]Event, error) {
 }
 
 // OpenEventFor returns the active (unresolved) event for a rule+target, if any.
-func OpenEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
+func OpenEventFor(d *db.DB, ruleID int64, ws, env, host string) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, project, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, host, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events
-		WHERE rule_id = ? AND project = ? AND env = ? AND resolved_at IS NULL
-		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env)
+		WHERE rule_id = ? AND project = ? AND env = ? AND host = ? AND resolved_at IS NULL
+		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env, host)
 	e, err := scanEvent(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -321,13 +324,13 @@ func OpenEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 
 // LastEventFor returns the most recent event (any state) for a rule+target —
 // used to enforce the cooldown window before re-firing.
-func LastEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
+func LastEventFor(d *db.DB, ruleID int64, ws, env, host string) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, project, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, host, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events
-		WHERE rule_id = ? AND project = ? AND env = ?
-		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env)
+		WHERE rule_id = ? AND project = ? AND env = ? AND host = ?
+		ORDER BY fired_at DESC LIMIT 1`, ruleID, ws, env, host)
 	e, err := scanEvent(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -341,9 +344,9 @@ func LastEventFor(d *db.DB, ruleID int64, ws, env string) (*Event, error) {
 func CreateEvent(d *db.DB, e Event) (*Event, error) {
 	res, err := d.Exec(`
 		INSERT INTO alert_events (rule_id, rule_name, condition_type, project,
-		                          env, message, severity, value)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.RuleID, e.RuleName, e.ConditionType, e.Workspace, e.Env,
+		                          env, host, message, severity, value)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.RuleID, e.RuleName, e.ConditionType, e.Workspace, e.Env, e.Host,
 		e.Message, e.Severity, e.Value)
 	if err != nil {
 		return nil, err
@@ -354,7 +357,7 @@ func CreateEvent(d *db.DB, e Event) (*Event, error) {
 
 func GetEvent(d *db.DB, id int64) (*Event, error) {
 	row := d.QueryRow(`
-		SELECT id, rule_id, rule_name, condition_type, project, env, message,
+		SELECT id, rule_id, rule_name, condition_type, project, env, host, message,
 		       severity, value, fired_at, resolved_at, dismissed
 		FROM alert_events WHERE id = ?`, id)
 	e, err := scanEvent(row)
@@ -525,7 +528,7 @@ func scanEvent(s scanner) (Event, error) {
 	var ruleID sql.NullInt64
 	var resolvedAt sql.NullTime
 	err := s.Scan(&e.ID, &ruleID, &e.RuleName, &e.ConditionType, &e.Workspace,
-		&e.Env, &e.Message, &e.Severity, &e.Value, &e.FiredAt, &resolvedAt, &dismissed)
+		&e.Env, &e.Host, &e.Message, &e.Severity, &e.Value, &e.FiredAt, &resolvedAt, &dismissed)
 	if ruleID.Valid {
 		e.RuleID = &ruleID.Int64
 	}

@@ -191,10 +191,15 @@ func (d *DB) migrate() error {
 			value          REAL    NOT NULL DEFAULT 0,
 			fired_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
 			resolved_at    DATETIME,
-			dismissed      INTEGER NOT NULL DEFAULT 0
+			dismissed      INTEGER NOT NULL DEFAULT 0,
+			-- Which machine the condition was observed on. Part of an event's
+			-- identity: a host-scoped rule (disk) fires per host, and without this
+			-- the first host to fill up would suppress every other host's alert
+			-- and the first to recover would resolve them all.
+			host           TEXT    NOT NULL DEFAULT ''
 		);
 		CREATE INDEX IF NOT EXISTS idx_alert_events_open
-			ON alert_events(rule_id, project, env, resolved_at);
+			ON alert_events(rule_id, project, env, host, resolved_at);
 		CREATE INDEX IF NOT EXISTS idx_alert_events_inbox
 			ON alert_events(dismissed, fired_at);
 
@@ -677,6 +682,9 @@ func (d *DB) migrate() error {
 	)`) //nolint:errcheck
 	d.addColumn("alert_rules", "notify_channel_ids TEXT NOT NULL DEFAULT '[]'")
 	d.addColumn("alert_rules", "ws_key TEXT NOT NULL DEFAULT ''") // Phase 3: workspace-tier target ('' = all workspaces)
+	// Existing events predate multi-host evaluation and were all observed on the
+	// control plane; '' reads as exactly that.
+	d.addColumn("alert_events", "host TEXT NOT NULL DEFAULT ''")
 
 	// Proxy Service (standalone reverse-proxy manager): instance-level routes Rigger
 	// renders into Traefik's file provider (/dynamic/proxy-*.yml). Each row = one host/

@@ -645,6 +645,15 @@ function AlertsContent() {
                         {ev.workspace}{ev.env ? ` / ${ev.env}` : ''}
                       </span>
                     )}
+                    {/* Host-scoped alerts (disk) fire per machine. Without this
+                        chip, three hosts over threshold read as three identical
+                        rows — the message names the host, but the eye needs the
+                        distinction before it reads the sentence. */}
+                    {ev.host && (
+                      <span className="text-[10px] font-mono text-content-muted bg-surface-raised px-1.5 py-0.5 rounded">
+                        {ev.host}
+                      </span>
+                    )}
                     {resolved && <span className="text-[10px] text-success-fg font-medium">resolved</span>}
                   </div>
                   <p className="text-sm text-content mt-1 break-words">{ev.message}</p>

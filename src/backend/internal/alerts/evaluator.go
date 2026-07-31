@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mansoor/rigger/ui/internal/db"
@@ -30,6 +31,14 @@ type Evaluator struct {
 	imgCache      *imagecheck.Cache
 	broker        *Broker
 	notifier      *notify.Dispatcher
+
+	// Fleet disk sampling — see hostdisk.go. Supplied by the api layer because
+	// reaching a remote host needs SSH, which this package must not import.
+	hostDisk  HostDiskSampler
+	diskMu    sync.Mutex
+	diskCache []HostDisk
+	diskAt    time.Time
+	nowFn     func() time.Time // test seam for the cache TTL
 }
 
 func NewEvaluator(d *db.DB, workspacesDir string, imgCache *imagecheck.Cache, broker *Broker, notifier *notify.Dispatcher) *Evaluator {
@@ -57,6 +66,12 @@ type target struct {
 	env         string
 	project     string // compose project name: {resource_prefix}_{env}
 	composePath string
+
+	// Host-scoped checks. host is "" for the control plane and forms part of the
+	// event's identity; diskPct carries the already-sampled value, since sampling
+	// a fleet inside check() would re-dial per rule.
+	host    string
+	diskPct float64
 }
 
 func (e *Evaluator) evaluate() {
@@ -93,9 +108,10 @@ func (e *Evaluator) evaluate() {
 
 // expandTargets turns a rule's targeting into the concrete checks to run.
 func (e *Evaluator) expandTargets(rule Rule, wss []workspace.Workspace) []target {
-	// Disk is a host-global metric — evaluate once, labelled by the rule.
+	// Disk is per-machine, not per-project: one target for every host Rigger can
+	// currently reach, the control plane included. See hostdisk.go.
 	if rule.ConditionType == CondDiskAbovePct {
-		return []target{{ws: rule.Workspace, env: rule.Env}}
+		return e.diskTargets(rule)
 	}
 
 	var out []target
@@ -218,11 +234,14 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 			t.ws, t.env, name, n, rule.Threshold)
 
 	case CondDiskAbovePct:
-		pct := stats.Host().DiskUsedPct
+		// Sampled once per evaluation pass in diskTargets — an unreachable host
+		// never becomes a target at all, so there is no "0%" case to guard here.
+		pct := t.diskPct
 		if pct < rule.Threshold {
 			return false, pct, ""
 		}
-		return true, pct, fmt.Sprintf("Host disk usage %.1f%% (threshold %g%%)", pct, rule.Threshold)
+		return true, pct, fmt.Sprintf("%s disk usage %.1f%% (threshold %g%%)",
+			hostLabel(t.host), pct, rule.Threshold)
 
 	case CondCPUAbovePct:
 		ps := statsOf(t.project)
@@ -302,7 +321,9 @@ func (e *Evaluator) check(rule Rule, t target, statsOf func(string) stats.Projec
 
 // apply is the open/resolve state machine for one rule+target.
 func (e *Evaluator) apply(rule Rule, t target, met bool, value float64, msg string) {
-	open, err := OpenEventFor(e.db, rule.ID, t.ws, t.env)
+	// Identity includes the host: two machines over threshold are two alerts, and
+	// one recovering must not resolve the other's.
+	open, err := OpenEventFor(e.db, rule.ID, t.ws, t.env, t.host)
 	if err != nil {
 		log.Printf("alerts: open lookup: %v", err)
 		return
@@ -313,7 +334,7 @@ func (e *Evaluator) apply(rule Rule, t target, met bool, value float64, msg stri
 			return // already firing — don't duplicate
 		}
 		// Respect the cooldown window since the last fire for this rule+target.
-		if last, _ := LastEventFor(e.db, rule.ID, t.ws, t.env); last != nil {
+		if last, _ := LastEventFor(e.db, rule.ID, t.ws, t.env, t.host); last != nil {
 			if time.Since(last.FiredAt) < time.Duration(rule.CooldownMinutes)*time.Minute {
 				return
 			}
@@ -324,6 +345,7 @@ func (e *Evaluator) apply(rule Rule, t target, met bool, value float64, msg stri
 			ConditionType: rule.ConditionType,
 			Workspace:     t.ws,
 			Env:           t.env,
+			Host:          t.host,
 			Message:       msg,
 			Severity:      rule.Severity,
 			Value:         value,

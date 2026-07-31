@@ -626,16 +626,17 @@ func collectHost() HostStats {
 		err = syscall.Statfs("/", &stat) // host mount missing — fall back
 	}
 	if err == nil {
-		bsize  := uint64(stat.Bsize)
-		total  := stat.Blocks * bsize
-		free   := stat.Bavail * bsize
-		used   := total - free
+		bsize := uint64(stat.Bsize)
+		total := stat.Blocks * bsize
+		// df's three numbers: used counts the reserved blocks (Blocks-Bfree),
+		// available excludes them (Bavail). Percentage is used/(used+avail) — see
+		// DiskPercent for why this must match the remote collector exactly.
+		avail := stat.Bavail * bsize
+		used := (stat.Blocks - stat.Bfree) * bsize
 		h.DiskTotalGB = float64(total) / 1e9
-		h.DiskUsedGB  = float64(used) / 1e9
-		h.DiskFreeGB  = float64(free) / 1e9
-		if total > 0 {
-			h.DiskUsedPct = float64(used) / float64(total) * 100.0
-		}
+		h.DiskUsedGB = float64(used) / 1e9
+		h.DiskFreeGB = float64(avail) / 1e9
+		h.DiskUsedPct = DiskPercent(float64(used), float64(avail))
 	}
 
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {

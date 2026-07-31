@@ -224,7 +224,9 @@ func main() {
 	// rule evaluator that turns rule conditions into alert events every 60s and
 	// dispatches notifications to each rule's assigned channels.
 	alertBroker := alerts.NewBroker()
-	alerts.NewEvaluator(database, cfg.WorkspacesDir, imgCache, alertBroker, notifier).Run()
+	// Started below, once the handler exists: the disk rule samples every
+	// registered host, and only the handler holds the SSH credentials to do it.
+	alertEval := alerts.NewEvaluator(database, cfg.WorkspacesDir, imgCache, alertBroker, notifier)
 
 	// Metrics history (Phase 6d): background collector samples per-env CPU/memory/
 	// disk every METRICS_INTERVAL_SECONDS (default 30s). A separate tiered job
@@ -263,6 +265,12 @@ func main() {
 	warnTraefikNetScope()       // nudge if a Swarm manager still has a bridge traefik_net
 
 	handler := api.NewHandler(authSvc, database, bridge, cfg.WorkspacesDir, cfg.RemoteWorkspacesDir, cfg.TemplatesDir, cfg.DataDir, imgCache, alertBroker, notifier, cfg.JWTSecret)
+
+	// Disk alerts cover the whole fleet, not just the machine Rigger runs on —
+	// which is usually the one least likely to fill up. Wired here because
+	// reaching a host needs the handler's credentials; see hostdisk_sampler.go.
+	alertEval.SetHostDiskSampler(handler.SampleHostDisk)
+	alertEval.Run()
 
 	// Start daily automated housekeeping (networks + dangling images) at 03:00 UTC
 	handler.StartHousekeepingScheduler(3)

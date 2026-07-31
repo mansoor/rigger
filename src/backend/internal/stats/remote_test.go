@@ -82,8 +82,10 @@ func TestCollectRemote(t *testing.T) {
 	if h.DiskTotalGB < 52 || h.DiskTotalGB > 53 {
 		t.Errorf("disk_total_gb = %.2f, want ~52.7", h.DiskTotalGB)
 	}
-	if h.DiskUsedPct < 39 || h.DiskUsedPct > 41 {
-		t.Errorf("disk_used_pct = %.2f, want ~40", h.DiskUsedPct)
+	// used/(used+avail) — df's own Capacity column on this row reads 42%, which
+	// the old used/blocks formula missed by two points (see DiskPercent).
+	if h.DiskUsedPct < 41.5 || h.DiskUsedPct > 41.7 {
+		t.Errorf("disk_used_pct = %.2f, want ~41.6 (df says 42%%)", h.DiskUsedPct)
 	}
 	if h.UptimeSeconds != 123456.78 {
 		t.Errorf("uptime = %f, want 123456.78", h.UptimeSeconds)

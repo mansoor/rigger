@@ -160,9 +160,7 @@ func parseDF(df string, h *HostStats) {
 	h.DiskTotalGB = blocks * k / 1e9
 	h.DiskUsedGB = used * k / 1e9
 	h.DiskFreeGB = avail * k / 1e9
-	if blocks > 0 {
-		h.DiskUsedPct = used / blocks * 100.0
-	}
+	h.DiskUsedPct = DiskPercent(used, avail)
 }
 
 func countNonEmptyLines(s string) int {

@@ -166,7 +166,9 @@ func (h *Handler) AlertMeta(w http.ResponseWriter, r *http.Request) {
 			{"value": alerts.CondRestartCount, "label": "Restart count above", "numeric": true, "scope": "stack", "unit": "restarts"},
 			{"value": alerts.CondCPUAbovePct, "label": "CPU usage above", "numeric": true, "scope": "stack", "unit": "%"},
 			{"value": alerts.CondMemoryAbovePct, "label": "Memory usage above", "numeric": true, "scope": "stack", "unit": "%"},
-			{"value": alerts.CondDiskAbovePct, "label": "Host disk usage above", "numeric": true, "scope": "host", "unit": "%"},
+			// One rule covers the fleet: it is evaluated against the control plane
+			// and every registered host, firing separately per machine.
+			{"value": alerts.CondDiskAbovePct, "label": "Disk usage above (every host)", "numeric": true, "scope": "host", "unit": "%"},
 			{"value": alerts.CondBackupFailed, "label": "Backup failed", "numeric": false, "scope": "stack"},
 			{"value": alerts.CondBackupStale, "label": "Backup stale (hours since last)", "numeric": true, "scope": "stack", "unit": "h"},
 			{"value": alerts.CondImageUpdate, "label": "Image update available (new digest)", "numeric": false, "scope": "stack"},

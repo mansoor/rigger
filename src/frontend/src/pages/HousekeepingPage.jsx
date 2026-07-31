@@ -1105,8 +1105,9 @@ export default function HousekeepingPage() {
         {host > 0 && (
           <div className="mb-4 px-3 py-2 rounded-lg bg-info-subtle/40 border border-info-border/50 text-xs text-content">
             Everything on this page now acts on <strong className="text-content-strong">{hostName}</strong> — Docker
-            prunes against that host&apos;s daemon, host-OS tasks over SSH. Migration leftovers and the daily
-            scheduler remain control-plane actions.
+            prunes against that host&apos;s daemon, host-OS tasks over SSH. Migration leftovers ignore this selector
+            because each one already records the host it was left on. The daily scheduler still runs against the
+            control plane only.
           </div>
         )}
 
