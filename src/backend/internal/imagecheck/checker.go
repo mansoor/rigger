@@ -237,9 +237,19 @@ func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
 		Images   []imgRef              `json:"images"`   // legacy image-stack model
 		Services []imgRef              `json:"services"` // unified service graph (current)
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil || cfg.Project.Type != "image" {
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil
 	}
+	// Deliberately NOT gated on project.Type. This used to return early unless the
+	// project was an image stack, which meant a git-source or custom project got no
+	// update check at all — including for the sidecars it pulls straight from a
+	// registry. A project that builds its own app still runs mongo, rabbitmq and a
+	// proxy alongside it, and those go stale exactly the same way.
+	//
+	// What can be checked is a property of the SERVICE, not the project: a service
+	// with an upstream image is comparable against its registry, and one Rigger
+	// builds from source is not (the answer there is Build, not pull). The loop
+	// below already skips refs with no image, so that distinction falls out.
 
 	// Image/prebuilt projects now store their images under `services`; older configs
 	// used `images`. Prefer services, fall back to images.
@@ -248,7 +258,13 @@ func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
 		refs = cfg.Images
 	}
 
-	var results []ServiceUpdate
+	// Empty, not nil: "checked, nothing pullable here" is a real answer and must
+	// be cached. nil is reserved for "couldn't read the config", and callers store
+	// only non-nil — so a project whose services are all built from source would
+	// otherwise never cache, leaving the UI polling every 4s forever waiting for a
+	// result that can't arrive. Harmless while only image stacks were checked;
+	// not harmless now that every project is.
+	results := []ServiceUpdate{}
 	for _, img := range refs {
 		if img.Image == "" {
 			continue // build-only / synthetic service with no upstream image to check
@@ -353,10 +369,11 @@ func checkAll(cache *Cache, workspacesDir string) {
 				continue
 			}
 			var cfg struct {
-				Project      struct{ Type string }      `json:"project"`
 				Environments map[string]json.RawMessage `json:"environments"`
 			}
-			if json.Unmarshal(data, &cfg) != nil || cfg.Project.Type != "image" {
+			// Every project type is swept — see Check() for why. A project with
+			// nothing pullable simply produces no results and costs one file read.
+			if json.Unmarshal(data, &cfg) != nil {
 				continue
 			}
 			for envName := range cfg.Environments {

@@ -413,19 +413,27 @@ func (r *runner) update() error {
 	if out, err := r.composeOutput(append([]string{"ps", "--status", "running", "--quiet"}, target...)...); err == nil {
 		runningBefore = len(bytes.TrimSpace(out)) > 0
 	}
-	// No EFFECTIVE registry resolved: built images have NO registry prefix and only
-	// exist on the local build daemon, so `compose pull` would resolve them against
-	// Docker Hub and fail. Skip the pull and recreate with the locally-built images
-	// (the env's {SVC}_IMAGE pointers already track the latest build) — the automatic
-	// local single-node fallback. With a registry set, pull as before to fetch the
-	// pushed image.
-	if r.registry == "" {
-		r.info("No registry configured — skipping pull; using locally-built images")
-	} else {
+	// With a registry, everything in the stack lives there — built images were
+	// pushed to it — so pull the target as given.
+	//
+	// Without one, built images have no registry prefix and exist only on the local
+	// build daemon; `compose pull` would resolve them against Docker Hub and fail.
+	// That used to mean skipping the pull for the WHOLE stack, which quietly made
+	// Update a no-op for the registry images a built project runs alongside its own
+	// — mongo, rabbitmq, a managed database. Now only the built services are held
+	// back and the rest are pulled normally. See pullable.go.
+	if r.registry != "" {
 		r.info("Pulling latest images...")
 		if err := r.compose(append([]string{"pull"}, target...)...); err != nil {
 			return err
 		}
+	} else if names := r.pullableTargets(target); len(names) > 0 {
+		r.info("No registry configured — pulling registry images only (%s)", strings.Join(names, ", "))
+		if err := r.compose(append([]string{"pull"}, names...)...); err != nil {
+			return err
+		}
+	} else {
+		r.info("No registry configured — skipping pull; using locally-built images")
 	}
 	if runningBefore {
 		r.info("Recreating containers with new images...")

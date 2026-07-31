@@ -457,11 +457,18 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   // no unhealthy container.
   const reachable = containerStatus === 'running' && !containerDetails.some(c => c.Health === 'unhealthy')
 
+  // Whether anything here comes from a registry. Checked per SERVICE rather than
+  // by project type: a custom or git-source project builds its own app but runs
+  // mongo, rabbitmq or a proxy beside it, and those go stale the same way. A
+  // service Rigger builds has no upstream image to compare against — for that one
+  // the answer is Build, not pull. Mirrors what the backend checker enumerates.
+  const hasPullable = (ws?.config?.services || []).some(s => s.image)
+
   // Image update check — results come from hourly background cache; poll every 10 min
   const { data: imgUpdates } = useQuery({
     queryKey: ['imageupdates', workspace, name, envName],
     queryFn: () => fetchImageUpdates(workspace, name, envName),
-    enabled: isImage,
+    enabled: hasPullable,
     // While the backend reports `pending` (a fresh check is in flight — e.g. for a
     // just-added env), poll quickly so the update badges appear without needing a
     // page remount; otherwise fall back to the slow 10-min cadence.
@@ -509,7 +516,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
         qc.invalidateQueries({ queryKey: ['metrics', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['backup-stats', workspace, name, envName] })
         qc.invalidateQueries({ queryKey: ['imagestatus', workspace, name, envName] })
-        if (isImage) qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
+        if (hasPullable) qc.invalidateQueries({ queryKey: ['imageupdates', workspace, name, envName] })
       }, 2000)
       // After update: backend invalidates its cache and runs a fresh check (~3-5s).
       // Wait 8s then refetch so the UI reflects the post-update digest comparison.
@@ -581,7 +588,9 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
     serviceRows = containerDetails
   }
 
-  // Per-service update info (image stacks only)
+  // Per-service update info. A service appears here only if it has an upstream
+  // image, so presence in this map is exactly the test for "can this row offer an
+  // update?" — no project-type check needed.
   const updateByService = Object.fromEntries(
     (imgUpdates?.updates || []).map(u => [u.service, u])
   )
@@ -666,7 +675,7 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
           <div className="flex gap-2">
             <PrimaryBtn variant="deploy" icon="deploy" fill onClick={() => handleAction('start')}
               title="Deploy — bring the stack up (applies the current compose)">Deploy</PrimaryBtn>
-            {isImage && (
+            {hasPullable && (
               <PrimaryBtn variant="update" icon="update" pulse={hasImageUpdate} disabled={updateUpToDate}
                 onClick={() => handleAction('update')}
                 title={updateUpToDate ? 'Up to date — no update available'
@@ -843,8 +852,11 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
                           <CtlBtn title="Restart" className="text-content-faint hover:text-success-fg" onClick={() => handleAction('restart', [c.Service])}>⟳</CtlBtn>
                         )}
                         {/* Update icon doubles as the indicator: pulses amber when an
-                            update is available, muted when the digest can't be compared. */}
-                        {isImage && (
+                            update is available, muted when the digest can't be compared.
+                            Shown per service that has an upstream image — a service built
+                            from source has nothing to pull, and offering it here would
+                            point at the wrong action. */}
+                        {upd && (
                           <CtlBtn
                             title={upd?.has_update ? `Update available: ${upd.newer_tag} — pull & recreate`
                               : upd?.indeterminate ? 'Cannot compare digest — pull latest & recreate'
