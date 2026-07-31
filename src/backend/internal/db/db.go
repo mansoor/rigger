@@ -832,6 +832,11 @@ func (d *DB) migrate() error {
 	// public_address is the host's PUBLIC web IP/hostname for DNS + magic-DNS, when it
 	// differs from the SSH address (e.g. SSH via a bastion). '' = use the SSH address.
 	d.addColumn("hosts", "public_address TEXT NOT NULL DEFAULT ''")
+	// Whether the nightly housekeeping run includes this host. Default 0 on
+	// purpose: upgrading must not silently start pruning machines the operator
+	// never asked Rigger to touch, and a build-only host may belong to someone
+	// else entirely. Opt in per host from Housekeeping → Automation.
+	d.addColumn("hosts", "housekeeping_enabled INTEGER NOT NULL DEFAULT 0")
 	// Housekeeping can now prune a registered remote host's daemon, not just the
 	// control plane's — so a log row has to say WHICH machine it freed space on,
 	// or "reclaimed 4.2 GB" is meaningless across a fleet. Existing rows all

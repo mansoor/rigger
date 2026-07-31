@@ -11,7 +11,7 @@ import {
   pruneNetworks, pruneBuildCache,
   fetchJournalStats, journalVacuum, fetchKernels, cleanKernels, aptClean, cleanTmp,
   fetchMigrationLeftovers, cleanMigrationLeftover, dismissMigrationLeftover,
-  fetchHosts,
+  fetchHosts, fetchAutoRunCoverage, setAutoRunCoverage,
 } from '../lib/api'
 
 // ── Target host ───────────────────────────────────────────────────────────────
@@ -732,6 +732,73 @@ function SafetyCenterTab({ docker }) {
   )
 }
 
+// ── Nightly-run coverage ──────────────────────────────────────────────────────
+
+// Which machines the 03:00 run cleans. Opt-in per host: pruning a machine on a
+// schedule isn't something to start doing because someone upgraded Rigger, and a
+// build host may belong to another team entirely. The control plane is always
+// included — it's the one machine Rigger unambiguously owns.
+function AutoRunCoverage({ log }) {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({ queryKey: ['hk-coverage'], queryFn: fetchAutoRunCoverage })
+  const machines = data?.machines || []
+
+  const toggle = useMutation({
+    mutationFn: ({ host_id, enabled }) => setAutoRunCoverage({ host_id, enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hk-coverage'] }),
+  })
+
+  // The newest scheduled row for a machine. Filtered by trigger so a manual
+  // prune doesn't masquerade as the nightly run having happened.
+  const lastRun = (name) => log.find(l => l.host === name && l.trigger === 'cron')
+
+  const STATUS = {
+    ok:      { label: 'ok',        cls: 'text-success-fg' },
+    error:   { label: 'failed',    cls: 'text-danger-fg' },
+    skipped: { label: 'unreachable — nothing run', cls: 'text-warning-fg' },
+  }
+
+  return (
+    <div>
+      <h2 className="text-sm font-semibold text-content-muted uppercase tracking-wider mb-3">Coverage</h2>
+      {isLoading ? (
+        <p className="text-sm text-content-subtle">Loading…</p>
+      ) : (
+        <div className="border border-border rounded-xl divide-y divide-border overflow-hidden">
+          {machines.map(m => {
+            const last = lastRun(m.name)
+            const st = last && (STATUS[last.status] || { label: last.status, cls: 'text-content-muted' })
+            return (
+              <div key={m.host_id} className="flex items-center gap-3 px-4 py-3 bg-surface">
+                <input
+                  type="checkbox" checked={m.enabled} disabled={m.fixed || toggle.isPending}
+                  onChange={e => toggle.mutate({ host_id: m.host_id, enabled: e.target.checked })}
+                  className="rounded border-border-strong bg-surface-overlay text-brand-500 focus:ring-brand-500 disabled:opacity-50"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-content-strong">
+                    {m.name}
+                    {m.fixed && <span className="ml-2 text-xs text-content-faint">always included</span>}
+                    {m.build_only && <span className="ml-2 text-[10px] uppercase tracking-wider text-content-muted bg-surface-raised px-1.5 py-0.5 rounded">build only</span>}
+                  </p>
+                  {last
+                    ? <p className="text-xs text-content-faint mt-0.5">Last nightly run {timeAgo(last.created_at)} · <span className={st.cls}>{st.label}</span></p>
+                    : <p className="text-xs text-content-faint mt-0.5">{m.enabled ? 'No nightly run recorded yet' : 'Not included'}</p>
+                  }
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <Hint className="mt-2">
+        A host that can&apos;t be reached is recorded as skipped and the other machines still run — one unreachable
+        box never stops the rest.
+      </Hint>
+    </div>
+  )
+}
+
 // ── Tab 3: Automation & Logs ──────────────────────────────────────────────────
 
 function AutomationTab({ caps }) {
@@ -790,33 +857,25 @@ function AutomationTab({ caps }) {
       {/* Automated tasks summary */}
       <div>
         <h2 className="text-sm font-semibold text-content-muted uppercase tracking-wider mb-3">Automated Tasks (Daily at 03:00 UTC)</h2>
-        {host > 0 && (
-          <p className="text-xs text-content-subtle mb-2">
-            The scheduler runs against the control plane only — these two tasks do not yet fan out to {hostName}.
-          </p>
-        )}
         <div className="grid grid-cols-2 gap-3">
           {[
             { name: 'prune-networks', label: 'Network Cleanup', desc: 'docker network prune -f' },
             { name: 'prune-dangling-images', label: 'Dangling Image Prune', desc: 'docker image prune -f' },
-          ].map(task => {
-            const last = log.find(l => l.task === task.name)
-            return (
-              <div key={task.name} className="p-4 bg-surface border border-border rounded-xl">
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-sm font-semibold text-content-strong">{task.label}</p>
-                  <span className="text-xs text-success-fg">Auto</span>
-                </div>
-                <p className="text-xs text-content-subtle font-mono mb-2">{task.desc}</p>
-                {last
-                  ? <p className="text-xs text-content-faint">Last run: {timeAgo(last.created_at)} · {last.status}</p>
-                  : <p className="text-xs text-content-faint">Not yet run</p>
-                }
+          ].map(task => (
+            <div key={task.name} className="p-4 bg-surface border border-border rounded-xl">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold text-content-strong">{task.label}</p>
+                <span className="text-xs text-success-fg">Auto</span>
               </div>
-            )
-          })}
+              <p className="text-xs text-content-subtle font-mono">{task.desc}</p>
+            </div>
+          ))}
         </div>
+        {/* Last-run moved into Coverage below: the run now happens per machine,
+            and a single "last run" mixing hosts would say nothing useful. */}
       </div>
+
+      <AutoRunCoverage log={log} />
 
       {/* Package cache — the manager is whatever the host actually has. */}
       <div className="p-4 bg-surface border border-border rounded-xl space-y-3">

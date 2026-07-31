@@ -731,7 +731,11 @@ type Host struct {
 	Reachability string `json:"reachability"`
 	// PublicAddress is the host's public web IP/hostname for DNS + magic-DNS when it
 	// differs from the SSH Address; '' means "use Address". See WebAddress.
-	PublicAddress string    `json:"public_address"`
+	PublicAddress string `json:"public_address"`
+	// HousekeepingEnabled includes this host in the nightly automated cleanup.
+	// Off by default — pruning a machine on a schedule is not something to start
+	// doing to an operator's fleet because they upgraded.
+	HousekeepingEnabled bool      `json:"housekeeping_enabled"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -765,7 +769,7 @@ func (h Host) WorkspaceScope() string {
 func WorkspaceOwnerScope(wsKey string) string { return "ws:" + wsKey }
 
 func ListHosts(d *db.DB) ([]Host, error) {
-	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, created_at, updated_at FROM hosts ORDER BY name`)
+	rows, err := d.Query(`SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, housekeeping_enabled, created_at, updated_at FROM hosts ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -773,7 +777,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.HousekeepingEnabled, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -788,7 +792,7 @@ func ListHosts(d *db.DB) ([]Host, error) {
 // hosts (owner_scope='ws:{key}') plus any global host granted to it (or to '*').
 func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	rows, err := d.Query(`
-		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, created_at, updated_at
+		SELECT id, name, address, ssh_port, ssh_user, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, housekeeping_enabled, created_at, updated_at
 		FROM hosts h
 		WHERE h.owner_scope = ?
 		   OR (h.owner_scope = 'global' AND EXISTS(
@@ -802,7 +806,7 @@ func ListHostsForWorkspace(d *db.DB, wsKey string) ([]Host, error) {
 	var out []Host
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.CreatedAt, &h.UpdatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.HousekeepingEnabled, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -868,8 +872,8 @@ func SetHostGrants(d *db.DB, hostID int64, workspaces []string) error {
 // GetHost returns a host including the encrypted SSH key (for dialing).
 func GetHost(d *db.DB, id int64) (*Host, error) {
 	var h Host
-	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, created_at, updated_at FROM hosts WHERE id=?`, id).
-		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.CreatedAt, &h.UpdatedAt)
+	err := d.QueryRow(`SELECT id, name, address, ssh_port, ssh_user, ssh_key_encrypted, ssh_host_key, workspaces_dir, owner_scope, swarm_state, swarm_manager, build_only, reachability, public_address, housekeeping_enabled, created_at, updated_at FROM hosts WHERE id=?`, id).
+		Scan(&h.ID, &h.Name, &h.Address, &h.SSHPort, &h.SSHUser, &h.SSHKeyEnc, &h.SSHHostKey, &h.WorkspacesDir, &h.OwnerScope, &h.SwarmState, &h.SwarmManager, &h.BuildOnly, &h.Reachability, &h.PublicAddress, &h.HousekeepingEnabled, &h.CreatedAt, &h.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -888,6 +892,14 @@ func SetHostCapability(d *db.DB, id int64, swarmState string, swarmManager bool)
 // build-host pickers but excluded from deploy-host pickers + env→host binding.
 func SetHostBuildOnly(d *db.DB, id int64, buildOnly bool) error {
 	_, err := d.Exec(`UPDATE hosts SET build_only=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, buildOnly, id)
+	return err
+}
+
+// SetHostHousekeeping includes (or excludes) a host in the nightly automated
+// cleanup. Explicit per host: the run prunes networks and dangling images, which
+// is safe but not something to start doing to a machine unasked.
+func SetHostHousekeeping(d *db.DB, id int64, enabled bool) error {
+	_, err := d.Exec(`UPDATE hosts SET housekeeping_enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, enabled, id)
 	return err
 }
 

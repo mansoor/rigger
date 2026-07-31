@@ -888,25 +888,9 @@ func min(a, b int) int {
 	return b
 }
 
-// HousekeepingAutoRun is called on a schedule to run safe/automated tasks.
-func (h *Handler) HousekeepingAutoRun() {
-	tasks := []struct {
-		name string
-		args []string
-	}{
-		{"prune-networks", []string{"network", "prune", "-f"}},
-		{"prune-dangling-images", []string{"image", "prune", "-f"}},
-	}
-	for _, t := range tasks {
-		out, err := dockerLocal(t.args...)
-		status := "ok"
-		if err != nil {
-			status = "error"
-		}
-		freed := extractFreedBytes(out)
-		h.logHousekeeping(controlPlaneLabel, t.name, "cron", status, out, freed, 0)
-	}
-}
+// The nightly automated run lives in housekeeping_schedule.go — it fans out
+// across the fleet, which needs a failure model this file's request handlers
+// don't.
 
 // HousekeepingAutoRunAt schedules the automated tasks daily at the given hour (UTC).
 func (h *Handler) StartHousekeepingScheduler(hourUTC int) {

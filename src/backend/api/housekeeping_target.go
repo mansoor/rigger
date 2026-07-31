@@ -81,7 +81,14 @@ func (h *Handler) hkTarget(r *http.Request) (*hkTarget, error) {
 	if err != nil || host == nil {
 		return nil, errHostNotFound
 	}
-	rh, err := h.dialHost(id)
+	return h.hkTargetForHost(host)
+}
+
+// hkTargetForHost dials a host and wraps it as a target. Split from hkTarget so
+// the nightly scheduler — which iterates hosts rather than reading a request —
+// reaches a machine exactly the way a UI action does.
+func (h *Handler) hkTargetForHost(host *settings.Host) (*hkTarget, error) {
+	rh, err := h.dialHost(host.ID)
 	if err != nil {
 		return nil, err
 	}

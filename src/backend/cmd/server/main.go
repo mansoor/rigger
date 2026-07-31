@@ -1127,6 +1127,11 @@ func main() {
 			handler.HousekeepingStatus(w, r)
 		case r.Method == "GET"  && path == "/api/housekeeping/log":
 			handler.HousekeepingLog(w, r)
+		// Which machines the nightly run covers, and opting a host in or out.
+		case r.Method == "GET"  && path == "/api/housekeeping/schedule/coverage":
+			handler.AutoRunCoverage(w, r)
+		case r.Method == "POST" && path == "/api/housekeeping/schedule/coverage":
+			handler.SetAutoRunCoverage(w, r)
 		// Migration leftovers (Phase 7)
 		case r.Method == "GET" && path == "/api/housekeeping/migration-leftovers":
 			handler.ListMigrationLeftovers(w, r)

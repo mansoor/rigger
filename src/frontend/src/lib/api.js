@@ -337,6 +337,11 @@ export const pruneContainers             = (host)   => api.post(`/housekeeping/d
 export const pruneVolumes                = (body, host) => api.post(`/housekeeping/docker/prune/volumes${hkq(host)}`, body).then(r => r.data)
 export const pruneNetworks               = (host)   => api.post(`/housekeeping/docker/prune/networks${hkq(host)}`).then(r => r.data)
 export const pruneBuildCache             = (host)   => api.post(`/housekeeping/docker/prune/build-cache${hkq(host)}`).then(r => r.data)
+// Which machines the nightly 03:00 run covers. Not host-scoped: this is the
+// fleet-wide membership list, not an action against one target.
+export const fetchAutoRunCoverage        = ()           => api.get('/housekeeping/schedule/coverage').then(r => r.data)
+export const setAutoRunCoverage          = (body)       => api.post('/housekeeping/schedule/coverage', body).then(r => r.data)
+
 // Host-OS tasks are host-scoped too — they run over SSH (with sudo when needed)
 // on a remote target, and via nsenter on the control plane. See hkq above.
 export const fetchJournalStats           = (host)       => api.get(`/housekeeping/host/journal/stats${hkq(host)}`).then(r => r.data)
