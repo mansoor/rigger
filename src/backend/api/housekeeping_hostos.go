@@ -26,6 +26,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -150,9 +151,69 @@ func (t *hkTarget) caps() hostCaps {
 	return t.capsCache
 }
 
+// ── Is nsenter actually reaching the host? ────────────────────────────────────
+//
+// `nsenter -t 1` enters the namespaces of PID 1 *as this process sees it*. With
+// `pid: host` that is the host's init, which is the point. Without it, PID 1 is
+// Rigger's own entrypoint — so nsenter "succeeds" and enters the namespaces it
+// was already in, and every host-OS task then runs INSIDE Rigger's container.
+//
+// That failure is silent and it is the bad kind: `apt-get clean` reports success
+// having cleaned the container, `find /tmp -delete` deletes Rigger's temp files,
+// and the host it was aimed at is untouched. A missing `privileged: true` at
+// least fails loudly with EPERM.
+//
+// The tell is that PID 1 shares our mount namespace. Mount specifically because
+// it is the one that decides whether /tmp and the package database are the
+// host's or the container's.
+
+// containerFiles are the markers a container runtime leaves behind. Checked
+// because the namespace test alone would misfire when Rigger runs directly on a
+// Linux host: there PID 1 legitimately shares our namespaces, nsenter is a
+// harmless no-op, and host-OS tasks work.
+var containerFiles = []string{"/.dockerenv", "/run/.containerenv"}
+
+func inContainer() bool {
+	for _, f := range containerFiles {
+		if _, err := os.Stat(f); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// readMountNS returns this process's and PID 1's mount-namespace identities.
+// Either being unreadable yields "", which pidHostMissing treats as "can't tell"
+// rather than as a problem — a wrong accusation here would block a working
+// install.
+func readMountNS() (self, init string) {
+	self, _ = os.Readlink("/proc/self/ns/mnt")
+	init, _ = os.Readlink("/proc/1/ns/mnt")
+	return self, init
+}
+
+// pidHostMissing reports the privileged-but-no-pid:host case.
+func pidHostMissing(selfNS, initNS string, containerized bool) bool {
+	return containerized && selfNS != "" && selfNS == initNS
+}
+
+const pidHostMissingReason = "Rigger can only see its own container: PID 1 shares this container's " +
+	"namespaces, which means `pid: host` is missing from the rigger service. Host-OS tasks would run " +
+	"inside Rigger's container instead of on the host — cleaning the wrong machine and reporting " +
+	"success. Add BOTH `privileged: true` and `pid: host` to the rigger service in docker-compose.yml."
+
 // probeHost runs hostProbeScript through the target's transport and turns the
 // result into a capability set, including the reason when there isn't one.
 func (t *hkTarget) probeHost() hostCaps {
+	// Checked before running anything: this is the case where the commands would
+	// have worked, on the wrong machine.
+	if !t.Remote {
+		self, init := readMountNS()
+		if pidHostMissing(self, init, inContainer()) {
+			return hostCaps{Reason: pidHostMissingReason}
+		}
+	}
+
 	// Deliberately not via hostRun: hostRun consults caps() to decide on sudo,
 	// and the probe is what determines sudo. It runs unprivileged — everything
 	// in it works as any user, and needing root to ask "am I root?" would be a

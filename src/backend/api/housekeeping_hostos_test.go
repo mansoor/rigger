@@ -94,6 +94,32 @@ func TestHostCmdRemoteSudoIsNonInteractive(t *testing.T) {
 	}
 }
 
+// `privileged: true` without `pid: host` is the dangerous misconfiguration:
+// nsenter -t 1 succeeds by entering the namespaces it was already in, so every
+// host-OS task runs inside Rigger's container and reports success.
+func TestPidHostMissing(t *testing.T) {
+	const ns = "mnt:[4026532398]"
+	const other = "mnt:[4026531840]"
+
+	if !pidHostMissing(ns, ns, true) {
+		t.Error("in a container, PID 1 sharing our mount namespace means pid: host is absent")
+	}
+	if pidHostMissing(ns, other, true) {
+		t.Error("a distinct PID 1 namespace is what pid: host looks like — must not accuse")
+	}
+	// Running directly on a Linux host: PID 1 legitimately shares our namespaces
+	// and nsenter is a harmless no-op. Accusing here would block a working setup.
+	if pidHostMissing(ns, ns, false) {
+		t.Error("outside a container, shared namespaces are normal")
+	}
+	// Unreadable /proc links must mean "can't tell", never "misconfigured".
+	for _, c := range [][2]string{{"", ""}, {"", ns}, {ns, ""}} {
+		if pidHostMissing(c[0], c[1], true) {
+			t.Errorf("unreadable namespaces %q/%q must not be reported as a misconfiguration", c[0], c[1])
+		}
+	}
+}
+
 func TestPkgCleanCmds(t *testing.T) {
 	if got := pkgCleanCmds("apt-get"); len(got) != 2 || got[0][0] != "apt-get" {
 		t.Errorf("apt-get = %v", got)
