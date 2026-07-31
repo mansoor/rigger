@@ -457,18 +457,17 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   // no unhealthy container.
   const reachable = containerStatus === 'running' && !containerDetails.some(c => c.Health === 'unhealthy')
 
-  // Whether anything here comes from a registry. Checked per SERVICE rather than
-  // by project type: a custom or git-source project builds its own app but runs
-  // mongo, rabbitmq or a proxy beside it, and those go stale the same way. A
-  // service Rigger builds has no upstream image to compare against — for that one
-  // the answer is Build, not pull. Mirrors what the backend checker enumerates.
-  const hasPullable = (ws?.config?.services || []).some(s => s.image)
-
-  // Image update check — results come from hourly background cache; poll every 10 min
+  // Image update check — results come from hourly background cache; poll every 10 min.
+  //
+  // Asked for every project, not just image stacks. What can be checked is a
+  // property of the SERVICE: a custom or git-source project builds its own app but
+  // runs mysql, redis, minio, adminer and mailpit beside it, and those go stale the
+  // same way. Which services those are can only be answered by the backend — it
+  // reads the generated compose, where managed dependencies and sidecars live;
+  // project config lists only what the operator declared.
   const { data: imgUpdates } = useQuery({
     queryKey: ['imageupdates', workspace, name, envName],
     queryFn: () => fetchImageUpdates(workspace, name, envName),
-    enabled: hasPullable,
     // While the backend reports `pending` (a fresh check is in flight — e.g. for a
     // just-added env), poll quickly so the update badges appear without needing a
     // page remount; otherwise fall back to the slow 10-min cadence.
@@ -479,10 +478,14 @@ function EnvCard({ name, ws, envName, cfg, onAction, onConfig, onCompose, onTerm
   const hasIndeterminate  = !hasImageUpdate && imgUpdates?.updates?.some(u => u.indeterminate) || false
   const updateServices    = (imgUpdates?.updates || []).filter(u => u.has_update).map(u => `${u.service}: ${u.newer_tag}`)
   const indetermServices  = (imgUpdates?.updates || []).filter(u => u.indeterminate).map(u => u.service)
-  // Update is shown permanently for image stacks; disabled once we've confirmed
-  // everything is current (so its position never shifts).
+  // Update is shown permanently once anything here is pullable; disabled after
+  // we've confirmed everything is current, so its position never shifts.
   const updateChecked     = imgUpdates && !imgUpdates.pending
   const updateUpToDate    = updateChecked && !hasImageUpdate
+  // The backend returns one entry per service it could check, so a non-empty
+  // result IS "something here comes from a registry". An all-built env returns an
+  // empty list and gets no Update button — for it the action is Build.
+  const hasPullable       = (imgUpdates?.updates || []).length > 0
 
   // Action availability by env state.
   const isRunning     = containerStatus === 'running' || containerStatus === 'partial'

@@ -221,41 +221,9 @@ func versionNewerAtPrecision(cur, cand []int) bool {
 
 // Check reads config.json for the workspace and checks each image for updates.
 func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
-	cfgPath := wspath.ConfigPath(workspacesDir, wsName, project)
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
+	refs, ok := checkableRefs(workspacesDir, wsName, project, env)
+	if !ok {
 		return nil
-	}
-
-	type imgRef struct {
-		Name  string `json:"name"`
-		Image string `json:"image"`
-		Tag   string `json:"tag"`
-	}
-	var cfg struct {
-		Project  struct{ Type string } `json:"project"`
-		Images   []imgRef              `json:"images"`   // legacy image-stack model
-		Services []imgRef              `json:"services"` // unified service graph (current)
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil
-	}
-	// Deliberately NOT gated on project.Type. This used to return early unless the
-	// project was an image stack, which meant a git-source or custom project got no
-	// update check at all — including for the sidecars it pulls straight from a
-	// registry. A project that builds its own app still runs mongo, rabbitmq and a
-	// proxy alongside it, and those go stale exactly the same way.
-	//
-	// What can be checked is a property of the SERVICE, not the project: a service
-	// with an upstream image is comparable against its registry, and one Rigger
-	// builds from source is not (the answer there is Build, not pull). The loop
-	// below already skips refs with no image, so that distinction falls out.
-
-	// Image/prebuilt projects now store their images under `services`; older configs
-	// used `images`. Prefer services, fall back to images.
-	refs := cfg.Services
-	if len(refs) == 0 {
-		refs = cfg.Images
 	}
 
 	// Empty, not nil: "checked, nothing pullable here" is a real answer and must
@@ -266,15 +234,9 @@ func Check(workspacesDir, wsName, project, env string) []ServiceUpdate {
 	// not harmless now that every project is.
 	results := []ServiceUpdate{}
 	for _, img := range refs {
-		if img.Image == "" {
-			continue // build-only / synthetic service with no upstream image to check
-		}
 		tag := img.Tag
-		if tag == "" {
-			tag = "latest"
-		}
 		fullRef := img.Image + ":" + tag
-		upd := ServiceUpdate{Service: img.Name, Image: img.Image, Tag: tag}
+		upd := ServiceUpdate{Service: img.Service, Image: img.Image, Tag: tag}
 
 		// Actionable signal: does the registry have a newer digest for the SAME
 		// configured tag? This is the only thing a one-click Update (pull the same
