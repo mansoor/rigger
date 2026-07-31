@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -61,11 +60,8 @@ func (h *Handler) DismissMigrationLeftover(w http.ResponseWriter, r *http.Reques
 
 // ── Docker helpers ─────────────────────────────────────────────────────────────
 
-func dockerRun(args ...string) (string, error) {
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
-}
+// Docker commands run through hkTarget.docker so they can act on the control
+// plane OR a registered remote host — see housekeeping_target.go.
 
 // parseDockerSize converts Docker size strings ("1.5GB", "500MB", "0B") to bytes.
 func parseDockerSize(s string) int64 {
@@ -88,26 +84,25 @@ func parseDockerSize(s string) int64 {
 	return 0
 }
 
-// logHousekeeping records a housekeeping action in the DB.
-func (h *Handler) logHousekeeping(task, trigger, status, output string, freedBytes, itemsRemoved int64) {
-	h.db.Exec(`INSERT INTO housekeeping_log (task, trigger, status, output, freed_bytes, items_removed)
-		VALUES (?, ?, ?, ?, ?, ?)`, task, trigger, status, output, freedBytes, itemsRemoved) //nolint:errcheck
+// logHousekeeping records a housekeeping action in the DB. host names the daemon
+// it ran against — without it, a freed-space figure is unattributable once more
+// than one machine is in play.
+func (h *Handler) logHousekeeping(host, task, trigger, status, output string, freedBytes, itemsRemoved int64) {
+	if host == "" {
+		host = controlPlaneLabel
+	}
+	h.db.Exec(`INSERT INTO housekeeping_log (host, task, trigger, status, output, freed_bytes, items_removed)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, host, task, trigger, status, output, freedBytes, itemsRemoved) //nolint:errcheck
 }
 
 // ── GET /api/housekeeping/status ──────────────────────────────────────────────
 
 func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
-	type DiskSection struct {
-		Count       int64  `json:"count"`
-		SizeBytes   int64  `json:"size_bytes"`
-		ReclaimableBytes int64 `json:"reclaimable_bytes"`
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
 	}
-	type DockerDisk struct {
-		Images     DiskSection `json:"images"`
-		Containers DiskSection `json:"containers"`
-		Volumes    DiskSection `json:"volumes"`
-		BuildCache DiskSection `json:"build_cache"`
-	}
+	defer t.Close()
 	type LastRun struct {
 		Task      string `json:"task"`
 		RunAt     string `json:"run_at"`
@@ -122,55 +117,14 @@ func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
 
 	var res Result
 
-	// Parse docker system df
-	out, err := dockerRun("system", "df")
-	if err == nil {
-		scanner := bufio.NewScanner(strings.NewReader(out))
-		for scanner.Scan() {
-			line := scanner.Text()
-			fields := strings.Fields(line)
-			if len(fields) < 4 {
-				continue
-			}
-			switch fields[0] {
-			case "Images":
-				res.Docker.Images.Count, _ = strconv.ParseInt(fields[1], 10, 64)
-				res.Docker.Images.SizeBytes = parseDockerSize(fields[3])
-				if len(fields) > 4 {
-					recl := strings.Split(fields[4], " ")[0]
-					res.Docker.Images.ReclaimableBytes = parseDockerSize(recl)
-				}
-			case "Containers":
-				res.Docker.Containers.Count, _ = strconv.ParseInt(fields[1], 10, 64)
-				res.Docker.Containers.SizeBytes = parseDockerSize(fields[3])
-				if len(fields) > 4 {
-					recl := strings.Split(fields[4], " ")[0]
-					res.Docker.Containers.ReclaimableBytes = parseDockerSize(recl)
-				}
-			case "Local":
-				if len(fields) >= 5 {
-					res.Docker.Volumes.Count, _ = strconv.ParseInt(fields[2], 10, 64)
-					res.Docker.Volumes.SizeBytes = parseDockerSize(fields[4])
-					if len(fields) > 5 {
-						recl := strings.Split(fields[5], " ")[0]
-						res.Docker.Volumes.ReclaimableBytes = parseDockerSize(recl)
-					}
-				}
-			case "Build":
-				if len(fields) >= 4 {
-					res.Docker.BuildCache.Count, _ = strconv.ParseInt(fields[2], 10, 64)
-					res.Docker.BuildCache.SizeBytes = parseDockerSize(fields[3])
-					res.Docker.BuildCache.ReclaimableBytes = res.Docker.BuildCache.SizeBytes
-				}
-			}
-		}
+	// Parsed by parseSystemDF (systemdf.go) — the column offsets differ per row
+	// and getting one wrong is silent, so it is tested against real output.
+	if out, err := t.docker("system", "df"); err == nil {
+		res.Docker = parseSystemDF(out)
 	}
 
 	// Health status
-	totalReclaimable := res.Docker.Images.ReclaimableBytes +
-		res.Docker.Containers.ReclaimableBytes +
-		res.Docker.Volumes.ReclaimableBytes +
-		res.Docker.BuildCache.ReclaimableBytes
+	_, totalReclaimable := res.Docker.Total()
 
 	const GB = int64(1024 * 1024 * 1024)
 	switch {
@@ -182,12 +136,16 @@ func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
 		res.HealthStatus = "HEALTHY"
 	}
 
-	// Check host privileged access
+	// Host-OS actions run via nsenter into the CONTROL PLANE's namespaces, so they
+	// mean nothing for a remote target — report them unavailable there rather than
+	// letting the UI offer buttons that would act on the wrong machine.
 	_, hostErr := exec.Command("nsenter", "--version").Output()
-	res.HostPrivileged = hostErr == nil
+	res.HostPrivileged = !t.Remote && hostErr == nil
 
-	// Recent housekeeping log
-	rows, _ := h.db.Query(`SELECT task, created_at, freed_bytes FROM housekeeping_log ORDER BY created_at DESC LIMIT 5`)
+	// Recent runs for THIS host — a mixed list would attribute one machine's
+	// reclaimed space to another.
+	rows, _ := h.db.Query(`SELECT task, created_at, freed_bytes FROM housekeeping_log
+		WHERE host = ? ORDER BY created_at DESC LIMIT 5`, t.Host)
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -208,6 +166,11 @@ func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
 // ── GET /api/housekeeping/docker/images ───────────────────────────────────────
 
 func (h *Handler) ListHousekeepingImages(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	type DockerImage struct {
 		ID         string `json:"id"`
 		Repository string `json:"repository"`
@@ -219,7 +182,7 @@ func (h *Handler) ListHousekeepingImages(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Get all images (short IDs for display)
-	imgOut, err := dockerRun("images", "--format",
+	imgOut, err := t.docker("images", "--format",
 		`{"id":"{{.ID}}","repository":"{{.Repository}}","tag":"{{.Tag}}","size":"{{.Size}}","created":"{{.CreatedAt}}"}`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -251,14 +214,14 @@ func (h *Handler) ListHousekeepingImages(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Method 1: image IDs via {{.ImageID}}
-	if idOut, err2 := dockerRun("ps", "-a", "--format", "{{.ImageID}}"); err2 == nil {
+	if idOut, err2 := t.docker("ps", "-a", "--format", "{{.ImageID}}"); err2 == nil {
 		for _, line := range strings.Split(idOut, "\n") {
 			addID(line)
 		}
 	}
 
 	// Method 2: image references via {{.Image}} (e.g. "nginx:latest")
-	if refOut, err2 := dockerRun("ps", "-a", "--format", "{{.Image}}"); err2 == nil {
+	if refOut, err2 := t.docker("ps", "-a", "--format", "{{.Image}}"); err2 == nil {
 		for _, ref := range strings.Split(refOut, "\n") {
 			ref = strings.TrimSpace(ref)
 			if ref != "" {
@@ -306,19 +269,29 @@ func (h *Handler) ListHousekeepingImages(w http.ResponseWriter, r *http.Request)
 // ── POST /api/housekeeping/docker/prune/dangling-images ───────────────────────
 
 func (h *Handler) PruneDanglingImages(w http.ResponseWriter, r *http.Request) {
-	out, err := dockerRun("image", "prune", "-f")
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+	out, err := t.docker("image", "prune", "-f")
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
 	freed := extractFreedBytes(out)
-	h.logHousekeeping("prune-dangling-images", "manual", status, out, freed, 0)
+	h.logHousekeeping(t.Host, "prune-dangling-images", "manual", status, out, freed, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "freed_bytes": freed, "status": status})
 }
 
 // ── POST /api/housekeeping/docker/prune/unused-images ────────────────────────
 
 func (h *Handler) PruneUnusedImages(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	var body struct {
 		ImageIDs []string `json:"image_ids"` // empty = prune all unused
 	}
@@ -329,9 +302,9 @@ func (h *Handler) PruneUnusedImages(w http.ResponseWriter, r *http.Request) {
 	if len(body.ImageIDs) > 0 {
 		// Remove specific images
 		args := append([]string{"rmi", "-f"}, body.ImageIDs...)
-		out, err = dockerRun(args...)
+		out, err = t.docker(args...)
 	} else {
-		out, err = dockerRun("image", "prune", "-a", "--filter", "until=168h", "-f")
+		out, err = t.docker("image", "prune", "-a", "--filter", "until=168h", "-f")
 	}
 
 	status := "ok"
@@ -339,13 +312,18 @@ func (h *Handler) PruneUnusedImages(w http.ResponseWriter, r *http.Request) {
 		status = "error"
 	}
 	freed := extractFreedBytes(out)
-	h.logHousekeeping("prune-unused-images", "manual", status, out, freed, int64(len(body.ImageIDs)))
+	h.logHousekeeping(t.Host, "prune-unused-images", "manual", status, out, freed, int64(len(body.ImageIDs)))
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "freed_bytes": freed, "status": status})
 }
 
 // ── GET /api/housekeeping/docker/containers ───────────────────────────────────
 
 func (h *Handler) ListStoppedContainers(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	type StoppedContainer struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
@@ -360,7 +338,7 @@ func (h *Handler) ListStoppedContainers(w http.ResponseWriter, r *http.Request) 
 	// Stopped containers belonging to these projects should not appear here —
 	// they are managed by Rigger and may be restarting or intentionally stopped.
 	managedProjects := map[string]bool{}
-	labelsOut, _ := dockerRun("ps", "--format", "{{.Labels}}")
+	labelsOut, _ := t.docker("ps", "--format", "{{.Labels}}")
 	for _, labelLine := range strings.Split(labelsOut, "\n") {
 		for _, kv := range strings.Split(labelLine, ",") {
 			kv = strings.TrimSpace(kv)
@@ -373,7 +351,7 @@ func (h *Handler) ListStoppedContainers(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	out, err := dockerRun("ps", "-a", "-f", "status=exited", "-f", "status=dead", "--format",
+	out, err := t.docker("ps", "-a", "-f", "status=exited", "-f", "status=dead", "--format",
 		`{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","finished_at":"{{.RunningFor}}","labels":"{{.Labels}}"}`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -424,18 +402,28 @@ func (h *Handler) ListStoppedContainers(w http.ResponseWriter, r *http.Request) 
 // ── POST /api/housekeeping/docker/prune/containers ────────────────────────────
 
 func (h *Handler) PruneContainers(w http.ResponseWriter, r *http.Request) {
-	out, err := dockerRun("container", "prune", "-f")
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+	out, err := t.docker("container", "prune", "-f")
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("prune-containers", "manual", status, out, 0, 0)
+	h.logHousekeeping(t.Host, "prune-containers", "manual", status, out, 0, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
 // ── GET /api/housekeeping/docker/volumes ──────────────────────────────────────
 
 func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	type DanglingVolume struct {
 		Name       string `json:"name"`
 		Driver     string `json:"driver"`
@@ -449,7 +437,7 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 	// dangling=true already excludes volumes attached to any container (running or stopped).
 	// We additionally exclude volumes that carry a com.docker.compose.project label —
 	// these are named volumes declared in compose files and belong to Rigger workspaces.
-	out, err := dockerRun("volume", "ls", "-f", "dangling=true", "--format",
+	out, err := t.docker("volume", "ls", "-f", "dangling=true", "--format",
 		`{"name":"{{.Name}}","driver":"{{.Driver}}","mount_point":"{{.Mountpoint}}","labels":"{{.Labels}}"}`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -482,7 +470,7 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 	if len(volumes) > 0 {
 		// Size map from `docker system df -v` (the only command that reports volume size).
 		sizeByName := map[string]string{}
-		if dfOut, derr := dockerRun("system", "df", "-v", "--format", "{{json .Volumes}}"); derr == nil {
+		if dfOut, derr := t.docker("system", "df", "-v", "--format", "{{json .Volumes}}"); derr == nil {
 			var dfVols []struct {
 				Name string `json:"Name"`
 				Size string `json:"Size"`
@@ -500,7 +488,7 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 		for i, v := range volumes {
 			names[i] = v.Name
 		}
-		if insOut, ierr := dockerRun(append([]string{"volume", "inspect"}, names...)...); ierr == nil {
+		if insOut, ierr := t.docker(append([]string{"volume", "inspect"}, names...)...); ierr == nil {
 			var inspected []struct {
 				Name      string `json:"Name"`
 				CreatedAt string `json:"CreatedAt"`
@@ -524,6 +512,11 @@ func (h *Handler) ListDanglingVolumes(w http.ResponseWriter, r *http.Request) {
 // ── POST /api/housekeeping/docker/prune/volumes ───────────────────────────────
 
 func (h *Handler) PruneVolumes(w http.ResponseWriter, r *http.Request) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	var body struct {
 		VolumeNames []string `json:"volume_names"` // specific volumes to remove
 	}
@@ -533,41 +526,51 @@ func (h *Handler) PruneVolumes(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if len(body.VolumeNames) > 0 {
 		args := append([]string{"volume", "rm"}, body.VolumeNames...)
-		out, err = dockerRun(args...)
+		out, err = t.docker(args...)
 	} else {
-		out, err = dockerRun("volume", "prune", "-f")
+		out, err = t.docker("volume", "prune", "-f")
 	}
 
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("prune-volumes", "manual", status, out, 0, int64(len(body.VolumeNames)))
+	h.logHousekeeping(t.Host, "prune-volumes", "manual", status, out, 0, int64(len(body.VolumeNames)))
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
 // ── POST /api/housekeeping/docker/prune/networks ─────────────────────────────
 
 func (h *Handler) PruneNetworks(w http.ResponseWriter, r *http.Request) {
-	out, err := dockerRun("network", "prune", "-f")
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+	out, err := t.docker("network", "prune", "-f")
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("prune-networks", "manual", status, out, 0, 0)
+	h.logHousekeeping(t.Host, "prune-networks", "manual", status, out, 0, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
 // ── POST /api/housekeeping/docker/prune/build-cache ──────────────────────────
 
 func (h *Handler) PruneBuildCache(w http.ResponseWriter, r *http.Request) {
-	out, err := dockerRun("builder", "prune", "-a", "-f")
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+	out, err := t.docker("builder", "prune", "-a", "-f")
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
 	freed := extractFreedBytes(out)
-	h.logHousekeeping("prune-build-cache", "manual", status, out, freed, 0)
+	h.logHousekeeping(t.Host, "prune-build-cache", "manual", status, out, freed, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "freed_bytes": freed, "status": status})
 }
 
@@ -595,7 +598,7 @@ func (h *Handler) AptClean(w http.ResponseWriter, r *http.Request) {
 				"Add 'privileged: true' and 'pid: host' to the rigger service in docker-compose.yml to enable host OS operations.\n\n" + combined
 		}
 	}
-	h.logHousekeeping("apt-clean", "manual", status, combined, 0, 0)
+	h.logHousekeeping(controlPlaneLabel, "apt-clean", "manual", status, combined, 0, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": combined, "status": status})
 }
 
@@ -636,7 +639,7 @@ func (h *Handler) JournalVacuum(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("journal-vacuum", "manual", status, out, 0, 0)
+	h.logHousekeeping(controlPlaneLabel, "journal-vacuum", "manual", status, out, 0, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
@@ -715,7 +718,7 @@ func (h *Handler) CleanKernels(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("clean-kernels", "manual", status, out, 0, int64(len(body.Packages)))
+	h.logHousekeeping(controlPlaneLabel, "clean-kernels", "manual", status, out, 0, int64(len(body.Packages)))
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
@@ -741,7 +744,7 @@ func (h *Handler) CleanTmp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping("clean-tmp", "manual", status, out, 0, 0)
+	h.logHousekeeping(controlPlaneLabel, "clean-tmp", "manual", status, out, 0, 0)
 	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
 }
 
@@ -750,6 +753,7 @@ func (h *Handler) CleanTmp(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HousekeepingLog(w http.ResponseWriter, r *http.Request) {
 	type LogEntry struct {
 		ID           int64  `json:"id"`
+		Host         string `json:"host"`
 		Task         string `json:"task"`
 		Trigger      string `json:"trigger"`
 		Status       string `json:"status"`
@@ -759,7 +763,9 @@ func (h *Handler) HousekeepingLog(w http.ResponseWriter, r *http.Request) {
 		CreatedAt    string `json:"created_at"`
 	}
 
-	rows, err := h.db.Query(`SELECT id, task, trigger, status, output, freed_bytes, items_removed, created_at
+	// The log stays fleet-wide and carries the host per row: "what has been
+	// cleaned lately" is a question about every machine, not the selected one.
+	rows, err := h.db.Query(`SELECT id, host, task, trigger, status, output, freed_bytes, items_removed, created_at
 		FROM housekeeping_log ORDER BY created_at DESC LIMIT 100`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -770,7 +776,7 @@ func (h *Handler) HousekeepingLog(w http.ResponseWriter, r *http.Request) {
 	var entries []LogEntry
 	for rows.Next() {
 		var e LogEntry
-		rows.Scan(&e.ID, &e.Task, &e.Trigger, &e.Status, &e.Output, &e.FreedBytes, &e.ItemsRemoved, &e.CreatedAt) //nolint:errcheck
+		rows.Scan(&e.ID, &e.Host, &e.Task, &e.Trigger, &e.Status, &e.Output, &e.FreedBytes, &e.ItemsRemoved, &e.CreatedAt) //nolint:errcheck
 		entries = append(entries, e)
 	}
 	if entries == nil {
@@ -811,13 +817,13 @@ func (h *Handler) HousekeepingAutoRun() {
 		{"prune-dangling-images", []string{"image", "prune", "-f"}},
 	}
 	for _, t := range tasks {
-		out, err := dockerRun(t.args...)
+		out, err := dockerLocal(t.args...)
 		status := "ok"
 		if err != nil {
 			status = "error"
 		}
 		freed := extractFreedBytes(out)
-		h.logHousekeeping(t.name, "cron", status, out, freed, 0)
+		h.logHousekeeping(controlPlaneLabel, t.name, "cron", status, out, freed, 0)
 	}
 }
 

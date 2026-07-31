@@ -824,6 +824,11 @@ func (d *DB) migrate() error {
 	// public_address is the host's PUBLIC web IP/hostname for DNS + magic-DNS, when it
 	// differs from the SSH address (e.g. SSH via a bastion). '' = use the SSH address.
 	d.addColumn("hosts", "public_address TEXT NOT NULL DEFAULT ''")
+	// Housekeeping can now prune a registered remote host's daemon, not just the
+	// control plane's — so a log row has to say WHICH machine it freed space on,
+	// or "reclaimed 4.2 GB" is meaningless across a fleet. Existing rows all
+	// predate remote support and were necessarily the control plane.
+	d.addColumn("housekeeping_log", "host TEXT NOT NULL DEFAULT 'control plane'")
 	// Same scoping for docker registries (Phase 3); pre-scope registries → '*'.
 	if d.addColumn("docker_registries", "owner_scope TEXT NOT NULL DEFAULT 'global'") {
 		d.Exec(`INSERT OR IGNORE INTO global_registry_grants (registry_id, workspace) SELECT id, '*' FROM docker_registries`) //nolint:errcheck

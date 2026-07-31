@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Layout from '../components/Layout'
@@ -11,7 +11,17 @@ import {
   pruneNetworks, pruneBuildCache,
   fetchJournalStats, journalVacuum, fetchKernels, cleanKernels, aptClean, cleanTmp,
   fetchMigrationLeftovers, cleanMigrationLeftover, dismissMigrationLeftover,
+  fetchHosts,
 } from '../lib/api'
+
+// ── Target host ───────────────────────────────────────────────────────────────
+// Docker-level housekeeping acts on one daemon: the control plane (0) or a
+// registered remote host. Every section fetches independently, so the selection
+// rides in context rather than being drilled through six components — and it
+// belongs in each query key, so switching host refetches instead of showing the
+// previous machine's images while it loads.
+const HKHostContext = createContext(0)
+const useHKHost = () => useContext(HKHostContext)
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
@@ -83,15 +93,16 @@ function OutputModal({ title, output, onClose }) {
 // ── Tab 1: Dashboard ──────────────────────────────────────────────────────────
 
 function DashboardTab({ status, onQuickAction }) {
+  const host = useHKHost()
   const qc = useQueryClient()
   const [actionOutput, setActionOutput] = useState(null)
 
   const networkMut = useMutation({
-    mutationFn: pruneNetworks,
+    mutationFn: () => pruneNetworks(host),
     onSuccess: (d) => { setActionOutput({ title: 'Network Prune', output: d.output }); qc.invalidateQueries({ queryKey: ['hk-status'] }) },
   })
   const danglingMut = useMutation({
-    mutationFn: pruneDanglingImages,
+    mutationFn: () => pruneDanglingImages(host),
     onSuccess: (d) => { setActionOutput({ title: 'Dangling Images Pruned', output: d.output }); qc.invalidateQueries({ queryKey: ['hk-status'] }) },
   })
 
@@ -210,19 +221,20 @@ function DashboardTab({ status, onQuickAction }) {
 
 // ── 2a: Unused Images ─────────────────────────────────────────────────────────
 function UnusedImagesSection() {
+  const host = useHKHost()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState({})
   const [output, setOutput] = useState(null)
   const { data: images = [], isLoading, refetch } = useQuery({
-    queryKey: ['hk-images'], queryFn: fetchHousekeepingImages, enabled: open,
+    queryKey: ['hk-images', host], queryFn: () => fetchHousekeepingImages(host), enabled: open,
   })
   const unusedImages = images.filter(i => !i.in_use && i.repository !== '<none>')
   const selectedIDs = Object.entries(selected).filter(([, v]) => v).map(([k]) => k)
   const selectedSize = unusedImages.filter(i => selected[i.id]).reduce((s, i) => s + (i.size_bytes || 0), 0)
 
   const purgeMut = useMutation({
-    mutationFn: () => pruneUnusedImages({ image_ids: selectedIDs }),
+    mutationFn: () => pruneUnusedImages({ image_ids: selectedIDs }, host),
     onSuccess: (d) => {
       setOutput(d.output); setSelected({})
       qc.invalidateQueries({ queryKey: ['hk-status'] })
@@ -294,15 +306,16 @@ function UnusedImagesSection() {
 
 // ── 2b: Stopped Containers ────────────────────────────────────────────────────
 function StoppedContainersSection() {
+  const host = useHKHost()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState('')
   const [output, setOutput] = useState(null)
   const { data: containers = [], isLoading, refetch } = useQuery({
-    queryKey: ['hk-containers'], queryFn: fetchStoppedContainers, enabled: open,
+    queryKey: ['hk-containers', host], queryFn: () => fetchStoppedContainers(host), enabled: open,
   })
   const purgeMut = useMutation({
-    mutationFn: pruneContainers,
+    mutationFn: () => pruneContainers(host),
     onSuccess: (d) => {
       setOutput(d.output); setConfirm('')
       qc.invalidateQueries({ queryKey: ['hk-status'] })
@@ -385,6 +398,7 @@ function StoppedContainersSection() {
 
 // ── 2c: Volume Purging (CRITICAL) ─────────────────────────────────────────────
 function VolumePurgingSection() {
+  const host = useHKHost()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [toggled, setToggled] = useState({})
@@ -392,12 +406,12 @@ function VolumePurgingSection() {
   const holdTimer = useRef(null)
   const [output, setOutput] = useState(null)
   const { data: volumes = [], isLoading, refetch } = useQuery({
-    queryKey: ['hk-volumes'], queryFn: fetchDanglingVolumes, enabled: open,
+    queryKey: ['hk-volumes', host], queryFn: () => fetchDanglingVolumes(host), enabled: open,
   })
   const selectedNames = volumes.filter(v => toggled[v.name]).map(v => v.name)
 
   const purgeMut = useMutation({
-    mutationFn: () => pruneVolumes({ volume_names: selectedNames }),
+    mutationFn: () => pruneVolumes({ volume_names: selectedNames }, host),
     onSuccess: (d) => {
       setOutput(d.output); setToggled({}); setHoldProgress(0)
       qc.invalidateQueries({ queryKey: ['hk-status'] })
@@ -518,6 +532,7 @@ function VolumePurgingSection() {
 
 // ── 2d: Build Cache ───────────────────────────────────────────────────────────
 function BuildCacheSection({ docker }) {
+  const host = useHKHost()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [sliderUnlocked, setSliderUnlocked] = useState(false)
@@ -528,7 +543,7 @@ function BuildCacheSection({ docker }) {
   const total = buildCacheBytes + imagesBytes + volumesBytes || 1
 
   const purgeMut = useMutation({
-    mutationFn: pruneBuildCache,
+    mutationFn: () => pruneBuildCache(host),
     onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-status'] }) },
   })
 
@@ -840,7 +855,7 @@ function AutomationTab({ hostPrivileged }) {
               <table className="w-full text-xs">
                 <thead className="bg-surface-raised/60">
                   <tr>
-                    {['Task', 'Trigger', 'Status', 'Freed', 'Run At'].map(h => (
+                    {['Host', 'Task', 'Trigger', 'Status', 'Freed', 'Run At'].map(h => (
                       <th key={h} className="px-3 py-2 text-left text-content-muted font-medium">{h}</th>
                     ))}
                   </tr>
@@ -848,6 +863,7 @@ function AutomationTab({ hostPrivileged }) {
                 <tbody className="divide-y divide-border">
                   {log.map((entry, i) => (
                     <tr key={i} className="hover:bg-surface-raised/40 cursor-pointer" onClick={() => setSelectedLog(entry)}>
+                      <td className="px-3 py-2 text-content-muted whitespace-nowrap">{entry.host || 'control plane'}</td>
                       <td className="px-3 py-2 font-mono text-content">{entry.task}</td>
                       <td className="px-3 py-2">
                         <span className={`px-1.5 py-0.5 rounded text-xs ${entry.trigger === 'cron' ? 'bg-surface-overlay text-content-muted' : 'bg-brand-900/50 text-accent-text'}`}>
@@ -994,33 +1010,68 @@ export default function HousekeepingPage() {
     if (id === 'dashboard') n.delete('tab'); else n.set('tab', id)
     return n
   }, { replace: true })
+  // Target daemon, also in the URL so a host's cleanup view can be linked to.
+  // 0 = control plane, which is what an older link (no ?host=) resolves to.
+  const host = Number(params.get('host')) || 0
+  const setHost = (id) => setParams(p => {
+    const n = new URLSearchParams(p)
+    if (!id) n.delete('host'); else n.set('host', String(id))
+    return n
+  }, { replace: true })
+
+  const { data: hosts = [] } = useQuery({ queryKey: ['hosts'], queryFn: fetchHosts })
+  // Build-only hosts still accumulate images and layers — arguably faster than
+  // deploy targets do — so they belong in the list.
+  const hostName = host ? (hosts.find(x => x.id === host)?.name || `host ${host}`) : 'control plane'
+
   const { data: status, isLoading } = useQuery({
-    queryKey: ['hk-status'], queryFn: fetchHousekeepingStatus, refetchInterval: 60_000,
+    queryKey: ['hk-status', host], queryFn: () => fetchHousekeepingStatus(host), refetchInterval: 60_000,
   })
 
   return (
     <Layout>
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="mb-6 flex items-start justify-between">
+        <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-content-strong">Housekeeping</h1>
             <Hint className="text-sm mt-0.5">Docker and host OS maintenance — automated and approval-gated.</Hint>
           </div>
-          {!isLoading && status && <StatusBadge status={status.health_status} />}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Which daemon the Docker tabs act on. Disk fills up on the machines
+                running the workloads, which is usually not this one. */}
+            <label className="flex items-center gap-2 text-xs text-content-subtle">
+              Host
+              <select value={host} onChange={e => setHost(Number(e.target.value))}
+                className={`${CONTROL} w-auto`}>
+                <option value={0}>Control plane</option>
+                {hosts.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </label>
+            {!isLoading && status && <StatusBadge status={status.health_status} />}
+          </div>
         </div>
 
-        <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
-          {isLoading ? (
-            <div className="py-16 text-center text-content-subtle">Loading system status…</div>
-          ) : (
-            <>
-              {tab === 'dashboard'   && <DashboardTab status={status} />}
-              {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
-              {tab === 'migrations'  && <MigrationLeftoversTab />}
-              {tab === 'automation'  && <AutomationTab hostPrivileged={status?.host_privileged} />}
-            </>
-          )}
-        </VerticalTabs>
+        {host > 0 && (
+          <div className="mb-4 px-3 py-2 rounded-lg bg-info-subtle/40 border border-info-border/50 text-xs text-content">
+            Showing Docker usage on <strong className="text-content-strong">{hostName}</strong>. Prunes act on that
+            host&apos;s daemon. Host-OS tasks and migration leftovers remain control-plane actions.
+          </div>
+        )}
+
+        <HKHostContext.Provider value={host}>
+          <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
+            {isLoading ? (
+              <div className="py-16 text-center text-content-subtle">Loading system status…</div>
+            ) : (
+              <>
+                {tab === 'dashboard'   && <DashboardTab status={status} />}
+                {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
+                {tab === 'migrations'  && <MigrationLeftoversTab />}
+                {tab === 'automation'  && <AutomationTab hostPrivileged={status?.host_privileged} />}
+              </>
+            )}
+          </VerticalTabs>
+        </HKHostContext.Provider>
       </div>
     </Layout>
   )

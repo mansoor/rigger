@@ -1897,7 +1897,7 @@ func (h *Handler) hostBindSourceDir() string {
 			return
 		}
 		format := fmt.Sprintf(`{{range .Mounts}}{{if eq .Destination "%s"}}{{.Source}}{{end}}{{end}}`, h.workspacesDir)
-		if out, err := dockerRun("inspect", host, "--format", format); err == nil {
+		if out, err := dockerLocal("inspect", host, "--format", format); err == nil {
 			hostWsDirValue = strings.TrimSpace(out)
 		}
 	})

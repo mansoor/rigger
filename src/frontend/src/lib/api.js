@@ -322,17 +322,21 @@ export const putConfig         = (ws, name, content) =>
 
 // ── Housekeeping ──────────────────────────────────────────────────────────────
 
-export const fetchHousekeepingStatus     = ()       => api.get('/housekeeping/status').then(r => r.data)
+// Docker-level housekeeping is host-scoped: pass a registered host id to act on
+// that daemon, or omit it for the control plane. The host-OS calls below stay
+// control-plane-only (they nsenter into Rigger's own host).
+const hkq = (host) => (host ? `?host=${host}` : '')
+export const fetchHousekeepingStatus     = (host)   => api.get(`/housekeeping/status${hkq(host)}`).then(r => r.data)
 export const fetchHousekeepingLog        = ()       => api.get('/housekeeping/log').then(r => r.data)
-export const fetchHousekeepingImages     = ()       => api.get('/housekeeping/docker/images').then(r => r.data)
-export const fetchStoppedContainers      = ()       => api.get('/housekeeping/docker/containers').then(r => r.data)
-export const fetchDanglingVolumes        = ()       => api.get('/housekeeping/docker/volumes').then(r => r.data)
-export const pruneDanglingImages         = ()       => api.post('/housekeeping/docker/prune/dangling-images').then(r => r.data)
-export const pruneUnusedImages           = (body)   => api.post('/housekeeping/docker/prune/unused-images', body).then(r => r.data)
-export const pruneContainers             = ()       => api.post('/housekeeping/docker/prune/containers').then(r => r.data)
-export const pruneVolumes                = (body)   => api.post('/housekeeping/docker/prune/volumes', body).then(r => r.data)
-export const pruneNetworks               = ()       => api.post('/housekeeping/docker/prune/networks').then(r => r.data)
-export const pruneBuildCache             = ()       => api.post('/housekeeping/docker/prune/build-cache').then(r => r.data)
+export const fetchHousekeepingImages     = (host)   => api.get(`/housekeeping/docker/images${hkq(host)}`).then(r => r.data)
+export const fetchStoppedContainers      = (host)   => api.get(`/housekeeping/docker/containers${hkq(host)}`).then(r => r.data)
+export const fetchDanglingVolumes        = (host)   => api.get(`/housekeeping/docker/volumes${hkq(host)}`).then(r => r.data)
+export const pruneDanglingImages         = (host)   => api.post(`/housekeeping/docker/prune/dangling-images${hkq(host)}`).then(r => r.data)
+export const pruneUnusedImages           = (body, host) => api.post(`/housekeeping/docker/prune/unused-images${hkq(host)}`, body).then(r => r.data)
+export const pruneContainers             = (host)   => api.post(`/housekeeping/docker/prune/containers${hkq(host)}`).then(r => r.data)
+export const pruneVolumes                = (body, host) => api.post(`/housekeeping/docker/prune/volumes${hkq(host)}`, body).then(r => r.data)
+export const pruneNetworks               = (host)   => api.post(`/housekeeping/docker/prune/networks${hkq(host)}`).then(r => r.data)
+export const pruneBuildCache             = (host)   => api.post(`/housekeeping/docker/prune/build-cache${hkq(host)}`).then(r => r.data)
 export const fetchJournalStats           = ()       => api.get('/housekeeping/host/journal/stats').then(r => r.data)
 export const journalVacuum               = (body)   => api.post('/housekeeping/host/journal/vacuum', body).then(r => r.data)
 export const fetchKernels                = ()       => api.get('/housekeeping/host/kernels').then(r => r.data)

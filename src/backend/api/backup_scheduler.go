@@ -99,7 +99,13 @@ func (h *Handler) runScheduledBackup(ws, name, env string, s workspace.BackupSch
 	if label == "" {
 		label = s.ID
 	}
-	h.logHousekeeping("backup:"+pkey+":"+env+":"+label, "scheduled", hkStatus, out.String(), 0, 0)
+	// A scheduled backup runs on the environment's own host, which may be remote —
+	// record that rather than defaulting to the control plane.
+	hkHost := h.envHostName(pkey, env)
+	if hkHost == "" {
+		hkHost = controlPlaneLabel
+	}
+	h.logHousekeeping(hkHost, "backup:"+pkey+":"+env+":"+label, "scheduled", hkStatus, out.String(), 0, 0)
 	if runErr != nil {
 		return
 	}
