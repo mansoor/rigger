@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -109,10 +108,13 @@ func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
 		FreedGB   string `json:"freed_gb"`
 	}
 	type Result struct {
-		Docker      DockerDisk `json:"docker"`
-		HealthStatus string    `json:"health_status"` // HEALTHY | CLEANUP_ADVISED | CRITICAL_SPACE_DEFICIT
-		LastRuns    []LastRun  `json:"last_runs"`
-		HostPrivileged bool    `json:"host_privileged"`
+		Docker         DockerDisk `json:"docker"`
+		HealthStatus   string     `json:"health_status"` // HEALTHY | CLEANUP_ADVISED | CRITICAL_SPACE_DEFICIT
+		LastRuns       []LastRun  `json:"last_runs"`
+		HostPrivileged bool       `json:"host_privileged"`
+		HostCaps       hostCaps   `json:"host_caps"`
+		Host           string     `json:"host"`
+		Remote         bool       `json:"remote"`
 	}
 
 	var res Result
@@ -136,11 +138,13 @@ func (h *Handler) HousekeepingStatus(w http.ResponseWriter, r *http.Request) {
 		res.HealthStatus = "HEALTHY"
 	}
 
-	// Host-OS actions run via nsenter into the CONTROL PLANE's namespaces, so they
-	// mean nothing for a remote target — report them unavailable there rather than
-	// letting the UI offer buttons that would act on the wrong machine.
-	_, hostErr := exec.Command("nsenter", "--version").Output()
-	res.HostPrivileged = !t.Remote && hostErr == nil
+	// What this target can do at the OS level is probed, not assumed — a remote
+	// host may refuse for reasons the control plane never has (no passwordless
+	// sudo, no apt). HostPrivileged is kept as the coarse yes/no an older client
+	// reads; HostCaps carries the reason, which is what the UI can act on.
+	res.HostCaps = t.caps()
+	res.HostPrivileged = res.HostCaps.Available
+	res.Host, res.Remote = t.Host, t.Remote
 
 	// Recent runs for THIS host — a mixed list would attribute one machine's
 	// reclaimed space to another.
@@ -576,44 +580,88 @@ func (h *Handler) PruneBuildCache(w http.ResponseWriter, r *http.Request) {
 
 // ── Host OS helpers ───────────────────────────────────────────────────────────
 
-// nsenter runs a command on the host via nsenter (requires --pid=host or privileged mode).
-func nsenterRun(args ...string) (string, error) {
-	allArgs := append([]string{"-t", "1", "-m", "-u", "-i", "-n", "--"}, args...)
-	cmd := exec.Command("nsenter", allArgs...)
-	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+// Host-OS commands run through hkTarget.hostRun, which chooses its transport per
+// target: nsenter into PID 1's namespaces on the control plane, SSH (with
+// `sudo -n` when the user isn't root) on a remote host. See
+// housekeeping_hostos.go for the capability probe behind that choice.
+
+// hostOSGuard resolves the target and checks it can run host-OS commands at all,
+// writing the refusal itself. A target that can't is the common case on a fresh
+// install (no privileged mode) or a locked-down host (no passwordless sudo), and
+// running the command anyway would produce a shell error that explains nothing.
+func (h *Handler) hostOSGuard(w http.ResponseWriter, r *http.Request) (*hkTarget, hostCaps, bool) {
+	t, ok := h.resolveHKTarget(w, r)
+	if !ok {
+		return nil, hostCaps{}, false
+	}
+	caps, reason := t.requireHostOS()
+	if reason != "" {
+		t.Close()
+		// 200 with available:false, not an error status: "this host can't do
+		// that" is an answer, and the UI renders it as guidance.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output": reason, "status": "unavailable", "available": false, "host": t.Host,
+		})
+		return nil, caps, false
+	}
+	return t, caps, true
 }
 
 // ── POST /api/housekeeping/host/apt/clean ─────────────────────────────────────
 
 func (h *Handler) AptClean(w http.ResponseWriter, r *http.Request) {
-	out1, err1 := nsenterRun("apt-get", "autoremove", "-y")
-	out2, err2 := nsenterRun("apt-get", "clean")
-	combined := out1 + "\n" + out2
+	t, caps, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+
+	cmds := pkgCleanCmds(caps.PkgMgr)
+	if cmds == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output": unsupportedPkgMgr(caps.PkgMgr), "status": "unavailable",
+			"available": false, "host": t.Host,
+		})
+		return
+	}
+
+	var outs []string
 	status := "ok"
-	if err1 != nil || err2 != nil {
-		status = "error"
-		if err1 != nil {
-			combined = "apt-get not available or host access not configured.\n" +
-				"Add 'privileged: true' and 'pid: host' to the rigger service in docker-compose.yml to enable host OS operations.\n\n" + combined
+	for _, c := range cmds {
+		out, err := t.hostRun(hostOSTimeout, c...)
+		outs = append(outs, "$ "+strings.Join(c, " ")+"\n"+out)
+		if err != nil {
+			status = "error"
+			// Keep going: `clean` is still worth doing when `autoremove` fails,
+			// and the operator gets both transcripts either way.
 		}
 	}
-	h.logHousekeeping(controlPlaneLabel, "apt-clean", "manual", status, combined, 0, 0)
-	writeJSON(w, http.StatusOK, map[string]any{"output": combined, "status": status})
+	combined := strings.Join(outs, "\n\n")
+	h.logHousekeeping(t.Host, "apt-clean", "manual", status, combined, 0, 0)
+	writeJSON(w, http.StatusOK, map[string]any{"output": combined, "status": status, "host": t.Host})
 }
 
 // ── GET /api/housekeeping/host/journal/stats ──────────────────────────────────
 
 func (h *Handler) JournalStats(w http.ResponseWriter, r *http.Request) {
-	out, err := nsenterRun("journalctl", "--disk-usage")
-	if err != nil {
+	t, caps, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+
+	if !caps.Journal {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"output": "journalctl not accessible. Add 'privileged: true' and 'pid: host' to docker-compose.yml.",
-			"available": false,
+			"output": "systemd-journald isn't present on this host.", "available": false, "host": t.Host,
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"output": out, "available": true})
+	out, err := t.hostRun(hostProbeTimeout, "journalctl", "--disk-usage")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"output": out, "available": false, "host": t.Host})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"output": out, "available": true, "host": t.Host})
 }
 
 // ── POST /api/housekeeping/host/journal/vacuum ────────────────────────────────
@@ -625,81 +673,82 @@ func (h *Handler) JournalVacuum(w http.ResponseWriter, r *http.Request) {
 	}
 	body.MaxAgeDays = 14
 	body.MaxSizeGB = 2
+
+	t, caps, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	_ = readJSON(r, &body)
+
+	if !caps.Journal {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output": "systemd-journald isn't present on this host.", "status": "unavailable",
+			"available": false, "host": t.Host,
+		})
+		return
+	}
 
 	var out string
 	var err error
 	if body.MaxAgeDays > 0 {
-		out, err = nsenterRun("journalctl", fmt.Sprintf("--vacuum-time=%dd", body.MaxAgeDays))
+		out, err = t.hostRun(hostOSTimeout, "journalctl", fmt.Sprintf("--vacuum-time=%dd", body.MaxAgeDays))
 	} else {
-		out, err = nsenterRun("journalctl", fmt.Sprintf("--vacuum-size=%dG", body.MaxSizeGB))
+		out, err = t.hostRun(hostOSTimeout, "journalctl", fmt.Sprintf("--vacuum-size=%dG", body.MaxSizeGB))
 	}
 
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping(controlPlaneLabel, "journal-vacuum", "manual", status, out, 0, 0)
-	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
+	h.logHousekeeping(t.Host, "journal-vacuum", "manual", status, out, 0, 0)
+	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status, "host": t.Host})
 }
 
 // ── GET /api/housekeeping/host/kernels ────────────────────────────────────────
 
 func (h *Handler) ListKernels(w http.ResponseWriter, r *http.Request) {
-	type KernelInfo struct {
-		Package string `json:"package"`
-		Version string `json:"version"`
-		Active  bool   `json:"active"`
-		Locked  bool   `json:"locked"` // active + previous
+	t, caps, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
 	}
+	defer t.Close()
 
-	activeOut, _ := nsenterRun("uname", "-r")
-	active := strings.TrimSpace(activeOut)
-
-	dpkgOut, err := nsenterRun("dpkg", "-l", "linux-image-*")
-	if err != nil {
+	kernels, active, reason := h.readKernels(t, caps)
+	if reason != "" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"kernels": []KernelInfo{},
-			"available": false,
-			"active": active,
+			"kernels": []kernelInfo{}, "available": false, "active": active,
+			"reason": reason, "host": t.Host,
 		})
 		return
 	}
-
-	var kernels []KernelInfo
-	lines := strings.Split(dpkgOut, "\n")
-	for i, line := range lines {
-		if !strings.HasPrefix(line, "ii ") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		pkg := fields[1]
-		ver := strings.TrimPrefix(pkg, "linux-image-")
-		isActive := strings.Contains(ver, active)
-		// Lock the active kernel and the one immediately before it
-		isPrev := i > 0 && len(kernels) > 0 && len(kernels) == 1
-		kernels = append(kernels, KernelInfo{
-			Package: pkg, Version: ver,
-			Active: isActive, Locked: isActive || isPrev,
-		})
-	}
-
-	// Ensure the newest non-active kernel is also locked as "previous"
-	if len(kernels) >= 2 {
-		for i := range kernels {
-			if !kernels[i].Active {
-				kernels[i].Locked = true
-				break
-			}
-		}
-	}
-
 	writeJSON(w, http.StatusOK, map[string]any{
-		"kernels": kernels, "active": active, "available": true,
+		"kernels": kernels, "active": active, "available": true, "host": t.Host,
 	})
+}
+
+// readKernels lists installed kernels on a target. Shared by the list and purge
+// handlers so the purge can only remove something the list actually offered.
+func (h *Handler) readKernels(t *hkTarget, caps hostCaps) (kernels []kernelInfo, active, reason string) {
+	active, _ = t.hostRun(hostProbeTimeout, "uname", "-r")
+	if caps.PkgMgr != "apt-get" {
+		return nil, active, "Kernel cleanup is Debian/Ubuntu only. " +
+			"On RHEL-family hosts dnf prunes old kernels itself (installonly_limit)."
+	}
+	out, err := t.hostRun(hostProbeTimeout, "dpkg", "-l", "linux-image-*")
+	if err != nil {
+		return nil, active, "Couldn't list kernel packages: " + firstLine(out)
+	}
+	return parseKernels(out, active), active, ""
+}
+
+// firstLine keeps an error message to its headline — command output can run to
+// pages, and the rest belongs in the log, not in a one-line reason.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 // ── POST /api/housekeeping/host/kernels/clean ─────────────────────────────────
@@ -712,14 +761,40 @@ func (h *Handler) CleanKernels(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "packages list required"})
 		return
 	}
+	t, caps, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
+
+	kernels, _, reason := h.readKernels(t, caps)
+	if reason != "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"output": reason, "status": "unavailable", "available": false, "host": t.Host,
+		})
+		return
+	}
+
+	// Re-derive what may be removed rather than trusting the request. The list
+	// endpoint marks the running kernel and its fallback as locked and the UI
+	// disables them, but the UI is not the boundary — and this endpoint would
+	// otherwise purge any package name it was given, kernel or not.
+	if bad := rejectedKernels(body.Packages, removableKernels(kernels)); len(bad) > 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "refusing to remove " + strings.Join(bad, ", ") +
+				" — not an unlocked kernel package on " + t.Host,
+		})
+		return
+	}
+
 	args := append([]string{"apt-get", "purge", "-y"}, body.Packages...)
-	out, err := nsenterRun(args...)
+	out, err := t.hostRun(hostOSTimeout, args...)
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping(controlPlaneLabel, "clean-kernels", "manual", status, out, 0, int64(len(body.Packages)))
-	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
+	h.logHousekeeping(t.Host, "clean-kernels", "manual", status, out, 0, int64(len(body.Packages)))
+	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status, "host": t.Host})
 }
 
 // ── POST /api/housekeeping/host/tmp/clean ─────────────────────────────────────
@@ -730,6 +805,12 @@ func (h *Handler) CleanTmp(w http.ResponseWriter, r *http.Request) {
 		Exclude    []string `json:"exclude"` // patterns to exclude
 	}
 	body.MaxAgeDays = 7
+
+	t, _, ok := h.hostOSGuard(w, r)
+	if !ok {
+		return
+	}
+	defer t.Close()
 	_ = readJSON(r, &body)
 
 	atimeArg := fmt.Sprintf("+%d", body.MaxAgeDays)
@@ -738,14 +819,14 @@ func (h *Handler) CleanTmp(w http.ResponseWriter, r *http.Request) {
 		findArgs = append(findArgs, "!", "-name", pat)
 	}
 	findArgs = append(findArgs, "-delete")
-	out, err := nsenterRun(findArgs...)
+	out, err := t.hostRun(hostOSTimeout, findArgs...)
 
 	status := "ok"
 	if err != nil {
 		status = "error"
 	}
-	h.logHousekeeping(controlPlaneLabel, "clean-tmp", "manual", status, out, 0, 0)
-	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status})
+	h.logHousekeeping(t.Host, "clean-tmp", "manual", status, out, 0, 0)
+	writeJSON(w, http.StatusOK, map[string]any{"output": out, "status": status, "host": t.Host})
 }
 
 // ── GET /api/housekeeping/log ─────────────────────────────────────────────────

@@ -23,6 +23,12 @@ import {
 const HKHostContext = createContext(0)
 const useHKHost = () => useContext(HKHostContext)
 
+// The host's display name, for the several places a destructive button should
+// say which machine it lands on. Separate from the id so a section that only
+// labels doesn't re-render on nothing.
+const HKHostNameContext = createContext('control plane')
+const useHKHostName = () => useContext(HKHostNameContext)
+
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
 function fmtBytes(b) {
@@ -610,25 +616,29 @@ function BuildCacheSection({ docker }) {
 // ── 2e: Kernel Cleanup ────────────────────────────────────────────────────────
 function KernelCleanupSection() {
   const qc = useQueryClient()
+  const host = useHKHost()
+  const hostName = useHKHostName()
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState({})
   const [confirmStep, setConfirmStep] = useState(0) // 0=none, 1=first, 2=confirmed
   const [output, setOutput] = useState(null)
   const { data: kernelData, isLoading, refetch } = useQuery({
-    queryKey: ['hk-kernels'], queryFn: fetchKernels, enabled: open,
+    queryKey: ['hk-kernels', host], queryFn: () => fetchKernels(host), enabled: open,
   })
   const kernels = kernelData?.kernels || []
   const selectedPkgs = kernels.filter(k => selected[k.package] && !k.locked).map(k => k.package)
 
   const cleanMut = useMutation({
-    mutationFn: () => cleanKernels({ packages: selectedPkgs }),
+    mutationFn: () => cleanKernels({ packages: selectedPkgs }, host),
     onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-kernels'] }) },
   })
 
   if (!kernelData?.available && !isLoading && open) {
     return (
       <div className="bg-surface border border-border rounded-xl p-4">
-        <Hint>Kernel cleanup requires host OS access (privileged mode). See the Automation tab for setup instructions.</Hint>
+        {/* The backend says why — no sudo, no apt, no privileged mode — and the
+            reasons differ per host, so show its answer rather than a guess. */}
+        <Hint>{kernelData?.reason || kernelData?.output || 'Kernel cleanup is unavailable on this host.'}</Hint>
       </div>
     )
   }
@@ -682,7 +692,10 @@ function KernelCleanupSection() {
               )}
               {confirmStep === 1 && (
                 <div className="space-y-2 p-3 bg-warning-subtle/40 border border-warning-border/50 rounded-lg">
-                  <p className="text-xs text-warning-fg">This will permanently remove: {selectedPkgs.join(', ')}</p>
+                  <p className="text-xs text-warning-fg">
+                    This will permanently remove {selectedPkgs.join(', ')} from{' '}
+                    <strong>{hostName}</strong>.
+                  </p>
                   <div className="flex gap-2">
                     <Btn variant="secondary" size="xs" onClick={() => setConfirmStep(0)} >Cancel</Btn>
                     <Btn variant="danger" size="xs" onClick={() => { setConfirmStep(2); cleanMut.mutate() }}
@@ -721,39 +734,67 @@ function SafetyCenterTab({ docker }) {
 
 // ── Tab 3: Automation & Logs ──────────────────────────────────────────────────
 
-function AutomationTab({ hostPrivileged }) {
+function AutomationTab({ caps }) {
   const qc = useQueryClient()
+  const host = useHKHost()
+  const hostName = useHKHostName()
   const { data: log = [] } = useQuery({ queryKey: ['hk-log'], queryFn: fetchHousekeepingLog, refetchInterval: 30_000 })
   const [journalCfg, setJournalCfg] = useState({ max_age_days: 14, max_size_gb: 2 })
   const [tmpCfg, setTmpCfg] = useState({ max_age_days: 7, exclude: '' })
   const [output, setOutput] = useState(null)
   const [selectedLog, setSelectedLog] = useState(null)
 
-  const aptMut    = useMutation({ mutationFn: aptClean, onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-log'] }) } })
-  const jrnlMut   = useMutation({ mutationFn: () => journalVacuum(journalCfg), onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-log'] }) } })
+  const aptMut    = useMutation({ mutationFn: () => aptClean(host), onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-log'] }) } })
+  const jrnlMut   = useMutation({ mutationFn: () => journalVacuum(journalCfg, host), onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-log'] }) } })
   const tmpMut    = useMutation({
-    mutationFn: () => cleanTmp({ max_age_days: tmpCfg.max_age_days, exclude: tmpCfg.exclude.split(',').map(s => s.trim()).filter(Boolean) }),
+    mutationFn: () => cleanTmp({ max_age_days: tmpCfg.max_age_days, exclude: tmpCfg.exclude.split(',').map(s => s.trim()).filter(Boolean) }, host),
     onSuccess: (d) => { setOutput(d.output); qc.invalidateQueries({ queryKey: ['hk-log'] }) },
   })
 
+  const available = caps?.available
+  // Package cleanup needs a manager we actually drive; the journal needs
+  // systemd. Both can be missing on a host that is otherwise perfectly reachable.
+  const pkgLabel = { 'apt-get': 'apt', dnf: 'dnf', yum: 'yum' }[caps?.pkg_manager] || null
+
   return (
     <div className="space-y-6">
-      {!hostPrivileged && (
+      {!available && (
         <div className="px-4 py-3 bg-warning-subtle/40 border border-warning-border/50 rounded-xl">
-          <p className="text-xs text-warning-fg font-semibold mb-1">Host OS operations require privileged mode</p>
-          <p className="text-xs text-warning-fg">
-            Add the following to <code className="font-mono bg-warning-subtle/40 px-1 rounded">src/docker-compose.yml</code> under the <code className="font-mono bg-warning-subtle/40 px-1 rounded">rigger</code> service:
+          <p className="text-xs text-warning-fg font-semibold mb-1">
+            Host OS tasks aren&apos;t available on {hostName}
           </p>
-          <pre className="text-xs text-warning-fg font-mono mt-2 bg-warning-subtle/60 rounded p-2">
+          <p className="text-xs text-warning-fg">
+            {caps?.reason || 'Rigger could not determine what this host allows.'}
+          </p>
+          {!host && (
+            <pre className="text-xs text-warning-fg font-mono mt-2 bg-warning-subtle/60 rounded p-2">
 {`    privileged: true
     pid: host`}
-          </pre>
+            </pre>
+          )}
+        </div>
+      )}
+
+      {available && (
+        <div className="px-4 py-3 bg-surface border border-border rounded-xl">
+          <p className="text-xs text-content-muted">
+            Running on <strong className="text-content-strong">{hostName}</strong>
+            {caps.os ? ` · ${caps.os}` : ''}
+            {' · as '}
+            <code className="font-mono">{caps.root ? 'root' : `${caps.user || 'unknown'} (sudo)`}</code>
+            {pkgLabel ? ` · ${pkgLabel}` : ''}
+          </p>
         </div>
       )}
 
       {/* Automated tasks summary */}
       <div>
         <h2 className="text-sm font-semibold text-content-muted uppercase tracking-wider mb-3">Automated Tasks (Daily at 03:00 UTC)</h2>
+        {host > 0 && (
+          <p className="text-xs text-content-subtle mb-2">
+            The scheduler runs against the control plane only — these two tasks do not yet fan out to {hostName}.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
           {[
             { name: 'prune-networks', label: 'Network Cleanup', desc: 'docker network prune -f' },
@@ -777,18 +818,23 @@ function AutomationTab({ hostPrivileged }) {
         </div>
       </div>
 
-      {/* APT config */}
+      {/* Package cache — the manager is whatever the host actually has. */}
       <div className="p-4 bg-surface border border-border rounded-xl space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-content-strong">APT Package Cache Cleanup</h3>
-            <Hint className="mt-0.5">apt-get autoremove && apt-get clean</Hint>
+            <h3 className="text-sm font-semibold text-content-strong">Package Cache Cleanup</h3>
+            <Hint className="mt-0.5">
+              {pkgLabel === 'apt' && 'apt-get autoremove && apt-get clean'}
+              {(pkgLabel === 'dnf' || pkgLabel === 'yum') && `${pkgLabel} autoremove && ${pkgLabel} clean all`}
+              {!pkgLabel && 'No supported package manager detected on this host.'}
+            </Hint>
           </div>
           <span className="text-xs text-success-fg bg-success-subtle/30 px-2 py-0.5 rounded-full">Auto-safe</span>
         </div>
-        <Btn variant="primary" size="xs" onClick={() => aptMut.mutate()} disabled={aptMut.isPending}
+        <Btn variant="primary" size="xs" onClick={() => aptMut.mutate()}
+          disabled={aptMut.isPending || !available || !pkgLabel}
           >
-          {aptMut.isPending ? 'Running…' : 'Run Now'}
+          {aptMut.isPending ? 'Running…' : `Run on ${hostName}`}
         </Btn>
         {aptMut.isSuccess && <p className="text-xs text-success-fg">✓ Completed</p>}
       </div>
@@ -813,10 +859,14 @@ function AutomationTab({ hostPrivileged }) {
               className={`${CONTROL} w-full`} />
           </div>
         </div>
-        <Btn variant="primary" size="xs" onClick={() => jrnlMut.mutate()} disabled={jrnlMut.isPending}
+        <Btn variant="primary" size="xs" onClick={() => jrnlMut.mutate()}
+          disabled={jrnlMut.isPending || !available || !caps?.journal}
           >
-          {jrnlMut.isPending ? 'Running…' : 'Apply Vacuum'}
+          {jrnlMut.isPending ? 'Running…' : `Apply on ${hostName}`}
         </Btn>
+        {available && !caps?.journal && (
+          <p className="text-xs text-content-subtle">systemd-journald isn&apos;t present on this host.</p>
+        )}
       </div>
 
       {/* Temp cleanup config */}
@@ -839,9 +889,10 @@ function AutomationTab({ hostPrivileged }) {
               className={`${CONTROL} w-full`} />
           </div>
         </div>
-        <Btn variant="primary" size="xs" onClick={() => tmpMut.mutate()} disabled={tmpMut.isPending}
+        <Btn variant="primary" size="xs" onClick={() => tmpMut.mutate()}
+          disabled={tmpMut.isPending || !available}
           >
-          {tmpMut.isPending ? 'Cleaning…' : 'Clean /tmp'}
+          {tmpMut.isPending ? 'Cleaning…' : `Clean /tmp on ${hostName}`}
         </Btn>
       </div>
 
@@ -1053,24 +1104,27 @@ export default function HousekeepingPage() {
 
         {host > 0 && (
           <div className="mb-4 px-3 py-2 rounded-lg bg-info-subtle/40 border border-info-border/50 text-xs text-content">
-            Showing Docker usage on <strong className="text-content-strong">{hostName}</strong>. Prunes act on that
-            host&apos;s daemon. Host-OS tasks and migration leftovers remain control-plane actions.
+            Everything on this page now acts on <strong className="text-content-strong">{hostName}</strong> — Docker
+            prunes against that host&apos;s daemon, host-OS tasks over SSH. Migration leftovers and the daily
+            scheduler remain control-plane actions.
           </div>
         )}
 
         <HKHostContext.Provider value={host}>
-          <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
-            {isLoading ? (
-              <div className="py-16 text-center text-content-subtle">Loading system status…</div>
-            ) : (
-              <>
-                {tab === 'dashboard'   && <DashboardTab status={status} />}
-                {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
-                {tab === 'migrations'  && <MigrationLeftoversTab />}
-                {tab === 'automation'  && <AutomationTab hostPrivileged={status?.host_privileged} />}
-              </>
-            )}
-          </VerticalTabs>
+          <HKHostNameContext.Provider value={hostName}>
+            <VerticalTabs tabs={TABS} active={tab} onChange={setTab}>
+              {isLoading ? (
+                <div className="py-16 text-center text-content-subtle">Loading system status…</div>
+              ) : (
+                <>
+                  {tab === 'dashboard'   && <DashboardTab status={status} />}
+                  {tab === 'safety'      && <SafetyCenterTab docker={status?.docker} />}
+                  {tab === 'migrations'  && <MigrationLeftoversTab />}
+                  {tab === 'automation'  && <AutomationTab caps={status?.host_caps} />}
+                </>
+              )}
+            </VerticalTabs>
+          </HKHostNameContext.Provider>
         </HKHostContext.Provider>
       </div>
     </Layout>

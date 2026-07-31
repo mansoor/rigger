@@ -8,11 +8,12 @@ package api
 // internal/executor, which already abstracts local vs. over-SSH; routing
 // housekeeping through the same seam is what makes remote hosts work.
 //
-// The target comes from ?host=<id>: absent or 0 means the control plane. Only
-// the Docker-level operations are host-aware — the host-OS ones (apt, journal,
-// kernels) still use nsenter into the control plane's namespaces, which has no
-// meaning on a machine Rigger isn't running on. Those need a different transport
-// and their own sudo handling; they stay control-plane-only for now.
+// The target comes from ?host=<id>: absent or 0 means the control plane.
+//
+// Docker-level operations run through hkTarget.docker. Host-OS operations (apt,
+// journal, kernels, /tmp) run through hkTarget.hostRun, which picks its own
+// transport — nsenter locally, SSH with optional `sudo -n` remotely — and probes
+// what the target can actually do. See housekeeping_hostos.go.
 
 import (
 	"bytes"
@@ -36,6 +37,12 @@ type hkTarget struct {
 	Host   string // display label — controlPlaneLabel, or the host's name
 	Remote bool
 	closer func()
+
+	// Host-OS capabilities, probed on first use and reused for the rest of the
+	// request — see housekeeping_hostos.go. capsOnce rather than sync.Once
+	// because a target is per-request and never shared across goroutines.
+	capsOnce  bool
+	capsCache hostCaps
 }
 
 // Close releases the SSH connection. Safe on a local target.

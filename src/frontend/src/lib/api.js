@@ -337,12 +337,14 @@ export const pruneContainers             = (host)   => api.post(`/housekeeping/d
 export const pruneVolumes                = (body, host) => api.post(`/housekeeping/docker/prune/volumes${hkq(host)}`, body).then(r => r.data)
 export const pruneNetworks               = (host)   => api.post(`/housekeeping/docker/prune/networks${hkq(host)}`).then(r => r.data)
 export const pruneBuildCache             = (host)   => api.post(`/housekeeping/docker/prune/build-cache${hkq(host)}`).then(r => r.data)
-export const fetchJournalStats           = ()       => api.get('/housekeeping/host/journal/stats').then(r => r.data)
-export const journalVacuum               = (body)   => api.post('/housekeeping/host/journal/vacuum', body).then(r => r.data)
-export const fetchKernels                = ()       => api.get('/housekeeping/host/kernels').then(r => r.data)
-export const cleanKernels                = (body)   => api.post('/housekeeping/host/kernels/clean', body).then(r => r.data)
-export const aptClean                    = ()       => api.post('/housekeeping/host/apt/clean').then(r => r.data)
-export const cleanTmp                    = (body)   => api.post('/housekeeping/host/tmp/clean', body).then(r => r.data)
+// Host-OS tasks are host-scoped too — they run over SSH (with sudo when needed)
+// on a remote target, and via nsenter on the control plane. See hkq above.
+export const fetchJournalStats           = (host)       => api.get(`/housekeeping/host/journal/stats${hkq(host)}`).then(r => r.data)
+export const journalVacuum               = (body, host) => api.post(`/housekeeping/host/journal/vacuum${hkq(host)}`, body).then(r => r.data)
+export const fetchKernels                = (host)       => api.get(`/housekeeping/host/kernels${hkq(host)}`).then(r => r.data)
+export const cleanKernels                = (body, host) => api.post(`/housekeeping/host/kernels/clean${hkq(host)}`, body).then(r => r.data)
+export const aptClean                    = (host)       => api.post(`/housekeeping/host/apt/clean${hkq(host)}`).then(r => r.data)
+export const cleanTmp                    = (body, host) => api.post(`/housekeeping/host/tmp/clean${hkq(host)}`, body).then(r => r.data)
 
 // Migration leftovers (Phase 7) — data/files left on a source host after a migration.
 export const fetchMigrationLeftovers  = ()   => api.get('/housekeeping/migration-leftovers').then(r => r.data)
