@@ -1,4 +1,4 @@
-# Rigger — Rig once. Deploy anywhere
+# Rigger — More Dev, Loss Ops
 
 > **Yes, it's called Rigger.** It's the deckhand who lashes your containers to the crane, double-checks every knot, and hoists them into prod without dropping one in the harbor. It remembers exactly which line went where, never fat-fingers a `docker run` at 2 a.m., and quietly judges you for deploying on a Friday. You bring the cargo — Rigger handles the heavy lifting, the rigging, and the part where everything stays afloat.
 
