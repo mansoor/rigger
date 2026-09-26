@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { closeLine } from '../lib/wsclose'
 import { fetchWorkspace, fetchEnvVars, fetchEnvStatus, fetchImageUpdates, fetchContainers, fetchEnvMetrics, fetchMetricsConfig, updateEnvVars, rotateSecret, fetchSecretEvents, openActionSocket, fetchActionRuns, clearActionRuns, fetchBackupStats, fetchBackupServices, fetchPipelines, fetchPipelineRuns, fetchDeployHistory, approvePipelineRun, rejectPipelineRun, fetchImageStatus, trackLatest, setBuildPipeline, startPipelineRun, fetchCertInfo, fetchMaintenance } from '../lib/api'
 import { RunModal, STAGE_ICON, stageSummary, statusChipCls, stepCls, stepIcon } from '../components/PipelinesTab'
 import { isSystemVar, EnvVarGroupLabel } from '../lib/envVarGroups'
@@ -1466,8 +1467,9 @@ function useLogStream({ workspace, wsName, activeEnv, activeContainers = [], tok
       const newLines = (e.data || '').split(/\r?\n/).filter(l => l !== '')
       setLines(prev => { const next = [...prev, ...newLines]; return next.length > maxLines ? next.slice(-maxLines) : next })
     })
-    ws.addEventListener('close', () => setLines(prev => [...prev, '\x1b[2m--- stream closed ---\x1b[0m']))
-    ws.addEventListener('error', () => setLines(prev => [...prev, '\x1b[31m--- connection error ---\x1b[0m']))
+    // Only `close` reports: the spec fires error then close, and error carries
+    // no detail — the code on the close event is the whole diagnosis.
+    ws.addEventListener('close', e => setLines(prev => [...prev, closeLine(e)]))
   }, [workspace, wsName, activeEnv, activeContainers.join(','), token, maxLines]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { connect(); return () => wsRef.current?.close() }, [connect])

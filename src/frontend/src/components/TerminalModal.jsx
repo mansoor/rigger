@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { closeTermLine } from '../lib/wsclose'
 import { useQuery } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -138,16 +139,16 @@ export default function TerminalModal({ workspace, wsName, envName, initialServi
       inputDisposer.dispose()
     })
 
-    ws.addEventListener('close', () => {
-      term.writeln('\r\n\x1b[33m--- disconnected ---\x1b[0m')
+    ws.addEventListener('close', e => {
+      term.write(closeTermLine(e))
       firstMsgRef.current = false
       setConnected(false)
       setConnecting(false)
       wsRef.current = null
     })
 
+    // No message here: close always follows, and it carries the code.
     ws.addEventListener('error', () => {
-      term.writeln('\r\n\x1b[31m--- connection error ---\x1b[0m')
       firstMsgRef.current = false
       setConnected(false)
       setConnecting(false)

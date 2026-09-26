@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { closeTermLine } from '../lib/wsclose'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Terminal } from '@xterm/xterm'
@@ -2339,11 +2340,14 @@ function Step7({ payload, onDone, onEditProject, onDeployProject, onBackToWorksp
       }
     })
     ws.addEventListener('error', () => {
-      term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n')
+      // The message comes from `close`, which knows why.
       sawError = true
       resolve('failure')
     })
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', e => {
+      if (e?.code && e.code !== 1000 && e.code !== 1001 && e.code !== 1005) {
+        term.write(closeTermLine(e))
+      }
       // Closed without an explicit marker: failure if we saw any error line,
       // otherwise treat a clean finish as success.
       if (!resolved) resolve(sawError ? 'failure' : 'success')

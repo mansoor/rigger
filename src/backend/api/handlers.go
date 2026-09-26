@@ -396,15 +396,19 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// One writer for the whole handler. The output goroutines below and the
+	// keepalive ping are two writers on a connection that panics if they overlap,
+	// so they share a mutex. The ping is what lets an idle stream — a `logs -f` on
+	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
+	// read timeout. See wskeepalive.go.
+	ww := newWSWriter(conn)
+	defer ww.Keepalive()()
+
 	// gorilla/websocket panics on concurrent writes (and a panic in the spawned
 	// output goroutine below isn't recovered by net/http — it would crash the whole
-	// process). Serialize ALL writes to this conn through safeWrite.
-	var wsMu sync.Mutex
-	safeWrite := func(b []byte) {
-		wsMu.Lock()
-		conn.WriteMessage(websocket.TextMessage, b) //nolint:errcheck
-		wsMu.Unlock()
-	}
+	// process). Every write goes through one writer, which also owns the keepalive
+	// ping — see wskeepalive.go.
+	safeWrite := func(b []byte) { ww.Text(b) } //nolint:errcheck
 
 	// First message: { "token": "...", "workspace": { ...CreateRequest... } }
 	var msg struct {
@@ -412,13 +416,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Workspace workspace.CreateRequest `json:"workspace"`
 	}
 	if err := conn.ReadJSON(&msg); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: invalid request\033[0m\n")) //nolint:errcheck
+		ww.Text([]byte("\033[31m✗ Error: invalid request\033[0m\n")) //nolint:errcheck
 		return
 	}
 
 	claims, err := h.auth.ValidateToken(msg.Token)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: unauthorized — please sign in again\033[0m\n")) //nolint:errcheck
+		ww.Text([]byte("\033[31m✗ Error: unauthorized — please sign in again\033[0m\n")) //nolint:errcheck
 		return
 	}
 
@@ -2272,20 +2276,28 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// One writer for the whole handler. The output goroutines below and the
+	// keepalive ping are two writers on a connection that panics if they overlap,
+	// so they share a mutex. The ping is what lets an idle stream — a `logs -f` on
+	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
+	// read timeout. See wskeepalive.go.
+	ww := newWSWriter(conn)
+	defer ww.Keepalive()()
+
 	// Expect first message: { "command": "start", "env": "prod", "token": "<jwt>" }
 	var req struct {
 		actionRequest
 		Token string `json:"token"`
 	}
 	if err := conn.ReadJSON(&req); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: invalid request\n")) //nolint:errcheck
+		ww.Text([]byte("error: invalid request\n")) //nolint:errcheck
 		return
 	}
 
 	// Validate token from first WS message (no Authorization header over WS)
 	claims, err := h.auth.ValidateToken(req.Token)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("error: unauthorized\n")) //nolint:errcheck
+		ww.Text([]byte("error: unauthorized\n")) //nolint:errcheck
 		return
 	}
 
@@ -2297,7 +2309,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		minRole = auth.RoleViewer
 	}
 	if eff == "" || !auth.AtLeast(eff, minRole) {
-		conn.WriteMessage(websocket.TextMessage, []byte("\033[31m✗ Error: you don't have permission to run this action on "+name+"\033[0m\n")) //nolint:errcheck
+		ww.Text([]byte("\033[31m✗ Error: you don't have permission to run this action on "+name+"\033[0m\n")) //nolint:errcheck
 		return
 	}
 
@@ -2334,7 +2346,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 			n, readErr := pr.Read(buf)
 			if n > 0 {
 				if !gone {
-					if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
+					if err := ww.Text(buf[:n]); err != nil {
 						// Peer is gone. Stop writing and cancel the command, but keep
 						// draining the pipe so the producer never blocks on a full buffer.
 						gone = true
@@ -2412,7 +2424,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 	}
-	conn.WriteMessage(websocket.TextMessage, []byte(marker)) //nolint:errcheck
+	ww.Text([]byte(marker)) //nolint:errcheck
 	outBuf.WriteString(marker)
 
 	// Record the run in the per-workspace Action-output history (skip read-only
@@ -2963,6 +2975,14 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// One writer for the whole handler. The output goroutines below and the
+	// keepalive ping are two writers on a connection that panics if they overlap,
+	// so they share a mutex. The ping is what lets an idle stream — a `logs -f` on
+	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
+	// read timeout. See wskeepalive.go.
+	ww := newWSWriter(conn)
+	defer ww.Keepalive()()
+
 	// First message: {"token":"...","service":"app","cols":120,"rows":40}
 	var init struct {
 		Token   string `json:"token"`
@@ -2971,28 +2991,28 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		Rows    int    `json:"rows"`
 	}
 	if err := conn.ReadJSON(&init); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: invalid handshake\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: invalid handshake\r\n")) //nolint:errcheck
 		return
 	}
 
 	claims, err := h.auth.ValidateToken(init.Token)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: unauthorized\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: unauthorized\r\n")) //nolint:errcheck
 		return
 	}
 	// Opening a shell is a privileged action — require developer+ on the project.
 	if eff := h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name); eff == "" || !auth.AtLeast(eff, auth.RoleDeveloper) {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: you don't have permission to open a terminal here\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: you don't have permission to open a terminal here\r\n")) //nolint:errcheck
 		return
 	}
 	if init.Service == "" {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: service name required\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: service name required\r\n")) //nolint:errcheck
 		return
 	}
 	// The service name is interpolated into a docker command (and, for remote
 	// hosts, a remote shell line) — enforce the strict container-name pattern.
 	if !safeContainerName.MatchString(init.Service) {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: invalid container name\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: invalid container name\r\n")) //nolint:errcheck
 		return
 	}
 
@@ -3009,26 +3029,24 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	// the running task's container ID (on the env's own daemon).
 	ex, err := h.bridge.ExecForEnv(wsName, name, env)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+err.Error()+"\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: "+err.Error()+"\r\n")) //nolint:errcheck
 		return
 	}
 	target, rerr := h.resolveContainerRef(ex, wsName, name, env, init.Service)
 	if rerr != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("\r\nerror: "+rerr.Error()+"\r\n")) //nolint:errcheck
+		ww.Text([]byte("\r\nerror: "+rerr.Error()+"\r\n")) //nolint:errcheck
 		return
 	}
 
 	// Open the PTY on the env's own daemon (local socket or remote SSH).
 	de, err := h.bridge.OpenTerminal(wsName, name, env, target, cols, rows)
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-			[]byte("\r\nerror: "+err.Error()+"\r\n"))
+		ww.Text([]byte("\r\nerror: "+err.Error()+"\r\n")) //nolint:errcheck
 		return
 	}
 	defer de.Close()
 
-	conn.WriteMessage(websocket.TextMessage, //nolint:errcheck
-		[]byte(fmt.Sprintf("\r\n\x1b[32mConnected to %s/%s — type 'exit' to disconnect\x1b[0m\r\n", env, init.Service)))
+	ww.Text([]byte(fmt.Sprintf("\r\n\x1b[32mConnected to %s/%s — type 'exit' to disconnect\x1b[0m\r\n", env, init.Service))) //nolint:errcheck
 
 	done := make(chan struct{})
 
@@ -3038,7 +3056,7 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, err := de.Read(buf)
 			if n > 0 {
-				conn.WriteMessage(websocket.BinaryMessage, buf[:n]) //nolint:errcheck
+				ww.Binary(buf[:n]) //nolint:errcheck
 			}
 			if err != nil {
 				break

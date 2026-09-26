@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { closeTermLine } from '../lib/wsclose'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useTheme } from '../theme/ThemeProvider'
@@ -29,8 +30,7 @@ export default function LogDrawer({ ws, title, onClose }) {
 
     // Stream WebSocket messages into the terminal
     ws.addEventListener('message', (e) => term.write(e.data))
-    ws.addEventListener('close',   () => term.write('\r\n\x1b[2m[connection closed]\x1b[0m\r\n'))
-    ws.addEventListener('error',   () => term.write('\r\n\x1b[31m[connection error]\x1b[0m\r\n'))
+    ws.addEventListener('close',   e => term.write(closeTermLine(e)))
 
     return () => {
       ro.disconnect()
