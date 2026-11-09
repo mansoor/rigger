@@ -73,6 +73,12 @@ func TestKeepalivePingsAnIdleConnection(t *testing.T) {
 // concurrent writes — in a spawned goroutine that panic is not recovered by
 // net/http and would take the process down. Run writes and pings together with
 // -race to prove they serialize.
+//
+// The server drains and finishes exactly as the real handlers do. The first
+// version of this test did neither, and failed 8 runs in 20: the client answered
+// 200 pings with 200 pongs, nothing read them, and closing a socket with unread
+// data made the kernel reset the connection before "done" arrived. That was not
+// a test bug — the real handlers did the same thing.
 func TestWriterSerializesPingsAndOutput(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -81,6 +87,8 @@ func TestWriterSerializesPingsAndOutput(t *testing.T) {
 		}
 		defer c.Close()
 		ww := newWSWriter(c)
+		defer ww.Finish()
+		ww.Drain(nil)
 
 		var wg sync.WaitGroup
 		for g := 0; g < 4; g++ {
@@ -98,20 +106,146 @@ func TestWriterSerializesPingsAndOutput(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer conn.Close()
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+	conn := dialTest(t, srv)
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			t.Fatalf("read: %v — a panic or interleaved frame would surface here", err)
+			t.Fatalf("read: %v — a panic, interleaved frame or reset would surface here", err)
 		}
 		if string(msg) == "done" {
 			return
 		}
+	}
+}
+
+func dialTest(t *testing.T, srv *httptest.Server) *websocket.Conn {
+	t.Helper()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	conn.SetReadDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck
+	return conn
+}
+
+// readToClose reads until the connection ends and returns every text message and
+// the close code (-1 when the connection ended without a close frame at all).
+func readToClose(conn *websocket.Conn) (lines []string, code int) {
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			if ce, ok := err.(*websocket.CloseError); ok {
+				return lines, ce.Code
+			}
+			return lines, -1
+		}
+		lines = append(lines, string(msg))
+	}
+}
+
+// Every stream used to end with close code 1006 — gorilla's Close() drops the TCP
+// connection without a close frame. Now that the UI explains close codes, that
+// would print "connection dropped, check your proxy" under every completed
+// deploy. Finish sends a normal closure instead.
+func TestFinishSendsNormalClose(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		ww := newWSWriter(c)
+		ww.Keepalive()
+		defer ww.Finish()
+		ww.Drain(nil)
+		ww.Text([]byte("✓ deploy completed")) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	lines, code := readToClose(dialTest(t, srv))
+	if len(lines) != 1 || lines[0] != "✓ deploy completed" {
+		t.Errorf("lines = %q, want the completion line", lines)
+	}
+	if code != websocket.CloseNormalClosure {
+		t.Errorf("close code = %d, want %d (normal closure) — 1006 is what the UI reports as a dropped connection", code, websocket.CloseNormalClosure)
+	}
+}
+
+// The exact failure mode: a long operation receives pongs it must not leave
+// unread. With pongs outstanding, the last line and a clean close must still
+// arrive — every time, so the loop catches a timing-dependent reset.
+func TestPongsDoNotCostTheLastLine(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			ww := newWSWriter(c)
+			defer ww.Finish()
+			ww.Drain(nil)
+			for p := 0; p < 100; p++ { // a long deploy's worth of keepalives
+				ww.ping() //nolint:errcheck
+			}
+			time.Sleep(20 * time.Millisecond) // let the pongs land before closing
+			ww.Text([]byte("last line"))      //nolint:errcheck
+		}))
+		lines, code := readToClose(dialTest(t, srv))
+		srv.Close()
+		if len(lines) == 0 || lines[len(lines)-1] != "last line" {
+			t.Fatalf("run %d: last line lost (got %q, close %d)", i, lines, code)
+		}
+		if code != websocket.CloseNormalClosure {
+			t.Fatalf("run %d: close code %d, want %d", i, code, websocket.CloseNormalClosure)
+		}
+	}
+}
+
+// Drain's onGone is how a following log stream learns the browser left.
+func TestDrainReportsThePeerLeaving(t *testing.T) {
+	gone := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		ww := newWSWriter(c)
+		defer ww.Finish()
+		ww.Drain(func() { close(gone) })
+		<-gone
+	}))
+	defer srv.Close()
+
+	conn := dialTest(t, srv)
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "")) //nolint:errcheck
+	select {
+	case <-gone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onGone never ran — a following stream would never be cancelled")
+	}
+}
+
+// Finish runs from a defer and may also be reached on an error path.
+func TestFinishIsSafeTwice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		ww := newWSWriter(c)
+		ww.Keepalive()
+		ww.Drain(nil)
+		ww.Finish()
+		ww.Finish()
+	}))
+	defer srv.Close()
+
+	if _, code := readToClose(dialTest(t, srv)); code != websocket.CloseNormalClosure {
+		t.Errorf("close code = %d, want %d", code, websocket.CloseNormalClosure)
 	}
 }
 

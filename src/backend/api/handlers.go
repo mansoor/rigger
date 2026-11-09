@@ -402,7 +402,8 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
 	// read timeout. See wskeepalive.go.
 	ww := newWSWriter(conn)
-	defer ww.Keepalive()()
+	ww.Keepalive()
+	defer ww.Finish() // close frame + handshake; runs before conn.Close
 
 	// gorilla/websocket panics on concurrent writes (and a panic in the spawned
 	// output goroutine below isn't recovered by net/http — it would crash the whole
@@ -419,6 +420,9 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		ww.Text([]byte("\033[31m✗ Error: invalid request\033[0m\n")) //nolint:errcheck
 		return
 	}
+	// The browser answers every keepalive ping with a pong; something must read
+	// them, or closing the socket resets it. See wsWriter.Drain.
+	ww.Drain(nil)
 
 	claims, err := h.auth.ValidateToken(msg.Token)
 	if err != nil {
@@ -2282,7 +2286,8 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
 	// read timeout. See wskeepalive.go.
 	ww := newWSWriter(conn)
-	defer ww.Keepalive()()
+	ww.Keepalive()
+	defer ww.Finish() // close frame + handshake; runs before conn.Close
 
 	// Expect first message: { "command": "start", "env": "prod", "token": "<jwt>" }
 	var req struct {
@@ -2381,22 +2386,21 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		runOpts.ScheduleName = "Manual backup"
 		runOpts.Trigger = "manual"
 	}
-	// Bind a following stream to the connection. The write path above catches a
-	// dead peer only when there is output to write, and an idle `logs -f` may
-	// produce none for hours — so also watch for the close frame. The client
-	// sends nothing after its opening request, so any read completing means the
-	// peer went away.
-	if isFollowCommand(req.Command) {
+	// Read for the whole life of the stream. A following stream (`logs -f`) is
+	// bound to the connection: the write path above notices a dead peer only when
+	// there is output to write, and an idle stream may produce none for hours, so
+	// a failed read cancels it. Every other command needs the reader too — it
+	// consumes the pongs answering our keepalive pings (see wsWriter.Drain) — but
+	// a browser going away must not cancel a deploy, so for those it only drains.
+	follow := isFollowCommand(req.Command)
+	if follow {
 		runOpts.Context = streamCtx
-		go func() {
-			for {
-				if _, _, err := conn.ReadMessage(); err != nil {
-					cancelStream()
-					return
-				}
-			}
-		}()
 	}
+	ww.Drain(func() {
+		if follow {
+			cancelStream()
+		}
+	})
 	runErr := h.bridge.Run(runOpts)
 	col.Flush() //nolint:errcheck — emit any trailing partial line before closing
 	pw.Close()
@@ -2981,7 +2985,8 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 	// a quiet container, a terminal sitting at a prompt — survive a reverse proxy's
 	// read timeout. See wskeepalive.go.
 	ww := newWSWriter(conn)
-	defer ww.Keepalive()()
+	ww.Keepalive()
+	defer ww.Finish() // close frame + handshake; runs before conn.Close
 
 	// First message: {"token":"...","service":"app","cols":120,"rows":40}
 	var init struct {
@@ -3071,8 +3076,13 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		close(done)
 	}()
 
-	// WebSocket → PTY input (or resize control messages)
+	// WebSocket → PTY input (or resize control messages). This is the
+	// connection's reader, so it also consumes keepalive pongs; Finish waits on
+	// it for the browser's close reply.
+	readDone := make(chan struct{})
+	ww.SetReader(readDone)
 	go func() {
+		defer close(readDone)
 		for {
 			mt, msg, err := conn.ReadMessage()
 			if err != nil {

@@ -38,10 +38,27 @@ const wsPingInterval = 25 * time.Second
 // the keepalive goroutine forever.
 const wsPingTimeout = 10 * time.Second
 
-// wsWriter serializes writes to one connection and can keep it warm.
+// wsCloseWait bounds how long Finish waits for the peer to answer the close
+// frame. Long enough for a browser on a slow link, short enough that a peer which
+// never answers cannot hold the handler open.
+const wsCloseWait = 2 * time.Second
+
+// wsWriter serializes writes to one connection, keeps it warm, and ends it
+// properly. A handler's lifecycle is:
+//
+//	ww := newWSWriter(conn)
+//	ww.Keepalive()
+//	defer ww.Finish()
+//	… read the opening message …
+//	ww.Drain(onGone)      // or SetReader, if the handler reads for itself
+//	… stream output with Text/Binary …
 type wsWriter struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
+
+	stopPing func()          // set by Keepalive
+	readDone <-chan struct{} // closed when the connection's reader exits
+	finished bool            // close frame already sent
 }
 
 func newWSWriter(c *websocket.Conn) *wsWriter { return &wsWriter{conn: c} }
@@ -70,8 +87,9 @@ func (w *wsWriter) ping() error {
 	return w.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsPingTimeout))
 }
 
-// Keepalive starts pinging until the returned stop is called. Callers defer stop
-// so the goroutine cannot outlive the handler.
+// Keepalive starts pinging until the returned stop is called, or until Finish.
+// Every ping is answered by a pong, so a handler that pings must also read — see
+// Drain.
 //
 // A failed ping stops the pinging and nothing else: the connection is already
 // broken, and the read loops own deciding what that means. Tearing down a stream
@@ -93,5 +111,71 @@ func (w *wsWriter) Keepalive() (stop func()) {
 			}
 		}
 	}()
-	return func() { once.Do(func() { close(done) }) }
+	stop = func() { once.Do(func() { close(done) }) }
+	w.stopPing = stop
+	return stop
+}
+
+// Drain becomes the connection's only reader, discarding incoming messages until
+// the connection fails, then calls onGone (nil to ignore). Start it after the
+// handler has read its opening message — gorilla allows one reader at a time.
+//
+// Not optional once pings are sent. gorilla processes inbound frames only inside
+// a read call, so a handler that stops reading after its opening message leaves
+// every pong the browser sends in the socket buffer. Closing a socket that still
+// holds unread data makes the kernel send a reset instead of a clean close, and a
+// reset can destroy the last lines of output in flight — exactly the line that
+// says whether a deploy succeeded.
+func (w *wsWriter) Drain(onGone func()) {
+	done := make(chan struct{})
+	w.readDone = done
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := w.conn.ReadMessage(); err != nil {
+				if onGone != nil {
+					onGone()
+				}
+				return
+			}
+		}
+	}()
+}
+
+// SetReader registers a reader the handler runs itself (the terminal forwards
+// what it reads to a shell), so Finish can wait for the peer's close reply.
+func (w *wsWriter) SetReader(done <-chan struct{}) { w.readDone = done }
+
+// Finish ends the stream the way the protocol intends: stop pinging, send a close
+// frame with "normal closure", and give the peer a moment to answer.
+//
+// Without it the handler simply returned and gorilla dropped the TCP connection,
+// so the browser reported close code 1006 — "abnormal closure" — at the end of
+// every stream, successful or not. With close codes now shown to the user, that
+// would put a "connection dropped, check your proxy" warning under every
+// completed deploy. Safe to call more than once.
+func (w *wsWriter) Finish() {
+	if w.stopPing != nil {
+		w.stopPing()
+	}
+	w.mu.Lock()
+	if w.finished {
+		w.mu.Unlock()
+		return
+	}
+	w.finished = true
+	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+	err := w.conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(wsCloseWait))
+	w.mu.Unlock()
+
+	// Wait for the peer's close reply, which ends the reader. Skip the wait when
+	// the close frame could not be sent (the peer is already gone) or when no
+	// reader is running (the handler failed before reading its opening message).
+	if err != nil || w.readDone == nil {
+		return
+	}
+	select {
+	case <-w.readDone:
+	case <-time.After(wsCloseWait):
+	}
 }
