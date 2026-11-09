@@ -3015,6 +3015,12 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		ww.Text([]byte("\r\nerror: invalid container name\r\n")) //nolint:errcheck
 		return
 	}
+	// Validate the environment before it reaches ExecForEnv or the resolver,
+	// which builds a stack name from it (see containerScope).
+	if !safeEnvName.MatchString(env) {
+		ww.Text([]byte("\r\nerror: invalid environment name\r\n")) //nolint:errcheck
+		return
+	}
 
 	cols, rows := init.Cols, init.Rows
 	if cols <= 0 {
