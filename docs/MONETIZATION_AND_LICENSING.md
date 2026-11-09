@@ -1,5 +1,12 @@
 # Rigger — Monetization, Open-Core Split & Licensing (Design Doc)
 
+> **Partly superseded (2026-11-09) by [`GO_LIVE_PLAN.md`](GO_LIVE_PLAN.md).** The strategy, editions,
+> tier matrix, pricing and sequencing here (§0–§3, §6–§7) are replaced: self-hosted stays free and
+> complete, and paid features move to Rigger Cloud. The reasons are in that plan's §1 — chiefly that
+> this matrix charged for features competitors give away, and that GPLv3 makes key-gated features in
+> a distributed image unenforceable. **§4–§5 (license-key mechanism, gate plumbing) remain the
+> reference** if a self-hosted commercial tier is ever built.
+
 Status: **design / for review** — no code yet. This is the plan to turn Rigger into a
 commercial open-core product (free self-hosted CE + paid self-hosted tiers + an optional
 hosted SaaS), covering: what to open-source vs keep private, how to name the editions, the

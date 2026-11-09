@@ -4,6 +4,12 @@ Internal tracking: what's verified, what's known-shaky, and what's queued. Delib
 
 Last reviewed: **2026-07-28** (v0.1.42).
 
+> **Newer documents:** [`PRODUCT_REVIEW_2026-11.md`](PRODUCT_REVIEW_2026-11.md) is the current gap
+> analysis. Of its four fix-first issues, the Viewer-to-host-root escalation is fixed in v0.1.46 (`a66235c`);
+> the broken installer URL, SQLite running without foreign keys, and the JWT secret doubling as the
+> data-encryption key are still open.
+> [`GO_LIVE_PLAN.md`](GO_LIVE_PLAN.md) turns it into launch gates and the go-to-market plan.
+
 ---
 
 ## How to use this file
