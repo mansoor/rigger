@@ -2028,6 +2028,8 @@ function UsersTab() {
 
   const fmtLast = (s) => s ? new Date(s).toLocaleString() : 'never'
   function statusBadge(u) {
+    // Disabled from the console (`rigger users disable`): can't sign in.
+    if (u.status === 'disabled') return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-danger-subtle text-danger-fg border-danger-border/60" title="Can't sign in. Re-enable with: rigger users enable">disabled</span>
     if (u.status === 'invited') return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-amber-100/70 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/40">invited</span>
     if (!u.email_verified) return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-surface-raised border-border-strong text-content-faint">unverified</span>
     return <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-100/70 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/40">verified</span>

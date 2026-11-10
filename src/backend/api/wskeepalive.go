@@ -49,16 +49,18 @@ const wsCloseWait = 2 * time.Second
 //	ww := newWSWriter(conn)
 //	ww.Keepalive()
 //	defer ww.Finish()
-//	… read the opening message …
-//	ww.Drain(onGone)      // or SetReader, if the handler reads for itself
+//	… read and authenticate the opening message …
+//	ww.EndWhen(sessionActive) // end the stream when its session ends
+//	ww.Drain(onGone)          // or SetReader, if the handler reads for itself
 //	… stream output with Text/Binary …
 type wsWriter struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 
 	stopPing func()          // set by Keepalive
-	readDone <-chan struct{} // closed when the connection's reader exits
-	finished bool            // close frame already sent
+	readDone <-chan struct{} // closed when the connection's reader exits; guarded by mu
+	finished bool            // close frame already sent; guarded by mu
+	alive    func() bool     // set by EndWhen; guarded by mu
 }
 
 func newWSWriter(c *websocket.Conn) *wsWriter { return &wsWriter{conn: c} }
@@ -105,7 +107,7 @@ func (w *wsWriter) Keepalive() (stop func()) {
 			case <-done:
 				return
 			case <-t.C:
-				if err := w.ping(); err != nil {
+				if !w.tick() {
 					return
 				}
 			}
@@ -114,6 +116,58 @@ func (w *wsWriter) Keepalive() (stop func()) {
 	stop = func() { once.Do(func() { close(done) }) }
 	w.stopPing = stop
 	return stop
+}
+
+// tick is one keepalive step: end the stream if its session is over, otherwise
+// ping. Reports whether to keep going.
+func (w *wsWriter) tick() bool {
+	w.mu.Lock()
+	alive := w.alive
+	w.mu.Unlock()
+	if alive != nil && !alive() {
+		w.endSession()
+		return false
+	}
+	return w.ping() == nil
+}
+
+// EndWhen has the keepalive end the stream once alive reports false — when the
+// session that opened it is over because the account was disabled or its password
+// changed. A stream is authorized once, when it opens; without this an open
+// terminal would outlive the account's access by as long as it stayed open. Call
+// it after authenticating the opening message.
+func (w *wsWriter) EndWhen(alive func() bool) {
+	w.mu.Lock()
+	w.alive = alive
+	w.mu.Unlock()
+}
+
+// endSession ends the stream because its session ended. The close frame says so
+// (1008, "session ended"), so the browser can tell the user rather than report a
+// dropped connection. The connection is then closed outright, so the handler's
+// reads and writes fail and it unwinds: a shell ends; a deploy already running
+// carries on, unwatched.
+func (w *wsWriter) endSession() {
+	w.mu.Lock()
+	if w.finished {
+		w.mu.Unlock()
+		return
+	}
+	w.finished = true
+	msg := websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "session ended")
+	err := w.conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(wsCloseWait))
+	readDone := w.readDone
+	w.mu.Unlock()
+
+	// Let the peer's close reply arrive first, as Finish does, so the close frame
+	// isn't lost to a reset.
+	if err == nil && readDone != nil {
+		select {
+		case <-readDone:
+		case <-time.After(wsCloseWait):
+		}
+	}
+	w.conn.Close() //nolint:errcheck
 }
 
 // Drain becomes the connection's only reader, discarding incoming messages until
@@ -128,7 +182,7 @@ func (w *wsWriter) Keepalive() (stop func()) {
 // says whether a deploy succeeded.
 func (w *wsWriter) Drain(onGone func()) {
 	done := make(chan struct{})
-	w.readDone = done
+	w.SetReader(done)
 	go func() {
 		defer close(done)
 		for {
@@ -144,7 +198,11 @@ func (w *wsWriter) Drain(onGone func()) {
 
 // SetReader registers a reader the handler runs itself (the terminal forwards
 // what it reads to a shell), so Finish can wait for the peer's close reply.
-func (w *wsWriter) SetReader(done <-chan struct{}) { w.readDone = done }
+func (w *wsWriter) SetReader(done <-chan struct{}) {
+	w.mu.Lock()
+	w.readDone = done
+	w.mu.Unlock()
+}
 
 // Finish ends the stream the way the protocol intends: stop pinging, send a close
 // frame with "normal closure", and give the peer a moment to answer.
@@ -166,16 +224,17 @@ func (w *wsWriter) Finish() {
 	w.finished = true
 	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 	err := w.conn.WriteControl(websocket.CloseMessage, msg, time.Now().Add(wsCloseWait))
+	readDone := w.readDone
 	w.mu.Unlock()
 
 	// Wait for the peer's close reply, which ends the reader. Skip the wait when
 	// the close frame could not be sent (the peer is already gone) or when no
 	// reader is running (the handler failed before reading its opening message).
-	if err != nil || w.readDone == nil {
+	if err != nil || readDone == nil {
 		return
 	}
 	select {
-	case <-w.readDone:
+	case <-readDone:
 	case <-time.After(wsCloseWait):
 	}
 }

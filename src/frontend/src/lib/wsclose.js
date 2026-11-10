@@ -29,6 +29,11 @@ export function closeReason(e) {
     return 'connection dropped without a close frame (1006) — if you reach Rigger ' +
       'through a reverse proxy, check its read timeout; nginx defaults to 60s'
   }
+  // The server ends a stream this way when the session that opened it ends: the
+  // password changed, or the account was disabled (wskeepalive.go, endSession).
+  if (code === 1008 && e?.reason === 'session ended') {
+    return 'stream closed — your session ended; sign in again'
+  }
   if (REASONS[code]) return REASONS[code]
   // A server-sent reason is more specific than anything guessable from the code.
   const detail = (e?.reason || '').trim()

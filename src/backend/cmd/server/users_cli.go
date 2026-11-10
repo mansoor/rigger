@@ -54,6 +54,15 @@ Commands:
   disable-2fa <email|id>       Turn off two-factor authentication and delete
                                the account's recovery codes.
 
+  disable <email|id>           Switch an account off: it can't sign in, and its
+                               sessions end, including open terminals. Refused
+                               for the last active super-admin.
+
+  enable <email|id>            Switch a disabled account back on. It signs in
+                               with its existing password.
+
+Resetting a password also signs the account out everywhere.
+
 If Rigger is not running, use a one-off container on the same data volume:
 
   docker run --rm -it -v rigger_rigger-data:/data ghcr.io/mansoor/rigger users list
@@ -161,7 +170,9 @@ func runUsers(args []string, env usersIO) int {
 	}
 
 	wantsAccount := cmd != "list"
-	if cmd != "list" && cmd != "reset-password" && cmd != "reset-link" && cmd != "disable-2fa" {
+	switch cmd {
+	case "list", "reset-password", "reset-link", "disable-2fa", "disable", "enable":
+	default:
 		fmt.Fprintf(env.stderr, "rigger users: unknown command %q\n\n%s", cmd, usersUsage)
 		return 2
 	}
@@ -202,9 +213,67 @@ func runUsers(args []string, env usersIO) int {
 		return usersResetPassword(svc, d, u, opts, env)
 	case "reset-link":
 		return usersResetLink(svc, d, u, opts, env)
+	case "disable":
+		return usersDisable(svc, d, u, env)
+	case "enable":
+		return usersEnable(svc, d, u, env)
 	default: // disable-2fa
 		return disable2FAAndReport(svc, d, u, env)
 	}
+}
+
+func usersDisable(svc *auth.Service, d *db.DB, u *auth.UserInfo, env usersIO) int {
+	who := accountLabel(u)
+	changed, err := svc.DisableUser(u.ID)
+	switch {
+	case errors.Is(err, auth.ErrLastAdmin):
+		fmt.Fprintf(env.stderr, "rigger users disable: %s is the only active super-admin; disabling it would leave nobody who can manage Rigger.\n"+
+			"Make another account a super-admin first. To lock out someone who knows its password, use `rigger users reset-password` instead: it signs the account out everywhere.\n", who)
+		return 1
+	case errors.Is(err, auth.ErrAccountInvited):
+		fmt.Fprintf(env.stderr, "rigger users disable: %s has not accepted its invitation yet. "+
+			"Delete it from the Users page instead; that also stops its invitation link.\n", who)
+		return 1
+	case err != nil && strings.Contains(err.Error(), "no such column"):
+		fmt.Fprintln(env.stderr, "rigger users disable: the database predates this version of rigger. "+
+			"Start this version of Rigger once so it can update the database, then run this again.")
+		return 1
+	case err != nil:
+		fmt.Fprintf(env.stderr, "rigger users disable: %v\n", err)
+		return 1
+	}
+	if !changed {
+		fmt.Fprintf(env.stdout, "%s is already disabled.\n", who)
+		return 0
+	}
+	recordConsoleAction(d, "disable", u)
+	fmt.Fprintf(env.stdout, "Disabled %s. It can't sign in, and its sessions have ended; "+
+		"open terminals and log streams close within 30 seconds.\n", who)
+	fmt.Fprintln(env.stdout, "API keys belong to Rigger, not to the account that created them: "+
+		"review them under Admin → API Keys if this person made any.")
+	return 0
+}
+
+func usersEnable(svc *auth.Service, d *db.DB, u *auth.UserInfo, env usersIO) int {
+	who := accountLabel(u)
+	changed, err := svc.EnableUser(u.ID)
+	if errors.Is(err, auth.ErrAccountInvited) {
+		fmt.Fprintf(env.stderr, "rigger users enable: %s has not accepted its invitation yet; "+
+			"it becomes active when it does. Resend the invitation from the Users page, or set a password with `rigger users reset-password`.\n", who)
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(env.stderr, "rigger users enable: %v\n", err)
+		return 1
+	}
+	if !changed {
+		fmt.Fprintf(env.stdout, "%s is already active.\n", who)
+		return 0
+	}
+	recordConsoleAction(d, "enable", u)
+	fmt.Fprintf(env.stdout, "Enabled %s. It can sign in again with its existing password; "+
+		"sessions from before it was disabled stay signed out.\n", who)
+	return 0
 }
 
 func usersList(svc *auth.Service, env usersIO) int {
@@ -261,8 +330,12 @@ func usersResetPassword(svc *auth.Service, d *db.DB, u *auth.UserInfo, o usersOp
 	} else {
 		fmt.Fprintf(env.stdout, "Password updated for %s.\n", who)
 	}
+	fmt.Fprintln(env.stdout, "Every session the account had is now signed out.")
 	if activated {
 		fmt.Fprintln(env.stdout, "The account had not accepted its invitation; it is now active, and the invitation link no longer works.")
+	}
+	if u.Status == auth.StatusDisabled {
+		fmt.Fprintf(env.stdout, "The account is disabled, so it still can't sign in. Run `rigger users enable %s` when it should.\n", accountRef(u))
 	}
 	if o.disable2FA {
 		return disable2FAAndReport(svc, d, u, env)
@@ -272,6 +345,11 @@ func usersResetPassword(svc *auth.Service, d *db.DB, u *auth.UserInfo, o usersOp
 
 func usersResetLink(svc *auth.Service, d *db.DB, u *auth.UserInfo, o usersOptions, env usersIO) int {
 	raw, err := svc.CreateResetLinkToken(u.ID, o.expires)
+	if errors.Is(err, auth.ErrAccountDisabled) {
+		fmt.Fprintf(env.stderr, "rigger users reset-link: %s is disabled, so it couldn't sign in with a new password. "+
+			"Run `rigger users enable %s` first.\n", accountLabel(u), accountRef(u))
+		return 1
+	}
 	if errors.Is(err, auth.ErrAccountInvited) {
 		fmt.Fprintf(env.stderr, "rigger users reset-link: %s has not accepted its invitation yet. "+
 			"Resend the invitation from the Users page, or set a password with `rigger users reset-password`.\n", accountLabel(u))
@@ -373,6 +451,14 @@ func accountLabel(u *auth.UserInfo) string {
 		return u.Email
 	}
 	return fmt.Sprintf("%s (id %d)", u.Username, u.ID)
+}
+
+// accountRef is how to name the account in a suggested command.
+func accountRef(u *auth.UserInfo) string {
+	if u.Email != "" {
+		return u.Email
+	}
+	return fmt.Sprint(u.ID)
 }
 
 func orDash(s string) string {

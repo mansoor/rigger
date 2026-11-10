@@ -224,10 +224,12 @@ function ChangePasswordModal({ onClose }) {
   const [next, setNext]       = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError]     = useState('')
+  const setSession = useAuthStore(s => s.setSession)
 
   const mutation = useMutation({
     mutationFn: () => changePassword(current, next),
-    onSuccess: onClose,
+    // The change ends every earlier session; adopt the new one it returns.
+    onSuccess: (res) => { if (res?.token) setSession(res.token); onClose() },
     onError: (e) => setError(e.response?.data?.error || 'Failed to change password'),
   })
 
@@ -784,9 +786,11 @@ function AccountSecurity({ onDone }) {
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
+  const setSession = useAuthStore(s => s.setSession)
   const mutation = useMutation({
     mutationFn: () => changePassword(current, next),
-    onSuccess: onDone,
+    // The change ends every earlier session; adopt the new one it returns.
+    onSuccess: (res) => { if (res?.token) setSession(res.token); onDone() },
     onError: (e) => setError(e.response?.data?.error || 'Failed to change password'),
   })
   function submit(e) {

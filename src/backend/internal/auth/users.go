@@ -16,6 +16,9 @@ import (
 const (
 	StatusActive  = "active"
 	StatusInvited = "invited"
+	// StatusDisabled marks an account switched off by an administrator: it can't
+	// sign in, and the sessions it had are ended (see DisableUser).
+	StatusDisabled = "disabled"
 
 	inviteTTL = 7 * 24 * time.Hour
 	verifyTTL = 24 * time.Hour
@@ -380,6 +383,63 @@ func (s *Service) DeleteUser(id int64) error {
 	s.db.Exec(`DELETE FROM user_recovery_codes WHERE user_id=?`, id)  //nolint:errcheck
 	_, err = s.db.Exec(`DELETE FROM users WHERE id=?`, id)
 	return err
+}
+
+// DisableUser switches an account off. It can no longer sign in, and its
+// sessions end: requests are refused at once, and open terminals and streams
+// close within one keepalive interval. Unused password-reset links are cancelled
+// too. changed is false when the account was already disabled.
+//
+// Refused for the last active super-admin (ErrLastAdmin), which would leave
+// nobody able to manage Rigger, and for an account that has not accepted its
+// invitation (ErrAccountInvited) — completing the invitation would activate it
+// anyway; delete it instead.
+func (s *Service) DisableUser(id int64) (changed bool, err error) {
+	u, err := s.getUserByID(id)
+	if err != nil {
+		return false, err
+	}
+	switch u.Status {
+	case StatusDisabled:
+		return false, nil
+	case StatusInvited:
+		return false, ErrAccountInvited
+	}
+	if u.Role == RoleSuperadmin {
+		n, err := s.countSuperadmins()
+		if err != nil {
+			return false, err
+		}
+		if n <= 1 {
+			return false, ErrLastAdmin
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE users SET status=?, sessions_revoked_at=CURRENT_TIMESTAMP WHERE id=?`,
+		StatusDisabled, id); err != nil {
+		return false, err
+	}
+	_, err = s.db.Exec(`DELETE FROM user_tokens WHERE user_id=? AND kind=? AND used_at IS NULL`, id, KindReset)
+	return true, err
+}
+
+// EnableUser switches a disabled account back on. The person signs in again with
+// the account's existing password; sessions from before it was disabled stay
+// ended. changed is false when the account was already active.
+func (s *Service) EnableUser(id int64) (changed bool, err error) {
+	u, err := s.getUserByID(id)
+	if err != nil {
+		return false, err
+	}
+	switch u.Status {
+	case StatusActive:
+		return false, nil
+	case StatusInvited:
+		return false, ErrAccountInvited
+	}
+	if _, err := s.db.Exec(`UPDATE users SET status=? WHERE id=?`, StatusActive, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Service) countSuperadmins() (int, error) {

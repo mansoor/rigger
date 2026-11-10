@@ -2,7 +2,6 @@ package main
 
 import (
 	"embed"
-	"fmt"
 	"io/fs"
 	"log"
 	"net"
@@ -149,25 +148,10 @@ func seedDNSToken(d *db.DB) {
 }
 
 func main() {
-	// Subcommands run a one-shot task and exit instead of starting the server.
-	if len(os.Args) > 1 && os.Args[1] == "init-workspace" {
-		os.Exit(runInitWorkspace(os.Args[2:]))
-	}
-	// Account recovery from the server console — see users_cli.go.
-	if len(os.Args) > 1 && os.Args[1] == "users" {
-		os.Exit(runUsers(os.Args[2:], consoleIO(config.Load().DataDir)))
-	}
-	// detect-host-ip prints the host's primary outbound IP and exits. The control
-	// plane runs this in a throwaway `--network host` container so the lookup
-	// happens in the HOST network namespace (the server's own namespace only sees
-	// the 172.x bridge). A UDP "connect" selects the outbound route without sending
-	// any packet — its local address is the IP the host reaches the internet on.
-	if len(os.Args) > 1 && os.Args[1] == "detect-host-ip" {
-		if ip := outboundIP(); ip != "" {
-			fmt.Println(ip)
-			os.Exit(0)
-		}
-		os.Exit(1)
+	// With no arguments this is the server. Any argument names a one-shot command
+	// that runs and exits — or is refused; see commands.go.
+	if len(os.Args) > 1 {
+		os.Exit(runCommand(os.Args[1:], os.Stdout, os.Stderr))
 	}
 
 	cfg := config.Load()
@@ -872,7 +856,9 @@ func main() {
 	mux.Handle("/api/workspaces", protected)
 	mux.Handle("/api/workspaces/", protected)
 
-	// SSE: Docker container events (auth via ?token= query param)
+	// SSE: Docker container events. EventSource can't send headers, so the stream
+	// opens with a single-use ticket from the authenticated ticket endpoint.
+	mux.Handle("POST /api/events/ticket", authSvc.Middleware(http.HandlerFunc(handler.EventsTicket)))
 	mux.HandleFunc("/api/events", handler.StreamEvents)
 
 	// WebSocket: create workspace (streams bootstrap output)

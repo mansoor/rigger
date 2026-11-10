@@ -42,6 +42,10 @@ const (
 // with.
 var ErrAccountInvited = errors.New("the account has not accepted its invitation yet")
 
+// ErrAccountDisabled is returned when a reset link is requested for a disabled
+// account, which could not sign in with the new password either.
+var ErrAccountDisabled = errors.New("the account is disabled")
+
 // FindUser resolves an account by email (case-insensitive) or numeric id.
 func (s *Service) FindUser(ref string) (*UserInfo, error) {
 	ref = strings.TrimSpace(ref)
@@ -60,9 +64,11 @@ func (s *Service) FindUser(ref string) (*UserInfo, error) {
 }
 
 // SetPasswordFromConsole sets a password without knowing the current one. It is
-// held to the configured password policy, and records the change time. An
-// account that has not accepted its invitation is activated, since the operator
-// is setting its first password; activated reports whether that happened.
+// held to the configured password policy, and records the change time, which
+// ends every session the account had. An account that has not accepted its
+// invitation is activated, since the operator is setting its first password;
+// activated reports whether that happened. A disabled account stays disabled —
+// enabling it is a separate, deliberate step.
 func (s *Service) SetPasswordFromConsole(id int64, password string) (activated bool, err error) {
 	u, err := s.getUserByID(id)
 	if err != nil {
@@ -75,12 +81,16 @@ func (s *Service) SetPasswordFromConsole(id int64, password string) (activated b
 	if err != nil {
 		return false, err
 	}
+	status := u.Status
+	if status == StatusInvited {
+		status = StatusActive
+	}
 	if _, err := s.db.Exec(
 		`UPDATE users SET password=?, status=?, password_changed_at=CURRENT_TIMESTAMP WHERE id=?`,
-		string(hash), StatusActive, id); err != nil {
+		string(hash), status, id); err != nil {
 		return false, err
 	}
-	activated = u.Status != StatusActive
+	activated = u.Status == StatusInvited
 	if activated {
 		// The account's invitation link would otherwise still work, letting
 		// whoever holds that email set a different password over this one.
@@ -117,7 +127,11 @@ func (s *Service) CreateResetLinkToken(id int64, ttl time.Duration) (string, err
 	if err != nil {
 		return "", err
 	}
-	if u.Status != StatusActive {
+	switch u.Status {
+	case StatusActive:
+	case StatusDisabled:
+		return "", ErrAccountDisabled
+	default:
 		return "", ErrAccountInvited
 	}
 	if ttl < MinResetLinkTTL || ttl > MaxResetLinkTTL {

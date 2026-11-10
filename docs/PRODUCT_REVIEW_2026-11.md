@@ -106,9 +106,9 @@ for both keys. This is the prerequisite for a complete response to 1.1.
 | No CPU or memory limits on Compose services | limits are only *displayed*, as "unlimited" | One leaking app can exhaust host memory and take every other app, and Rigger, down with it. |
 | No disaster recovery for Rigger itself | nothing backs up `rigger.db` | Lose that disk and you lose users, hosts, SSH keys, git providers and secrets. Remote apps keep running but can no longer be managed. |
 | Off-site backups unencrypted | only proxy backups take a passphrase | Full database dumps sit in plaintext on S3 or SFTP. |
-| Login token in a URL | `/api/events?token=` ([`useDockerEvents.js:24`](../src/frontend/src/hooks/useDockerEvents.js)) | The session JWT lands in reverse-proxy access logs. Use a short-lived, single-purpose ticket. |
+| Login token in a URL — **fixed in v0.1.48** | `/api/events?token=` ([`useDockerEvents.js`](../src/frontend/src/hooks/useDockerEvents.js)) | The session JWT landed in reverse-proxy access logs. The stream now opens with a single-use, one-minute ticket ([`events_ticket.go`](../src/backend/api/events_ticket.go)). |
 | Whole host filesystem mounted | `/:/host:ro` ([`docker-compose.yml:39`](../src/docker-compose.yml)), used for one disk-usage call | Turns any file-read bug into a read of the whole host, as 1.1 demonstrates. Measure host disk from a throwaway container instead. |
-| Thin tests where it matters | `internal/auth` has none (JWT, passwords, TOTP, RBAC); the frontend has none; no end-to-end suite | 41 of 53 Go packages have tests, but not the most security-critical one. Nothing exercises install → deploy → upgrade as a user would. |
+| Thin tests where it matters | `internal/auth` had none; v0.1.47–0.1.48 added tests for sessions, tokens and console recovery, but TOTP and RBAC are still untested; the frontend has none; no end-to-end suite | The most security-critical package is only partly covered. Nothing exercises install → deploy → upgrade as a user would. |
 | No committed dependency lockfile | `go.sum` is gitignored; the image build regenerates it with `go mod tidy` ([`Dockerfile`](../src/Dockerfile)) | Builds are not reproducible from the repository, and dependency resolution can drift between releases. Commit `go.sum` and build with `go mod download` plus `go mod verify`. |
 
 ---

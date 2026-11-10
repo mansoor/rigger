@@ -804,6 +804,11 @@ func (d *DB) migrate() error {
 		d.Exec(`UPDATE users SET password_changed_at=CURRENT_TIMESTAMP WHERE password_changed_at IS NULL`) //nolint:errcheck
 	}
 
+	// Session revocation (v0.1.48): tokens issued before this moment are refused,
+	// like those issued before password_changed_at. Stamped when an account is
+	// disabled, so enabling it again doesn't revive its old sessions. NULL = never.
+	d.addColumn("users", "sessions_revoked_at DATETIME")
+
 	// Optional 2FA / TOTP (auth Group A slice 4). totp_secret holds the base32 shared
 	// secret (set at enrollment); totp_enabled flips on only after a code is verified.
 	d.addColumn("users", "totp_secret TEXT NOT NULL DEFAULT ''")

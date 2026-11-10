@@ -290,3 +290,58 @@ func TestPingIntervalBeatsProxyTimeout(t *testing.T) {
 		t.Errorf("wsPingInterval %v leaves no margin for a dropped ping", wsPingInterval)
 	}
 }
+
+// A stream is authorized once, when it opens. When its session ends (the account
+// is disabled, its password changes) the next keepalive tick closes it with 1008
+// "session ended", so a terminal can't outlive the access that opened it.
+func TestEndWhenClosesTheStreamOnceTheSessionEnds(t *testing.T) {
+	var mu sync.Mutex
+	sessionOK := true
+	results := make(chan [2]bool, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		ww := newWSWriter(c)
+		defer ww.Finish()
+		gone := make(chan struct{})
+		ww.Drain(func() { close(gone) })
+		ww.EndWhen(func() bool { mu.Lock(); defer mu.Unlock(); return sessionOK })
+
+		ww.Text([]byte("before")) //nolint:errcheck
+		whileValid := ww.tick()
+		mu.Lock()
+		sessionOK = false
+		mu.Unlock()
+		afterEnd := ww.tick()
+		results <- [2]bool{whileValid, afterEnd}
+		<-gone // the handler's reader sees the connection end, so a shell would exit
+	}))
+	defer srv.Close()
+
+	conn := dialTest(t, srv)
+	var lines []string
+	var closeErr *websocket.CloseError
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			closeErr, _ = err.(*websocket.CloseError)
+			break
+		}
+		lines = append(lines, string(msg))
+	}
+	r := <-results
+	if !r[0] {
+		t.Error("a tick ended a stream whose session was still valid")
+	}
+	if r[1] {
+		t.Error("a tick kept a stream going after its session ended")
+	}
+	if closeErr == nil || closeErr.Code != websocket.ClosePolicyViolation || closeErr.Text != "session ended" {
+		t.Errorf("close = %v, want 1008 \"session ended\"", closeErr)
+	}
+	if len(lines) != 1 || lines[0] != "before" {
+		t.Errorf("lines = %q, want just the output sent before the session ended", lines)
+	}
+}

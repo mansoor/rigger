@@ -714,7 +714,8 @@ Manage users under Admin → Users; grant workspace membership and project acces
 |-----------|--------|
 | Password storage | bcrypt, cost 10 |
 | Access token | JWT, 15-minute expiry, held in memory only |
-| Refresh token | httpOnly cookie, 7-day rolling |
+| Refresh token | httpOnly cookie, 7-day rolling; each token kind is accepted only for its own job |
+| Ending sessions | Changing or resetting a password signs the account out everywhere; disabling an account ends its sessions, open terminals and log streams included |
 | Password policy | Minimum length, complexity and maximum age; an expired password forces a change |
 | Invites | Invited accounts can't sign in until they complete registration |
 | Email verification | Banner and resend; falls back to showing the link when no SMTP is configured |
@@ -722,9 +723,9 @@ Manage users under Admin → Users; grant workspace membership and project acces
 | Two-factor | Opt-in TOTP with QR enrollment and recovery codes |
 | Access requests | Self-service request with an admin approval inbox |
 | Audit log | Every action recorded — user, project, command, environment, host |
-| Console recovery | `rigger users` resets passwords, prints reset links and turns off 2FA from the server — see below |
+| Console account tools | `rigger users` resets passwords, prints reset links, turns off 2FA, and disables or enables accounts from the server — see below |
 
-### Recovering an account
+### Managing accounts from the console
 
 When nobody can sign in to fix it — a forgotten password with no email configured, a lost authenticator, or the only administrator locked out — recover from the server console. These commands run inside the Rigger container, alongside the running app.
 
@@ -732,13 +733,15 @@ When nobody can sign in to fix it — a forgotten password with no email configu
 docker exec -it rigger rigger users list
 ```
 
+They need Rigger v0.1.47 or later (`disable` and `enable`: v0.1.48). Check what the container runs with `docker exec rigger rigger version`. If you upgrade by hand rather than from Settings → Updates, set `RIGGER_IMAGE_TAG` in `src/.env` to the new version first: the one-click updater pins it there, and `docker compose pull` fetches whatever it names.
+
 **Set a new password.** By default a random one is generated and printed once:
 
 ```bash
 docker exec -it rigger rigger users reset-password you@example.com
 ```
 
-To choose it yourself, add `--prompt` and type it twice; nothing is echoed. Scripts can pass it on standard input with `--password-stdin`. Either way it must meet your password policy. Add `--disable-2fa` if the authenticator is lost too.
+To choose it yourself, add `--prompt` and type it twice; nothing is echoed. Scripts can pass it on standard input with `--password-stdin`. Either way it must meet your password policy. Add `--disable-2fa` if the authenticator is lost too. A reset signs the account out everywhere, so it also locks out anyone else who had its password.
 
 **Send a reset link instead.** This prints a single-use link that lets the account owner choose their own password in the browser, on the same page the forgot-password email opens:
 
@@ -753,6 +756,15 @@ Links last an hour unless you set `--expires` (5 minutes to 72 hours), and creat
 ```bash
 docker exec -it rigger rigger users disable-2fa you@example.com
 ```
+
+**Disable an account** that should no longer get in, such as someone who has left:
+
+```bash
+docker exec -it rigger rigger users disable someone@example.com
+docker exec -it rigger rigger users enable someone@example.com
+```
+
+A disabled account can't sign in, and its sessions end at once: API requests are refused straight away, and open terminals and log streams close within 30 seconds. It shows as **disabled** under Admin → Users. `enable` lets it sign in again with its existing password, but sessions from before it was disabled stay ended. The last active super-admin can't be disabled. API keys aren't tied to the account that created them, so review them under Admin → API Keys.
 
 Every command takes an email address or the id shown by `list`, and each change is recorded in the audit log as `console`. If the container isn't running, use a one-off container on the same data volume:
 
@@ -873,7 +885,7 @@ For headless creation, the binary's `init-workspace` subcommand takes a prepared
 docker exec rigger rigger init-workspace -name myapp -config /toolkit/workspaces/myapp.config.json
 ```
 
-For account recovery — password resets, reset links and turning off 2FA — the binary has a `users` subcommand; see [Recovering an account](#recovering-an-account).
+For account recovery and control — password resets, reset links, turning off 2FA, disabling accounts — the binary has a `users` subcommand; see [Managing accounts from the console](#managing-accounts-from-the-console). `rigger version` prints the binary's version, and `rigger help` lists every subcommand.
 
 ---
 

@@ -248,6 +248,11 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accessToken, newRefresh, err := h.auth.RefreshAccessToken(cookie.Value)
+	if errors.Is(err, auth.ErrSessionLookup) {
+		// A database hiccup, not a bad session: keep the cookie for the retry.
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "try again shortly"})
+		return
+	}
 	if err != nil {
 		// Clear invalid cookie
 		http.SetCookie(w, &http.Cookie{Name: "refresh_token", Value: "", Path: "/api/auth/refresh", MaxAge: -1})
@@ -429,6 +434,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		ww.Text([]byte("\033[31m✗ Error: unauthorized — please sign in again\033[0m\n")) //nolint:errcheck
 		return
 	}
+	ww.EndWhen(func() bool { return h.auth.SessionActive(claims) })
 
 	send := func(s string) { safeWrite([]byte(s)) }
 
@@ -655,11 +661,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	send("\n\033[32m✓ Project " + msg.Workspace.Name + " is ready!\033[0m\n")
 }
 
-// GET /api/events — SSE stream of Docker container events (auth via ?token= query param
-// because the browser EventSource API does not support custom request headers).
+// GET /api/events?ticket=… — SSE stream of Docker container events and alerts.
+// The browser EventSource API can't send an Authorization header, so the stream
+// opens with a single-use ticket from POST /api/events/ticket (events_ticket.go)
+// and ends when the session behind it does.
 func (h *Handler) StreamEvents(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	if _, err := h.auth.ValidateToken(token); err != nil {
+	claims, ok := eventTickets.redeem(r.URL.Query().Get("ticket"))
+	if !ok || !h.auth.SessionActive(claims) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -733,6 +741,11 @@ func (h *Handler) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 
 		case <-ticker.C:
+			// The stream was authorized when it opened; stop feeding an account
+			// that has since been disabled or signed out.
+			if !h.auth.SessionActive(claims) {
+				return
+			}
 			fmt.Fprint(w, ": heartbeat\n\n")
 			flusher.Flush()
 
@@ -2305,6 +2318,7 @@ func (h *Handler) RunAction(w http.ResponseWriter, r *http.Request) {
 		ww.Text([]byte("error: unauthorized\n")) //nolint:errcheck
 		return
 	}
+	ww.EndWhen(func() bool { return h.auth.SessionActive(claims) })
 
 	// Enforce RBAC (the WS route bypasses the HTTP gate): read-only streams need
 	// viewer; everything else (deploy/restart/stop/backup/…) needs developer+.
@@ -2811,7 +2825,16 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	// The change ended every session the account had, this one included — that is
+	// what signs out anyone else holding it. Hand this browser a new session so
+	// changing your own password doesn't sign you out.
+	access, refresh, err := h.auth.RenewSession(claims.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"}) // changed; sign in again
+		return
+	}
+	setRefreshCookie(w, r, refresh)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "token": access})
 }
 
 // GET /api/backups — list all backup snapshots across all workspaces
@@ -3005,6 +3028,7 @@ func (h *Handler) Terminal(w http.ResponseWriter, r *http.Request) {
 		ww.Text([]byte("\r\nerror: unauthorized\r\n")) //nolint:errcheck
 		return
 	}
+	ww.EndWhen(func() bool { return h.auth.SessionActive(claims) })
 	// Opening a shell is a privileged action — require developer+ on the project.
 	if eff := h.auth.EffectiveRole(claims.UserID, claims.Role, wsName, name); eff == "" || !auth.AtLeast(eff, auth.RoleDeveloper) {
 		ww.Text([]byte("\r\nerror: you don't have permission to open a terminal here\r\n")) //nolint:errcheck

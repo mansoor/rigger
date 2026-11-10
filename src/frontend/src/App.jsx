@@ -33,9 +33,11 @@ function RequireAuth({ children }) {
 }
 
 // Shown in place of the app when the user's password has expired (rotation policy).
-// On success we refresh the access token so the `mcp` claim clears and the app unblocks.
+// On success we adopt the session the change returns: its token has the `mcp`
+// claim cleared, so the app unblocks.
 function ForcePasswordChange() {
   const tryRefresh = useAuthStore((s) => s.tryRefresh)
+  const setSession = useAuthStore((s) => s.setSession)
   const logout     = useAuthStore((s) => s.logout)
   const [current, setCurrent] = useState('')
   const [next, setNext]       = useState('')
@@ -49,8 +51,11 @@ function ForcePasswordChange() {
     if (next !== confirm) { setError('Passwords do not match'); return }
     setBusy(true)
     try {
-      await changePassword(current, next)
-      await tryRefresh() // fresh token has mcp cleared → app unblocks
+      // The change ends every earlier session, this one included, so the old
+      // refresh cookie no longer works; the response carries the new session.
+      const res = await changePassword(current, next)
+      if (res?.token) setSession(res.token)
+      else await tryRefresh()
     } catch (err) {
       setError(err.response?.data?.error || 'Could not change password')
     } finally {

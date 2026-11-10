@@ -85,8 +85,30 @@ type Claims struct {
 	// policy; the frontend forces a change before granting access. Recomputed on
 	// every token issue/refresh so it clears as soon as the password is updated.
 	MustChangePassword bool `json:"mcp,omitempty"`
+	// Use is the token's kind, tokenAccess or tokenRefresh. Each kind is accepted
+	// only for its own purpose. (Refresh tokens used to be marked by Subject, but
+	// Username shares the "sub" key and shadowed it, so the mark never reached the
+	// token and either kind passed for the other.)
+	Use string `json:"token_use,omitempty"`
 	jwt.RegisteredClaims
 }
+
+// Token kinds. An access token authenticates requests and lives minutes; a
+// refresh token only buys a new session and lives days. Tokens issued before
+// v0.1.48 carry no kind and are refused, which signs every older session out once.
+const (
+	tokenAccess  = "access"
+	tokenRefresh = "refresh"
+)
+
+// refreshTTL is how long a refresh token lasts. Each refresh issues a new one, so
+// a session in use rolls on; one left idle this long ends.
+const refreshTTL = 7 * 24 * time.Hour
+
+// tokenLeeway absorbs small clock differences when checking a token's times.
+const tokenLeeway = 30 * time.Second
+
+var errWrongTokenKind = errors.New("token is not valid for this use")
 
 type Service struct {
 	db        *db.DB
@@ -224,48 +246,74 @@ func (s *Service) Login(identifier, password string) (string, error) {
 }
 
 func (s *Service) issueToken(id int64, username, role, email string, emailVerified bool) (string, error) {
-	claims := Claims{
+	return s.sign(Claims{
 		UserID:             id,
 		Username:           username,
 		Role:               role,
 		Email:              email,
 		EmailVerified:      emailVerified,
 		MustChangePassword: s.passwordExpired(id),
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(s.jwtExpiry) * time.Minute)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(s.jwtSecret)
+		Use:                tokenAccess,
+	}, time.Duration(s.jwtExpiry)*time.Minute)
 }
 
-// issueRefreshToken creates a long-lived JWT (7 days) stored in the httpOnly cookie.
+// issueRefreshToken creates the long-lived token kept in the httpOnly cookie.
 func (s *Service) issueRefreshToken(id int64, username, role, email string, emailVerified bool) (string, error) {
-	claims := Claims{
+	return s.sign(Claims{
 		UserID:        id,
 		Username:      username,
 		Role:          role,
 		Email:         email,
 		EmailVerified: emailVerified,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Subject:   "refresh",
-		},
+		Use:           tokenRefresh,
+	}, refreshTTL)
+}
+
+func (s *Service) sign(c Claims, ttl time.Duration) (string, error) {
+	now := time.Now()
+	c.IssuedAt = jwt.NewNumericDate(now)
+	c.ExpiresAt = jwt.NewNumericDate(now.Add(ttl))
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString(s.jwtSecret)
+}
+
+// parseToken checks a token's signature, times and kind. Whether its session
+// still stands is a separate question — see checkSession.
+func (s *Service) parseToken(raw, use string) (*Claims, error) {
+	var c Claims
+	_, err := jwt.ParseWithClaims(raw, &c,
+		func(*jwt.Token) (any, error) { return s.jwtSecret, nil },
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+		jwt.WithLeeway(tokenLeeway),
+	)
+	if err != nil {
+		return nil, err
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(s.jwtSecret)
+	if c.Use != use {
+		return nil, errWrongTokenKind
+	}
+	if c.UserID == 0 || c.IssuedAt == nil {
+		return nil, errors.New("token is missing claims")
+	}
+	return &c, nil
 }
 
 // IssueSession returns a fresh (access, refresh) pair for a user id — used after
 // completing registration so the new user is logged straight in.
 func (s *Service) IssueSession(userID int64) (accessToken, refreshToken string, err error) {
+	s.touchLastLogin(userID)
+	return s.RenewSession(userID)
+}
+
+// RenewSession issues a fresh (access, refresh) pair from the account's current
+// details. It rolls a session on refresh, and keeps a browser signed in after it
+// changes its own password — a change that ends every session issued before it.
+func (s *Service) RenewSession(userID int64) (accessToken, refreshToken string, err error) {
 	u, err := s.getUserByID(userID)
 	if err != nil {
 		return "", "", err
 	}
-	s.touchLastLogin(userID)
 	name := displayName(u.Username, u.Email)
 	if accessToken, err = s.issueToken(userID, name, u.Role, u.Email, u.EmailVerified); err != nil {
 		return "", "", err
@@ -274,50 +322,24 @@ func (s *Service) IssueSession(userID int64) (accessToken, refreshToken string, 
 	return
 }
 
-// RefreshAccessToken validates a refresh token cookie and issues a new short-lived access token.
-// Accepts any JWT signed with our secret — the cookie's MaxAge governs session lifetime so we
-// skip expiry validation here. No Subject check so old-build cookies still work after upgrades.
+// RefreshAccessToken exchanges a refresh token for a new access token and a new
+// refresh token, so a session in use rolls on. The token must be an unexpired
+// refresh token whose session still stands; an access token, however fresh, is
+// refused.
 func (s *Service) RefreshAccessToken(refreshToken string) (accessToken, newRefresh string, err error) {
-	var claims Claims
-
-	// Parse the token; ignore expiry errors — we trust the httpOnly cookie's MaxAge instead.
-	_, parseErr := jwt.ParseWithClaims(
-		refreshToken, &claims,
-		func(t *jwt.Token) (any, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method")
-			}
-			return s.jwtSecret, nil
-		},
-		jwt.WithoutClaimsValidation(), // skip exp/nbf/iat checks — cookie MaxAge is the guard
-	)
-	if parseErr != nil {
-		// Only fail for signature errors; ignore validation errors (exp, etc.)
-		if !errors.Is(parseErr, jwt.ErrTokenExpired) &&
-			!errors.Is(parseErr, jwt.ErrTokenNotValidYet) {
-			return "", "", fmt.Errorf("invalid refresh token")
-		}
-	}
-
-	if claims.UserID == 0 {
-		return "", "", fmt.Errorf("invalid token claims")
-	}
-
-	// Re-fetch user from DB to get current role/email and verify account still exists
-	var username, role, email string
-	var ev int
-	if dbErr := s.db.QueryRow(
-		"SELECT username, role, email, email_verified FROM users WHERE id = ?", claims.UserID,
-	).Scan(&username, &role, &email, &ev); dbErr != nil {
-		return "", "", fmt.Errorf("user not found")
-	}
-	name := displayName(username, email)
-	accessToken, err = s.issueToken(claims.UserID, name, role, email, ev != 0)
+	c, err := s.parseToken(refreshToken, tokenRefresh)
 	if err != nil {
+		return "", "", fmt.Errorf("invalid refresh token: %w", err)
+	}
+	if _, err := s.checkSession(c); err != nil {
 		return "", "", err
 	}
-	// Rolling: issue a fresh 7-day refresh token so the session stays alive with activity
-	newRefresh, err = s.issueRefreshToken(claims.UserID, name, role, email, ev != 0)
+	accessToken, newRefresh, err = s.RenewSession(c.UserID)
+	if err != nil && !errors.Is(err, ErrUserNotFound) {
+		// The session stands; failing to read the account is a lookup failure,
+		// which mustn't cost the browser its cookie.
+		return "", "", fmt.Errorf("%w: %v", ErrSessionLookup, err)
+	}
 	return accessToken, newRefresh, err
 }
 
@@ -342,22 +364,20 @@ func (s *Service) Login2(identifier, password, code string) (accessToken, refres
 	return
 }
 
-// ValidateToken parses and validates a JWT, returning the claims.
+// ValidateToken checks an access token and that its session still stands (see
+// checkSession), and returns its claims carrying the account's current role — so
+// a demotion applies to the next request, not at the token's next refresh.
 func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return s.jwtSecret, nil
-	})
+	c, err := s.parseToken(tokenStr, tokenAccess)
 	if err != nil {
 		return nil, err
 	}
-	claims, ok := token.Claims.(*Claims)
-	if !ok || !token.Valid {
-		return nil, errors.New("invalid token")
+	role, err := s.checkSession(c)
+	if err != nil {
+		return nil, err
 	}
-	return claims, nil
+	c.Role = role
+	return c, nil
 }
 
 // RequireSuperadmin returns middleware (to wrap inside Middleware, which
@@ -386,6 +406,11 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			return
 		}
 		claims, err := s.ValidateToken(strings.TrimPrefix(header, "Bearer "))
+		if errors.Is(err, ErrSessionLookup) {
+			// Not the session's fault: a 401 would sign the browser out.
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if err != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

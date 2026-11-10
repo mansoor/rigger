@@ -48,13 +48,42 @@ func runCLI(t *testing.T, dir, stdin string, secret func(string) (string, error)
 // canSignIn proves a password works through the real login path.
 func canSignIn(t *testing.T, dir, password string) bool {
 	t.Helper()
+	return canSignInAs(t, dir, adminEmail, password)
+}
+
+func canSignInAs(t *testing.T, dir, email, password string) bool {
+	t.Helper()
 	d, err := db.OpenExisting(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	_, _, err = auth.NewService(d, "x", 15).Login2(adminEmail, password, "")
+	_, _, err = auth.NewService(d, "x", 15).Login2(email, password, "")
 	return err == nil
+}
+
+const (
+	memberEmail    = "dev@example.com"
+	memberPassword = "Member-Passw0rd!"
+)
+
+// addMember adds a second, active account the way a person accepting an
+// invitation would.
+func addMember(t *testing.T, dir, role string) {
+	t.Helper()
+	d, err := db.OpenExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	svc := auth.NewService(d, "x", 15)
+	_, raw, err := svc.InviteUser(memberEmail, role, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CompleteRegistration(raw, memberPassword, "", ""); err != nil {
+		t.Fatal(err)
+	}
 }
 
 var tempPassword = regexp.MustCompile(`Temporary password: (\S+)`)
@@ -215,6 +244,69 @@ func TestResetPasswordAndDisable2FATogether(t *testing.T) {
 	}
 }
 
+func TestDisableAndEnable(t *testing.T) {
+	dir := newDataDir(t)
+	addMember(t, dir, auth.RoleUser)
+
+	r := runCLI(t, dir, "", nil, "disable", memberEmail)
+	if r.code != 0 || !strings.Contains(r.out, "Disabled "+memberEmail) {
+		t.Fatalf("disable: exit %d\n%s%s", r.code, r.out, r.errOut)
+	}
+	if canSignInAs(t, dir, memberEmail, memberPassword) {
+		t.Error("a disabled account signed in")
+	}
+	if r := runCLI(t, dir, "", nil, "list"); !strings.Contains(r.out, "disabled") {
+		t.Errorf("list should show the account as disabled:\n%s", r.out)
+	}
+	if r := runCLI(t, dir, "", nil, "disable", memberEmail); r.code != 0 || !strings.Contains(r.out, "already disabled") {
+		t.Errorf("disabling again: exit %d\n%s", r.code, r.out)
+	}
+	// A password reset doesn't quietly undo the disable, and says so.
+	r = runCLI(t, dir, "", nil, "reset-password", memberEmail)
+	if r.code != 0 || !strings.Contains(r.out, "rigger users enable "+memberEmail) {
+		t.Errorf("reset-password on a disabled account: exit %d\n%s", r.code, r.out)
+	}
+	if r := runCLI(t, dir, "", nil, "reset-link", memberEmail); r.code != 1 || !strings.Contains(r.errOut, "disabled") {
+		t.Errorf("reset-link on a disabled account: exit %d, %q", r.code, r.errOut)
+	}
+
+	// The reset above set a random password; choose a known one again.
+	r = runCLI(t, dir, memberPassword+"\n", nil, "reset-password", memberEmail, "--password-stdin")
+	if r.code != 0 {
+		t.Fatalf("setting the member's password back: exit %d %s", r.code, r.errOut)
+	}
+	r = runCLI(t, dir, "", nil, "enable", memberEmail)
+	if r.code != 0 || !strings.Contains(r.out, "Enabled "+memberEmail) {
+		t.Fatalf("enable: exit %d\n%s%s", r.code, r.out, r.errOut)
+	}
+	if !canSignInAs(t, dir, memberEmail, memberPassword) {
+		t.Error("an enabled account can't sign in with its password")
+	}
+	if r := runCLI(t, dir, "", nil, "enable", memberEmail); r.code != 0 || !strings.Contains(r.out, "already active") {
+		t.Errorf("enabling again: exit %d\n%s", r.code, r.out)
+	}
+
+	d, _ := db.OpenExisting(dir)
+	defer d.Close()
+	var n int
+	d.QueryRow(`SELECT COUNT(1) FROM audit_log WHERE username='console' AND command IN (?, ?)`, //nolint:errcheck
+		"users disable "+memberEmail, "users enable "+memberEmail).Scan(&n)
+	if n != 2 {
+		t.Errorf("%d audit entries for disable+enable, want 2", n)
+	}
+}
+
+func TestDisableRefusesTheOnlySuperadmin(t *testing.T) {
+	dir := newDataDir(t)
+	r := runCLI(t, dir, "", nil, "disable", adminEmail)
+	if r.code != 1 || !strings.Contains(r.errOut, "only active super-admin") {
+		t.Errorf("exit %d, %q", r.code, r.errOut)
+	}
+	if !canSignIn(t, dir, "Original-Passw0rd!") {
+		t.Error("the refused disable locked the administrator out anyway")
+	}
+}
+
 func TestListShowsAccounts(t *testing.T) {
 	dir := newDataDir(t)
 	r := runCLI(t, dir, "", nil, "list")
@@ -263,6 +355,9 @@ func TestUsageAndErrors(t *testing.T) {
 		{[]string{"reset-link", adminEmail, "--expires", "1m"}, 1},   // outside 5m–72h
 		{[]string{"reset-password", "nobody@example.com"}, 1},        // unknown account
 		{[]string{"list", "extra"}, 2},
+		{[]string{"disable"}, 2},                       // no account
+		{[]string{"enable", "a@x", "b@x"}, 2},          // two accounts
+		{[]string{"disable", "nobody@example.com"}, 1}, // unknown account
 		{[]string{"help"}, 0},
 		{[]string{"reset-password", "--help"}, 0},
 	} {

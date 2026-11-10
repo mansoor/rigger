@@ -237,6 +237,9 @@ export const fetchCompose      = (ws, name, env) => api.get(`${projBase(ws, name
 export const putCompose        = (ws, name, env, content) =>
   api.put(`${projBase(ws, name)}/envs/${env}/compose`, { content }).then(r => r.data)
 export const fetchConfig       = (ws, name)      => api.get(`${projBase(ws, name)}/config`).then(r => r.data)
+// A password change ends every earlier session, this one included; the response
+// carries a new access token ({ status, token }) for the caller to adopt with
+// setSession, and sets the matching refresh cookie.
 export const changePassword    = (current_password, new_password) =>
   api.post('/auth/password', { current_password, new_password }).then(r => r.data)
 // Optional workspace scoping: when a workspace key is passed these lists are
@@ -698,6 +701,9 @@ export function openActionSocket(workspace, name, command, env, extra = [], serv
 
 // Rigger's own build version (self-update Phase 0).
 export const fetchVersion = () => api.get('/version').then(r => r.data)
+
+// A single-use ticket for opening the live-events stream (useDockerEvents).
+export const fetchEventsTicket = () => api.post('/events/ticket').then(r => r.data.ticket)
 
 // Check for a newer Rigger release (self-update Phase 2; admin). force=true bypasses the cache.
 export const checkUpdates = (force = false) => api.get(`/updates/check${force ? '?force=1' : ''}`).then(r => r.data)
