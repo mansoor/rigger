@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -25,6 +26,37 @@ func Open(dataDir string) (*DB, error) {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return d, nil
+}
+
+// OpenExisting opens the server's database for a one-shot console command,
+// without migrating it.
+//
+// Two differences from Open, both deliberate. It never creates a database: if
+// DATA_DIR points somewhere wrong, a recovery command that silently made a fresh
+// empty database would report success while changing nothing. And it leaves the
+// schema alone: the server owns migrations, and running them from a second
+// process beside a live server would race it.
+//
+// busy_timeout lets the command wait out the server's brief write locks rather
+// than fail on them. (This uses the modernc driver's _pragma syntax; see the
+// review note on Open's parameters.)
+func OpenExisting(dataDir string) (*DB, error) {
+	path := filepath.Join(dataDir, "rigger.db")
+	if fi, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("no Rigger database at %s (is DATA_DIR right?): %w", path, err)
+	} else if fi.IsDir() {
+		return nil, fmt.Errorf("%s is a directory, not a database", path)
+	}
+	conn, err := sql.Open("sqlite", "file:"+path+"?mode=rw&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	conn.SetMaxOpenConns(1)
+	if err := conn.Ping(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	return &DB{conn}, nil
 }
 
 func (d *DB) migrate() error {

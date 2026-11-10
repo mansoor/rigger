@@ -153,6 +153,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "init-workspace" {
 		os.Exit(runInitWorkspace(os.Args[2:]))
 	}
+	// Account recovery from the server console — see users_cli.go.
+	if len(os.Args) > 1 && os.Args[1] == "users" {
+		os.Exit(runUsers(os.Args[2:], consoleIO(config.Load().DataDir)))
+	}
 	// detect-host-ip prints the host's primary outbound IP and exits. The control
 	// plane runs this in a throwaway `--network host` container so the lookup
 	// happens in the HOST network namespace (the server's own namespace only sees

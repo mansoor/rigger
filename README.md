@@ -712,7 +712,7 @@ Manage users under Admin → Users; grant workspace membership and project acces
 
 | Mechanism | Detail |
 |-----------|--------|
-| Password storage | bcrypt, cost 12 |
+| Password storage | bcrypt, cost 10 |
 | Access token | JWT, 15-minute expiry, held in memory only |
 | Refresh token | httpOnly cookie, 7-day rolling |
 | Password policy | Minimum length, complexity and maximum age; an expired password forces a change |
@@ -722,6 +722,43 @@ Manage users under Admin → Users; grant workspace membership and project acces
 | Two-factor | Opt-in TOTP with QR enrollment and recovery codes |
 | Access requests | Self-service request with an admin approval inbox |
 | Audit log | Every action recorded — user, project, command, environment, host |
+| Console recovery | `rigger users` resets passwords, prints reset links and turns off 2FA from the server — see below |
+
+### Recovering an account
+
+When nobody can sign in to fix it — a forgotten password with no email configured, a lost authenticator, or the only administrator locked out — recover from the server console. These commands run inside the Rigger container, alongside the running app.
+
+```bash
+docker exec -it rigger rigger users list
+```
+
+**Set a new password.** By default a random one is generated and printed once:
+
+```bash
+docker exec -it rigger rigger users reset-password you@example.com
+```
+
+To choose it yourself, add `--prompt` and type it twice; nothing is echoed. Scripts can pass it on standard input with `--password-stdin`. Either way it must meet your password policy. Add `--disable-2fa` if the authenticator is lost too.
+
+**Send a reset link instead.** This prints a single-use link that lets the account owner choose their own password in the browser, on the same page the forgot-password email opens:
+
+```bash
+docker exec -it rigger rigger users reset-link you@example.com --expires 24h
+```
+
+Links last an hour unless you set `--expires` (5 minutes to 72 hours), and creating a new link cancels the previous one. Full links use the **Public base URL** under Settings → System email; if that isn't set, pass `--base-url https://rigger.example.com`.
+
+**Turn off two-factor authentication** when an authenticator is lost:
+
+```bash
+docker exec -it rigger rigger users disable-2fa you@example.com
+```
+
+Every command takes an email address or the id shown by `list`, and each change is recorded in the audit log as `console`. If the container isn't running, use a one-off container on the same data volume:
+
+```bash
+docker run --rm -it -v rigger_rigger-data:/data ghcr.io/mansoor/rigger users list
+```
 
 ---
 
@@ -835,6 +872,8 @@ For headless creation, the binary's `init-workspace` subcommand takes a prepared
 ```bash
 docker exec rigger rigger init-workspace -name myapp -config /toolkit/workspaces/myapp.config.json
 ```
+
+For account recovery — password resets, reset links and turning off 2FA — the binary has a `users` subcommand; see [Recovering an account](#recovering-an-account).
 
 ---
 
