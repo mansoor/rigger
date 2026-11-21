@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mansoor/rigger/ui/internal/auth"
+	"github.com/mansoor/rigger/ui/internal/composegen"
 	"github.com/mansoor/rigger/ui/internal/databases"
 	"github.com/mansoor/rigger/ui/internal/executor"
 	"github.com/mansoor/rigger/ui/internal/wsconfig"
@@ -270,7 +271,7 @@ func (h *Handler) GetServiceConsole(w http.ResponseWriter, r *http.Request) {
 // alphanumerics plus dots and hyphens, starting and ending alphanumeric.
 var bucketNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
-// minioMC runs a one-off `minio/mc` command against the env's MinIO. The transient
+// minioMC runs a one-off `mc` (MinIO client) command against the env's MinIO. The transient
 // container SHARES the minio container's network namespace (--network container:…),
 // so the S3 API is reachable at 127.0.0.1:9000 with no need to resolve the compose
 // network name. Returns combined stdout+stderr (stdout carries --json output on
@@ -306,7 +307,7 @@ func (h *Handler) minioMC(workspace, project, env string, mcArgs ...string) ([]b
 	args := []string{
 		"run", "--rm", "--network", "container:" + ref,
 		"-e", "MC_HOST_r=http://" + user + ":" + pass + "@127.0.0.1:9000",
-		"minio/mc:" + cfg.Version("minio_mc", "latest"),
+		composegen.MinIOClientImage + ":" + cfg.Version("minio_mc", "latest"),
 	}
 	args = append(args, mcArgs...)
 	var buf bytes.Buffer

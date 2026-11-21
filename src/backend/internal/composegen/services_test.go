@@ -438,18 +438,25 @@ func TestObjectStorageMinIOAndLocal(t *testing.T) {
 	}
 	s := string(out)
 	m := svcBlock(t, s, "minio")
-	for _, want := range []string{"image: minio/minio:", "server /data --console-address", "- app1_dev_minio_data:/data"} {
+	// MinIO's own images (minio/minio, minio/mc) no longer serve pulls: the managed
+	// service must use the Pigsty fork.
+	for _, want := range []string{"image: pgsty/minio:latest", "server /data --console-address", "- app1_dev_minio_data:/data"} {
 		if !strings.Contains(m, want) {
 			t.Errorf("minio block missing %q\n---\n%s", want, m)
 		}
 	}
 	if strings.Contains(m, "healthcheck:") {
-		t.Errorf("minio must NOT carry a healthcheck (distroless → Traefik would drop it)\n%s", m)
+		t.Errorf("minio must NOT carry a healthcheck (a failing one makes Traefik drop it)\n%s", m)
 	}
 	init := svcBlock(t, s, "minio_init")
-	for _, want := range []string{"image: minio/mc:", "mc mb --ignore-existing", "$$MINIO_BUCKET", "restart: \"no\"", "http://minio:9000"} {
+	for _, want := range []string{"image: pgsty/mc:latest", "mc mb --ignore-existing", "$$MINIO_BUCKET", "restart: \"no\"", "http://minio:9000"} {
 		if !strings.Contains(init, want) {
 			t.Errorf("minio_init block missing %q\n---\n%s", want, init)
+		}
+	}
+	for _, gone := range []string{"minio/minio", "minio/mc"} {
+		if strings.Contains(s, gone) {
+			t.Errorf("compose names the withdrawn upstream image %q", gone)
 		}
 	}
 	// mc/S3 reject underscore hostnames — must use the bare "minio" name, never {prefix}_minio.

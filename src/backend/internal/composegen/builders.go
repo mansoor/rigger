@@ -22,6 +22,18 @@ const (
 	dashQueue    = 44
 )
 
+// MinIO images for managed object storage. MinIO stopped publishing community
+// builds in late 2025, and its own repositories (minio/minio, minio/mc on Docker
+// Hub and quay.io) now refuse pulls. Pigsty maintains a community fork of both,
+// built from MinIO's open-source code: the same server and client, entrypoints,
+// flags, environment variables and on-disk format, so it is a drop-in — volumes
+// written by upstream MinIO read back unchanged. Environments generated before
+// the switch are rewritten at boot (api.MigrateMinIOImages).
+const (
+	MinIOImage       = "pgsty/minio"
+	MinIOClientImage = "pgsty/mc"
+)
+
 // buildStack emits the volumes + services blocks for the unified service graph:
 // every app service in cfg.Services, then the managed-dependency toggles
 // (database / redis / object storage) which stay as env flags until Phase 3.
@@ -1036,7 +1048,7 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		verMC := c.version("minio_mc", "latest")
 		g.line(sectionComment("MinIO "+verMinIO+" (S3-compatible)", dashStorage))
 		g.line("  minio:")
-		g.line("    image: minio/minio:" + verMinIO)
+		g.line("    image: " + MinIOImage + ":" + verMinIO)
 		g.containerName(isSwarm, prefix + "_minio")
 		// S3 API on :9000, built-in console on :9001 (the rich admin UI is the opt-in
 		// opens3/console sidecar; this stock one is fine for a quick look).
@@ -1047,18 +1059,18 @@ func (g *gen) buildManagedDeps(prefix string, isSwarm bool) {
 		g.line("    volumes:")
 		g.line("      - " + prefix + "_minio_data:/data")
 		g.managedNet(prefix, "minio")
-		// No Docker healthcheck: the minio image is distroless-ish (no curl/shell), so a
-		// CMD-SHELL probe would fail and Traefik would drop it. A container with NO
-		// healthcheck reads as healthy; the mc-init below retry-loops until MinIO is up.
+		// No Docker healthcheck, deliberately: one that failed or lagged would make Traefik
+		// drop the container, and a container with NO healthcheck reads as healthy. The
+		// mc-init below retry-loops until MinIO is up instead.
 		g.deployBlock(isSwarm, "minio", "1", "unless-stopped", true) // managed stateful — single-instance
 		g.line("")
 
 		// One-shot bucket init: wait for MinIO, then create the app's bucket (idempotent).
-		// minio/mc ships /bin/sh; $$VAR keeps the .env values for the SHELL (compose would
-		// otherwise interpolate $VAR at parse time). restart:"no" so it runs once and exits.
+		// The mc image ships /bin/sh; $$VAR keeps the .env values for the SHELL (compose
+		// would otherwise interpolate $VAR at parse time). restart:"no" so it runs once.
 		g.line(sectionComment("MinIO bucket init (one-shot)", dashStorage))
 		g.line("  minio_init:")
-		g.line("    image: minio/mc:" + verMC)
+		g.line("    image: " + MinIOClientImage + ":" + verMC)
 		g.containerName(isSwarm, prefix + "_minio_init")
 		g.emitDependsOn(prefix, []string{"minio"}, nil, isSwarm)
 		g.managedNet(prefix, "minio_init")

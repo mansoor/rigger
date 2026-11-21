@@ -14,7 +14,7 @@
 
 services:
   minio:
-    image: minio/minio:latest
+    image: pgsty/minio:latest
     container_name: rigger-minio
     command: server /data --console-address ":9001"
     environment:
@@ -35,7 +35,7 @@ services:
 
   # One-shot: create the backups bucket once MinIO is up, then exit.
   minio-setup:
-    image: minio/mc:latest
+    image: pgsty/mc:latest
     container_name: rigger-minio-setup
     depends_on:
       - minio

@@ -320,7 +320,7 @@ Only the **external port** is per-environment, which is what lets you expose a d
 
 ### Object storage, Redis and cache
 
-- **Object storage** — a local persistent volume, or **MinIO** for a managed S3. MinIO emits the standard S3 environment contract (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`, `AWS_ENDPOINT`, …) and creates the per-environment bucket on first start.
+- **Object storage** — a local persistent volume, or **MinIO** for a managed S3. MinIO emits the standard S3 environment contract (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BUCKET`, `AWS_ENDPOINT`, …) and creates the per-environment bucket on first start. MinIO no longer publishes community images, so Rigger runs [Pigsty's community build](https://github.com/pgsty/minio) (`pgsty/minio`, `pgsty/mc`): the same server and client, and data written by upstream MinIO reads back unchanged. Environments created before v0.1.49 are moved to it automatically at startup.
 - **Redis** — a project-level toggle that emits `REDIS_HOST`, `REDIS_PORT` and `REDIS_URL`.
 
 ### Consoles and per-environment sidecars

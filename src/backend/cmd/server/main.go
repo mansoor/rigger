@@ -264,6 +264,7 @@ func main() {
 	handler.StartHousekeepingScheduler(3)
 	handler.MigrateBackupConfig()   // one-time: legacy config.backup → per-env schedules
 	handler.MigrateLegacyDomains()  // one-time: legacy per-env domain → verified primary custom domain
+	handler.MigrateMinIOImages()    // every boot: withdrawn minio/minio + minio/mc → the pgsty fork
 	handler.ReconcileInstalledVersion() // stamp "last updated" when the running version first appears
 	handler.RenderProxyRoutes()     // re-render the Proxy Service file-provider config (drift repair)
 	handler.StartBackupScheduler()      // Phase 11 — per-env interval-based backup schedules

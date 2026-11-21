@@ -1,7 +1,7 @@
 {
   "name": "minio",
   "label": "MinIO Object Storage",
-  "description": "High-performance S3-compatible object storage with web console",
+  "description": "High-performance S3-compatible object storage with web console (MinIO community build maintained by Pigsty)",
   "tags": [
     "storage",
     "s3",
@@ -10,11 +10,11 @@
   "categories": [
     "File Sharing & Storage"
   ],
-  "website": "https://min.io",
+  "website": "https://github.com/pgsty/minio",
   "images": [
     {
       "name": "app",
-      "image": "minio/minio",
+      "image": "pgsty/minio",
       "tag": "latest",
       "port": 9000,
       "host_port": "${MINIO_API_PORT}",
